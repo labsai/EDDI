@@ -733,8 +733,12 @@ The component also restricts the NATS ports with NetworkPolicies, pins the NATS
 image by digest, keeps one NATS pod per node (a cluster with fewer than three nodes
 needs that patched to `preferred`), leaves 20 % of the NATS volume free
 (`max_file_store`), sets `EDDI_CLUSTER_DEGRADED_TURNS=reject` and gives EDDI a 5 s
-`preStop` sleep. TLS on NATS itself is not configured — use the Helm chart's
-`nats.tls`, or patch a `tls {}` block into `nats-config`.
+`preStop` sleep. TLS on NATS itself is not configured, so by default EDDI sends its
+NATS password over plaintext `nats://` inside the cluster network — use the Helm chart's
+`nats.tls`, or patch a `tls {}` block into `nats-config` **and** switch EDDI to it: set
+`EDDI_NATS_URL` to `tls://` URLs (or `eddi.nats.tls.enabled=true`) and give it the CA with
+`eddi.nats.tls.truststore-path`, mounted from a Secret. Patching only the server leaves EDDI
+dialling `nats://`, which a TLS-only server refuses.
 
 **Helm** — three replicas, an in-chart three-node NATS cluster with authentication,
 and a PodDisruptionBudget:
@@ -766,7 +770,7 @@ helm install eddi ./helm/eddi \
 | `nats.externalReplicas` | `3` | `EDDI_NATS_REPLICAS` for an external NATS — R3 buckets and streams on a JetStream cluster of three or more servers. Set `1` only for a single-server NATS. Before chart 2.14.0 an external NATS silently got R1 |
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
 | `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
-| `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects, and may not delete streams or touch JetStream placement. `nats.auth.secondaryUsername` / `secondaryPassword` add a second user with the same permissions, for rotating the password without downtime: set the secondary to the new credentials and upgrade, swap it into `username`/`password` and upgrade (EDDI rolls onto it), then clear the secondary and upgrade |
+| `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects, and may not delete streams or touch JetStream placement. `nats.auth.secondaryUsername` / `secondaryPassword` add a second user with the same permissions, for rotating the password without downtime: set the secondary to the new credentials and upgrade, swap it into `username`/`password` and upgrade (EDDI rolls onto it), then clear the secondary and upgrade. With `eddi.existingSecret` the chart neither updates EDDI's NATS credentials nor rolls its pods: before clearing the old user, put the new password in that Secret (`eddi.nats.password=`) and restart the EDDI pods (`kubectl rollout restart deployment/<fullname>`), or every node loses NATS when the old user goes |
 | `nats.isolation.*` | off | `enabled: true` puts EDDI's user in its own NATS account (`account`, default `EDDI`) with its own reply-subject prefix (`_INBOX_<account>`), named in its permissions — for a NATS that other tenants share. It moves the buckets and streams into the new account: enable it on a fresh install |
 | `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide (cert-manager's carry `tls.crt`, `tls.key` and `ca.crt`). The chart mounts its `ca.crt` — only that key — into EDDI as the trust store and connects over `tls://`; the certificate must name `*.<fullname>-nats` |
 | `nats.image.*` | `2.11.17-alpine` + digest | A full patch version pinned by digest |

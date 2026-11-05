@@ -26,6 +26,23 @@
 - The code default of `degraded.turns` stays `local`; the chart exposes `eddi.cluster.degradedTurns` and the docs and the Kustomize component recommend `reject`.
 - Account isolation and a custom inbox prefix are opt-in: switching an existing release would strand its dead letters and archives in the old account.
 
+### Review follow-ups
+
+- Only a certificate or handshake-policy failure counts as a TLS misconfiguration: a handshake
+  the peer cut off or a reset connection (a NATS restart) is `io` and no longer turns every pod
+  not-ready.
+- A failed cap of an existing archive bucket is retried on the next use instead of being given up.
+- `helm upgrade --reuse-values` from an older chart no longer fails on the missing
+  `nats.externalReplicas` (defaults to 3) or `nats.isolation` / `nats.metrics` maps.
+- `EddiClusterMemberLost` compares with the member count that held for 10 minutes, so a rolling
+  update's surge pod (3 → 4 → 3) no longer fires it; a promtool case covers that.
+- Docs: `require-first-connect` must be off as well to serve from boot; the Kustomize NATS needs
+  EDDI switched to `tls://` too, not only a server `tls {}` block; an `eddi.existingSecret`
+  release must update that Secret and restart EDDI before the old NATS user is removed. The
+  Platform Operator no longer rules out a NATS outage for a node that never connected.
+- The NATS image pin test checks the whole reference, not a valid prefix of it. The CI chart
+  checks use low-entropy fixture passwords (secret scanning flagged the earlier placeholders).
+
 ### What's next
 
 - Per-node NKey/JWT users need an external NATS with account management; the chart stays with password users.

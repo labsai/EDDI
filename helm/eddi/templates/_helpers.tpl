@@ -148,7 +148,7 @@ certificate's host names against these pod names
 The NATS account of the in-chart NATS under nats.isolation (default EDDI).
 */}}
 {{- define "eddi.natsAccount" -}}
-{{- $account := .Values.nats.isolation.account | default "EDDI" | toString -}}
+{{- $account := (.Values.nats.isolation | default dict).account | default "EDDI" | toString -}}
 {{- if not (regexMatch "^[A-Za-z0-9_-]+$" $account) -}}
 {{- fail (printf "nats.isolation.account %q may only contain letters, digits, '_' and '-'" $account) -}}
 {{- end -}}
@@ -161,7 +161,7 @@ nats.isolation, so the user's subscribe permission can name it; jnats' default
 _INBOX otherwise, which every existing permission set allows.
 */}}
 {{- define "eddi.natsInboxPrefix" -}}
-{{- if and .Values.nats.enabled .Values.nats.isolation.enabled -}}
+{{- if and .Values.nats.enabled (.Values.nats.isolation | default dict).enabled -}}
 _INBOX_{{ include "eddi.natsAccount" . }}
 {{- else -}}
 _INBOX

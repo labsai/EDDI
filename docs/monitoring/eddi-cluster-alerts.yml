@@ -59,7 +59,10 @@ groups:
             by resync or polling.
 
       - alert: EddiClusterMemberLost
-        expr: max(eddi_cluster_members) < max(max_over_time(eddi_cluster_members[15m]))
+        # The baseline is the member count that held for 10 minutes at a time, so
+        # the surge pod of a rolling update (3 -> 4 -> 3, maxSurge 1) does not
+        # raise it and the rollout does not look like a lost node.
+        expr: max(eddi_cluster_members) < max_over_time(min_over_time(max(eddi_cluster_members)[10m:1m])[15m:1m])
         for: 5m
         labels:
           severity: warning

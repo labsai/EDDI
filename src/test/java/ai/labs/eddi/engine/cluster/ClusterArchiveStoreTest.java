@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Duration;
 import java.util.List;
@@ -223,5 +224,38 @@ class ClusterArchiveStoreTest {
         ArgumentCaptor<StreamConfiguration> updated = ArgumentCaptor.forClass(StreamConfiguration.class);
         verify(jsm).updateStream(updated.capture());
         assertEquals(1L << 30, updated.getValue().getMaxBytes());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("a cap that failed is tried again on the next use instead of being given up")
+    void failedCapIsRetried(@TempDir Path dir) throws Exception {
+        ClusterConfig config = ClusterConfig.defaults().withMessagingType("nats");
+        Connection connection = mock(Connection.class);
+        ObjectStoreManagement management = mock(ObjectStoreManagement.class);
+        when(connection.objectStoreManagement()).thenReturn(management);
+        ObjectStoreStatus status = mock(ObjectStoreStatus.class);
+        when(status.getMaxBucketSize()).thenReturn(-1L);
+        when(management.getStatus("EDDI_ARCHIVES")).thenReturn(status);
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(connection.jetStreamManagement()).thenReturn(jsm);
+        StreamInfo info = mock(StreamInfo.class);
+        when(info.getConfiguration()).thenReturn(StreamConfiguration.builder().name("OBJ_EDDI_ARCHIVES").build());
+        when(jsm.getStreamInfo("OBJ_EDDI_ARCHIVES")).thenReturn(info);
+        when(jsm.updateStream(any())).thenThrow(new IOException("JetStream request timed out")).thenReturn(info);
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(mock(ObjectStore.class));
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+        ClusterArchiveStore store = new ClusterArchiveStore(config, connections);
+        Path file = Files.writeString(dir.resolve("a.zip"), "zip");
+
+        store.publish("a.zip", file, Duration.ofMinutes(5));
+        store.publish("b.zip", file, Duration.ofMinutes(5));
+        store.publish("c.zip", file, Duration.ofMinutes(5));
+
+        verify(jsm, times(2)).updateStream(any());
+        verify(management, times(2)).getStatus("EDDI_ARCHIVES");
     }
 }

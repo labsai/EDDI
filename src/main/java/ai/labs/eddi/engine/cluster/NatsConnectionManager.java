@@ -29,6 +29,7 @@ import org.jboss.logging.Logger;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509ExtendedTrustManager;
@@ -432,7 +433,8 @@ public class NatsConnectionManager {
             if (t instanceof AuthenticationException) {
                 return ErrorCause.AUTH;
             }
-            if (t instanceof SSLException || t instanceof CertificateException) {
+            if (t instanceof CertificateException || t instanceof SSLPeerUnverifiedException
+                    || (t instanceof SSLException && isTlsPolicyFailure(t.getMessage()))) {
                 return ErrorCause.TLS;
             }
             if (t instanceof TimeoutException || t instanceof SocketTimeoutException) {
@@ -452,6 +454,23 @@ public class NatsConnectionManager {
             }
         }
         return ErrorCause.OTHER;
+    }
+
+    /**
+     * Whether an {@link SSLException}'s message names a certificate or handshake
+     * policy failure, which retrying cannot heal. A handshake the peer cut off or a
+     * reset connection is an ordinary transport failure (a NATS restart, a network
+     * blip) and must not report the node as misconfigured.
+     */
+    static boolean isTlsPolicyFailure(String message) {
+        if (message == null) {
+            return false;
+        }
+        String m = message.toLowerCase(Locale.ROOT);
+        return m.contains("pkix") || m.contains("certificat") || m.contains("subject alternative") || m.contains("no name matching")
+                || m.contains("no appropriate protocol") || m.contains("protocol_version") || m.contains("handshake_failure")
+                || m.contains("bad_certificate") || m.contains("unknown_ca") || m.contains("no cipher suites in common")
+                || m.contains("unsupported_certificate") || m.contains("access_denied");
     }
 
     /** The cause of an error the server reported ({@code -ERR '...'}). */

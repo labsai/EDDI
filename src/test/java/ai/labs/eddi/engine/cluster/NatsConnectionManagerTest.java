@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
@@ -257,6 +259,13 @@ class NatsConnectionManagerTest {
             assertEquals(ErrorCause.AUTH, NatsConnectionManager.classify(new AuthenticationException("bad")));
             assertEquals(ErrorCause.TLS, NatsConnectionManager.classify(new IOException("wrapped", new SSLHandshakeException("PKIX"))));
             assertEquals(ErrorCause.TLS, NatsConnectionManager.classify(new CertificateException("No subject alternative names")));
+            // An SSLException is TLS only when it is about a certificate or the handshake
+            // policy; a socket the peer closed or reset (a NATS restart) is ordinary I/O.
+            assertEquals(ErrorCause.IO, NatsConnectionManager.classify(new SSLException("Connection reset")));
+            assertEquals(ErrorCause.IO, NatsConnectionManager.classify(new SSLHandshakeException("Remote host terminated the handshake")));
+            assertEquals(ErrorCause.TLS, NatsConnectionManager.classify(new SSLPeerUnverifiedException("peer not authenticated")));
+            assertEquals(ErrorCause.TLS, NatsConnectionManager.classify(
+                    new SSLHandshakeException("Received fatal alert: certificate_unknown")));
             assertEquals(ErrorCause.TIMEOUT, NatsConnectionManager.classify(new TimeoutException()));
             assertEquals(ErrorCause.IO, NatsConnectionManager.classify(new ConnectException("Connection refused")));
             assertEquals(ErrorCause.AUTH, NatsConnectionManager.classify(new IOException("Authorization Violation")));

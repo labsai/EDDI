@@ -8,7 +8,7 @@
 {{- if and .Values.nats.auth.secondaryUsername (eq .Values.nats.auth.secondaryUsername .Values.nats.auth.username) }}
 {{- fail "nats.auth.secondaryUsername must differ from nats.auth.username: NATS refuses a configuration with two users of one name." }}
 {{- end }}
-{{- if and .Values.nats.isolation.enabled (not .Values.nats.auth.enabled) }}
+{{- if and (.Values.nats.isolation | default dict).enabled (not .Values.nats.auth.enabled) }}
 {{- fail "nats.isolation.enabled=true needs nats.auth.enabled=true: the account and the scoped permissions belong to EDDI's NATS user." }}
 {{- end }}
 {{- $inbox := include "eddi.natsInboxPrefix" . }}
@@ -64,7 +64,7 @@ stringData:
     {{- if .Values.nats.auth.secondaryUsername }}
     {{- $users = append $users (dict "user" .Values.nats.auth.secondaryUsername "password" (required "nats.auth.secondaryPassword is required with nats.auth.secondaryUsername" .Values.nats.auth.secondaryPassword)) }}
     {{- end }}
-    {{- if .Values.nats.isolation.enabled }}
+    {{- if (.Values.nats.isolation | default dict).enabled }}
     # One account per deployment: another tenant of this NATS cannot see this
     # deployment's streams, buckets or replies, whatever its own permissions.
     accounts {
@@ -253,7 +253,7 @@ spec:
               path: /healthz?js-server-only=true
               port: monitoring
             periodSeconds: 10
-        {{- if .Values.nats.metrics.enabled }}
+        {{- if (.Values.nats.metrics | default dict).enabled }}
         # The NATS server's own metrics (JetStream storage, streams, slow
         # consumers) for the eddi-cluster-nats alert group.
         - name: metrics
@@ -314,12 +314,12 @@ spec:
     - name: monitoring
       port: 8222
       targetPort: monitoring
-    {{- if .Values.nats.metrics.enabled }}
+    {{- if (.Values.nats.metrics | default dict).enabled }}
     - name: metrics
       port: 7777
       targetPort: metrics
     {{- end }}
-{{- if and .Values.nats.metrics.enabled .Values.serviceMonitor.enabled }}
+{{- if and (.Values.nats.metrics | default dict).enabled .Values.serviceMonitor.enabled }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

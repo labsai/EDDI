@@ -905,7 +905,7 @@ jobs:
           echo "--- cluster mode: in-chart NATS over TLS mounts the CA (cert-manager-style Secret)"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}" --set eddi.messagingType=nats --set nats.enabled=true \
-            --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
+            --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
             --set nats.tls.enabled=true --set nats.tls.secretName=eddi-nats-tls --set prometheusRule.enabled=true)
           grep -qF 'EDDI_NATS_TLS_TRUSTSTORE_PATH: "/etc/eddi/nats-ca/ca.crt"' <<<"$rendered" \
             || { echo "::error::EDDI does not trust the in-chart NATS CA (C2b)"; exit 1; }
@@ -1016,11 +1016,11 @@ jobs:
             --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats
           expect_failure "an unknown nats.antiAffinity" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
-            --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
+            --set nats.enabled=true --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
             --set nats.antiAffinity=sometimes
           expect_failure "a secondary NATS user with the primary's name" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
-            --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
+            --set nats.enabled=true --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
             --set nats.auth.secondaryUsername=eddi --set nats.auth.secondaryPassword=fixturefixturefixture
           expect_failure "a termination grace that does not cover preStop + drain + readiness grace" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \

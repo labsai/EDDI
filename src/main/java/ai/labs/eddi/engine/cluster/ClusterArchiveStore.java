@@ -73,8 +73,9 @@ public class ClusterArchiveStore {
             long maxBytes = config.archivesMaxBytes() > 0 ? config.archivesMaxBytes() : -1;
             try {
                 ObjectStoreStatus status = management.getStatus(bucket());
-                if (status != null && status.getMaxBucketSize() != maxBytes) {
-                    capExistingBucket(connection, maxBytes);
+                if (status != null && status.getMaxBucketSize() != maxBytes && !capExistingBucket(connection, maxBytes)) {
+                    // Not marked as ensured: the next publish or fetch tries the cap again.
+                    return connection.objectStore(bucket());
                 }
             } catch (JetStreamApiException missing) {
                 management.create(ObjectStoreConfiguration.builder(bucket()).storageType(StorageType.File)
@@ -88,17 +89,22 @@ public class ClusterArchiveStore {
     /**
      * Applies the configured size cap to a bucket that exists with another one
      * (made before the cap existed). Best effort: a failure leaves the bucket as it
-     * is and is logged.
+     * is, is logged, and is retried on the next use.
+     *
+     * @return whether the cap was applied
      */
-    private void capExistingBucket(Connection connection, long maxBytes) {
+    private boolean capExistingBucket(Connection connection, long maxBytes) {
         String stream = "OBJ_" + bucket();
         try {
             var management = connection.jetStreamManagement();
             StreamInfo info = management.getStreamInfo(stream);
             management.updateStream(StreamConfiguration.builder(info.getConfiguration()).maxBytes(maxBytes).build());
             LOGGER.infof("Archive store %s capped at %d bytes (eddi.cluster.archives.max-bytes)", bucket(), maxBytes);
+            return true;
         } catch (IOException | JetStreamApiException | RuntimeException e) {
-            LOGGER.warnf("Could not cap the archive store %s at %d bytes: %s", bucket(), maxBytes, e.getMessage());
+            LOGGER.warnf("Could not cap the archive store %s at %d bytes (retried on the next use): %s", bucket(), maxBytes,
+                    e.getMessage());
+            return false;
         }
     }
 

@@ -62,6 +62,19 @@ tests:
               summary: "The EDDI cluster has fewer members than 15 minutes ago"
               description: "A node stopped writing its presence record (crash, eviction, network partition, or a scale-in). Its conversation leases were taken over after their TTL; check EddiClusterLeaseTakeovers and the lost node's last log lines. Expected for a while after an intended scale-in."
 
+  - name: the surge pod of a rolling update is not a lost member
+    interval: 1m
+    input_series:
+      - series: 'eddi_cluster_members{job="eddi", instance="a"}'
+        values: '3 3 3 4 4 4 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EddiClusterMemberLost
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: EddiClusterMemberLost
+        exp_alerts: []
+
   - name: a full JetStream store and a nearly full dead-letter stream warn
     interval: 1m
     input_series:

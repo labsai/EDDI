@@ -48,7 +48,14 @@ class ThirdPartyImagePinsTest {
     private static final Pattern MONGO_IMAGE = Pattern.compile("(?<![\\w./-])mongo:([\\w.\\-]+)");
     private static final Pattern KEYCLOAK_IMAGE = Pattern.compile("quay\\.io/keycloak/keycloak:([\\w.\\-]+)");
     private static final Pattern PATCH_VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+");
-    private static final Pattern NATS_IMAGE = Pattern.compile("(?<![\\w./-])nats:([\\w.\\-]+(?:@sha256:[0-9a-f]+)?)");
+    /**
+     * The whole image reference after {@code nats:}, up to whitespace or a quote —
+     * not a valid-looking prefix of it, so a malformed suffix is part of what is
+     * checked. A word character must follow the colon, which leaves out
+     * {@code nats://} URLs.
+     */
+    private static final Pattern NATS_IMAGE = Pattern.compile("(?<![\\w./-])nats:(\\w[^\\s\"'#]*)");
+    private static final Pattern NATS_PINNED = Pattern.compile("(\\d+\\.\\d+\\.\\d+)(?:-[a-z0-9]+)?@sha256:[0-9a-f]{64}");
     private static final YAMLMapper YAML = new YAMLMapper();
 
     @Test
@@ -90,9 +97,25 @@ class ThirdPartyImagePinsTest {
                 "the Kustomize NATS component must be part of the sweep: " + references);
         assertEquals(1, references.size(), "NATS is pinned to more than one reference: " + references);
         String reference = references.firstKey();
-        Matcher pinned = Pattern.compile("(\\d+\\.\\d+\\.\\d+)(?:-[a-z0-9]+)?@sha256:[0-9a-f]{64}").matcher(reference);
+        Matcher pinned = NATS_PINNED.matcher(reference);
         assertTrue(pinned.matches(), "NATS is referenced as `" + reference + "` in " + references.get(reference)
                 + " — pin a full MAJOR.MINOR.PATCH tag AND its @sha256 digest");
+    }
+
+    @Test
+    @DisplayName("the NATS pin check sees a malformed suffix instead of accepting the valid prefix")
+    void natsReferenceIsCheckedWhole() {
+        String digest = "0".repeat(64);
+        Matcher valid = NATS_IMAGE.matcher("    image: nats:2.11.17-alpine@sha256:" + digest + "\n");
+        assertTrue(valid.find());
+        assertTrue(NATS_PINNED.matcher(valid.group(1)).matches(), valid.group(1));
+
+        Matcher malformed = NATS_IMAGE.matcher("    image: \"nats:2.11.17-alpine@sha256:" + digest + "oops\"\n");
+        assertTrue(malformed.find());
+        assertEquals("2.11.17-alpine@sha256:" + digest + "oops", malformed.group(1));
+        assertFalse(NATS_PINNED.matcher(malformed.group(1)).matches(), "a malformed suffix must fail the pin check");
+
+        assertFalse(NATS_IMAGE.matcher("url: nats://eddi-nats:4222").find(), "a nats:// URL is not an image");
     }
 
     @Test

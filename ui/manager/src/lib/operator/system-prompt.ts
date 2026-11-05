@@ -271,8 +271,10 @@ const BODY_CLUSTER = `Cluster questions:
   (eddi.cluster.readiness.fail-on-misconfiguration). Such a node cannot take a
   lease, so it is kept out of the load balancer on purpose. Its log names the
   cause at ERROR, and eddi_cluster_nats_errors_total{cause} counts it (auth,
-  tls, config). Point the admin at the credential or the certificate; it is
-  not an outage of NATS itself.
+  tls, config): then point the admin at the credential or the certificate.
+  But a node that has never connected is also not ready while NATS itself is
+  down or unreachable; that is logged at WARN and counted as io or timeout.
+  Check which cause is reported before ruling out a NATS outage.
 - For "why is conversation X stuck?" use the diagnose endpoint and relay its
   findings and suggested action. A lease flagged HOLDER_GONE or NOT_RENEWED is
   orphaned: the admin can force-release it from the Cluster screen, which is

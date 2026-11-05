@@ -199,7 +199,9 @@ data:
   EDDI_NATS_TLS_ENABLED: "true"
   {{- end }}
   {{- else }}
-  {{- $externalReplicas := int .Values.nats.externalReplicas }}
+  {{- /* `helm upgrade --reuse-values` from an older chart carries no externalReplicas: use the chart default */}}
+  {{- $externalReplicas := 3 }}
+  {{- if hasKey .Values.nats "externalReplicas" }}{{ $externalReplicas = int .Values.nats.externalReplicas }}{{ end }}
   {{- if or (lt $externalReplicas 1) (gt $externalReplicas 5) }}
   {{- fail (printf "nats.externalReplicas must be between 1 and 5, got %d" $externalReplicas) }}
   {{- end }}
