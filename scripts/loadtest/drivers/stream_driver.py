@@ -158,6 +158,10 @@ async def sse_events(resp):
             end = buf.find("\n\n", max(pos, scan))
             if end < 0:
                 break
+            if end - pos > MAX_SSE_FRAME:
+                # The same limit for a frame whose end arrived in this piece, so the verdict does
+                # not depend on where the 64 KiB boundaries fell.
+                raise ValueError(f"SSE frame longer than {MAX_SSE_FRAME} characters")
             raw, pos = buf[pos:end], end + 2
             name, data = "message", []
             for line in raw.split("\n"):

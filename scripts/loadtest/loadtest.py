@@ -187,18 +187,14 @@ def write_text_atomic(path, text, explicit=False):
     follow a symlink another local user planted at a predictable result name and truncate whatever
     it points to; os.replace swaps the directory entry itself and never follows it.
 
-    `explicit` marks a path the user named with --out. If that names something other than a regular
-    file or a directory (`--out /dev/stdout`, a pipe), it is written in place: replacing it would swap
-    the device entry out instead of writing to it. Default result paths never take this branch."""
-    if explicit:
-        try:
-            st = os.stat(path)
-        except FileNotFoundError:
-            st = None
-        if st is not None and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
-            with open(path, "w", encoding="utf-8", newline="\n") as dest:
-                dest.write(text)
-            return
+    `explicit` marks a path the user named with --out. `--out /dev/stdout` (or `-`) is written to this
+    process's stdout, whatever it is redirected to: replacing /dev/stdout would need a temp file in /dev,
+    and a stat of it reports the redirect target's type. No other path is opened directly, so a FIFO
+    planted at a chosen name in results/ is replaced like any file, never written to."""
+    if explicit and path in ("-", "/dev/stdout"):
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".out-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:

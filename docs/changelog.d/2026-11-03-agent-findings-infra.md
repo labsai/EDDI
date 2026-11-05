@@ -57,6 +57,13 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
   `docker compose ps -q keycloak` with the stack's own compose arguments, so a keycloak of
   another Compose project on the same port is never sent the admin password.
 
+- **PR #1239 fourth review:** a complete SSE frame is held to the same 1 MiB limit before it is
+  yielded, so the verdict no longer depends on where the 64 KiB boundaries fall. `--out
+  /dev/stdout` (or `-`) now writes to the process's stdout descriptor. It works even when stdout
+  is redirected to a file, where a stat reports a regular file and the temp file would have
+  landed in `/dev`. No other `--out` path is opened in place, so a FIFO planted in `results/`
+  is replaced rather than written to. This drops the stat-based special-file branch.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve

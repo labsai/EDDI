@@ -257,13 +257,13 @@ class InfraReviewHardeningTest {
         assertFalse(lt.contains("f\"{name}.json\"), \"w\""), "the cluster runner opens the predictable path itself");
         assertFalse(lt.contains("open(out, \"w\""), "the report opens the predictable path itself");
         assertFalse(lt.contains("\"gate-summary.md\"), \"w\""));
-        // The one direct write: a special file (--out /dev/stdout) the user named
-        // explicitly, inside write_text_atomic and only behind the explicit flag.
-        int direct = lt.indexOf("open(path, \"w\"");
-        int gate = lt.indexOf("    if explicit:\n");
-        assertTrue(direct > gate && gate > lt.indexOf("def write_text_atomic(") && lt.indexOf("open(path, \"w\"", direct + 1) < 0,
-                "only write_text_atomic's explicit special-file branch may open the target itself");
-        assertTrue(lt.contains("not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode)"));
+        // The one direct write is this process's stdout for an explicit --out
+        // /dev/stdout:
+        // no path is opened in place, so a FIFO planted in results/ is replaced, not
+        // fed.
+        assertFalse(lt.contains("open(path, \"w\""), "no writer opens its target path in place");
+        assertTrue(lt.contains("if explicit and path in (\"-\", \"/dev/stdout\"):\n        sys.stdout.write(text)"),
+                "--out /dev/stdout goes to the stdout descriptor, whatever it is redirected to");
         assertTrue(lt.contains("write_text_atomic(os.path.join(RESULTS, f\"{result['name']}.json\"), json.dumps(result, indent=2))"),
                 "default result paths never pass explicit");
     }
@@ -275,6 +275,9 @@ class InfraReviewHardeningTest {
         assertTrue(py.contains("scan = max(0, len(buf) - 1)") && py.contains("end = buf.find(\"\\n\\n\", max(pos, scan))"),
                 "an incomplete frame must not be rescanned from its start for every piece");
         assertTrue(py.contains("MAX_SSE_FRAME = 1 << 20") && py.contains("if len(buf) > MAX_SSE_FRAME:"));
+        int complete = py.indexOf("if end - pos > MAX_SSE_FRAME:");
+        assertTrue(complete > 0 && complete < py.indexOf("raw, pos = buf[pos:end], end + 2"),
+                "a complete frame is held to the same limit before it is yielded, whatever the piece boundaries");
 
         String vm = read("gcp/provision-vm.sh");
         int loop = vm.indexOf("for attempt in \\$(seq 1 18); do");
