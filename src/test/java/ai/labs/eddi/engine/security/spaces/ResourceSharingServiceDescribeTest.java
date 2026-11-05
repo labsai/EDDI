@@ -106,6 +106,7 @@ class ResourceSharingServiceDescribeTest {
     @Test
     void theOwnerSeesEveryGrantWithLabels() {
         when(accessGuard.effectiveLevel(any())).thenReturn(AccessLevel.OWN);
+        when(accessGuard.mayReadGrants(any())).thenReturn(true);
         when(directory.isActive()).thenReturn(true);
 
         var info = service.describe(AGENT);
@@ -137,6 +138,7 @@ class ResourceSharingServiceDescribeTest {
     @Test
     void withoutARunningDirectoryNobodyIsFlaggedUnknown() {
         when(accessGuard.effectiveLevel(any())).thenReturn(AccessLevel.OWN);
+        when(accessGuard.mayReadGrants(any())).thenReturn(true);
         when(directory.isActive()).thenReturn(false);
         assertTrue(service.describe(AGENT).grants().get(2).known());
     }
@@ -169,6 +171,7 @@ class ResourceSharingServiceDescribeTest {
         descriptor.setOwnerId("carol");
         descriptor.setGrants(null);
         when(accessGuard.effectiveLevel(any())).thenReturn(AccessLevel.OWN);
+        when(accessGuard.mayReadGrants(any())).thenReturn(true);
         assertEquals("carol", service.describe(AGENT).ownerLabel());
     }
 
@@ -180,6 +183,7 @@ class ResourceSharingServiceDescribeTest {
         list.add(new ResourceGrant("legacy-principal", "VIEW", "alice", null));
         descriptor.setGrants(list);
         when(accessGuard.effectiveLevel(any())).thenReturn(AccessLevel.OWN);
+        when(accessGuard.mayReadGrants(any())).thenReturn(true);
         var grants = service.describe(AGENT).grants();
         assertEquals(1, grants.size());
         assertEquals("legacy-principal", grants.getFirst().label(), "a bare principal from before subject prefixes");
