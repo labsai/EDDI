@@ -352,6 +352,21 @@ class ToolLoopResumer {
                 continue;
             }
 
+            // toolCallGuardrails, block-only: nothing is rewritten after approval, so a
+            // finding refuses the call. Before the claim, so a refusal consumes nothing
+            // and stays replayable; a call the journal already holds never runs again.
+            String guardrailRefusal = toolLoopRunner.toolCallGuardrails == null
+                    ? null
+                    : toolLoopRunner.toolCallGuardrails.screenApproved(task, memory, c.getToolName(), amended != null ? amended : c.getArgumentsRaw(),
+                            amended != null, toolSources, setup.toolEndpoints(), currentMessages, trace,
+                            toolLoopRunner.sideCallSpend(memory, conversationId, enableCostTracking,
+                                    () -> toolLoopRunner.toolCostDelta(conversationId, toolCostBefore)),
+                            () -> journalStore.find(conversationId, pauseEpoch, c.getCallId()).isPresent());
+            if (guardrailRefusal != null) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), guardrailRefusal));
+                continue;
+            }
+
             // Journal protocol — at-most-once across crashes/re-approvals.
             if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
                 String args = amended != null ? amended : c.getArgumentsRaw();

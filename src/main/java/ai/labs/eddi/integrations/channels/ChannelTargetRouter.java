@@ -1171,7 +1171,10 @@ public class ChannelTargetRouter {
             return true;
         }
         try {
-            vaultHostAllowlist.requireAllowed(List.of(raw), SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
+            // Every reference in the value, not just the first: the resolver expands all
+            // of them, so a token written as "${vault:a}${vault:b}" sends both secrets.
+            List<String> references = List.copyOf(VaultHostAllowlist.referencesIn(List.of(raw)));
+            vaultHostAllowlist.requireAllowed(references, SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
             return true;
         } catch (VaultHostAllowlist.HostNotAllowedException e) {
             warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")", true);

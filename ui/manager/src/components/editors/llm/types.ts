@@ -218,6 +218,19 @@ export interface LlmTask {
    */
   fieldAliases?: Record<string, string>;
   /**
+   * How a `convertToObject` answer arrives. `text` (default) — the model writes
+   * the JSON as its reply; `tool` — it calls a terminal reply tool whose
+   * parameters are the `responseSchema` (needs an object-root JSON Schema).
+   */
+  answerMode?: 'text' | 'tool';
+  /** Name of the reply tool in `answerMode: "tool"` (default `reply`). */
+  answerToolName?: string;
+  /**
+   * `required` (default) forces a tool call where the provider supports it;
+   * `auto` lets the model choose.
+   */
+  answerToolChoice?: 'required' | 'auto';
+  /**
    * What the task does when its model phase fails outright. `fallback` serves
    * the configured fallback (see `ResponseValidation.fallbackMessage`) and
    * completes the turn; `error` (the default) fails it.
@@ -240,6 +253,12 @@ export interface LlmTask {
    * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
    */
   toolApprovals?: ToolApprovalsConfig | null;
+  /**
+   * Guardrails on the ARGUMENTS of the tool calls the model asks for (EDDI
+   * 6.7+): run before the approval gate, and again, block-only, on an approved
+   * or edited call. Absent or empty = nothing runs. Never sent unless set.
+   */
+  toolCallGuardrails?: ToolCallGuardrailConfig[];
 
   /**
    * Token pricing (USD per 1M tokens) for this task's ORDINARY (non-cascade)
@@ -302,6 +321,18 @@ export interface GuardrailConfig {
   blockMessage?: string;
   /** Per-type settings as plain strings, e.g. `{ patterns: "email,ssn" }`. */
   parameters?: Record<string, string>;
+}
+
+/**
+ * One guardrail on tool-call arguments. Mirrors the backend
+ * `ToolCallGuardrailConfig`: a guardrail plus the calls it applies to (`tools`,
+ * tool-approval patterns, required) and the fields it screens (`fields`, JSON
+ * pointers; `*` is every element or member, `""` the whole arguments; absent =
+ * every string).
+ */
+export interface ToolCallGuardrailConfig extends GuardrailConfig {
+  tools: string[];
+  fields?: string[];
 }
 
 /**
