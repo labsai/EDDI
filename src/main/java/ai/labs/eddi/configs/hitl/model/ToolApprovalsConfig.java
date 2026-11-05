@@ -144,6 +144,22 @@ public class ToolApprovalsConfig {
         private String approvalCategory;
         /** Overrides {@link ToolApprovalsConfig#getPendingMessage()}. ≤500 chars. */
         private String pendingMessage;
+        /**
+         * Context blocks rendered for the calls this rule governs, shown on the
+         * approval card (see {@link ApprovalContextBlock}). {@code call.*} is available
+         * here. At most 4. Absent = none.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> context;
+
+        public List<ApprovalContextBlock> getContext() {
+            return context;
+        }
+
+        public void setContext(List<ApprovalContextBlock> context) {
+            this.context = context;
+        }
 
         public String getMatch() {
             return match;

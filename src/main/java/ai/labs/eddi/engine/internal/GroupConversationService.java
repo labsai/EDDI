@@ -46,6 +46,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -83,6 +84,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -258,6 +260,21 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * Renders {@code hitlConfig.approvalContext} at pause commit. Same
+     * field-injection pattern and null-safety as {@link #sharedArtifactStore} —
+     * unresolvable in direct-construction unit tests, where no context is rendered.
+     */
+    @Inject
+    Instance<GroupApprovalContextRenderer> approvalContextRenderer;
+
+    /**
+     * The group approval-context renderer, or {@code null} when none is available.
+     */
+    public GroupApprovalContextRenderer approvalContextRenderer() {
+        return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
+    }
 
     /**
      * Shared LLM summarization for I9 transcript windowing. Same field-injection

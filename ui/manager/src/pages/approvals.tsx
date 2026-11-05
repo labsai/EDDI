@@ -458,6 +458,7 @@ function ApprovalQueueRow({
                 approvalTimeout={item.approvalTimeout ?? undefined}
                 pausedPhaseName={groupConversation.data?.pausedPhaseName}
                 granularity={groupConversation.data?.hitlPauseType}
+                approvalContext={groupConversation.data?.hitlApprovalContext ?? null}
                 pendingTaskIds={(groupConversation.data?.taskList?.tasks ?? [])
                   .filter((task) => task.status === "AWAITING_APPROVAL")
                   .map((task) => task.id)}
@@ -495,6 +496,7 @@ function ApprovalQueueRow({
                 timeoutPolicy={item.timeoutPolicy ?? undefined}
                 approvalTimeout={item.approvalTimeout ?? undefined}
                 pauseDetails={approvalStatus.data?.pauseDetails ?? null}
+                approvalContext={approvalStatus.data?.approvalContext ?? null}
                 // The query's own flags, not `!data`: that conflated a failed
                 // read with a successful one carrying no pauseDetails, and
                 // resolved the latter to "not pending" — enabling Approve on

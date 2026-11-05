@@ -7386,6 +7386,82 @@
           }
         },
         {
+          "id": 420,
+          "type": "timeseries",
+          "title": "Approval context renders",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_hitl_approval_context_render_total{outcome,surface}` — one per `approvalContext` block rendered when a pause is committed: `ok`, `empty` (rendered blank and dropped, which is how a conditional block stays out of the way), `failed` (the template threw or timed out) and `too_large` (over the output or loop limit). `failed` and `too_large` show as an empty block on the card with an error note — the pause itself is never delayed or failed by them. `surface` is `regular` or `group`.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 68
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome, surface) (rate(eddi_hitl_approval_context_render_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{surface}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
           "id": 269,
           "type": "timeseries",
           "title": "HITL email notifications",

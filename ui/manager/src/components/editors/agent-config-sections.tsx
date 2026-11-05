@@ -43,6 +43,8 @@ import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { EditorSection } from "./editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
+import { ApprovalContextEditor } from "./approval-context-editor";
+import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
@@ -1347,10 +1349,13 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   // the recipients (and drops hitlConfig), whatever notifyOn last said.
   const recipientsError = enabled && notifyOn ? recipientsProblem() : null;
   const recipientsInvalid = recipientsError !== null;
+  // Same rule for the approval-context blocks: an unsavable block would only be
+  // refused by the backend, so the page withholds the save while one is shown.
+  const contextInvalid = enabled && approvalContextHasErrors(hitl.approvalContext, "agent");
   useEffect(() => {
-    onValidityChange?.(recipientsInvalid);
+    onValidityChange?.(recipientsInvalid || contextInvalid);
     return () => onValidityChange?.(false);
-  }, [recipientsInvalid, onValidityChange]);
+  }, [recipientsInvalid, contextInvalid, onValidityChange]);
 
   return (
     <EditorSection
@@ -1520,6 +1525,13 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 />
               </div>
             )}
+
+            <ApprovalContextEditor
+              value={hitl.approvalContext}
+              scope="agent"
+              disabled={disabled}
+              onChange={(approvalContext) => patchHitl({ approvalContext })}
+            />
 
             {/* Tool-level approval gating (surface 3) — pause when the model
                 invokes a matching tool, before it executes. */}

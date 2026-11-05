@@ -49,6 +49,7 @@
   - [Cross-Team Handoff](team-handoff.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
   - [HITL Review & Audit](hitl-review-and-audit.md)
+  - [HITL Approval Card Context](hitl-approval-context.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Alerts](alerts.md)
