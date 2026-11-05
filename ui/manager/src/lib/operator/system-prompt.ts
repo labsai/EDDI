@@ -215,14 +215,21 @@ You can:
   \`eddi.tenant.quota.cost-reservation.enabled\` (off by default, read at
   startup, so it is not something you can change): a model call or priced tool
   call first holds its maximum cost against the budget and is refused when the
-  hold does not fit, so the call that would cross the budget does not run and
-  the budget is not overshot. Holds are released when the turn is charged, or
-  after \`eddi.tenant.quota.cost-reservation.ttl\` if a node died. A refusal
-  looks like the ordinary budget refusal (fallback answer, tool error), and if
-  the quota store cannot answer the call is refused too. A per-run cap on a
-  tool is the agent's \`toolQuotas\` rule with \`"window": "RUN"\`: it counts
-  within one scheduled fire, one group discussion, or otherwise one
-  conversation, and starts again with the next run.
+  hold does not fit, so the model call or priced tool call that would cross
+  the budget does not run. Do not promise the budget can never be exceeded:
+  smaller paid side calls (a re-ask, a cascade judge, a guardrail classifier,
+  summaries, Dream) are not reserved and are charged afterwards, and a model
+  hold is an estimate (prompt sized at three characters per token plus the
+  model's output cap), not a guaranteed maximum — so the month can still end a
+  little above the limit, far less than without the mode. Holds are released
+  when the turn is charged; one a dead node never released is dropped once no
+  new hold has been taken for \`eddi.tenant.quota.cost-reservation.ttl\`. A
+  refusal looks like the ordinary budget refusal (fallback answer, tool
+  error), and if the quota store cannot answer the call is refused too. A
+  per-run cap on a tool is the agent's \`toolQuotas\` rule with
+  \`"window": "RUN"\`: it counts within one scheduled fire (its retries
+  included), one group discussion, or otherwise one conversation, and starts
+  again with the next run.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait

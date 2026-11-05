@@ -357,6 +357,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // (redeploy) — otherwise a drifted pause would silently never clear.
                 // Tasks BEFORE resumeIndex already ran pre-pause and are skipped.
                 executeResume(memory, llmConfig, batch, resumeDecision, currentStep, templateDataObjects);
+                // As after executeTask below: the resumed task's hold (its remaining
+                // rounds) shrinks to what it actually spent, so the later tasks of this
+                // turn are not refused against money it no longer needs.
+                if (spendGate != null) {
+                    spendGate.settleHolds(memory);
+                }
             }
 
             var tasks = llmConfig.tasks();

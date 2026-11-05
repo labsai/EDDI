@@ -61,10 +61,7 @@ final class ModelCallBound {
         long toolTokens = 0;
         if (task.isAgentMode()) {
             rounds += ToolLoopRunner.effectiveMaxToolIterations(task);
-            int toolBudget = task.getMaxToolContextTokens() != null
-                    ? task.getMaxToolContextTokens()
-                    : ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
-            toolTokens = Math.max(0, toolBudget);
+            toolTokens = toolContextTokens(task);
         }
         if (cascadeActive && task.getModelCascade() != null && task.getModelCascade().getSteps() != null) {
             double total = 0.0;
@@ -87,7 +84,7 @@ final class ModelCallBound {
                                int defaultMaxOutputTokens) {
         int rounds = Math.max(1, ToolLoopRunner.effectiveMaxToolIterations(task) - batch.getIterationIndex() + 1);
         long transcriptTokens = batch.getChatTranscriptJson() == null ? 0 : batch.getChatTranscriptJson().length() / CHARS_PER_TOKEN + 1;
-        long toolTokens = Math.max(0, toolContextTokens(task));
+        long toolTokens = toolContextTokens(task);
         boolean cascadeStep = batch.getCascadeStepIndex() != null;
         ModelPrices prices = ModelPrices.forRun(task, batch.getCascadeStepIndex());
         return usd(prices, cascadeStep ? null : modelName, rounds, transcriptTokens + toolTokens, toolTokens,
@@ -131,8 +128,16 @@ final class ModelCallBound {
         return configured != null && configured > 0 ? configured : Math.max(1, defaultMaxOutputTokens);
     }
 
-    /** The tool-context cap the loop runs with, for tests. */
+    /**
+     * The tool context each later round is sized with: the task's
+     * {@code maxToolContextTokens}, or the default. {@code <= 0} switches the
+     * loop's guard OFF (ToolLoopRunner) - the tool traffic is then not capped at
+     * all, so it must not be sized as zero; the default cap stands in, which keeps
+     * the hold well above the opening prompt alone (a bound, not a guarantee, for a
+     * loop that is not capped).
+     */
     static int toolContextTokens(LlmConfiguration.Task task) {
-        return task.getMaxToolContextTokens() != null ? task.getMaxToolContextTokens() : ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
+        Integer configured = task.getMaxToolContextTokens();
+        return configured != null && configured > 0 ? configured : ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS;
     }
 }

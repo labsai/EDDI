@@ -1867,7 +1867,8 @@
     "toolQuotasWindowHour": "每小时",
     "toolQuotasWindowDay": "每天（UTC）",
     "toolQuotasWindowWeek": "每 7 天",
-    "toolQuotasWindowMonth": "每 31 天"
+    "toolQuotasWindowMonth": "每 31 天",
+    "toolQuotasDuplicate": "另一个配额已在使用此工具名称。名称唯一之前，重命名不会被保存。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -4814,11 +4815,12 @@
     "budgetDisabled": "强制执行已关闭，因此既不计量也不限制花费。",
     "budgetReached": "已达预算（{{spent}} / {{limit}}）。LLM 任务将返回备用回答而不调用模型，工具调用将被拒绝，直到下个月开始或上限被调高。",
     "budgetRemaining": "本月已使用 {{spent}} / {{limit}}。还剩 {{remaining}}，之后将不再调用模型。",
+    "budgetRemainingHeld": "本月已使用 {{limit}} 中的 {{spent}}，运行中的轮次预留了 {{held}}。新调用还剩 {{remaining}}。",
     "budgetNote": "按 UTC 日历月统计已定价的模型调用和已跟踪的工具费用。未定价的模型、对话摘要和嵌入不计量。越过上限的那一轮仍会完成，因此总额可能略高于上限。被拒绝的调用计入 eddi.llm.spend.refused 指标。",
     "invalidInteger": "请输入整数（0 或更大），或留空表示不限制。",
     "invalidAmount": "请输入金额（0 或更大），或留空表示不限制。",
     "heldByTurns": "运行中的轮次已预留 {{amount}}",
-    "costHardCeiling": "默认情况下，超出预算的那次调用仍会完成。若要改为拒绝它，服务器可先预留每次调用的最大成本：设置 eddi.tenant.quota.cost-reservation.enabled=true（启动属性）。"
+    "costHardCeiling": "默认情况下，超出预算的那次调用仍会完成。若要改为拒绝它，服务器可先预留每次调用的最大成本：设置 eddi.tenant.quota.cost-reservation.enabled=true（启动属性）。 预留涵盖 LLM 模型调用和已定价的工具调用；较小的附带调用（摘要、评判、Dream）仍在事后计费，可能会略微超出。"
   },
   "secretPicker": {
     "clearVault": "清除保管库引用",

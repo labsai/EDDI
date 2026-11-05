@@ -43,7 +43,9 @@ public record UsageSnapshot(
         // YearMonth.parse), so only the REST representation disagreed.
         @JsonFormat(shape = JsonFormat.Shape.STRING) YearMonth costMonth,
         // Budget set aside for turns still running (opt-in hard ceiling); 0 when the
-        // mode is off.
+        // mode is off. The stored total: it can still include the hold of a node that
+        // died until the next reservation drops it past the TTL
+        // (docs/tenant-quotas.md).
         double reservedUsd) {
 
     /**

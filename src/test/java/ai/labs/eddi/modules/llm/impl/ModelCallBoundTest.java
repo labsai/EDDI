@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -68,6 +69,27 @@ class ModelCallBoundTest {
         // context cap
         double expected = 4 * plain + 3 * 1000 * 2.0 / 1_000_000;
         assertEquals(expected, loop, 1e-12);
+    }
+
+    @Test
+    @DisplayName("a disabled tool-context guard (maxToolContextTokens <= 0) is sized with the default cap, not as zero")
+    void disabledGuardUsesTheDefaultCap() {
+        var disabled = pricedTask(true, 3);
+        disabled.setMaxToolContextTokens(0);
+        var defaulted = pricedTask(true, 3);
+        defaulted.setMaxToolContextTokens(null);
+
+        assertEquals(ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS, ModelCallBound.toolContextTokens(disabled));
+        assertEquals(
+                ModelCallBound.phaseMaxUsd(defaulted, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096),
+                ModelCallBound.phaseMaxUsd(disabled, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096), 1e-12);
+
+        var batch = new PendingToolCallBatch();
+        batch.setChatTranscriptJson("y".repeat(300));
+        batch.setIterationIndex(1);
+        disabled.setMaxToolContextTokens(-1);
+        assertEquals(ModelCallBound.resumeMaxUsd(defaulted, batch, Map.of("maxTokens", "100"), "openai", "m", 4096),
+                ModelCallBound.resumeMaxUsd(disabled, batch, Map.of("maxTokens", "100"), "openai", "m", 4096), 1e-12);
     }
 
     @Test

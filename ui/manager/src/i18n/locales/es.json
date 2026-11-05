@@ -1887,7 +1887,8 @@
     "toolQuotasWindowHour": "Por hora",
     "toolQuotasWindowDay": "Por día (UTC)",
     "toolQuotasWindowWeek": "Por 7 días",
-    "toolQuotasWindowMonth": "Por 31 días"
+    "toolQuotasWindowMonth": "Por 31 días",
+    "toolQuotasDuplicate": "Otra cuota ya usa este nombre de herramienta. El cambio de nombre no se guarda hasta que el nombre sea único."
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -4865,11 +4866,12 @@
     "budgetDisabled": "La aplicación está desactivada: el gasto no se mide ni se limita.",
     "budgetReached": "Presupuesto alcanzado ({{spent}} de {{limit}}). Las tareas LLM responden con su respuesta de reserva en lugar de llamar al modelo y se rechazan las llamadas a herramientas, hasta que cambie el mes o se suba el límite.",
     "budgetRemaining": "{{spent}} de {{limit}} usados este mes. Quedan {{remaining}} antes de que se dejen de llamar los modelos.",
+    "budgetRemainingHeld": "{{spent}} de {{limit}} usados este mes y {{held}} retenidos por turnos en curso. Quedan {{remaining}} para llamadas nuevas.",
     "budgetNote": "Cuenta las llamadas a modelos con precio y el coste de herramientas registrado, por mes natural UTC. No se miden los modelos sin precio, los resúmenes de conversación ni los embeddings. Un turno que cruza el límite termina igualmente, por lo que el total puede quedar algo por encima. Las llamadas rechazadas se cuentan en la métrica eddi.llm.spend.refused.",
     "invalidInteger": "Introduzca un número entero (0 o más) o déjelo vacío para ilimitado.",
     "invalidAmount": "Introduzca un importe (0 o más) o déjelo vacío para ilimitado.",
     "heldByTurns": "{{amount}} reservados por turnos en curso",
-    "costHardCeiling": "Por defecto, la llamada que cruza el presupuesto se completa igualmente. Para rechazarla, el servidor puede reservar antes el coste máximo de cada llamada: establezca eddi.tenant.quota.cost-reservation.enabled=true (propiedad de arranque)."
+    "costHardCeiling": "Por defecto, la llamada que cruza el presupuesto se completa igualmente. Para rechazarla, el servidor puede reservar antes el coste máximo de cada llamada: establezca eddi.tenant.quota.cost-reservation.enabled=true (propiedad de arranque). Las reservas cubren las llamadas a modelos LLM y las llamadas a herramientas con precio; las llamadas secundarias menores (resúmenes, jueces, Dream) se siguen cobrando después y pueden sumar un poco más."
   },
   "secretPicker": {
     "clearVault": "Borrar referencia de vault",

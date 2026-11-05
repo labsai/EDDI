@@ -1887,7 +1887,8 @@
     "toolQuotasWindowHour": "Par heure",
     "toolQuotasWindowDay": "Par jour (UTC)",
     "toolQuotasWindowWeek": "Par 7 jours",
-    "toolQuotasWindowMonth": "Par 31 jours"
+    "toolQuotasWindowMonth": "Par 31 jours",
+    "toolQuotasDuplicate": "Un autre quota utilise déjà ce nom d'outil. Le renommage n'est enregistré qu'une fois le nom unique."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -4865,11 +4866,12 @@
     "budgetDisabled": "L'application est désactivée : la dépense n'est ni mesurée ni limitée.",
     "budgetReached": "Budget atteint ({{spent}} sur {{limit}}). Les tâches LLM renvoient leur réponse de repli au lieu d'appeler le modèle et les appels d'outils sont refusés, jusqu'au changement de mois ou à l'augmentation de la limite.",
     "budgetRemaining": "{{spent}} sur {{limit}} utilisés ce mois-ci. Il reste {{remaining}} avant que les modèles ne soient plus appelés.",
+    "budgetRemainingHeld": "{{spent}} sur {{limit}} utilisés ce mois-ci et {{held}} réservés par des tours en cours. Il reste {{remaining}} pour de nouveaux appels.",
     "budgetNote": "Compte les appels de modèle tarifés et le coût des outils suivis, par mois calendaire UTC. Les modèles sans prix, les résumés de conversation et les embeddings ne sont pas mesurés. Un tour qui franchit la limite se termine quand même : le total peut la dépasser légèrement. Les appels refusés sont comptés dans la métrique eddi.llm.spend.refused.",
     "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
     "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité.",
     "heldByTurns": "{{amount}} réservés par les tours en cours",
-    "costHardCeiling": "Par défaut, l'appel qui dépasse le budget se termine quand même. Pour le refuser, le serveur peut d'abord réserver le coût maximal de chaque appel : définissez eddi.tenant.quota.cost-reservation.enabled=true (propriété de démarrage)."
+    "costHardCeiling": "Par défaut, l'appel qui dépasse le budget se termine quand même. Pour le refuser, le serveur peut d'abord réserver le coût maximal de chaque appel : définissez eddi.tenant.quota.cost-reservation.enabled=true (propriété de démarrage). Les réservations couvrent les appels aux modèles LLM et les appels d'outils tarifés ; les petits appels annexes (résumés, juges, Dream) sont toujours facturés après coup et peuvent ajouter un peu au-delà."
   },
   "secretPicker": {
     "clearVault": "Effacer la référence vault",

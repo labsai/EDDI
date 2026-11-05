@@ -2112,7 +2112,7 @@ to one run and the next run starts again at zero, whatever the clock says.
 
 | The turn belongs to… | …so the run is |
 |---|---|
-| A [scheduled](scheduling.md) fire | That fire. Even on a `persistent` conversation, the next fire is a new run |
+| A [scheduled](scheduling.md) fire | That fire, retries included: a failed attempt, its automatic retries and a manual retry of it count as one run, so a retry cannot run again the tools an earlier attempt already ran. The run ends when a fire completes; even on a `persistent` conversation, the next fire is a new run |
 | A [group conversation](group-conversations.md) member turn (a cadence run, a discussion) | That group conversation, shared by all the member's turns in it |
 | Anything else (a standalone agent, a chat) | The conversation |
 

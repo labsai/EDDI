@@ -1867,7 +1867,8 @@
     "toolQuotasWindowHour": "1時間ごと",
     "toolQuotasWindowDay": "1日ごと（UTC）",
     "toolQuotasWindowWeek": "7日ごと",
-    "toolQuotasWindowMonth": "31日ごと"
+    "toolQuotasWindowMonth": "31日ごと",
+    "toolQuotasDuplicate": "別のクォータがすでにこのツール名を使用しています。名前が一意になるまで名前の変更は保存されません。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -4814,11 +4815,12 @@
     "budgetDisabled": "適用が無効なため、支出は計測も制限もされません。",
     "budgetReached": "予算に達しました（{{spent}} / {{limit}}）。LLM タスクはモデルを呼び出さずフォールバック回答を返し、ツール呼び出しは拒否されます。月が替わるか上限を引き上げるまで続きます。",
     "budgetRemaining": "今月は {{limit}} のうち {{spent}} を使用。モデルが呼び出されなくなるまで残り {{remaining}} です。",
+    "budgetRemainingHeld": "今月は {{limit}} のうち {{spent}} を使用し、実行中のターンが {{held}} を確保しています。新しい呼び出しに使えるのは残り {{remaining}} です。",
     "budgetNote": "UTC の暦月ごとに、料金が設定されたモデル呼び出しと追跡済みのツールコストを計上します。料金のないモデル、会話の要約、埋め込みは計測されません。上限を超えるターンも最後まで実行されるため、合計が上限をわずかに超えることがあります。拒否された呼び出しは eddi.llm.spend.refused メトリクスに計上されます。",
     "invalidInteger": "0 以上の整数を入力するか、空欄で無制限にしてください。",
     "invalidAmount": "0 以上の金額を入力するか、空欄で無制限にしてください。",
     "heldByTurns": "実行中のターンが {{amount}} を確保中",
-    "costHardCeiling": "既定では、予算を超える呼び出しも最後まで実行されます。代わりに拒否するには、サーバーが各呼び出しの最大コストを先に確保します。eddi.tenant.quota.cost-reservation.enabled=true を設定してください（起動時プロパティ）。"
+    "costHardCeiling": "既定では、予算を超える呼び出しも最後まで実行されます。代わりに拒否するには、サーバーが各呼び出しの最大コストを先に確保します。eddi.tenant.quota.cost-reservation.enabled=true を設定してください（起動時プロパティ）。 確保の対象は LLM モデル呼び出しと価格設定されたツール呼び出しです。小さな付随呼び出し（要約、ジャッジ、Dream）は引き続き後から課金され、わずかに上乗せされることがあります。"
   },
   "secretPicker": {
     "clearVault": "Vault 参照をクリア",

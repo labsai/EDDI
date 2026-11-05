@@ -171,8 +171,10 @@ public interface ITenantQuotaStore {
      * hold is given back with {@link #releaseCost} once the actual cost is charged.
      * <p>
      * Holds that are never released (the node died) must not pin the budget
-     * forever: the held total is dropped once its epoch is older than
-     * {@code ttlMillis}, and {@link #releaseCost} for a dropped epoch is a no-op.
+     * forever: the held total is dropped once its NEWEST hold is older than
+     * {@code ttlMillis} (so every hold in it is; never by the age of the shared
+     * epoch, which overlapping turns keep alive far longer than any one call), and
+     * {@link #releaseCost} for a dropped epoch is a no-op.
      * <p>
      * Not supported by a store that does not override it: it refuses, flagged as an
      * outage (fail closed).

@@ -70,23 +70,28 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 monthly_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
                 cost_month VARCHAR(10),
                 reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-                reserved_since BIGINT NOT NULL DEFAULT 0
+                reserved_since BIGINT NOT NULL DEFAULT 0,
+                reserved_last_at BIGINT NOT NULL DEFAULT 0
             )
             """;
 
-    /** Tables created before cost reservations existed get the two columns. */
+    /** Tables created before cost reservations existed get the columns. */
     private static final String ADD_RESERVATION_COLUMNS = """
             ALTER TABLE tenant_usage
                 ADD COLUMN IF NOT EXISTS reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-                ADD COLUMN IF NOT EXISTS reserved_since BIGINT NOT NULL DEFAULT 0
+                ADD COLUMN IF NOT EXISTS reserved_since BIGINT NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS reserved_last_at BIGINT NOT NULL DEFAULT 0
             """;
 
     /**
-     * Held total as an expression: 0 when its epoch is older than the stale bound
-     * (parameter), else the stored value. Takes one parameter, used twice by
-     * callers via {@link #RESERVE_COST}.
+     * Held total as an expression: 0 when its newest hold is older than the stale
+     * bound (parameter) — so every hold in it is — else the stored value. Not the
+     * epoch alone: overlapping turns keep the total held longer than any one turn,
+     * and expiring by epoch dropped holds still running. Takes one parameter, used
+     * three times by {@link #RESERVE_COST}.
      */
-    private static final String EFFECTIVE_RESERVED = "(CASE WHEN reserved_since > 0 AND reserved_since < ? THEN 0.0 ELSE reserved_usd END)";
+    private static final String EFFECTIVE_RESERVED = "(CASE WHEN reserved_since > 0 AND GREATEST(reserved_since, reserved_last_at) < ? "
+            + "THEN 0.0 ELSE reserved_usd END)";
 
     /**
      * One atomic statement: the {@code WHERE} checks {@code cost + held + amount <=
@@ -96,7 +101,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     private static final String RESERVE_COST = """
             UPDATE tenant_usage SET
                 reserved_since = CASE WHEN %1$s <= 0 THEN ? ELSE reserved_since END,
-                reserved_usd = %1$s + ?
+                reserved_usd = %1$s + ?,
+                reserved_last_at = ?
             WHERE tenant_id = ? AND cost_month = ?
               AND monthly_cost_usd + %1$s + ? <= ?
             RETURNING reserved_since
@@ -665,6 +671,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             ps.setLong(i++, now);
             ps.setLong(i++, staleBefore); // reserved_usd
             ps.setDouble(i++, amount);
+            ps.setLong(i++, now); // reserved_last_at
             ps.setString(i++, tenantId);
             ps.setString(i++, monthKey);
             ps.setLong(i++, staleBefore); // budget check

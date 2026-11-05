@@ -40,6 +40,14 @@ class TenantUsageCounters {
     private double reservedUsd;
     /** Epoch millis the held total started (0 = nothing held). */
     private long reservedSince;
+    /**
+     * Epoch millis of the most recent hold. The held total is dropped only once
+     * THIS is older than the TTL — i.e. every hold in it is — not once the shared
+     * epoch is: on a busy tenant overlapping turns keep the total above zero far
+     * longer than any one turn, and dropping by epoch discarded holds of calls
+     * still running.
+     */
+    private long reservedLastAt;
 
     /**
      * Source of "now". Production always gets {@link Clock#systemUTC()}; a test
@@ -86,12 +94,12 @@ class TenantUsageCounters {
 
     /**
      * Holds {@code amount} if {@code cost + held + amount <= limit}; returns the
-     * epoch of the hold, or -1 when it does not fit. A held total older than
-     * {@code ttlMillis} is dropped first.
+     * epoch of the hold, or -1 when it does not fit. A held total whose newest hold
+     * is older than {@code ttlMillis} (so every hold in it is) is dropped first.
      */
     long tryReserve(double amount, double limit, long ttlMillis) {
         long now = clock.millis();
-        if (reservedSince > 0 && reservedSince < now - ttlMillis) {
+        if (reservedSince > 0 && Math.max(reservedSince, reservedLastAt) < now - ttlMillis) {
             reservedUsd = 0.0;
             reservedSince = 0;
         }
@@ -102,6 +110,7 @@ class TenantUsageCounters {
             reservedSince = now;
         }
         reservedUsd += amount;
+        reservedLastAt = now;
         return reservedSince;
     }
 
@@ -153,6 +162,7 @@ class TenantUsageCounters {
         monthlyCostUsd = 0.0;
         reservedUsd = 0.0;
         reservedSince = 0;
+        reservedLastAt = 0;
         Instant now = clock.instant();
         minuteWindowStart = now.truncatedTo(ChronoUnit.MINUTES);
         dayStart = now.truncatedTo(ChronoUnit.DAYS);

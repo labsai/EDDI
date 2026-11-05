@@ -76,6 +76,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private static final String FIELD_COST_MONTH = "costMonth";
     private static final String FIELD_RESERVED_USD = "reservedUsd";
     private static final String FIELD_RESERVED_SINCE = "reservedSince";
+    private static final String FIELD_RESERVED_LAST_AT = "reservedLastAt";
 
     private final MongoCollection<Document> quotas;
     private final MongoCollection<Document> usage;
@@ -485,13 +486,17 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     // ─── Cost reservations ───
 
     /**
-     * The held total as an aggregation expression: 0 when its epoch is older than
-     * {@code staleBefore} (an unreleased hold), else the stored value.
+     * The held total as an aggregation expression: 0 when its newest hold is older
+     * than {@code staleBefore} (every hold in it is unreleased past the TTL), else
+     * the stored value. Not the epoch alone: overlapping turns keep the total held
+     * longer than any one turn, and expiring by epoch dropped holds still running.
      */
     private static Document effectiveReserved(long staleBefore) {
+        Document since = new Document("$ifNull", List.of("$" + FIELD_RESERVED_SINCE, 0L));
+        Document newest = new Document("$max", List.of(since, new Document("$ifNull", List.of("$" + FIELD_RESERVED_LAST_AT, 0L))));
         Document stale = new Document("$and", List.of(
-                new Document("$gt", List.of(new Document("$ifNull", List.of("$" + FIELD_RESERVED_SINCE, 0L)), 0L)),
-                new Document("$lt", List.of("$" + FIELD_RESERVED_SINCE, staleBefore))));
+                new Document("$gt", List.of(since, 0L)),
+                new Document("$lt", List.of(newest, staleBefore))));
         return new Document("$cond", List.of(stale, 0.0, new Document("$ifNull", List.of("$" + FIELD_RESERVED_USD, 0.0))));
     }
 
@@ -542,7 +547,8 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         Document set = new Document("$set", new Document()
                 .append(FIELD_RESERVED_SINCE, new Document("$cond", List.of(
                         new Document("$lte", List.of(effective, 0.0)), now, new Document("$ifNull", List.of("$" + FIELD_RESERVED_SINCE, now)))))
-                .append(FIELD_RESERVED_USD, new Document("$add", List.of(effective, amount))));
+                .append(FIELD_RESERVED_USD, new Document("$add", List.of(effective, amount)))
+                .append(FIELD_RESERVED_LAST_AT, now));
         return usage.findOneAndUpdate(
                 Filters.and(Filters.eq(FIELD_TENANT_ID, tenantId), Filters.eq(FIELD_COST_MONTH, monthKey), Filters.expr(fits)),
                 List.of(set),

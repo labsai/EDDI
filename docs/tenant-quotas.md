@@ -138,7 +138,7 @@ gets an error result — and nothing is spent.
 
 | Call | Reserved | When |
 |---|---|---|
-| An LLM task's model phase | prompt tokens x input price + the model's output-token cap x output price, for every round the phase can run (an agent-mode task: `1 + maxToolIterations` rounds, each later round carrying up to `maxToolContextTokens` of tool output; a cascade: every step) | Once, before the first model request; a tool loop resumed after human approval reserves the rounds it has left |
+| An LLM task's model phase | prompt tokens x input price + the model's output-token cap x output price, for every round the phase can run (an agent-mode task: `1 + maxToolIterations` rounds, each later round carrying up to `maxToolContextTokens` of tool output — the default cap when that is `0` or less, which switches the loop's own cap off; a cascade: every step) | Once, before the first model request; a tool loop resumed after human approval reserves the rounds it has left |
 | A priced tool call (`toolPricing`, or a built-in's default price) | The tool's price | Right before the tool runs |
 
 The prompt is sized from the messages about to be sent at three characters per token, which errs
@@ -157,9 +157,20 @@ that pauses for human approval releases its holds at the pause and takes new one
 **Fails closed.** If the quota store cannot answer, the reservation is refused (reason
 `tenant_accounting_unavailable`, counted on `eddi_tenant_quota_unavailable_total{type="cost"}`), the
 same way the read-only gate refuses. A hold that is never released — the node died mid-turn — does
-not pin the budget forever: the held total is dropped once it is older than
-`eddi.tenant.quota.cost-reservation.ttl` (default `PT10M`; set it above your longest turn). If a
-release fails the hold just waits out that TTL, which errs on the safe side.
+not pin the budget forever: the held total is dropped once **no hold has been added to it** for
+`eddi.tenant.quota.cost-reservation.ttl` (default `PT10M`; set it above your longest turn), so every
+hold in it is older than the TTL. Holds share one bookkeeping total per tenant, and on a busy tenant
+overlapping turns keep that total above zero far longer than any single turn; expiring it by the age
+of its first hold would discard the holds of calls still running. The flip side: a dead node's
+unreleased hold on a tenant with continuous traffic stays counted until the tenant has a quiet spell
+of one TTL, or until every live hold is released. That errs on the safe side, as does a failed
+release, which also just waits out the TTL. The `reservedUsd` that the usage snapshot and the
+Manager's Quotas page report is the stored total, so it can include such a dead hold until the next
+reservation drops it.
+
+The ceiling is only as tight as the estimate: a model hold is sized from the prompt at three
+characters per token and the model's output cap (see above), not from a guaranteed maximum, so a
+call whose real prompt tokenizes worse than that estimate can cost more than it held.
 
 **What is *not* reserved.** The mode bounds the model phase of each LLM task and priced tool calls.
 The smaller paid side calls — a same-model re-ask, a cascade judge, a guardrail classifier, a rolling

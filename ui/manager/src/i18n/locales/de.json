@@ -1860,14 +1860,15 @@
     "toolQuotasSubjectDefault": "(Standard: die Nutzer-ID)",
     "toolQuotasLimit": "Erlaubte Aufrufe",
     "toolQuotasWindow": "Zeitfenster",
-    "toolQuotasPool": "Pool (optional)",
+    "toolQuotasPool": "Pool (wahlweise)",
     "toolQuotasAdd": "Kontingent hinzufügen",
     "toolQuotasRunNote": "Ein Limit pro Lauf begrenzt einen autonomen Lauf (einen Zeitplan oder eine Gruppenkadenz). Es ist kein Missbrauchsschutz für Endnutzer – dafür ein festes Zeitfenster verwenden.",
     "toolQuotasWindowRun": "Pro Lauf",
     "toolQuotasWindowHour": "Pro Stunde",
     "toolQuotasWindowDay": "Pro Tag (UTC)",
     "toolQuotasWindowWeek": "Pro 7 Tage",
-    "toolQuotasWindowMonth": "Pro 31 Tage"
+    "toolQuotasWindowMonth": "Pro 31 Tage",
+    "toolQuotasDuplicate": "Ein anderes Kontingent verwendet diesen Tool-Namen bereits. Die Umbenennung wird erst gespeichert, wenn der Name eindeutig ist."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -4814,11 +4815,12 @@
     "budgetDisabled": "Die Durchsetzung ist aus – die Ausgaben werden weder erfasst noch begrenzt.",
     "budgetReached": "Budget erreicht ({{spent}} von {{limit}}). LLM-Tasks liefern ihre Ersatzantwort, statt das Modell aufzurufen, und Tool-Aufrufe werden abgelehnt – bis der Monat wechselt oder das Limit erhöht wird.",
     "budgetRemaining": "{{spent}} von {{limit}} in diesem Monat verbraucht. Noch {{remaining}}, bevor Modelle nicht mehr aufgerufen werden.",
+    "budgetRemainingHeld": "{{spent}} von {{limit}} in diesem Monat verbraucht und {{held}} von laufenden Turns reserviert. Noch {{remaining}} für neue Aufrufe.",
     "budgetNote": "Zählt berechnete Modellaufrufe und erfasste Tool-Kosten pro UTC-Kalendermonat. Modelle ohne Preis, Unterhaltungszusammenfassungen und Embeddings werden nicht erfasst. Ein Turn, der das Limit überschreitet, läuft noch zu Ende – die Summe kann also leicht darüber liegen. Abgelehnte Aufrufe zählt die Metrik eddi.llm.spend.refused.",
     "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "heldByTurns": "{{amount}} von laufenden Turns reserviert",
-    "costHardCeiling": "Standardmäßig wird der Aufruf, der das Budget überschreitet, noch zu Ende ausgeführt. Um ihn stattdessen abzulehnen, kann der Server vorab die Höchstkosten jedes Aufrufs reservieren: eddi.tenant.quota.cost-reservation.enabled=true setzen (Startup-Property)."
+    "costHardCeiling": "Standardmäßig wird der Aufruf, der das Budget überschreitet, noch zu Ende ausgeführt. Um ihn stattdessen abzulehnen, kann der Server vorab die Höchstkosten jedes Aufrufs reservieren: eddi.tenant.quota.cost-reservation.enabled=true setzen (Startup-Property). Reserviert werden LLM-Modellaufrufe und bepreiste Tool-Aufrufe; kleinere Nebenaufrufe (Zusammenfassungen, Judges, Dream) werden weiterhin nachträglich abgerechnet und können etwas darüber hinaus kosten."
   },
   "secretPicker": {
     "clearVault": "Vault-Referenz löschen",

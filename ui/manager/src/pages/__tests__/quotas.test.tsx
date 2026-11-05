@@ -642,6 +642,9 @@ describe("QuotasPage", () => {
     const first = renderQuotas();
     await waitFor(() => expect(screen.getByTestId("usage-cost-held")).toHaveTextContent("$1.50"));
     expect(screen.getByTestId("usage-cost-held-bar")).toBeInTheDocument();
+    // what is left for a new call is the limit minus spend AND holds: 10 - 2 - 1.5
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$1.50 held by running turns");
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$6.50 left for new calls");
     first.unmount();
 
     // An older server sends no field; 0 means the mode is off. Neither shows anything.

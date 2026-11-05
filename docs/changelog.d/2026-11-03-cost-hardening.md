@@ -57,7 +57,7 @@ A Grafana panel (`Tenant cost reservations (hard ceiling)`) charts the new meter
   (documented in `docs/tenant-quotas.md`).
 - The `RUN` id comes from runtime context, so it bounds an autonomous run, not a hostile end user (documented); fixed
   windows remain the tool for per-user fair use.
-- Platform Operator: system prompt teaches both (revision 54, fingerprint `00f0946c7e085db5`); the allow-list is
+- Platform Operator: system prompt teaches both (revision 54, fingerprint `00f0946c7e085db5`; 55 after the review follow-ups); the allow-list is
   unchanged (the property is startup configuration, the `RUN` rule is part of the agent document).
 
 ### Not done / next
@@ -66,3 +66,20 @@ A Grafana panel (`Tenant cost reservations (hard ceiling)`) charts the new meter
 - Store ITs (`TenantQuotaStoreParityTest`, Mongo and PostgreSQL) are written; they need Docker.
 - Not reserved: embeddings (unpriced anyway), the side calls above and the HITL REVISE model call, which keep the
   read-only gate. A resumed tool loop does reserve (`ModelCallBound.resumeMaxUsd`).
+
+### Review follow-ups (2026-11-05)
+
+- Hold expiry is by the **newest** hold, not the shared epoch: a busy tenant's overlapping turns kept the held total
+  above zero past the TTL and the next reservation dropped holds of calls still running. New `reservedLastAt` /
+  `reserved_last_at` (added by `ALTER ... IF NOT EXISTS`) in all three stores; a dead node's hold on a continuously busy
+  tenant now waits for a quiet TTL (fails closed). Parity test with a stepping clock. Docs say the snapshot's
+  `reservedUsd` can include such a hold, and that a model hold is an estimate.
+- `window: "RUN"` on a scheduled fire is keyed by `scheduleId@lastFired` (`ScheduleFireExecutor.runIdOf`), so the retries
+  of one due fire share one run instead of each getting a fresh counter.
+- The resumed LLM task settles its holds when it finishes (as `executeTask` does).
+- `maxToolContextTokens <= 0` (guard off) sizes a hold with the default tool-context cap instead of zero.
+- Manager: no subject-only `toolQuotas` (subject disabled until a rule exists; removing the last rule drops it); a rename
+  onto another rule's name is held as a draft and flagged instead of silently dropping that rule; the budget status
+  subtracts holds from what is left; the cost-ceiling note and the operator prompt no longer promise an un-overshootable
+  budget. 2 new i18n keys and one amended, in all 11 locales. Grafana: the USD series has its own unit and axis.
+- Platform Operator: revision 55 (fingerprint `a5a444f4385d0702`) for the prompt change.

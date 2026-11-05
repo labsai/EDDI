@@ -350,7 +350,12 @@ export function QuotasPage() {
               {/* The saved policy, not the form: this says what the backend is doing now,
                   and an unsaved edit is not applied until it is saved. */}
               {usage && quota && (
-                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={quota.maxMonthlyCostUsd} enforced={quota.enabled} />
+                <CostBudgetStatus
+                  spent={usage.monthlyCostUsd}
+                  held={usage.reservedUsd ?? 0}
+                  limit={quota.maxMonthlyCostUsd}
+                  enforced={quota.enabled}
+                />
               )}
             </div>
           </div>
@@ -519,7 +524,18 @@ function formatUsd(n: number): string {
  * budget (nothing metered), enforcement off with a budget, no budget, budget
  * reached, or spend versus remaining.
  */
-function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
+function CostBudgetStatus({
+  spent,
+  held = 0,
+  limit,
+  enforced,
+}: {
+  spent: number;
+  /** Budget held by running turns (hard-ceiling mode): not spent, but not free for a new call either. */
+  held?: number;
+  limit: number;
+  enforced: boolean;
+}) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
   const reached = !unlimited && spent >= limit;
@@ -541,6 +557,12 @@ function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: nu
       "quotas.budgetReached",
       "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
       { spent: money(spent), limit: money(limit) },
+    );
+  } else if (held > 0) {
+    state = t(
+      "quotas.budgetRemainingHeld",
+      "{{spent}} of {{limit}} used this month and {{held}} held by running turns. {{remaining}} left for new calls.",
+      { spent: money(spent), limit: money(limit), held: money(held), remaining: money(Math.max(0, limit - spent - held)) },
     );
   } else {
     state = t("quotas.budgetRemaining", "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.", {

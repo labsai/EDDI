@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, X } from "lucide-react";
 import { NumberInput } from "../number-input";
@@ -22,13 +22,14 @@ const WINDOWS: { value: string; key: string; fallback: string }[] = [
 
 /**
  * The quotas object with a change applied. An object with no rule left is
- * dropped, and an empty subject is dropped: the field is only ever written when
- * the author set something, because an older backend's strict parser refuses a
- * field it does not know.
+ * dropped — subject and all, because the backend refuses a `toolQuotas` with an
+ * empty `tools` map — and an empty subject is dropped: the field is only ever
+ * written when the author set something, because an older backend's strict
+ * parser refuses a field it does not know.
  */
 function withQuotas(task: LlmTask, subject: string | undefined, rules: [string, QuotaRule][]): LlmTask {
   const trimmed = subject?.trim();
-  if (rules.length === 0 && !trimmed) return { ...task, toolQuotas: undefined };
+  if (rules.length === 0) return { ...task, toolQuotas: undefined };
   const next: ToolQuotas = { tools: Object.fromEntries(rules) };
   if (trimmed) next.subject = subject;
   return { ...task, toolQuotas: next };
@@ -47,6 +48,9 @@ export function TaskToolQuotas({ task, onChange, readOnly }: TaskSectionProps) {
   const quotas = task.toolQuotas;
   const rules = Object.entries(quotas?.tools ?? {});
   const hasRun = rules.some(([, r]) => r.window?.toUpperCase() === RUN_WINDOW);
+  // A rename that lands on another rule's name is kept here, not written: writing
+  // it would collapse the two rules into one and silently drop the other's limit.
+  const [nameDrafts, setNameDrafts] = useState<Record<number, string>>({});
 
   const inputCls =
     "h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring aria-[invalid=true]:border-destructive";
@@ -54,8 +58,20 @@ export function TaskToolQuotas({ task, onChange, readOnly }: TaskSectionProps) {
   const setRule = (i: number, tool: string, rule: QuotaRule) => {
     const next = [...rules];
     next[i] = [tool, rule];
-    // A renamed rule that lands on an existing name replaces it (last one wins).
-    onChange(withQuotas(task, quotas?.subject, [...new Map(next)]));
+    onChange(withQuotas(task, quotas?.subject, next));
+  };
+
+  const rename = (i: number, name: string, rule: QuotaRule) => {
+    if (rules.some(([other], j) => j !== i && other === name)) {
+      setNameDrafts((d) => ({ ...d, [i]: name }));
+      return;
+    }
+    setNameDrafts((d) => {
+      const rest = { ...d };
+      delete rest[i];
+      return rest;
+    });
+    setRule(i, name, rule);
   };
 
   return (
@@ -77,6 +93,7 @@ export function TaskToolQuotas({ task, onChange, readOnly }: TaskSectionProps) {
           value={quotas?.subject ?? ""}
           onChange={(e) => onChange(withQuotas(task, e.target.value, rules))}
           readOnly={readOnly}
+          disabled={!readOnly && rules.length === 0}
           placeholder="{context.personId}"
           aria-describedby={hintId}
           className={`${inputCls} w-56`}
@@ -90,16 +107,28 @@ export function TaskToolQuotas({ task, onChange, readOnly }: TaskSectionProps) {
         {rules.map(([tool, rule], i) => {
           const windowKnown = WINDOWS.some((w) => w.value === rule.window?.toUpperCase());
           const limitInvalid = rule.limit === undefined || rule.limit < 1;
+          const draft = nameDrafts[i];
+          const duplicate = draft !== undefined;
           return (
             <div key={`quota-${i}`} className="flex flex-wrap items-center gap-1.5" data-testid={`task-tool-quota-${i}`}>
               <input
                 type="text"
-                value={tool}
-                onChange={(e) => setRule(i, e.target.value, rule)}
+                value={draft ?? tool}
+                onChange={(e) => rename(i, e.target.value, rule)}
                 readOnly={readOnly}
                 placeholder={t("llmEditor.toolName", "Tool name")}
                 aria-label={t("llmEditor.toolName", "Tool name")}
+                aria-invalid={duplicate}
+                title={
+                  duplicate
+                    ? t(
+                        "llmEditor.toolQuotasDuplicate",
+                        "Another quota already uses this tool name. The rename is not saved until the name is unique.",
+                      )
+                    : undefined
+                }
                 className={`${inputCls} w-40`}
+                data-testid={`task-tool-quota-name-${i}`}
               />
               <NumberInput
                 integer
@@ -139,19 +168,28 @@ export function TaskToolQuotas({ task, onChange, readOnly }: TaskSectionProps) {
                 aria-label={t("llmEditor.toolQuotasPool", "Pool (optional)")}
                 className={`${inputCls} w-32`}
               />
+              {duplicate && (
+                <p className="basis-full text-[10px] text-destructive" role="alert" data-testid={`task-tool-quota-duplicate-${i}`}>
+                  {t(
+                    "llmEditor.toolQuotasDuplicate",
+                    "Another quota already uses this tool name. The rename is not saved until the name is unique.",
+                  )}
+                </p>
+              )}
               {!readOnly && (
                 <button
                   type="button"
                   aria-label={t("common.remove", "Remove")}
-                  onClick={() =>
+                  onClick={() => {
+                    setNameDrafts({});
                     onChange(
                       withQuotas(
                         task,
                         quotas?.subject,
                         rules.filter((_, j) => j !== i),
                       ),
-                    )
-                  }
+                    );
+                  }}
                   className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
                 >
                   <X className="h-3 w-3" />

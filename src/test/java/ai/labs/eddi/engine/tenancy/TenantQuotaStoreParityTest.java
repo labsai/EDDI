@@ -22,8 +22,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -272,5 +275,70 @@ class TenantQuotaStoreParityTest extends MongoTestBase {
         store.releaseCost(tenant, two.reservation().generation(), 50.0);
         assertTrue(store.tryReserveCost(tenant, 10.0, 10.0, TTL).granted(), storeName + ": the whole budget is free");
         assertFalse(store.tryReserveCost(tenant, 0.5, 10.0, TTL).granted(), storeName + ": and a negative hold did not appear");
+    }
+
+    /** A clock the test can step forward; the stores read it on every call. */
+    private static final class SteppingClock extends Clock {
+        private Instant now;
+
+        SteppingClock(Instant start) {
+            this.now = start;
+        }
+
+        void advance(Duration by) {
+            now = now.plus(by);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    static Stream<Arguments> steppingStores() {
+        return Stream.of(
+                Arguments.of("in-memory", (Function<Clock, ITenantQuotaStore>) clock -> new InMemoryTenantQuotaStore(
+                        new TenantQuota("unused", -1, -1, -1, -1.0, true), clock)),
+                Arguments.of("mongo", (Function<Clock, ITenantQuotaStore>) clock -> new MongoTenantQuotaStore(getDatabase(), clock)),
+                Arguments.of("postgres", (Function<Clock, ITenantQuotaStore>) clock -> new PostgresTenantQuotaStore(
+                        PostgresTestBase.createDataSourceInstance(), clock)));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("steppingStores")
+    @DisplayName("cost reservation: young holds survive once the shared epoch is older than the TTL")
+    void youngHoldsOutliveAnOldEpoch(String storeName, Function<Clock, ITenantQuotaStore> factory) {
+        SteppingClock clock = new SteppingClock(Instant.parse("2026-06-15T12:00:00Z"));
+        ITenantQuotaStore store = factory.apply(clock);
+        String tenant = freshTenant(storeName);
+
+        CostReservationResult first = store.tryReserveCost(tenant, 3.0, 10.0, TTL);
+        assertTrue(first.granted());
+        clock.advance(Duration.ofMinutes(8));
+        CostReservationResult second = store.tryReserveCost(tenant, 3.0, 10.0, TTL);
+        assertTrue(second.granted());
+        store.releaseCost(tenant, first.reservation().generation(), 3.0);
+
+        // the epoch is now 12 minutes old (TTL 10), the held 3 only 4 minutes
+        clock.advance(Duration.ofMinutes(4));
+        assertFalse(store.tryReserveCost(tenant, 7.5, 10.0, TTL).granted(),
+                storeName + ": the running call's 3 still counts although the epoch it shares is past the TTL");
+        store.releaseCost(tenant, second.reservation().generation(), 3.0);
+        assertTrue(store.tryReserveCost(tenant, 7.5, 10.0, TTL).granted(), storeName + ": and its release still lands");
+
+        // nothing reserved for longer than the TTL: every hold left is a dead one
+        clock.advance(Duration.ofMinutes(11));
+        assertTrue(store.tryReserveCost(tenant, 10.0, 10.0, TTL).granted(),
+                storeName + ": an unreleased hold is dropped once its newest hold is stale");
     }
 }

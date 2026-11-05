@@ -157,6 +157,30 @@ class ScheduleFireExecutorAuthorityTest {
         }
 
         @Test
+        void retriesOfOneDueFireShareTheRunAndACompletionStartsANewOne() {
+            var s = schedule(List.of());
+            s.setId("sched-1");
+            String firstEver = ScheduleFireExecutor.runIdOf(s);
+
+            // a failed attempt and its retry: new claim (fireId), new nextFire, same
+            // lastFired
+            s.setFireId("sched-1:1000");
+            s.setNextFire(Instant.ofEpochMilli(5_000));
+            String retry = ScheduleFireExecutor.runIdOf(s);
+            assertEquals(firstEver, retry);
+
+            s.setLastFired(Instant.ofEpochMilli(9_000)); // markCompleted
+            String next = ScheduleFireExecutor.runIdOf(s);
+            assertFalse(next.equals(retry));
+            assertEquals("sched-1@9000", next);
+
+            var other = schedule(List.of());
+            other.setId("sched-2");
+            other.setLastFired(Instant.ofEpochMilli(9_000));
+            assertFalse(ScheduleFireExecutor.runIdOf(other).equals(next));
+        }
+
+        @Test
         void unlimitedAddsNothing() {
             var s = schedule(List.of());
             var input = input();
