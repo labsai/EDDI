@@ -1,9 +1,6 @@
 import { useState, useCallback, useMemo, useRef, useEffect, memo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { useAuth } from "@/hooks/use-auth";
 import { pinsStorageKey } from "@/lib/workforce-pins";
 import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
@@ -14,6 +11,7 @@ import { truncateContent } from "@/components/groups/group-utils";
 import { StructuredEntryBody } from "@/components/groups/structured-entry-body";
 import { entryBodyToMarkdown, isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import type { TaskDefinition, TranscriptEntryType } from "@/lib/api/groups";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 
@@ -351,9 +349,9 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                 )}
               >
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                  <ConversationMarkdown escapeRawHtml>
                     {truncateContent(readable!, t("groups.contentTruncated", "[Content truncated]"))}
-                  </ReactMarkdown>
+                  </ConversationMarkdown>
                 </div>
                 {isCollapsible && !isExpanded && (
                   <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />

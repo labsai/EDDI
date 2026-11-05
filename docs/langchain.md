@@ -1353,7 +1353,7 @@ Tokens already streamed to a client cannot be taken back. A task with an output 
 Every guardrail that fires produces:
 
 - an audit record under the step key `audit:guardrail:<phase>:<type>` (`{phase, type, action, reason, retryCount, taskId}`), collected into the [audit ledger](audit-ledger.md) entry as `output.guardrails`. The `reason` is EDDI's (e.g. `pii:email`, `prompt_injection_pattern`) — never the screened text;
-- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
+- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer. The Manager's chat and the Chat UI show it under the reply it explains ("Guardrail (output): pii redacted"), and while the reply is still being written their activity line reads "Checking the reply…";
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
 Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.

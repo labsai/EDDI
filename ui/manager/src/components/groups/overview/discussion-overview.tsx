@@ -1,9 +1,6 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleDollarSign, Layers, MessageSquare, Users } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatDuration, formatUsd } from "@/lib/utils";
 import { styleDisplay } from "@/lib/discussion-styles";
@@ -14,6 +11,7 @@ import { ParticipationMatrix } from "./participation-matrix";
 import { InteractionMap } from "./interaction-map";
 import { BidBoard } from "./bid-board";
 import { bandOrder, rosterIsAnonymous, type OverviewBand } from "./style-recipe";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 interface DiscussionOverviewProps {
   digest: DiscussionDigest;
@@ -161,7 +159,7 @@ function SynthesisCard({ answer }: { answer: string }) {
         {t("groups.overview.synthesis", "Conclusion")}
       </h3>
       <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-foreground">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{answer}</ReactMarkdown>
+        <ConversationMarkdown escapeRawHtml>{answer}</ConversationMarkdown>
       </div>
     </section>
   );

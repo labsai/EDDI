@@ -1,8 +1,5 @@
 import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, Copy, CheckCircle2, GitMerge } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
@@ -13,6 +10,7 @@ import { entryTypeInfo } from "@/lib/api/groups";
 import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
 import { isAgentFailurePlaceholder, parseTranscriptContent } from "@/components/groups/group-utils";
 import { AgentFailedNotice } from "@/components/groups/structured-entry-body";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -312,7 +310,7 @@ function SynthesisCard({ content, delay }: { content: string; delay: number }) {
           {isAgentFailurePlaceholder(content) ? (
             <AgentFailedNotice />
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{body}</ReactMarkdown>
+            <ConversationMarkdown escapeRawHtml>{body}</ConversationMarkdown>
           )}
         </div>
         {collapsible && !expanded && (

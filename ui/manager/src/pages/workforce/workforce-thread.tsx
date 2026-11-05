@@ -26,9 +26,6 @@ import {
   Square,
   MessageSquarePlus,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { parseTranscriptContent, formatMarkdownText } from "@/components/groups/group-utils";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { useGroup, useResolvedGroupVersion } from "@/hooks/use-groups";
@@ -63,6 +60,7 @@ import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -602,6 +600,7 @@ function ThreadInput({
           }
           disabled={disabled}
           rows={1}
+          data-testid="thread-input"
           className={cn(
             "flex-1 min-h-10 max-h-32 resize-none rounded-xl ps-4 pe-4 py-2.5",
             "bg-muted",
@@ -1423,9 +1422,9 @@ function WorkforceThread() {
                     if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
                     return (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                        <ConversationMarkdown escapeRawHtml>
                           {formatMarkdownText(parsed)}
-                        </ReactMarkdown>
+                        </ConversationMarkdown>
                       </div>
                     );
                   })() : (

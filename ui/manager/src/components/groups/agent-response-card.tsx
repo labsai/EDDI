@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink, sanitizeAgentHtml } from "@/lib/markdown-safe";
+import { sanitizeAgentHtml } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, Fingerprint } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +9,7 @@ import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
 import { truncateContent, safeFormatDate } from "./group-utils";
 import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import { StructuredEntryBody } from "./structured-entry-body";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -254,9 +253,9 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
                   {/* Deliberately NO rehypeRaw: agent output is attacker-influenceable
                       (prompt injection). Raw HTML must stay escaped. The opt-in
                       HTML path above uses DOMPurify for explicit sanitization. */}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                  <ConversationMarkdown escapeRawHtml>
                     {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
-                  </ReactMarkdown>
+                  </ConversationMarkdown>
                 </div>
               )}
               {/* Fade-out gradient when collapsed — bg matches card context */}

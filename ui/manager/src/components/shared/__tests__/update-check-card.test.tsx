@@ -281,7 +281,7 @@ describe("UpdateCheckCard", () => {
 
     expect(container.querySelector("img")).toBeNull();
     // Not dropped either — reachable, but only when a human chooses to.
-    const link = screen.getByTestId("update-notes-image-link");
+    const link = screen.getByTestId("markdown-image-link");
     expect(link).toHaveAttribute("href", "https://tracker.example/pixel.png");
     expect(link).toHaveTextContent("pixel");
   });
