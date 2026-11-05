@@ -16,6 +16,7 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
@@ -188,6 +189,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Marks a call to this deployment as agent-originated (HITL oversight).
+     * Field-injected like the allow-list above; null in direct-construction tests,
+     * where only loopback targets are marked.
+     */
+    @Inject
+    AgentCallMarker agentCallMarker;
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -1727,6 +1736,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             request.setHttpHeader(headerName, headerValue);
         }
+        // Engine-owned, set after the configured headers so no config can drop it — and
+        // only
+        // on a call to this deployment, so no EDDI header reaches a third-party API.
+        AgentCallMarker.apply(agentCallMarker, request, targetUri);
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

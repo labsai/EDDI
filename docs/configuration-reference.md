@@ -422,6 +422,14 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
+| `eddi.hitl.analytics.retention` | `P400D` | How long approval-decision facts (the analytics projection of `hitl.approval` ledger entries) are kept. The ledger itself keeps the evidence. See [hitl-oversight.md](hitl-oversight.md) |
+| `eddi.hitl.analytics.initial-backfill` | `P90D` | How far back the one-time first-start rebuild reads the ledger into approval analytics. `P0D` disables it; `POST /hitl/analytics/rebuild` runs one by hand |
+| `eddi.hitl.samples.enabled` | `true` | Cluster-wide switch for the sampled audit of ungated tool calls (`hitlConfig.oversight.sampledAudit`) |
+| `eddi.hitl.samples.retention` | `P180D` | How long audit samples are kept |
+| `eddi.hitl.autonomy.maintenance-interval` | `PT1H` | How often the `hitl-autonomy-maintenance` system schedule runs (sample expiry, earned-autonomy evaluation, retention); at least 60 s |
+| `eddi.hitl.autonomy.suspension-cache-ttl` | `PT15S` | How long a node trusts its cached list of an agent's suspended categories — the longest a suspension takes to reach every pod |
+| `eddi.hitl.autonomy.max-agents-per-run` | `500` | Deployed agents one maintenance run evaluates (round-robin) |
+| `eddi.hitl.oversight.self-hosts` | *(empty)* | Extra names this deployment is reached by (`host` or `host:port`, comma-separated; a bare host matches any port). An httpcall to one of them, to `eddi.self.base-url`'s origin or to a loopback address carries `X-EDDI-Agent-Call`, so the oversight API can refuse an agent's own write. No other host ever sees the header |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
 
 ---

@@ -14,6 +14,7 @@ import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -109,6 +110,11 @@ class ToolLoopRunner {
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
     private final ToolResultGuardrail toolResultGuardrail;
+    /**
+     * Told about every allowed call after it ran (the sampled audit); set by the
+     * owner.
+     */
+    private volatile AllowedToolCallObserver allowedCallObserver = AllowedToolCallObserver.NONE;
 
     ToolLoopRunner(ToolExecutionService toolExecutionService, ToolResponseTruncator toolResponseTruncator,
             TenantQuotaService tenantQuotaService, MemorySnapshotService memorySnapshotService,
@@ -122,6 +128,10 @@ class ToolLoopRunner {
         this.gateSupport = gateSupport;
         this.toolContextBudgetGuard = toolContextBudgetGuard;
         this.toolResultGuardrail = toolResultGuardrail;
+    }
+
+    void setAllowedCallObserver(AllowedToolCallObserver observer) {
+        this.allowedCallObserver = observer != null ? observer : AllowedToolCallObserver.NONE;
     }
 
     /**
@@ -613,10 +623,15 @@ class ToolLoopRunner {
                                         exchangeRecorder)) {
                                     continue;
                                 }
-                                executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                                boolean executed = executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources,
+                                        exchangeRecorder,
                                         () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                                 toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                                if (executed) {
+                                    allowedCallObserver.afterAllowed(memory, allowedReq, toolSources, setup.toolEndpoints(), effectiveToolApprovals,
+                                            trace);
+                                }
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -692,10 +707,14 @@ class ToolLoopRunner {
                             continue;
                         }
 
-                        executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                        boolean executed = executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                 () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                         toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                         enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                        if (executed) {
+                            allowedCallObserver.afterAllowed(memory, toolRequest, toolSources, setup.toolEndpoints(), effectiveToolApprovals,
+                                    trace);
+                        }
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 
@@ -1155,17 +1174,23 @@ class ToolLoopRunner {
      * <p>
      * The one place both live execution sites share, so a rule enforced on the
      * ungated half of a gated batch cannot be missing from the main loop.
+     *
+     * @return true only when the call really ran: a repeat-guard refusal or a
+     *         {@code notExecuted} pipeline outcome returns false, so an observer of
+     *         allowed calls never correlates a stale earlier result of the same
+     *         tool
      */
-    private static void executeGuarded(ToolRepeatGuard guard, ToolExecutionRequest request, AiMessage call,
-                                       List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
-                                       Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
-                                       Supplier<ToolCallResult> execution) {
+    private static boolean executeGuarded(ToolRepeatGuard guard, ToolExecutionRequest request, AiMessage call,
+                                          List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
+                                          Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
+                                          Supplier<ToolCallResult> execution) {
         // A nameless call (the approval gate sends it through) has no identity to track
         // and no name for a trace entry; it stays on the unguarded path and degrades to
         // "tool not found" as before.
         if (guard == null || request.name() == null) {
-            addResult(currentMessages, call, request, execution.get().governed(), exchangeRecorder);
-            return;
+            ToolCallResult unguarded = execution.get();
+            addResult(currentMessages, call, request, unguarded.governed(), exchangeRecorder);
+            return !unguarded.notExecuted();
         }
         ToolRepeatGuard.Refusal refusal = guard.check(request.name(), request.arguments());
         if (refusal != null) {
@@ -1176,7 +1201,7 @@ class ToolLoopRunner {
             String source = toolSources == null ? null : toolSources.get(request.name());
             Metrics.globalRegistry.counter("eddi.tool.repeat.refused", "source", source != null ? source : "unknown", "reason",
                     refusal.reasonCode()).increment();
-            return;
+            return false;
         }
         ToolCallResult result = execution.get();
         ToolOutcomeClassifier.Outcome outcome = result.notExecuted()
@@ -1184,6 +1209,7 @@ class ToolLoopRunner {
                 : ToolOutcomeClassifier.classify(result.raw());
         guard.record(request.name(), request.arguments(), outcome, result.raw());
         addResult(currentMessages, call, request, result.governed(), exchangeRecorder);
+        return !result.notExecuted();
     }
 
     /**
