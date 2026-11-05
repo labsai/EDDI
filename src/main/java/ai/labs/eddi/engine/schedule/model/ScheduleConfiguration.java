@@ -113,6 +113,14 @@ public class ScheduleConfiguration {
      */
     public static final String CONTEXT_MAX_COST_PER_FIRE = "scheduleMaxCostPerFire";
 
+    /**
+     * Context key naming the fire a scheduled turn belongs to: the run that a
+     * {@code toolQuotas} rule with {@code window: "RUN"} counts within. Set by the
+     * scheduler on every fire's turn (and the startup turn of a conversation the
+     * fire creates).
+     */
+    public static final String CONTEXT_FIRE_ID = "scheduleFireId";
+
     // -- Security --
     private double maxCostPerFire = -1.0; // <= 0 = unlimited (Postgres stores 0 as NULL)
     private boolean allowSelfScheduling;

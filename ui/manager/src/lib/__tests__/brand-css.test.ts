@@ -39,6 +39,12 @@ describe("renderBrandStylesheet", () => {
     );
   });
 
+  it("writes the dark theme when only dark colours are set, as the server does", () => {
+    const css = renderBrandStylesheet({ ...EMPTY_COLORS, darkPrimary: "#2dd4bf" }, 4);
+    expect(css).toContain("--brand-loader-accent:#2dd4bf;");
+    expect(css).toContain(".dark{");
+  });
+
   it("is empty with no colour, and touches only the chat for an accent alone", () => {
     expect(renderBrandStylesheet(EMPTY_COLORS, 3)).toBe("");
     expect(renderBrandStylesheet(resolveBrandColors({ ...EMPTY_COLORS, chatAccent: "#123" }), 3)).toBe(

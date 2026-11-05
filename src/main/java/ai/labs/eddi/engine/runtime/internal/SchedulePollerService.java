@@ -300,6 +300,12 @@ public class SchedulePollerService {
             // with per-fire error isolation, so a burst of one-shot HITL timeouts does
             // not serialize behind one thread.
             for (ScheduleConfiguration schedule : dueSchedules) {
+                // Shutdown can begin while this loop runs: a claim made after it is rejected at
+                // dispatch and then sits CLAIMED until its lease expires, so no replica can run
+                // it.
+                if (stopping) {
+                    break;
+                }
                 if (!fireSlots.tryAcquire()) {
                     LOGGER.debugf("[SCHEDULE] All %d fire slots busy — leaving the remaining due schedules for the next cycle",
                             Math.max(1, maxConcurrentFires));

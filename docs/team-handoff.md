@@ -127,7 +127,7 @@ A gated tool call inside a group member's turn is **auto-rejected** by the HITL 
 
 ### The `HandoffAdmission` extension point
 
-Both entry points end in one method, `TeamHandoffService.file`. Beans implementing `ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission` are consulted after the consent, loop and cap checks and may refuse a handoff (a budget gate on the receiving team) or replace the text (redaction). There are none by default. An implementation that throws counts as a refusal.
+Both entry points end in one method, `TeamHandoffService.file`. Beans implementing `ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission` are consulted after the consent, loop and cap checks and may refuse a handoff (a budget gate on the receiving team) or replace the text (redaction). One ships: a target team with a [team budget](team-budgets.md) that is spent, or that cannot be read, refuses the handoff with the budget's own refusal text. An implementation that throws counts as a refusal.
 
 ## Reviewing the inbox
 
@@ -141,6 +141,8 @@ REST (`/groupstore/groups/{groupId}/workspace`, roles `eddi-admin` / `eddi-edito
 | `POST /handoffs/{handoffId}/accept` | EDIT | Body `{subject?, description?, priority?, note?}`. A changed field makes the decision `APPROVED_EDITED`. `409` when the backlog is full or already has that subject. |
 | `POST /handoffs/{handoffId}/decline` | EDIT | Body `{reasonCode?, note?}`. |
 | `DELETE /backlog/{taskId}` | EDIT | Deletes a backlog task and its origin. The backlog is capped at 200 tasks and had no other way to shrink; handoff makes the cap reachable. `409` while a cadence discussion is working the task. |
+
+MCP: `list_team_handoffs`, `accept_team_handoff` and `decline_team_handoff`, with the same access rules (see [MCP Server](mcp-server.md#team-handoff-tools-3)). The Platform Operator can read the inbox and explain a refusal, but never accepts or declines: an intake decision is a person's.
 
 Every decision writes an audit entry (`taskId` `team.handoff.intake`) in the shared approval vocabulary: `approvalCategory: team_handoff_intake`, outcome `APPROVED | APPROVED_EDITED | REJECTED`, `reasonCode`, so approval analytics need no special case.
 

@@ -1,3 +1,5 @@
+import type { LessonConfig } from "./group-lessons";
+import type { OutcomeConfig } from "./group-outcomes";
 import { api } from "../api-client";
 import { HITL_CLIENT_HEADERS } from "./hitl";
 import { deleteAgent, type AgentDescriptor } from "./agents";
@@ -465,6 +467,23 @@ export interface TaskItem {
    * agent-filed tasks existed.
    */
   createdByAgentId?: string | null;
+  /**
+   * Set when the task is a bet: a claim, the metric that judges it and the date
+   * somebody looks. Absent on an ordinary task, and on every task stored before bets.
+   */
+  bet?: Bet | null;
+}
+
+/** What turns a backlog task into a bet (backend `SharedTaskList.Bet`). */
+export interface Bet {
+  hypothesis: string;
+  metric: string;
+  /** Free text, e.g. ">= 5". */
+  target: string | null;
+  /** ISO instant the bet is due for a verdict. */
+  reviewDate: string;
+  /** When a verdict was last given; `null` while the bet is open. */
+  reviewedAt: string | null;
 }
 
 /**
@@ -601,6 +620,10 @@ export interface AgentGroupConfiguration {
   taskListConfig?: GroupTaskConfig | null;
   /** Bounds for RETRO-phase lesson harvesting (I8). `null` runs RETRO with defaults (3 per run / 50 stored). */
   retroConfig?: RetroConfig | null;
+  /** Off (absent) unless set: the group then accepts outcome reports and its RETRO phase quotes them. */
+  outcomeConfig?: OutcomeConfig | null;
+  /** Off (absent) unless set: lesson sharing between teams and the scheduled consolidation of retro lessons. */
+  lessonConfig?: LessonConfig | null;
   /** Transcript windowing for long-running discussions (I9). `null` = windowing off entirely. */
   contextWindow?: ContextWindowConfig | null;
   /**

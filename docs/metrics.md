@@ -316,6 +316,8 @@ eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
 eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_group_outcomes_total{outcome}  # Team outcome reports: recorded, duplicate, disabled, invalid, not_found, subject_full (see team-learning-loop.md)
+eddi_group_lessons_total{outcome}  # Team lesson consolidation: merged, retired, rejected, skipped_changed, run_completed, run_skipped, run_failed (see team-learning-loop.md)
 eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
 eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
@@ -327,7 +329,7 @@ panel shows "no refusals" rather than "no data".
 
 ```text
 eddi_team_budget_metering_total             # Charges of root-discussion spend to the owning team; tags: outcome (recorded|unavailable|error)
-eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup), reason (exhausted|tenant|unavailable)
+eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup|handoff), reason (exhausted|tenant|unavailable)
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
@@ -407,6 +409,8 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_tenant_cost_reservation_total{outcome} # Hard-ceiling reservations (opt-in): reserved / refused / unavailable / release_failed
+eddi_tenant_cost_reservation_usd_total{direction} # USD held (held) and given back (released) by those reservations
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
 ```
 
@@ -941,7 +945,7 @@ eddi_vault_grant_update_count_total         # allowedAgents edited without the v
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures (store unreachable, decryption failed) — not "no such key"
 eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
-eddi_vault_legacy_unbound_opened_count_total # Values opened only through the no-AAD legacy fallback; zero after a rotate-dek = safe to set eddi.vault.accept-unbound-legacy-data=false
+eddi_vault_legacy_unbound_opened_count_total # Fallback attempts for values opened only through the no-AAD legacy fallback (refused ones included); cumulative, so after a rotate-dek on every tenant watch its rate, not its total: once the rate has stayed at zero over your whole observation period it is safe to set eddi.vault.accept-unbound-legacy-data=false
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver

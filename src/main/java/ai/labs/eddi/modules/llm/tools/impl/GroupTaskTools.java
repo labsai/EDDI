@@ -105,7 +105,13 @@ public class GroupTaskTools {
                                @P(value = "0 = highest priority. Omit for normal.", required = false) Integer priority,
                                @P(value = "Who should own this: a role as \"ROLE:Reviewer\", or a member's exact name. "
                                        + "Omit to have it assigned to the next member in turn.",
-                                  required = false) String assignToRole) {
+                                  required = false) String assignToRole,
+                               @P(value = "Only to file the work as a bet: what you believe it will achieve. "
+                                       + "Needs metric and reviewDate too.",
+                                  required = false) String hypothesis,
+                               @P(value = "With hypothesis: what is measured to judge the bet", required = false) String metric,
+                               @P(value = "With hypothesis: the value that counts as success", required = false) String target,
+                               @P(value = "With hypothesis: ISO date the bet is judged, e.g. 2026-12-01", required = false) String reviewDate) {
 
         GroupConversation gc = liveDiscussion();
         if (gc == null) {
@@ -151,9 +157,15 @@ public class GroupTaskTools {
                 .map(m -> m.displayName() != null ? m.displayName() : m.agentId())
                 .findFirst().orElse(resolved);
 
+        SharedTaskList.Bet bet;
+        try {
+            bet = SharedTaskList.Bet.of(hypothesis, metric, target, reviewDate);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage() + ".";
+        }
         var result = taskList.addAgentTask(subject, description, dependsOnSubjects,
                 priority != null ? priority : 0, agentId, resolved, assignedDisplayName,
-                config.maxAgentAddedTasksPerDiscussion());
+                config.maxAgentAddedTasksPerDiscussion(), bet);
         if (!result.accepted()) {
             return result.rejectionReason();
         }

@@ -83,8 +83,8 @@ public final class BrandDelivery {
      * {@code --color-primary-foreground}, {@code --color-ring} and
      * {@code --color-sidebar-accent} (with its foreground, so the pair keeps the
      * brand's contrast) in light ({@code :root}) and dark ({@code .dark}); the Chat
-     * reads {@code --chat-accent}. The block for {@code .dark} is always written
-     * when a colour is set, because it comes after {@code :root} with the same
+     * reads {@code --chat-accent}. The block for {@code .dark} is written when a
+     * dark colour is set, because it comes after {@code :root} with the same
      * specificity as the bundle's own {@code .dark} block and would otherwise lose
      * to it.
      * <p>

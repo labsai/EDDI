@@ -87,6 +87,10 @@ export function findBlockedCalls(
       "operator.approval.blockedGateCarrying",
       "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
     ),
+    "carries-guardrails": t(
+      "operator.approval.blockedGuardrailCarrying",
+      "This request writes an LLM configuration that sets its tool-call guardrails (toolCallGuardrails), the screen that checks a tool call's arguments before the approval gate. The operator may not change what screens tool calls. Approving is unavailable for the whole batch while it is present — reject, and change the guardrails in the agent's LLM editor.",
+    ),
     "unsupported-patch-op": t(
       "operator.approval.blockedGatePatchOp",
       "This request patches an LLM configuration with an operation the approval-gate check cannot reason about (anything but add, replace, remove or test — copy and move can carry part of the stored document, a gate override included, somewhere else). Approving is unavailable for the whole batch while it is present — reject, and ask for the edit as add, replace or remove operations.",

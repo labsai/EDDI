@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.oversight.rest;
 
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecision;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalSummary;
+import ai.labs.eddi.engine.hitl.oversight.analytics.OutcomeAnalyticsService;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.GET;
@@ -80,6 +81,15 @@ public interface IRestApprovalAnalytics {
                description = "Totals, outcome rates, top reason codes, latency p50/p90 (approximate), timeout share, channel mix and "
                        + "sampled-audit counts. groupBy: none, category, agent, group, day, week, channel, agentVersion.")
     ApprovalSummary.Result summarize(@BeanParam Query query, @QueryParam("groupBy") String groupBy);
+
+    @GET
+    @Path("/outcomes")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Approval decisions joined with the outcomes their work reported",
+               description = "Per approval category: decided units, how many have a real-world outcome recorded against them (directly or "
+                       + "through the approved task), and the outcomes by kind. Needs groupId; outcomes are team-scoped and exist only "
+                       + "for groups whose configuration enables outcomeConfig.")
+    OutcomeAnalyticsService.Result outcomes(@BeanParam Query query);
 
     @GET
     @Path("/decisions")

@@ -251,6 +251,26 @@ class AgentGroupStoreTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void lessonConsolidationVaultGrantProblemsRejectTheSave() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
+        var grants = mock(ServiceJudgeVaultGrants.class);
+        store.serviceJudgeVaultGrants = grants;
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        c.setLessonConfig(new AgentGroupConfiguration.LessonConfig(null, null, null, new AgentGroupConfiguration.LessonConsolidationConfig(
+                "openai", "gpt-4o-mini", Map.of("apiKey", "${vault:k}"), null, null, null, null, null, null, null)));
+
+        when(grants.problems(any(), any())).thenReturn(List.of());
+        assertDoesNotThrow(() -> store.validateServiceJudgeGrants(c));
+
+        when(grants.problems(eq("lessonConfig.consolidation.parameters"), any())).thenReturn(List.of("y.apiKey needs a grant"));
+        var e = assertThrows(IllegalArgumentException.class, () -> store.validateServiceJudgeGrants(c));
+        assertTrue(e.getMessage().contains("y.apiKey needs a grant"), e.getMessage());
+    }
+
+    @Test
     void toolBackedFeaturesAreNamed() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
         assertTrue(AgentGroupStore.builtInToolFeatures(c).isEmpty());
