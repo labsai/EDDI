@@ -47,7 +47,7 @@ curl -X PUT http://localhost:7070/secretstore/secrets/default/slack-signing-secr
 
 ### 5. Configure Channel Integration
 
-There are two configuration methods. The **recommended** approach uses `ChannelIntegrationConfiguration` (new-style); the legacy `ChannelConnector` on agents is supported for backward compatibility.
+There are two configuration methods. The **recommended** approach uses `ChannelIntegrationConfiguration` (new-style); the legacy `ChannelConnector` on agents is **deprecated** (since 6.1.0, marked for removal) and is converted into a standalone `ChannelIntegrationConfiguration` automatically at startup. Do not author new ones.
 
 #### Recommended: ChannelIntegrationConfiguration
 
@@ -93,7 +93,9 @@ With this configuration:
 - `@EDDI panel: Should we use microservices?` → triggers the group discussion
 - `@EDDI debate: REST vs GraphQL` → triggers the debate group
 
-#### Legacy: ChannelConnector on Agent
+#### Legacy: ChannelConnector on Agent (deprecated)
+
+> Deprecated since 6.1.0 and auto-migrated at startup into standalone integrations; shown only so you can recognise old configs.
 
 Add a `ChannelConnector` to your agent configuration:
 
@@ -139,6 +141,12 @@ For the bot to accept DMs, you must enable the Messages Tab:
 5. Click **Save Changes**
 
 ---
+
+### 8. Approval buttons (optional, HITL)
+
+To use Slack buttons for human-in-the-loop approvals, enable **Interactivity & Shortcuts** in the Slack app and set the **Request URL** to `https://<your-eddi-host>/integrations/slack/interactive`. Set `hitlApprovalChannel` and `hitlApproverUserIds` (the approvers' Slack user ids; without it EDDI renders no buttons and the approval is notification-only) in the integration's `platformConfig`. See [HITL → Slack Integration](hitl.md#slack-integration) for the keys and scopes.
+
+The Slack timeouts and retry counts above are configurable through `eddi.slack.*`; see the [Configuration Reference](configuration-reference.md).
 
 ## Architecture
 
@@ -199,7 +207,7 @@ Only `botToken` and `signingSecret` are resolved; a `${vault:...}` reference in 
 other `platformConfig` value stays literal text. A credential whose reference does
 not resolve (vault disabled, key missing) is **dropped**, never used as its own
 text: an integration without a usable signing secret answers every request with
-401, and the verifier refuses an unresolved reference as a key in any case. A bot
+403, and the verifier refuses an unresolved reference as a key in any case. A bot
 token whose secret has `allowedHosts` that do not include `slack.com` is dropped
 the same way. The HITL approval card and resume messages are posted only with the
 originating integration's own bot token — never with the token of whatever
@@ -531,7 +539,7 @@ earlier with one gets approval cards without buttons until it is renamed). See
 
 ### Retry Logic
 
-All Slack API calls use **exponential backoff** (3 attempts, 500ms/1s/2s base). Failed messages are logged but don't crash the event handler.
+All Slack API calls use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Failed messages are logged but don't crash the event handler.
 
 ### Event Deduplication
 
@@ -607,7 +615,9 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 | `targets[].targetId` | ✅ | Agent ID or Group Config ID |
 | `targets[].triggers` | ❌ | List of trigger keywords (case-insensitive) |
 
-### Legacy ChannelConnector (on Agent)
+### Legacy ChannelConnector (on Agent, deprecated)
+
+Deprecated since 6.1.0; EDDI converts these into `ChannelIntegrationConfiguration` documents at startup. Write new configs in the recommended form above.
 
 ```json
 {
@@ -705,7 +715,7 @@ Slack retries events up to 3 times if it doesn't receive HTTP 200 within 3 secon
 
 ### Group discussion times out
 
-The `registerAgentThreadMappings` task waits up to 300 seconds. If the group discussion takes longer:
+The Slack handler waits up to `eddi.slack.group-completion-timeout-seconds` (default 300 seconds) for the group discussion, and a single agent turn is bounded by `eddi.slack.request-timeout-seconds` (default 60 seconds; a common cause of "no answer" for slow agents). If the discussion takes longer:
 - Check agent LLM response times
 - Consider using fewer agents or simpler discussion styles
 

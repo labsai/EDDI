@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory.model;
 import ai.labs.eddi.datastore.serialization.Id;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import com.fasterxml.jackson.annotation.JsonAlias;
@@ -170,6 +171,12 @@ public class ConversationMemorySnapshot {
     // pause.
     private String hitlPauseType;
     private PendingToolCallBatch hitlPendingToolCalls;
+    /**
+     * The approval-card context rendered when the current pause was committed (see
+     * {@link RenderedApprovalContext}); {@code null} unless the agent configures
+     * {@code approvalContext}. Cleared with the bookmark.
+     */
+    private RenderedApprovalContext hitlApprovalContext;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     /**
@@ -680,6 +687,14 @@ public class ConversationMemorySnapshot {
 
     public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
         this.hitlPendingToolCalls = hitlPendingToolCalls;
+    }
+
+    public RenderedApprovalContext getHitlApprovalContext() {
+        return hitlApprovalContext;
+    }
+
+    public void setHitlApprovalContext(RenderedApprovalContext hitlApprovalContext) {
+        this.hitlApprovalContext = hitlApprovalContext;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

@@ -60,10 +60,7 @@ public class WordSplitter {
                 i++;
                 lastPos = i + 1;
                 i = lastPos;
-                // i > 0 is explicit now. This branch reads charAt(i - 1), and it used to
-                // be unreachable at i == 0 only because isStringInteger("") answered
-                // true for the empty substring above and skipped the iteration — a
-                // bounds check standing on an unrelated method's wrong answer.
+                // i > 0 guards the charAt(i - 1) reads in this branch.
             } else if (i > 0 && CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i))) && lookup.charAt(i - 1) != ' '
                     && lookup.charAt(i - 1) != ':' && lookup.charAt(i - 1) != '.'
                     && !CharacterUtilities.isStringInteger(String.valueOf(lookup.charAt(i - 1)))) {

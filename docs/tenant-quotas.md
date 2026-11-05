@@ -5,10 +5,16 @@ themselves are stored per tenant and are editable at runtime through the admin A
 not need a restart to raise one tenant's ceiling.
 
 The deployment-wide defaults that seed a new tenant live in
-[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. A tenant row
-is created from those defaults the first time the tenant is seen; editing the properties afterwards
-does not rewrite rows that already exist, and a mismatch between a stored row and the configured
-default is reported in a startup WARN.
+[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. Only the
+**default tenant** (`eddi.tenant.default-id`) gets a row created from those defaults, once, on the
+first start against an empty database; editing the properties afterwards does not rewrite a row that
+already exists, and a mismatch between a stored row and the configured default is reported in a
+startup WARN. **Any other tenant has no row and is treated as unlimited (unmetered)** until an
+administrator creates one with `PUT /administration/quotas/{tenantId}`.
+
+Quotas are **off by default**: `eddi.tenant.quota.enabled=false`, and that value seeds the default
+tenant's per-tenant `enabled` flag. Nothing is enforced for a tenant until its row has
+`enabled: true`.
 
 ## What is metered
 
@@ -159,8 +165,9 @@ curl -X PUT "http://localhost:7070/administration/quotas/acme" \
   }'
 ```
 
-The write takes effect immediately: the service caches quotas but drops the tenant's entry on
-every write, so the next check reads the new row.
+The write takes effect immediately on the node that took it: the service caches quotas but drops
+the tenant's entry on every write, so the next check there reads the new row. Other cluster nodes
+pick it up within the 5-second cache TTL.
 
 ### Usage shape
 
@@ -188,6 +195,10 @@ A tenant quota is shared by everyone in the tenant. To cap what **one user** may
 within a time window — "100 content improvements per user per day", across conversations and nodes — use
 the agent designer's [`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas), which is configured
 per LLM task and counted per subject. The two stack: a call must pass both.
+
+To give each **team** (a group) its own monthly share of the tenant's budget, use a group's
+[`teamBudget`](team-budgets.md). Both apply: a team stops at its own cap or when the tenant's runs
+out, whichever comes first.
 
 ## See also
 

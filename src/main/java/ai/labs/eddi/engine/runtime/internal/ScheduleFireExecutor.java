@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
 import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomyMaintenanceService;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomySchedules;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -108,6 +110,9 @@ public class ScheduleFireExecutor {
 
     @Inject
     AlertMaintenanceService alertMaintenanceService;
+
+    @Inject
+    HitlAutonomyMaintenanceService hitlAutonomyMaintenanceService;
 
     @Inject
     ContinuationFireHandler continuationFireHandler;
@@ -236,6 +241,11 @@ public class ScheduleFireExecutor {
             // runs before the creator check. The poller's claim and lease make one
             // node run it at a time.
             return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
+        if (HitlAutonomySchedules.isMaintenance(md)) {
+            // HITL oversight maintenance fast-path (sample expiry, earned-autonomy
+            // evaluation, retention) — a system job like alert maintenance.
+            return fireHitlAutonomyMaintenance(schedule, instanceId, attemptNumber);
         }
         if (ConversationContinuations.isContinuationSchedule(md)) {
             // Self-continuation fast-path: the next turn of one conversation, armed by
@@ -822,6 +832,26 @@ public class ScheduleFireExecutor {
             return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
         }
         return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "alert maintenance", false);
+    }
+
+    private ScheduleFireLog fireHitlAutonomyMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            worthLogging = !hitlAutonomyMaintenanceService.run().isEmpty();
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] HITL oversight maintenance failed (schedule %s)", schedule.getId());
+        }
+        if (!worthLogging) {
+            return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        }
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "hitl oversight maintenance",
+                false);
     }
 
     /**

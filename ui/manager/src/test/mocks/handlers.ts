@@ -1,8 +1,12 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
+import { oversightHandlers } from "./oversight-handlers";
 import { alertHandlers } from "./alert-handlers";
+import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -915,10 +919,14 @@ export const handlers = [
 
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
+  // HITL oversight: /hitl/analytics, /hitl/samples, /hitl/autonomy.
+  ...oversightHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
+  ...teamBudgetHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
@@ -3167,6 +3175,7 @@ export const handlers = [
   http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+  ...teamHandoffHandlers,
 
   // ── I10 — packaged group templates ──
 
@@ -5658,7 +5667,9 @@ export const backupSyncHandlers = [
   // (GET */agents/pending-approvals is registered earlier, before the
   //  ":conversationId" catch-all, so it isn't shadowed.)
 
-  http.post("*/agents/:conversationId/resume", async ({ request }) => {
+  http.post("*/agents/:conversationId/resume", async ({ params, request }) => {
+    const editable = await editableResumeFor(params.conversationId, request);
+    if (editable) return editable;
     const body = (await request.json().catch(() => ({}))) as { note?: string };
     if (body?.note && body.note.length > 4096) {
       return HttpResponse.json(
@@ -5688,7 +5699,9 @@ export const backupSyncHandlers = [
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 
-  http.get("*/agents/:conversationId/approval-status", () => {
+  http.get("*/agents/:conversationId/approval-status", ({ params }) => {
+    const editable = editableApprovalStatusFor(params.conversationId);
+    if (editable) return editable;
     return HttpResponse.json({
       conversationId: "conv-awaiting-1",
       state: "AWAITING_HUMAN",

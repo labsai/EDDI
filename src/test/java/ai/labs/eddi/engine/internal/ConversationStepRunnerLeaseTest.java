@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -30,7 +31,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -42,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -63,6 +67,7 @@ class ConversationStepRunnerLeaseTest {
     private static final class TestLease implements LeaseHandle {
         private final Long fence;
         final List<Runnable> lostCallbacks = new CopyOnWriteArrayList<>();
+        volatile boolean lost;
 
         TestLease(Long fence) {
             this.fence = fence;
@@ -85,7 +90,7 @@ class ConversationStepRunnerLeaseTest {
 
         @Override
         public boolean isLost() {
-            return false;
+            return lost;
         }
 
         @Override
@@ -170,12 +175,78 @@ class ConversationStepRunnerLeaseTest {
         verify(store).compareAndSetState(ID, ConversationState.READY, ConversationState.EXECUTION_INTERRUPTED);
     }
 
+    // Replaces raiseFailureDoesNotStopTheTurn, which enshrined A3: a turn that
+    // could
+    // not raise the fence ran anyway, so a predecessor still writing could
+    // interleave.
     @Test
-    @DisplayName("a turn that cannot raise the fence still runs, fenced by its token")
-    void raiseFailureDoesNotStopTheTurn() throws Exception {
+    @DisplayName("A3: a turn that cannot raise the fence does not run; it is answered busy and its input is not consumed")
+    void raiseFailureAnswersBusy() throws Exception {
         doThrow(new IllegalStateException("db down")).when(store).raiseFence(anyString(), anyLong());
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, new TestLease(42L));
+        assertEquals(List.of(memory), skipped, "the caller is answered through the skip notifier");
+        verify(memory).setConversationState(ConversationState.IN_PROGRESS);
+        verify(runtime, never()).submitCallable(any(), any(), any());
+        verify(store, never()).getStateAndRevision(anyString());
+        verify(store, never()).getConversationState(anyString());
+    }
+
+    @Test
+    @DisplayName("A3: the fence is raised before the turn reads the conversation's state, revision or snapshot")
+    void fenceIsRaisedBeforeAnyRead() throws Exception {
         runTurn(new TestLease(42L));
-        verify(memory).setFenceToken(42L);
+        InOrder order = inOrder(store);
+        order.verify(store).raiseFence(ID, 42L);
+        order.verify(store).getStateAndRevision(ID);
+    }
+
+    @Test
+    @DisplayName("A1/A3: a turn whose lease is already lost when it starts does not run and does not raise the fence")
+    void lostBeforeStartAnswersBusy() throws Exception {
+        TestLease lease = new TestLease(42L);
+        lease.lost = true;
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
+        assertEquals(1, skipped.size());
+        verify(store, never()).raiseFence(anyString(), anyLong());
+        verify(runtime, never()).submitCallable(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("A1: a turn whose lease goes while the fence is raised does not run")
+    void lostDuringRaiseAnswersBusy() throws Exception {
+        TestLease lease = new TestLease(42L);
+        doAnswer(inv -> {
+            lease.lost = true;
+            return null;
+        }).when(store).raiseFence(ID, 42L);
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, lease);
+        assertEquals(1, skipped.size());
+        verify(runtime, never()).submitCallable(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("A1: the turn's memory asks the lease itself, so a lease lost before its callback fires still stops the turn")
+    void memoryReadsTheLeaseItself() throws Exception {
+        TestLease lease = new TestLease(42L);
+        runTurn(lease);
+        ArgumentCaptor<BooleanSupplier> check = ArgumentCaptor.forClass(BooleanSupplier.class);
+        verify(memory).setLeaseLostCheck(check.capture());
+        assertFalse(check.getValue().getAsBoolean());
+        lease.lost = true;
+        assertTrue(check.getValue().getAsBoolean());
+    }
+
+    @Test
+    @DisplayName("A1: a lease lost without its callback is still discarded as lease-lost, never stamped EXECUTION_INTERRUPTED")
+    void leaseLostWithoutCallbackLeavesTheStateAlone() throws Exception {
+        runTurn(new TestLease(42L));
+        when(memory.isCancelled()).thenReturn(true);
+        when(memory.isLeaseLost()).thenReturn(true);
+        completion().onComplete(null);
+        verify(store, never()).compareAndSetState(anyString(), any(), any());
     }
 
     @Test
@@ -365,6 +436,34 @@ class ConversationStepRunnerLeaseTest {
         assertEquals("hello", deadLetter.get("input"), "replayable: the input travels with it");
         verify(store, never()).compareAndSetState(anyString(), any(), any());
         verify(store, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    @DisplayName("A9: a turn the runtime refused after its lease was granted is answered busy, and its dead letter cannot be replayed")
+    void refusedAfterLeaseIsNotReplayable() throws Exception {
+        ConversationService service = mock(ConversationService.class);
+        setFinal(service, "conversationHitlService", mock(ConversationHitlService.class));
+        setFinal(service, "contextLogger", mock(IContextLogger.class));
+        setFinal(service, "callerIdentityContext", new CallerIdentityContext(null, null));
+        @SuppressWarnings("unchecked")
+        ICache<String, ConversationState> stateCache = mock(ICache.class);
+        var turnRunner = new ConversationStepRunner(service, store, mock(IConversationDescriptorStore.class), runtime, stateCache,
+                new ConcurrentHashMap<>(), 60);
+        List<IConversationMemory> answered = new CopyOnWriteArrayList<>();
+        var task = (ConversationStepRunner.TurnTask) turnRunner.processConversationStep(Environment.production, memory, ID, Map.of(),
+                m -> () -> null, false, answered::add, processingTurn(), Map.of("input", "hello", "agentId", "agent1"));
+        task.bindLease(new TestLease(42L));
+
+        // the coordinator dead-letters it first (describe), then tells it it was
+        // dropped
+        Map<String, Object> deadLetter = task.describe();
+        assertFalse(new DeadLetterEntry("1", ID, "refused", 1, null, deadLetter).isReplayable(),
+                "a replay on top of the caller's retry would run the turn twice");
+        assertEquals(DeadLetterEntry.NOT_REPLAYABLE_ANSWERED_RETRY,
+                new DeadLetterEntry("1", ID, "refused", 1, null, deadLetter).notReplayableReason());
+        task.onDiscarded(new RejectedExecutionException("runtime full"));
+        assertEquals(List.of(memory), answered);
+        verify(memory).setConversationState(ConversationState.IN_PROGRESS);
     }
 
     @Test

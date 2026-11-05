@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -43,6 +44,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -55,6 +57,9 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
+import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
+import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -100,7 +105,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  */
 @ApplicationScoped
-public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
+public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEditingTask {
     public static final String ID = "ai.labs.llm";
     public static final TaskId TASK_ID = new TaskId(ID);
 
@@ -195,6 +200,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      */
     @Inject
     GuardrailService guardrailService;
+
+    /**
+     * Re-gates suspended earned-autonomy categories (a runtime overlay on the
+     * tool-approval config). Field-injected for the same reason as
+     * {@link #attachmentForwarder}; null leaves the config as configured.
+     */
+    @Inject
+    AutonomyOverlayService autonomyOverlay;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -332,6 +345,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             // executeResume, which replays the frozen transcript and applies the
             // verdict; tasks BEFORE it already ran pre-pause, tasks AFTER it run the
             // normal path so the turn completes fully.
+            AutonomyOverlayService.applyToCarrier(autonomyOverlay, memory);
             PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
             HitlDecision resumeDecision = memory.getHitlResumeDecision();
             boolean resumeMode = batch != null && resumeDecision != null;
@@ -471,6 +485,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (toolHitlEnabled) {
             effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
                     memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
+            effectiveToolApprovals = AutonomyOverlayService.applyTo(autonomyOverlay, memory, effectiveToolApprovals);
         }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
@@ -586,7 +601,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // exact shape.
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             String schema = processedParams.get(KEY_RESPONSE_SCHEMA);
-            if (!isNullOrEmpty(schema)) {
+            if (AnswerTool.enabled(task)) {
+                // answerMode "tool": the schema is the reply tool's parameters, so the
+                // instruction is to call it — repeating the schema here would invite the
+                // model to write the JSON as text instead.
+                systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n" + "Give your final answer by calling the `"
+                        + AnswerToolConfigValidator.toolName(task) + "` tool exactly once, as your last step. Its arguments are the "
+                        + "complete answer. Never answer in plain text.";
+            } else if (!isNullOrEmpty(schema)) {
                 systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n"
                         + "You MUST respond with a single valid JSON object matching this exact schema:\n" + "```json\n" + schema + "\n```\n"
                         + "Do NOT include ANY text before or after the JSON. " + "Do NOT wrap in markdown code fences. "
@@ -993,8 +1015,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
-                } else if (eventSink != null) {
-                    // Legacy mode with streaming — try to get a streaming model
+                } else if (eventSink != null && !addToOutputExplicitlyFalse) {
+                    // Legacy mode with streaming — try to get a streaming model.
+                    // Not with addToOutput=false: the postResponse decides what the
+                    // caller sees, and a streamed token of the raw answer cannot be
+                    // taken back — that task takes the plain path below.
                     // R5: a task that may re-ask its model is buffered, never streamed — the
                     // tokens of an attempt that is then retried cannot be taken back. The same
                     // holds for an output guardrail that can change the answer (WS4).
@@ -1010,7 +1035,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                 currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse && !bufferOutput) {
+                        if (!bufferOutput) {
                             eventSink.onToken(responseContent);
                         }
                     }
@@ -2550,10 +2575,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                          boolean toolTranscript, Integer cascadeStepIndex, String answer, boolean addedToOutput,
                                          int outputMark, int quickRepliesMark) {
         var policy = memory.getHitlRevisionPolicy();
-        if (policy == null || !policy.revise()) {
+        if (policy == null || !(policy.revise() || policy.captureDraft())) {
             return;
         }
         var candidate = new HitlRevisionCandidate();
+        candidate.setEditable(policy.captureDraft());
+        // An approver's edit must keep the answer's shape: JSON for a convertToObject
+        // task.
+        candidate.setAnswerFormat(task.getParameters() != null && Boolean.parseBoolean(String.valueOf(task.getParameters().get(
+                KEY_CONVERT_TO_OBJECT)).trim()) ? HitlRevisionCandidate.FORMAT_JSON : HitlRevisionCandidate.FORMAT_TEXT);
         candidate.setLlmTaskId(task.getId());
         candidate.setLlmTaskIndex(llmTaskIndex);
         candidate.setCascadeStepIndex(cascadeStepIndex);
@@ -2562,7 +2592,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         candidate.setAddedToOutput(addedToOutput);
         candidate.setOutputMark(outputMark);
         candidate.setQuickRepliesMark(quickRepliesMark);
-        if (base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
+        // The request is frozen only for a revision; an edit needs the draft alone.
+        if (policy.revise() && base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
             var serialized = revisionTranscriptCodec.serialize(base, revisionTranscriptMaxBytes);
             candidate.setTranscriptJson(serialized.omitted() ? null : serialized.json());
         }
@@ -2650,6 +2681,44 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
         return true;
+    }
+
+    /**
+     * {@code hitlConfig.review.allowAnswerEdits}: an approver's edit replaces the
+     * draft. Screened, when asked, by the task's own output guardrails with no
+     * reprompter — a {@code reprompt} finding cannot ask the human again, so it
+     * blocks; {@code redact} rewrites the text. The guardrails' paid calls are
+     * admitted against the conversation's spend like a live answer's. Stored in
+     * place by {@link LlmAnswerEditor}; {@code postResponse} and later tasks do not
+     * run.
+     */
+    @Override
+    public ReviewerEditRequest.Outcome replaceAnswer(IConversationMemory memory, Object component, ReviewerEditRequest request)
+            throws LifecycleException {
+        if (!(component instanceof LlmConfiguration llmConfig) || request == null || request.candidate() == null) {
+            return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_CONFIG_DRIFT, null);
+        }
+        HitlRevisionCandidate candidate = request.candidate();
+        Task task = LlmAnswerEditor.taskOf(llmConfig, candidate);
+        if (task == null) {
+            LOGGER.warnf("hitl.edit.config_drift: the answer of task '%s' cannot be replaced in conversation '%s' — the LLM configuration "
+                    + "changed since the pause", sanitize(candidate.getLlmTaskId()), sanitize(memory.getConversationId()));
+            return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_CONFIG_DRIFT, null);
+        }
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        String text = request.editedText();
+        if (request.screen() && guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails())) {
+            var screened = guardrailService.runOutput(task.getOutputGuardrails(), text, null,
+                    guardrailContext(memory, task, List.of()).withSpend(TaskSpend.of(spendGate, memory)),
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+            accumulateCost(currentStep, screened.costUsd());
+            if (screened.isBlocked()) {
+                return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_SCREENED_OUT, screened.blocked().type());
+            }
+            text = screened.text();
+        }
+        LlmAnswerEditor.apply(currentStep, task, candidate, text, dataFactory);
+        return ReviewerEditRequest.Outcome.applied(text);
     }
 
     /** The revised answer, or null when it cannot be produced or fails a check. */
@@ -2866,6 +2935,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
     public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
+     * The namespaces of {@link #CONFIG_REF_MENTION}, each with its colon, for the
+     * forward scan in {@link #escapeConfigReferenceMentions}. Kept in the pattern's
+     * order; {@code LlmTaskVaultMentionTest} derives the namespaces from the
+     * pattern and fails if one is not escaped.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
      * against — the cheap pre-check, so the common no-reference value never pays
      * for a regex.
@@ -2917,12 +2994,58 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * Known limit: a mention already inside a {@code {|raw|}} section would be
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
+     * <p>
+     * A forward scan, not {@code CONFIG_REF_MENTION.replaceAll}: the regex retried
+     * {@code [^}]*} to the end of the value from every opener that has no closing
+     * brace, so an editor-written prompt full of unclosed {@code {vault:} openers
+     * cost quadratic CPU on every turn, before any template limit applies. Here an
+     * opener without a later {@code }} ends the scan — no later opener can close
+     * either. Same matches as the pattern, and a mention is copied literally (the
+     * regex replacement also read {@code $} and {@code \} inside one as group
+     * references).
      */
     static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        StringBuilder escaped = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = openerEnd(value, open + 1);
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (escaped == null) {
+                escaped = new StringBuilder(value.length() + 16);
+            }
+            escaped.append(value, copied, open).append("{|").append(value, open, close + 1).append("|}");
+            copied = close + 1;
+            from = close + 1;
+        }
+        return escaped == null ? value : escaped.append(value, copied, value.length()).toString();
+    }
+
+    /**
+     * Where a mention's body starts when a namespace opener begins at
+     * {@code start}, else -1.
+     */
+    private static int openerEnd(String value, int start) {
+        for (String opener : CONFIG_REF_OPENERS) {
+            if (value.startsWith(opener, start)) {
+                return start + opener.length();
+            }
+        }
+        return -1;
     }
 
     /**
@@ -3745,6 +3868,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 validateGuardrails(llmConfiguration);
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
+                validateAnswerMode(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
@@ -3754,6 +3878,25 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on an {@code answerMode} the store would refuse today (a
+     * configuration imported or stored before the check), and notes at INFO a
+     * forced tool call a provider cannot honour.
+     */
+    static void validateAnswerMode(LlmConfiguration llmConfiguration) throws WorkflowConfigurationException {
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (int i = 0; i < llmConfiguration.tasks().size(); i++) {
+            try {
+                AnswerToolConfigValidator.validate(llmConfiguration.tasks().get(i), "langchain.task[" + i + "]");
+            } catch (IllegalArgumentException e) {
+                throw new WorkflowConfigurationException("Invalid answerMode configuration: " + e.getMessage(), e);
+            }
+        }
+        AnswerTool.reportAtConfigure(llmConfiguration);
     }
 
     /**

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.groups.model.HandoffPolicies;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
@@ -119,8 +120,9 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         // === Agent Mode Features (Optional - triggers agent mode when set) ===
 
         /**
-         * List of EDDI httpcall URIs to use as tools. Setting this enables agent mode
-         * with tool calling.
+         * Legacy. The entries are NOT resolved: HTTP call tools are discovered from the
+         * workflow ({@code enableHttpCallTools}). A non-empty list only switches the
+         * task into agent mode.
          */
         private List<String> tools;
 
@@ -151,9 +153,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Boolean enableMcpCallTools = true;
 
         /**
-         * Whitelist of specific built-in tools to enable. Options: "calculator",
+         * Whitelist of specific tools to enable. Built-in options: "calculator",
          * "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer",
-         * "pdfreader", "weather"
+         * "pdfreader", "weather", "fetch_page" (alias "fetch_tool_response_page").
+         * Context-bound keys: "usermemory", "conversationRecall", "artifacts",
+         * "group_tasks" and the dynamic-agent tools "create_sub_agent",
+         * "converse_with_agent", "find_agents_by_capability", "recruit_agent",
+         * "teardown_agent". See docs/langchain.md.
          */
         private List<String> builtInToolsWhitelist;
 
@@ -178,6 +184,35 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.0.0
          */
         private int maxToolsInContext = 20;
+
+        /**
+         * Which tool sources {@link ToolLoadingStrategy#LAZY} hides behind
+         * {@code discover_tools}: any of {@code builtin}, {@code http}, {@code mcp},
+         * {@code a2a}. A source not listed is sent in full on every request, as with
+         * {@code EAGER}. Ignored unless the strategy is {@code LAZY}.
+         * <p>
+         * <b>A default, not a switch:</b> {@code null} or empty means
+         * {@code ["builtin"]}, which is exactly the LAZY behaviour from before this
+         * field existed — so a stored config is unchanged. Unknown entries are ignored
+         * with a WARN.
+         *
+         * @since 6.7.0
+         */
+        private List<String> lazySources;
+
+        /**
+         * How long a tool that {@code discover_tools} activated stays in the request
+         * under {@link ToolLoadingStrategy#LAZY}: {@code turn} (until the turn ends,
+         * across cascade steps and approval pauses) or {@code conversation} (carried
+         * into later turns of the same conversation, at most {@link #maxToolsInContext}
+         * of them). The activated names are kept in conversation memory, never in the
+         * task.
+         * <p>
+         * <b>A default, not a switch:</b> {@code null} means {@code turn}.
+         *
+         * @since 6.7.0
+         */
+        private String lazyRetention;
 
         /**
          * Maximum conversation turns to include in context. -1 = unlimited, 0 = none,
@@ -370,6 +405,27 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private ToolQuotaConfig toolQuotas;
 
         /**
+         * What a streaming client may be told about a call of each tool, keyed by tool
+         * name (like {@code toolQuotas}, the name the model invoked wins over the
+         * built-in slug): a static label and the values of a few allow-listed top-level
+         * arguments - see {@link ToolDisplayConfig}. Absent means a streamed tool call
+         * carries the tool name and call id only.
+         *
+         * @since 6.5.0
+         */
+        private Map<String, ToolDisplayConfig> toolDisplay;
+
+        /**
+         * Cross-team handoff: the teams this agent may file tasks into through the
+         * {@code handoff_to_team} tool. Absent means the tool is never assembled. A
+         * target only receives when its own {@code handoffConfig.accept} lists this
+         * agent (two-sided consent) — see {@code docs/team-handoff.md}.
+         *
+         * @since 6.7.0
+         */
+        private HandoffPolicies.TeamHandoffConfig teamHandoff;
+
+        /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
          * 120000 (two minutes).
          * <p>
@@ -547,6 +603,58 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private List<String> nonBlankFields;
 
+        // === Structured answers through a terminal reply tool (answerMode) ===
+
+        /**
+         * How a {@code convertToObject} task's answer reaches EDDI. {@code "text"}
+         * (also what null means — every stored config) keeps today's behaviour: the
+         * model writes the JSON object as its reply text. {@code "tool"} adds one
+         * synthetic tool ({@link #answerToolName}, default {@code reply}) whose
+         * parameters are the {@code responseSchema}; the model answers by calling it,
+         * so the answer is enforced by the provider's function-calling machinery — the
+         * path that works with tools on Gemini, Anthropic and Bedrock, where JSON mode
+         * does not.
+         * <p>
+         * Valid only with {@code convertToObject: "true"} and a {@code responseSchema}
+         * whose root is an {@code object} that native schema enforcement can convert;
+         * other combinations are refused at save time. A plain-text answer in this mode
+         * goes through the same invalid-JSON handling ({@code onInvalidJson}) as in
+         * {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code "text"}.
+         *
+         * @since 6.7.0
+         */
+        private String answerMode;
+
+        /**
+         * Name of the terminal reply tool when {@code answerMode} is {@code "tool"}.
+         * Null means {@code reply}. Must match {@code [A-Za-z0-9_-]{1,64}} and must not
+         * be the name of any other tool of the task; a collision is refused at save
+         * time and, for a tool only discovered at runtime, the colliding tool is
+         * dropped at assembly. Ignored in {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code reply}.
+         *
+         * @since 6.7.0
+         */
+        private String answerToolName;
+
+        /**
+         * Whether a request in {@code answerMode: "tool"} forces a tool call:
+         * {@code "required"} (also what null means) sets the provider's "must call a
+         * tool" mode (OpenAI/Azure {@code tool_choice: required}, Anthropic
+         * {@code any}, Gemini function-calling mode {@code ANY}, Mistral {@code any}),
+         * so the model cannot answer in plain text; {@code "auto"} lets it choose. A
+         * provider without such a mode gets {@code auto} (logged once at deploy).
+         * Ignored in {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code "required"}.
+         *
+         * @since 6.7.0
+         */
+        private String answerToolChoice;
+
         /**
          * Renames applied to the top-level keys of a parsed {@code convertToObject}
          * reply before the shape is validated: <code>{"htmlResponseStr":
@@ -582,7 +690,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * directive-shaped content. Null means the defaults — provenance marking on,
          * directives redacted — which is what an existing config gets.
          *
-         * @since 6.3.0
+         * @since 6.7.0
          */
         private ToolResultGuardrailConfig toolResultGuardrails;
 
@@ -876,6 +984,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.maxToolsInContext = maxToolsInContext;
         }
 
+        public List<String> getLazySources() {
+            return lazySources;
+        }
+
+        public void setLazySources(List<String> lazySources) {
+            this.lazySources = lazySources;
+        }
+
+        public String getLazyRetention() {
+            return lazyRetention;
+        }
+
+        public void setLazyRetention(String lazyRetention) {
+            this.lazyRetention = lazyRetention;
+        }
+
         public Integer getConversationHistoryLimit() {
             return conversationHistoryLimit;
         }
@@ -1060,6 +1184,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.toolQuotas = toolQuotas;
         }
 
+        public Map<String, ToolDisplayConfig> getToolDisplay() {
+            return toolDisplay;
+        }
+
+        public void setToolDisplay(Map<String, ToolDisplayConfig> toolDisplay) {
+            this.toolDisplay = toolDisplay;
+        }
+
+        public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {
+            return teamHandoff;
+        }
+
+        public void setTeamHandoff(HandoffPolicies.TeamHandoffConfig teamHandoff) {
+            this.teamHandoff = teamHandoff;
+        }
+
         public Integer getDefaultToolTimeoutMs() {
             return defaultToolTimeoutMs;
         }
@@ -1146,6 +1286,32 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setNonBlankFields(List<String> nonBlankFields) {
             this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
+        }
+
+        // --- answerMode (terminal reply tool) accessors ---
+
+        public String getAnswerMode() {
+            return answerMode;
+        }
+
+        public void setAnswerMode(String answerMode) {
+            this.answerMode = answerMode;
+        }
+
+        public String getAnswerToolName() {
+            return answerToolName;
+        }
+
+        public void setAnswerToolName(String answerToolName) {
+            this.answerToolName = answerToolName;
+        }
+
+        public String getAnswerToolChoice() {
+            return answerToolChoice;
+        }
+
+        public void setAnswerToolChoice(String answerToolChoice) {
+            this.answerToolChoice = answerToolChoice;
         }
 
         public Map<String, String> getFieldAliases() {

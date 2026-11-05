@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -451,6 +452,24 @@ class McpGroupToolsTest {
         String result = tools.read_group_conversation("gc1");
 
         assertEquals("{\"id\":\"gc1\"}", result);
+    }
+
+    @Test
+    void readGroupConversation_reRedactsTheStoredApprovalContext() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc1");
+        var context = new RenderedApprovalContext();
+        context.setItems(List.of(new RenderedApprovalContext.Item("Result", "key sk-ant-abcdefghijklmnopqrstuvwxyz0123456789 here", false,
+                RenderedApprovalContext.SOURCE_AGENT, null, null)));
+        gc.setHitlApprovalContext(context);
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+
+        tools.read_group_conversation("gc1");
+
+        var served = ArgumentCaptor.forClass(GroupConversation.class);
+        verify(jsonSerialization).serialize(served.capture());
+        String text = served.getValue().getHitlApprovalContext().getItems().getFirst().getText();
+        assertFalse(text.contains("abcdefghijklmnopqrstuvwxyz0123456789"), text);
     }
 
     @Test

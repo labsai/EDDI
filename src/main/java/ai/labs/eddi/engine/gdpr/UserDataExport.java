@@ -182,6 +182,19 @@ public record UserDataExport(
     }
 
     /**
+     * The section a participant contributes when its export failed — present, so
+     * the bundle says what it is missing, and counted by {@link #complete()}.
+     */
+    public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
+
+    /**
+     * The key a participant's section sets to {@code true} when it holds more than
+     * it exported — the section is then a capped extract, and counted by
+     * {@link #complete()}.
+     */
+    public static final String SECTION_TRUNCATED = "truncated";
+
+    /**
      * Personal-data categories this exporter does not reach yet, named as the
      * erasure cascade names them in {@code GdprDeletionResult}.
      * <p>
@@ -195,19 +208,6 @@ public record UserDataExport(
      * data lives only in these categories would otherwise be handed an empty bundle
      * described as complete.
      */
-    /**
-     * The section a participant contributes when its export failed — present, so
-     * the bundle says what it is missing, and counted by {@link #complete()}.
-     */
-    public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
-
-    /**
-     * The key a participant's section sets to {@code true} when it holds more than
-     * it exported — the section is then a capped extract, and counted by
-     * {@link #complete()}.
-     */
-    public static final String SECTION_TRUNCATED = "truncated";
-
     public static final List<String> OMITTED_CATEGORIES = List.of("schedules", "journalEntries");
 
     /**

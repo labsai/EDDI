@@ -618,18 +618,22 @@ class HitlCrashRecoveryObserverTest {
         }
 
         @Test
-        @DisplayName("F2: expired WAIT_INDEFINITELY GROUP pause is cancelled via cancelDiscussion; recent one spared")
+        @DisplayName("F2: expired WAIT_INDEFINITELY GROUP pause is cancelled, bound to that pause; recent one spared")
         void cancelsExpiredGroupPauses() throws Exception {
             var oldGc = groupPausedAt("gc-old", Instant.now().minus(40, ChronoUnit.DAYS));
             var recentGc = groupPausedAt("gc-recent", Instant.now().minus(1, ChronoUnit.DAYS));
             when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
                     .thenReturn(List.of(oldGc, recentGc));
-            when(groupConversationService.cancelDiscussion(eq("gc-old"), any())).thenReturn(true);
+            when(groupConversationService.cancelPausedDiscussion(eq("gc-old"), any(), any())).thenReturn(true);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(groupConversationService).cancelDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL);
-            verify(groupConversationService, never()).cancelDiscussion(eq("gc-recent"), any());
+            // Paused-only and bound to the expired pause: an approval that resumed the
+            // discussion after the scan must not have its running work cancelled.
+            verify(groupConversationService).cancelPausedDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL,
+                    HitlDecision.pauseIdOf(oldGc.getPausedAt()));
+            verify(groupConversationService, never()).cancelPausedDiscussion(eq("gc-recent"), any(), any());
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
 
         @Test
@@ -640,6 +644,7 @@ class HitlCrashRecoveryObserverTest {
 
             observer(true, true).sweepExpiredPendingApprovals();
 
+            verify(groupConversationService, never()).cancelPausedDiscussion(any(), any(), any());
             verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
     }

@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.internal;
 
 import java.util.Optional;
 import jakarta.ws.rs.WebApplicationException;
-import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.model.CoordinatorStatus;
+import ai.labs.eddi.engine.cluster.admin.ClusterAdminService;
+import ai.labs.eddi.engine.model.ClusterAdminModels.BulkResult;
+import ai.labs.eddi.engine.model.ClusterAdminModels.ItemOutcome;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import jakarta.ws.rs.NotFoundException;
@@ -84,55 +86,58 @@ class RestCoordinatorAdminTest {
     @DisplayName("replayDeadLetter")
     class ReplayDeadLetter {
 
+        private ClusterAdminService clusterAdmin;
+
+        @BeforeEach
+        void wire() {
+            clusterAdmin = mock(ClusterAdminService.class);
+            restCoordinatorAdmin.clusterAdmin = clusterAdmin;
+        }
+
+        private void outcome(String id, String outcome, String message) {
+            when(clusterAdmin.replay(eq(List.of(id)), anyString())).thenReturn(
+                    new BulkResult(List.of(new ItemOutcome(id, outcome, message)), "REPLAYED".equals(outcome) ? 1 : 0,
+                            "REPLAYED".equals(outcome) ? 0 : 1));
+        }
+
         @Test
-        @DisplayName("submits the captured input as a NEW turn and only then removes the entry")
-        void success() throws Exception {
-            var conversationService = mock(IConversationService.class);
-            restCoordinatorAdmin.conversationService = conversationService;
-            var entry = new DeadLetterEntry("dl-1", "conv-1", "boom", 1L, "{}", Map.of("input", "hello", "agentId", "a1"));
-            when(coordinator.getDeadLetter("dl-1")).thenReturn(Optional.of(entry));
-
+        @DisplayName("A7: goes through the console's replay (claim, commit-gated delete, audit) with the calling admin")
+        void success() {
+            outcome("dl-1", "REPLAYED", null);
             assertDoesNotThrow(() -> restCoordinatorAdmin.replayDeadLetter("dl-1"));
-
-            var order = inOrder(conversationService, coordinator);
-            order.verify(conversationService).say(eq("conv-1"), eq(false), eq(true), anyList(),
-                    argThat(input -> "hello".equals(input.getInput()) && input.getContext().containsKey("replayOf")), eq(false), any());
-            order.verify(coordinator).replayDeadLetter("dl-1");
+            verify(clusterAdmin).replay(List.of("dl-1"), "anonymous");
+            verify(coordinator, never()).replayDeadLetter(anyString());
         }
 
         @Test
         @DisplayName("refuses (409) an entry without captured input and keeps it")
         void notReplayable() {
-            restCoordinatorAdmin.conversationService = mock(IConversationService.class);
-            when(coordinator.getDeadLetter("dl-2")).thenReturn(Optional.of(new DeadLetterEntry("dl-2", "conv-1", "boom", 1L, "{}")));
-
+            outcome("dl-2", "NOT_REPLAYABLE", DeadLetterEntry.NOT_REPLAYABLE_NOT_CAPTURED);
             var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-2"));
             assertEquals(409, e.getResponse().getStatus());
-            verify(coordinator, never()).replayDeadLetter(anyString());
+        }
+
+        @Test
+        @DisplayName("A7: refuses (409) while another administrator replays the same entry")
+        void inProgress() {
+            outcome("dl-3", "IN_PROGRESS", "another administrator is replaying this entry right now");
+            var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-3"));
+            assertEquals(409, e.getResponse().getStatus());
         }
 
         @Test
         @DisplayName("keeps the entry (409) when the conversation refuses the turn")
-        void refusedTurnKeepsEntry() throws Exception {
-            var conversationService = mock(IConversationService.class);
-            restCoordinatorAdmin.conversationService = conversationService;
-            when(coordinator.getDeadLetter("dl-3"))
-                    .thenReturn(Optional.of(new DeadLetterEntry("dl-3", "conv-1", "boom", 1L, "{}", Map.of("input", "x", "agentId", "a"))));
-            doThrow(new IConversationService.ConversationEndedException("ended")).when(conversationService)
-                    .say(anyString(), any(), any(), anyList(), any(), anyBoolean(), any());
-
-            var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-3"));
+        void refusedTurnKeepsEntry() {
+            outcome("dl-4", "REJECTED", "ConversationEndedException: ended");
+            var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-4"));
             assertEquals(409, e.getResponse().getStatus());
-            verify(coordinator, never()).replayDeadLetter(anyString());
         }
 
         @Test
         @DisplayName("should throw NotFoundException when entry not found")
         void notFound() {
-            when(coordinator.getDeadLetter("dl-missing")).thenReturn(Optional.empty());
-
-            assertThrows(NotFoundException.class,
-                    () -> restCoordinatorAdmin.replayDeadLetter("dl-missing"));
+            outcome("dl-missing", "NOT_FOUND", "already replayed, discarded or expired");
+            assertThrows(NotFoundException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-missing"));
         }
     }
 

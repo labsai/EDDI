@@ -1,6 +1,6 @@
 # Prompt Snippets — Usage Guide
 
-> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They replace the deleted `DeploymentContextService` with a flexible, user-extensible, config-driven approach, and supply the customisable preset text for the counterweight and identity-masking features described in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking).
+> Prompt Snippets are reusable system prompt building blocks stored as versioned configuration documents. They are user-extensible and config-driven, and supply the customisable preset text for the counterweight and identity-masking features described in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking).
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ That's it. The snippet content is automatically injected at template resolution 
 
 ### Auto-Loading
 
-Snippets are loaded from the datastore (MongoDB or PostgreSQL) at LLM task execution time and injected into the template data map under the `snippets` namespace. This happens **before** the Qute template engine processes the system prompt, so `{snippets.xxx}` resolves like any other template variable.
+Snippets are loaded from the datastore (MongoDB or PostgreSQL) and injected into the template data map under the `snippets` namespace for **every template render** (the data map is built by the same converter for LLM tasks, outputs and HTTP calls), so `{snippets.xxx}` resolves like any other template variable in any of them.
 
 ```
 Template Data Map:
@@ -77,7 +77,7 @@ render therefore gets only snippets from sources the agent's own side controls:
 
 A snippet from another space is **never** injected, even if it is granted to the
 agent's team or published. To use one, copy it into the agent's space. The
-counterweight preset snippets (`counterweight-cautious`, `counterweight-strict`)
+counterweight preset snippets (`counterweight_cautious`, `counterweight_strict`)
 follow the same rule, so another workspace cannot replace an agent's safety text.
 
 If several eligible snippets share a name, the one from the earliest source above
@@ -148,7 +148,9 @@ All endpoints require `eddi-admin` or `eddi-editor` role.
 | `GET` | `/snippetstore/snippets/{id}?version=1` | Read a snippet |
 | `POST` | `/snippetstore/snippets` | Create a snippet |
 | `PUT` | `/snippetstore/snippets/{id}?version=1` | Update a snippet |
-| `DELETE` | `/snippetstore/snippets/{id}?version=1` | Delete a snippet |
+| `DELETE` | `/snippetstore/snippets/{id}?version=1` | Delete a snippet (add `permanent=true` to remove it and its history; default `false`) |
+
+Create and update answer `400` when `name` violates the `[a-z0-9_]+` pattern.
 
 ### Query Parameters for Descriptors
 
@@ -256,12 +258,8 @@ The designer controls exactly where each snippet appears, enabling precise promp
 
 ---
 
-## Migration from Legacy Services
+## Counterweight and Identity Masking
 
-| Legacy Service | Snippet Replacement |
-|---|---|
-| `DeploymentContextService` | Create environment-specific snippets (`prod_rules`, `staging_rules`) |
-
-`CounterweightService` and `IdentityMaskingService` were **not** removed — they are still applied to every system prompt and are configured per LLM task via the `counterweight` and `identityMasking` blocks in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking). Counterweight preset text is itself customised by creating `counterweight-cautious` / `counterweight-strict` snippets.
+`CounterweightService` and `IdentityMaskingService` are applied to every system prompt and are configured per LLM task via the `counterweight` and `identityMasking` blocks in [langchain.md → Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking). Counterweight preset text is itself customised by creating `counterweight_cautious` / `counterweight_strict` snippets (names use underscores because snippet names must match `[a-z0-9_]+`). Snippets with the older hyphenated names `counterweight-cautious` / `counterweight-strict` are still honoured if they exist in storage, but cannot be created through the REST API.
 
 The key advantage: snippets are **user-configurable** without code changes, versionable, and composable.
