@@ -38,7 +38,8 @@ The Manager's phase editor shows these fields when **On a tie** is set to **A hu
 2. The discussion pauses in `AWAITING_HUMAN_INPUT`, as a **non-speaker** human turn (`pauseType: HUMAN_TURN`,
    the same machinery as a member's turn and a facilitator escalation). The pending input carries
    `detail.kind: "TIE_BREAK"` and the options; the status and MCP summaries show `pendingKind: "TIE_BREAK"`
-   and `pendingOptions`, the inbox shows a **Tie-break** badge, the `human_input_requested` event carries the
+   and, to a caller who may read the pending content (the owner, the decider or an admin), `pendingOptions` —
+   an approver who is neither gets the summary without it, so clients must handle its absence; the inbox shows a **Tie-break** badge, the `human_input_requested` event carries the
    `detail`, and Slack posts a notice naming the decider and the options. The decider's prompt is built from
    the option texts and the weighted totals only, never from member statements.
 3. The decider answers on the human-input endpoint with a **choice**:
@@ -90,7 +91,8 @@ fallback is one turn, like the policy it borrows.
 
 With the audit ledger enabled, each resolution writes one `hitl.approval` audit entry with `verdict: "TIE_BROKEN"`,
 `approvalCategory: "group.vote_tiebreak"`, `reasonCode` (`HUMAN_CHOICE`, `TIMEOUT_NO_DECISION` or
-`TIMEOUT_MODERATOR`), the options and the choice. It is a human turn, not an approval, so it carries **no
+`TIMEOUT_MODERATOR`) and the options; the choice is recorded only for a human submission (`HUMAN_CHOICE`) — a
+timeout entry carries none, and `TIMEOUT_MODERATOR` does not record the moderator's eventual selection. It is a human turn, not an approval, so it carries **no
 `decisionOutcome`** — approval analytics skip it. When a meter registry is present (the default with
 metrics enabled), counter `eddi.group.vote.tiebreaks{policy, resolution}` counts resolutions (`human`, `timeout_none`, `timeout_moderator`).
 

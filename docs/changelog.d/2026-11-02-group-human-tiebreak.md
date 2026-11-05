@@ -87,6 +87,10 @@ Review follow-ups (round 3):
   need not be a member; [Group Human Decisions](../group-human-decisions.md) says the audit entry and the counter
   are written only when the audit ledger and the meter registry are present.
 
+Review follow-ups (round 4):
+
+- Docs: `pendingOptions` appears only for a caller who may read the pending content; the tie-break audit entry records a choice only for a human submission; an `eddi-approver` may answer a tie-break when their own principal is the decider.
+
 ```decision-log
 | 2026-11-02 | A HUMAN_DECIDES tie-break pauses through the I6 AWAITING_HUMAN_INPUT path, not the approval path | Approval endpoints are binary and carry no content, and any eddi-approver could then set the outcome of a vote; the I6 path already has the decider-or-admin guard, timeouts, crash recovery, CAS and the inbox | A PHASE approval with the choice in the note; letting approvers break ties |
 | 2026-11-02 | GroupConversation schema v5 for PendingHumanInput.detail and RESUME_KIND_TIE_BREAK | Both are resume-consumed: an older pod resolving a tie-break would re-run the vote's last repeat | Riding v4 because the fields are additive |
