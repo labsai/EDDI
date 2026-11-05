@@ -1721,6 +1721,22 @@ jobs:
         working-directory: ui/packages/ui
         run: npm test
 
+      # @eddi/conversation (ui/packages/conversation): the AgentConversation
+      # controller, the one markdown renderer and the shared conversation
+      # components, compiled into both apps as source. Its lint keeps it
+      # router-free and away from window.__EDDI_*__.
+      - name: "@eddi/conversation: type check"
+        working-directory: ui/packages/conversation
+        run: npm run typecheck
+
+      - name: "@eddi/conversation: lint"
+        working-directory: ui/packages/conversation
+        run: npm run lint
+
+      - name: "@eddi/conversation: unit tests"
+        working-directory: ui/packages/conversation
+        run: npm test
+
       - name: Type check
         run: npm run typecheck
 

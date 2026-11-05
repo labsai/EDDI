@@ -247,13 +247,30 @@ export function collectDefaults(files, read = (f) => fs.readFileSync(f, "utf8"))
   return byKey;
 }
 
+/**
+ * A package that ships strings of its own (`@eddi/conversation`'s
+ * `conversation.*`, in `src/i18n/locales/<lng>.json`) has them merged into this
+ * app's bundles at runtime (`withConversationLocales`), so they count here as
+ * if they were in this app's files — for MISSING, PARITY and ORPHAN alike.
+ */
+function packageLocaleDirs(packageDirs) {
+  return packageDirs.map((dir) => path.join(dir, "i18n", "locales")).filter((dir) => fs.existsSync(dir));
+}
+
 export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR, packageDirs = packageSourceDirs() } = {}) {
   const sources = [srcDir, ...packageDirs].flatMap((dir) => walk(dir));
   const files = fs.readdirSync(localesDir).filter((f) => f.endsWith(".json"));
+  const extraLocaleDirs = packageLocaleDirs(packageDirs);
   const locales = new Map(
     files.map((f) => [
       path.basename(f, ".json"),
-      flatten(JSON.parse(fs.readFileSync(path.join(localesDir, f), "utf8"))),
+      Object.assign(
+        {},
+        ...extraLocaleDirs
+          .filter((dir) => fs.existsSync(path.join(dir, f)))
+          .map((dir) => flatten(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")))),
+        flatten(JSON.parse(fs.readFileSync(path.join(localesDir, f), "utf8"))),
+      ),
     ]),
   );
 
