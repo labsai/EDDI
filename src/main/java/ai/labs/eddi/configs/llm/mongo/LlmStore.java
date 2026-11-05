@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.ToolDisplayConfigValidator;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaConfigValidator;
@@ -72,6 +73,9 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");
                 RescueOptions.validate(task.getResponseValidation(), task.getFieldAliases(), "langchain.task[" + i + "]");
                 warnStrictModeImplications(task.getToolApprovals(), fieldPath);
+                // answerMode: the terminal reply tool (convertToObject + object-root
+                // responseSchema, no name collision).
+                AnswerToolConfigValidator.validate(task, "langchain.task[" + i + "]");
             }
         }
     }

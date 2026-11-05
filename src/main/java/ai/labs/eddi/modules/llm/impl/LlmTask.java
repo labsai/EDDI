@@ -44,6 +44,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -600,7 +601,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // exact shape.
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             String schema = processedParams.get(KEY_RESPONSE_SCHEMA);
-            if (!isNullOrEmpty(schema)) {
+            if (AnswerTool.enabled(task)) {
+                // answerMode "tool": the schema is the reply tool's parameters, so the
+                // instruction is to call it — repeating the schema here would invite the
+                // model to write the JSON as text instead.
+                systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n" + "Give your final answer by calling the `"
+                        + AnswerToolConfigValidator.toolName(task) + "` tool exactly once, as your last step. Its arguments are the "
+                        + "complete answer. Never answer in plain text.";
+            } else if (!isNullOrEmpty(schema)) {
                 systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n"
                         + "You MUST respond with a single valid JSON object matching this exact schema:\n" + "```json\n" + schema + "\n```\n"
                         + "Do NOT include ANY text before or after the JSON. " + "Do NOT wrap in markdown code fences. "
@@ -3860,6 +3868,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 validateGuardrails(llmConfiguration);
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
+                validateAnswerMode(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
@@ -3869,6 +3878,25 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on an {@code answerMode} the store would refuse today (a
+     * configuration imported or stored before the check), and notes at INFO a
+     * forced tool call a provider cannot honour.
+     */
+    static void validateAnswerMode(LlmConfiguration llmConfiguration) throws WorkflowConfigurationException {
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (int i = 0; i < llmConfiguration.tasks().size(); i++) {
+            try {
+                AnswerToolConfigValidator.validate(llmConfiguration.tasks().get(i), "langchain.task[" + i + "]");
+            } catch (IllegalArgumentException e) {
+                throw new WorkflowConfigurationException("Invalid answerMode configuration: " + e.getMessage(), e);
+            }
+        }
+        AnswerTool.reportAtConfigure(llmConfiguration);
     }
 
     /**

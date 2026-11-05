@@ -603,6 +603,58 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private List<String> nonBlankFields;
 
+        // === Structured answers through a terminal reply tool (answerMode) ===
+
+        /**
+         * How a {@code convertToObject} task's answer reaches EDDI. {@code "text"}
+         * (also what null means — every stored config) keeps today's behaviour: the
+         * model writes the JSON object as its reply text. {@code "tool"} adds one
+         * synthetic tool ({@link #answerToolName}, default {@code reply}) whose
+         * parameters are the {@code responseSchema}; the model answers by calling it,
+         * so the answer is enforced by the provider's function-calling machinery — the
+         * path that works with tools on Gemini, Anthropic and Bedrock, where JSON mode
+         * does not.
+         * <p>
+         * Valid only with {@code convertToObject: "true"} and a {@code responseSchema}
+         * whose root is an {@code object} that native schema enforcement can convert;
+         * other combinations are refused at save time. A plain-text answer in this mode
+         * goes through the same invalid-JSON handling ({@code onInvalidJson}) as in
+         * {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code "text"}.
+         *
+         * @since 6.7.0
+         */
+        private String answerMode;
+
+        /**
+         * Name of the terminal reply tool when {@code answerMode} is {@code "tool"}.
+         * Null means {@code reply}. Must match {@code [A-Za-z0-9_-]{1,64}} and must not
+         * be the name of any other tool of the task; a collision is refused at save
+         * time and, for a tool only discovered at runtime, the colliding tool is
+         * dropped at assembly. Ignored in {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code reply}.
+         *
+         * @since 6.7.0
+         */
+        private String answerToolName;
+
+        /**
+         * Whether a request in {@code answerMode: "tool"} forces a tool call:
+         * {@code "required"} (also what null means) sets the provider's "must call a
+         * tool" mode (OpenAI/Azure {@code tool_choice: required}, Anthropic
+         * {@code any}, Gemini function-calling mode {@code ANY}, Mistral {@code any}),
+         * so the model cannot answer in plain text; {@code "auto"} lets it choose. A
+         * provider without such a mode gets {@code auto} (logged once at deploy).
+         * Ignored in {@code "text"} mode.
+         * <p>
+         * Kind of absence: a <b>default</b> — null is {@code "required"}.
+         *
+         * @since 6.7.0
+         */
+        private String answerToolChoice;
+
         /**
          * Renames applied to the top-level keys of a parsed {@code convertToObject}
          * reply before the shape is validated: <code>{"htmlResponseStr":
@@ -1225,6 +1277,32 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setNonBlankFields(List<String> nonBlankFields) {
             this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
+        }
+
+        // --- answerMode (terminal reply tool) accessors ---
+
+        public String getAnswerMode() {
+            return answerMode;
+        }
+
+        public void setAnswerMode(String answerMode) {
+            this.answerMode = answerMode;
+        }
+
+        public String getAnswerToolName() {
+            return answerToolName;
+        }
+
+        public void setAnswerToolName(String answerToolName) {
+            this.answerToolName = answerToolName;
+        }
+
+        public String getAnswerToolChoice() {
+            return answerToolChoice;
+        }
+
+        public void setAnswerToolChoice(String answerToolChoice) {
+            this.answerToolChoice = answerToolChoice;
         }
 
         public Map<String, String> getFieldAliases() {
