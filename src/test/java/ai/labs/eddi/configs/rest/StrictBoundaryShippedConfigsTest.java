@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.rest;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService.TemplateManifest;
@@ -107,6 +108,9 @@ class StrictBoundaryShippedConfigsTest {
             Map.entry(".mcpcalls.json", McpCallsConfiguration.class),
             Map.entry(".rag.json", RagConfiguration.class),
             Map.entry(".snippet.json", PromptSnippet.class),
+            // Exported under connections/ when a config references ${connection:…},
+            // and created from there on import (docs/agent-configs/google-workspace-tools).
+            Map.entry(".connection.json", ConnectionConfiguration.class),
             // v5 filenames. RestImportService still accepts them, so they are live
             // input, not museum pieces — and leaving them unmapped is precisely how
             // WorkflowConfiguration came to alias a key that shipped in no release
