@@ -422,4 +422,13 @@ class ToolLoopRunnerToolEventsTest {
         assertEquals("L", display.displayName());
         assertTrue(display.fields().isEmpty());
     }
+
+    @Test
+    @DisplayName("toolDisplay: a credential-named field is never shown, even when allow-listed and its value has no secret shape")
+    void credentialNamedFieldIsSkipped() {
+        ToolDisplay display = ToolDisplayResolver.resolve(taskWithDisplay("t", "L", "password", "title").getToolDisplay(), "t", "t",
+                "{\"password\":\"plainwordplain\",\"title\":\"Renew\"}");
+        assertFalse(display.fields().containsKey("password"));
+        assertEquals("Renew", display.fields().get("title"));
+    }
 }

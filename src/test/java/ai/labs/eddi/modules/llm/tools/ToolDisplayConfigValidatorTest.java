@@ -113,4 +113,14 @@ class ToolDisplayConfigValidatorTest {
     void messageNamesThePath() {
         assertTrue(refusal("createAction", config("x".repeat(121))).contains(PATH + "['createAction']"));
     }
+
+    @Test
+    @DisplayName("a credential-named field is refused with an actionable message")
+    void credentialField() {
+        for (String name : List.of("password", "apiKey", "token")) {
+            String message = refusal("a", config("L", name));
+            assertTrue(message.contains("names a credential field; it is never shown"), message);
+            assertTrue(message.contains(name), message);
+        }
+    }
 }

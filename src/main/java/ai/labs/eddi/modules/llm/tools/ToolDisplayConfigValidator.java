@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.modules.llm.model.ToolDisplayConfig;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -71,6 +72,9 @@ public final class ToolDisplayConfigValidator {
                     if (field.length() > ToolDisplayConfig.MAX_NAME_LENGTH) {
                         throw new IllegalArgumentException(
                                 path + ".fields has an argument name longer than " + ToolDisplayConfig.MAX_NAME_LENGTH + " characters");
+                    }
+                    if (SecretRedactionFilter.isCredentialFieldName(field)) {
+                        throw new IllegalArgumentException(path + ".fields names '" + field + "', which names a credential field; it is never shown");
                     }
                     if (!seen.add(field)) {
                         throw new IllegalArgumentException(path + ".fields names '" + field + "' twice");

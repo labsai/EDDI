@@ -56,6 +56,11 @@ final class ToolDisplayResolver {
             JsonNode root = parse(arguments);
             if (root != null && root.isObject()) {
                 for (String name : config.getFields()) {
+                    // Redaction below works on the value's shape; a credential-named field
+                    // is never shown at all (also refused at save, this covers stored configs).
+                    if (SecretRedactionFilter.isCredentialFieldName(name)) {
+                        continue;
+                    }
                     JsonNode value = root.get(name);
                     // Scalars only: an object or array argument is exactly the kind of
                     // payload that must not be shown.
