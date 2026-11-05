@@ -116,40 +116,42 @@ class VertxBodyStreamTest {
     @DisplayName("the source is paused at the high-water mark and resumed once drained below the low one")
     void backpressure() throws IOException {
         ScriptedStream source = new ScriptedStream();
-        VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
-        });
-        int chunk = 64 * 1024;
-        for (int i = 0; i < VertxBodyStream.HIGH_WATER_BYTES / chunk; i++) {
-            source.emit(filled(chunk, i));
-        }
-        assertTrue(source.paused, "a full queue pauses the source");
-        assertEquals(1, source.pauses.get());
+        try (VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
+        })) {
+            int chunk = 64 * 1024;
+            for (int i = 0; i < VertxBodyStream.HIGH_WATER_BYTES / chunk; i++) {
+                source.emit(filled(chunk, i));
+            }
+            assertTrue(source.paused, "a full queue pauses the source");
+            assertEquals(1, source.pauses.get());
 
-        byte[] buffer = new byte[chunk];
-        int resumesBefore = source.resumes.get();
-        // Drain until at most LOW_WATER remains queued.
-        long drained = 0;
-        while (drained < VertxBodyStream.HIGH_WATER_BYTES - VertxBodyStream.LOW_WATER_BYTES) {
-            drained += stream.read(buffer, 0, buffer.length);
+            byte[] buffer = new byte[chunk];
+            int resumesBefore = source.resumes.get();
+            // Drain until at most LOW_WATER remains queued.
+            long drained = 0;
+            while (drained < VertxBodyStream.HIGH_WATER_BYTES - VertxBodyStream.LOW_WATER_BYTES) {
+                drained += stream.read(buffer, 0, buffer.length);
+            }
+            assertEquals(resumesBefore + 1, source.resumes.get(), "a drained queue resumes the source once");
+            assertFalse(source.paused);
         }
-        assertEquals(resumesBefore + 1, source.resumes.get(), "a drained queue resumes the source once");
-        assertFalse(source.paused);
     }
 
     @Test
     @DisplayName("a failure surfaces after the bytes before it, as an IOException")
     void failureAfterData() throws IOException {
         ScriptedStream source = new ScriptedStream();
-        VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
-        });
-        source.emit("ab".getBytes());
-        source.fail(new IllegalStateException("connection reset"));
+        try (VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
+        })) {
+            source.emit("ab".getBytes());
+            source.fail(new IllegalStateException("connection reset"));
 
-        byte[] buffer = new byte[2];
-        assertEquals(2, stream.read(buffer, 0, 2));
-        assertArrayEquals("ab".getBytes(), buffer);
-        IOException failure = assertThrows(IOException.class, stream::read);
-        assertEquals("connection reset", failure.getMessage());
+            byte[] buffer = new byte[2];
+            assertEquals(2, stream.read(buffer, 0, 2));
+            assertArrayEquals("ab".getBytes(), buffer);
+            IOException failure = assertThrows(IOException.class, stream::read);
+            assertEquals("connection reset", failure.getMessage());
+        }
     }
 
     @Test
@@ -196,27 +198,28 @@ class VertxBodyStreamTest {
     @DisplayName("a slow consumer still reads every byte of a long body")
     void slowConsumerReadsEverything() throws Exception {
         ScriptedStream source = new ScriptedStream();
-        VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
-        });
-        int chunks = 40;
-        int chunk = 32 * 1024;
-        CompletableFuture<Void> producer = CompletableFuture.runAsync(() -> {
-            for (int i = 0; i < chunks; i++) {
-                while (source.paused) {
-                    Thread.onSpinWait();
+        try (VertxBodyStream stream = new VertxBodyStream(source, null, () -> {
+        })) {
+            int chunks = 40;
+            int chunk = 32 * 1024;
+            CompletableFuture<Void> producer = CompletableFuture.runAsync(() -> {
+                for (int i = 0; i < chunks; i++) {
+                    while (source.paused) {
+                        Thread.onSpinWait();
+                    }
+                    source.emit(filled(chunk, i));
                 }
-                source.emit(filled(chunk, i));
+                source.finish();
+            });
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = stream.read(buffer, 0, buffer.length)) != -1) {
+                out.write(buffer, 0, read);
             }
-            source.finish();
-        });
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int read;
-        while ((read = stream.read(buffer, 0, buffer.length)) != -1) {
-            out.write(buffer, 0, read);
+            producer.get(10, TimeUnit.SECONDS);
+            assertEquals(chunks * chunk, out.size());
+            assertEquals(chunks - 1, out.toByteArray()[out.size() - 1]);
         }
-        producer.get(10, TimeUnit.SECONDS);
-        assertEquals(chunks * chunk, out.size());
-        assertEquals(chunks - 1, out.toByteArray()[out.size() - 1]);
     }
 }
