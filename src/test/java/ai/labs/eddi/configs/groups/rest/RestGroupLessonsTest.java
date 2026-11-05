@@ -40,6 +40,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -83,12 +84,12 @@ class RestGroupLessonsTest {
         rest.shared(GROUP);
         rest.history(GROUP, null);
         rest.consolidation(GROUP);
-        verify(guard, org.mockito.Mockito.times(4)).requireAccess(GROUP, AccessLevel.VIEW, "group");
+        verify(guard, times(4)).requireAccess(GROUP, AccessLevel.VIEW, "group");
 
         rest.schedule(GROUP, new ScheduleRequest("0 3 * * 1", null));
         rest.unschedule(GROUP);
         rest.run(GROUP, true);
-        verify(guard, org.mockito.Mockito.times(3)).requireAccess(GROUP, AccessLevel.EDIT, "group");
+        verify(guard, times(3)).requireAccess(GROUP, AccessLevel.EDIT, "group");
     }
 
     @Test
@@ -161,7 +162,21 @@ class RestGroupLessonsTest {
         assertEquals(400, rest.schedule(GROUP, new ScheduleRequest(" ", null)).getStatus());
         assertEquals(400, rest.schedule(GROUP, null).getStatus());
         assertEquals(400, rest.schedule(GROUP, new ScheduleRequest("0 3 * * 1", "Mars/Olympus")).getStatus());
+        assertEquals(400, rest.schedule(GROUP, new ScheduleRequest("0 0 30 2 *", null)).getStatus(), "a cron that never fires is a 400, not a 500");
         verify(schedules, never()).createSchedule(any());
+    }
+
+    @Test
+    void schedulingKeepsTheConfiguredMinimumInterval() throws Exception {
+        rest.minIntervalSeconds = 3600;
+        var response = rest.schedule(GROUP, new ScheduleRequest("*/5 * * * *", null));
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getEntity().toString().contains("min-interval-seconds"), response.getEntity().toString());
+        verify(schedules, never()).deleteSchedulesByName(anyString());
+        verify(schedules, never()).createSchedule(any());
+
+        when(schedules.createSchedule(any())).thenReturn("sched-1");
+        assertEquals(201, rest.schedule(GROUP, new ScheduleRequest("0 3 * * 1", null)).getStatus());
     }
 
     @Test

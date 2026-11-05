@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BookOpenCheck } from "lucide-react";
+import { ErrorState } from "@/components/shared/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,22 @@ import {
 } from "@/hooks/use-group-lessons";
 import { getErrorMessage } from "@/lib/api-client";
 import type { ConsolidationResult } from "@/lib/api/group-lessons";
+import { listTimeZones } from "@/lib/api/schedules";
+
+/** The viewer's own IANA zone, as the workspace cadence form defaults to, or UTC. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function timeZoneOptions(current: string): string[] {
+  return [...new Set(["UTC", browserTimeZone(), current, ...listTimeZones()])].sort((a, b) =>
+    a === "UTC" ? -1 : b === "UTC" ? 1 : a.localeCompare(b),
+  );
+}
 
 const inputCls = "rounded-lg border border-input bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
@@ -46,12 +63,18 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ConsolidationResult | null>(null);
 
+  const [timeZone, setTimeZone] = useState(browserTimeZone);
+  const timeZones = useMemo(() => timeZoneOptions(timeZone), [timeZone]);
+
   function doRun(dryRun: boolean) {
     setError(null);
     run.mutate(dryRun, {
       onSuccess: (r) => {
         setResult(r);
-        if (!dryRun) toast.success(t("groupLessons.runDone", "Consolidation finished"));
+        if (dryRun) return;
+        // A skip (too few lessons, over the cost cap, a transient model failure) ran nothing.
+        if (r.status === "SKIPPED") toast.warning(t("groupLessons.runSkipped", "Consolidation skipped: {{reason}}", { reason: r.message }));
+        else toast.success(t("groupLessons.runDone", "Consolidation finished"));
       },
       onError: (err) => setError(getErrorMessage(err)),
     });
@@ -60,7 +83,7 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
   function doSchedule() {
     setError(null);
     schedule.mutate(
-      { cronExpression: cron.trim() },
+      { cronExpression: cron.trim(), timeZone: timeZone.trim() || "UTC" },
       { onSuccess: () => toast.success(t("groupLessons.scheduled", "Consolidation scheduled")), onError: (err) => setError(getErrorMessage(err)) },
     );
   }
@@ -69,6 +92,16 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
   const sharedGroups = shared.data?.groups ?? [];
   const notShared = shared.data?.notShared ?? [];
   const cs = state.data;
+  const loadError = (testId: string, query: { error: unknown; refetch: () => unknown }) => (
+    <div data-testid={testId}>
+      <ErrorState
+        message={t("groupLessons.loadError", "Could not load this section.")}
+        error={query.error}
+        onRetry={() => void query.refetch()}
+        retryLabel={t("common.retry", "Retry")}
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4" data-testid="workspace-lessons">
@@ -78,7 +111,9 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
       </h3>
 
       <Section title={t("groupLessons.ownTitle", "This team's lessons")} testId="lessons-own">
-        {ownLessons.length === 0 ? (
+        {own.isError ? (
+          loadError("lessons-own-error", own)
+        ) : own.isPending ? null : ownLessons.length === 0 ? (
           <p className="text-xs text-muted-foreground" data-testid="lessons-own-empty">
             {t("groupLessons.ownEmpty", "No lessons yet. A RETRO phase stores them after a discussion.")}
           </p>
@@ -94,7 +129,8 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
       </Section>
 
       <Section title={t("groupLessons.sharedTitle", "Shared with this team")} testId="lessons-shared">
-        {sharedGroups.length === 0 && notShared.length === 0 && (
+        {shared.isError && loadError("lessons-shared-error", shared)}
+        {shared.isSuccess && sharedGroups.length === 0 && notShared.length === 0 && (
           <p className="text-xs text-muted-foreground" data-testid="lessons-shared-empty">
             {t("groupLessons.sharedEmpty", "Nothing is shared with this team. List teams in readFrom, and have them list this team in shareWith.")}
           </p>
@@ -119,7 +155,9 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
       </Section>
 
       <Section title={t("groupLessons.consolidationTitle", "Consolidation")} testId="lessons-consolidation">
-        {!cs?.configured ? (
+        {state.isError ? (
+          loadError("consolidation-error-state", state)
+        ) : !cs ? null : !cs.configured ? (
           <p className="text-xs text-muted-foreground" data-testid="consolidation-off">
             {t("groupLessons.consolidationOff", "Not configured. Add lessonConfig.consolidation to the group configuration (a model and a cost cap).")}
           </p>
@@ -128,7 +166,7 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant={cs.scheduled ? "success" : "secondary"} data-testid="consolidation-schedule-state">
                 {cs.scheduled
-                  ? t("groupLessons.scheduledAt", "Scheduled: {{cron}}", { cron: cs.cronExpression })
+                  ? t("groupLessons.scheduledAt", "Scheduled: {{cron}} ({{zone}})", { cron: cs.cronExpression, zone: cs.timeZone || "UTC" })
                   : t("groupLessons.notScheduled", "Not scheduled")}
               </Badge>
               {!cs.hasModel && (
@@ -146,6 +184,20 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
                   className={`${inputCls} w-40 font-mono`}
                   data-testid="consolidation-cron"
                 />
+                <select
+                  value={timeZone}
+                  onChange={(e) => setTimeZone(e.target.value)}
+                  aria-label={t("groupLessons.timeZone", "Time zone")}
+                  title={t("groupLessons.timeZone", "Time zone")}
+                  className={inputCls}
+                  data-testid="consolidation-timezone"
+                >
+                  {timeZones.map((zone) => (
+                    <option key={zone} value={zone}>
+                      {zone}
+                    </option>
+                  ))}
+                </select>
                 <Button size="sm" onClick={doSchedule} disabled={!cron.trim() || schedule.isPending} data-testid="consolidation-schedule">
                   {t("groupLessons.schedule", "Schedule")}
                 </Button>
@@ -205,7 +257,9 @@ export function LessonsPanel({ groupId, readOnly }: { groupId: string; readOnly:
           {showHistory ? t("groupLessons.hideHistory", "Hide what consolidation removed") : t("groupLessons.showHistory", "Show what consolidation removed")}
         </button>
         {showHistory &&
-          ((history.data ?? []).length === 0 ? (
+          (history.isError ? (
+            loadError("lessons-history-error", history)
+          ) : history.isPending ? null : (history.data ?? []).length === 0 ? (
             <p className="text-xs text-muted-foreground" data-testid="lessons-history-empty">
               {t("groupLessons.historyEmpty", "Nothing has been merged or retired.")}
             </p>

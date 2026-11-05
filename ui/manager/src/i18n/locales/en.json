@@ -7670,7 +7670,7 @@
     "notShared": "Not shared with this team: {{ids}}",
     "consolidationTitle": "Consolidation",
     "consolidationOff": "Not configured. Add lessonConfig.consolidation to the group configuration (a model and a cost cap).",
-    "scheduledAt": "Scheduled: {{cron}}",
+    "scheduledAt": "Scheduled: {{cron}} ({{zone}})",
     "notScheduled": "Not scheduled",
     "noModel": "No model configured",
     "cron": "Cron expression",
@@ -7691,6 +7691,9 @@
     "merged": "Merged",
     "runDone": "Consolidation finished",
     "scheduled": "Consolidation scheduled",
+    "runSkipped": "Consolidation skipped: {{reason}}",
+    "timeZone": "Time zone",
+    "loadError": "Could not load this section.",
     "configLabel": "Team lessons",
     "configValue": "shares with {{share}}, reads from {{read}}{{consolidation}}",
     "configConsolidation": ", consolidates"

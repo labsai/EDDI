@@ -1145,6 +1145,57 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void updateSchedule_renamingALessonConsolidation_isRefused() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("lc2");
+        stored.setName("lesson-consolidation-group-1");
+        stored.setUserId("editor-1");
+        stored.setMetadata(lessonMarker("group-1"));
+        when(scheduleStore.readSchedule("lc2")).thenReturn(stored);
+        var guard = mock(ResourceAccessGuard.class);
+        when(guard.hasAccess("group-1", AccessLevel.EDIT)).thenReturn(true);
+        setField(rest, "resourceAccessGuard", guard);
+        var body = makeCronSchedule("lc2");
+        body.setName("lesson-consolidation-group-2");
+        body.setMetadata(lessonMarker("group-1"));
+
+        Response response = rest.updateSchedule("lc2", body);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    @Test
+    void fireNow_lessonConsolidation_withoutGroupEdit_isForbidden_evenForItsCreator() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("lc3");
+        stored.setUserId("editor-1");
+        stored.setMetadata(lessonMarker("group-1"));
+        when(scheduleStore.readSchedule("lc3")).thenReturn(stored);
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess(eq("group-1"), eq(AccessLevel.EDIT), anyString());
+        setField(rest, "resourceAccessGuard", guard);
+
+        assertThrows(ForbiddenException.class, () -> rest.fireNow("lc3"));
+        verify(pollerService, never()).claimForManualFire(any());
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_lessonConsolidation_namingNoGroup_isABadRequest() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("lc4");
+        stored.setUserId("editor-1");
+        stored.setMetadata(Map.of(LessonConsolidationService.METADATA_TYPE_KEY, LessonConsolidationService.METADATA_TYPE_CONSOLIDATION));
+        when(scheduleStore.readSchedule("lc4")).thenReturn(stored);
+
+        Response response = rest.fireNow("lc4");
+
+        assertEquals(400, response.getStatus());
+        verify(pollerService, never()).claimForManualFire(any());
+    }
+
+    @Test
     void allowSelfSchedulingProvidedMarker_neverReachesJson() throws Exception {
         var schedule = new ScheduleConfiguration();
         schedule.setAllowSelfScheduling(true);

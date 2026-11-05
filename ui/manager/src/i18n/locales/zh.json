@@ -7670,7 +7670,7 @@
     "notShared": "未与本团队共享：{{ids}}",
     "consolidationTitle": "整合",
     "consolidationOff": "未配置。请在群组配置中添加 lessonConfig.consolidation（一个模型和一个成本上限）。",
-    "scheduledAt": "已计划：{{cron}}",
+    "scheduledAt": "已计划：{{cron}}（{{zone}}）",
     "notScheduled": "未计划",
     "noModel": "未配置模型",
     "cron": "Cron 表达式",
@@ -7691,6 +7691,9 @@
     "merged": "已合并",
     "runDone": "整合已完成",
     "scheduled": "整合已计划",
+    "runSkipped": "已跳过整合：{{reason}}",
+    "timeZone": "时区",
+    "loadError": "无法加载此部分。",
     "configLabel": "团队经验",
     "configValue": "与 {{share}} 个团队共享，从 {{read}} 个团队读取{{consolidation}}",
     "configConsolidation": "，会整合"

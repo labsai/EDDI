@@ -7670,7 +7670,7 @@
     "notShared": "이 팀과 공유되지 않음: {{ids}}",
     "consolidationTitle": "통합",
     "consolidationOff": "구성되지 않았습니다. 그룹 구성에 lessonConfig.consolidation(모델과 비용 상한)을 추가하세요.",
-    "scheduledAt": "예약됨: {{cron}}",
+    "scheduledAt": "예약됨: {{cron}} ({{zone}})",
     "notScheduled": "예약되지 않음",
     "noModel": "모델이 구성되지 않음",
     "cron": "Cron 표현식",
@@ -7691,6 +7691,9 @@
     "merged": "병합됨",
     "runDone": "통합이 완료되었습니다",
     "scheduled": "통합이 예약되었습니다",
+    "runSkipped": "통합을 건너뛰었습니다: {{reason}}",
+    "timeZone": "시간대",
+    "loadError": "이 섹션을 불러올 수 없습니다.",
     "configLabel": "팀 교훈",
     "configValue": "{{share}}개 팀과 공유, {{read}}개 팀에서 읽음{{consolidation}}",
     "configConsolidation": ", 통합함"

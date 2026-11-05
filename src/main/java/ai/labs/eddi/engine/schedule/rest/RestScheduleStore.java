@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -534,6 +535,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // cadence's creator: the same authority as editing the group's cadences,
                 // which RestGroupWorkspace and guardManagedSchedule gate on EDIT of the group.
                 resourceAccessGuard.requireAccess(governingResourceId(schedule), AccessLevel.EDIT, "group");
+            }
+            if (LessonConsolidationService.isLessonConsolidationSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // A fire runs a model-backed consolidation that merges and retires the
+                // team's lessons, at its cost: the authority of RestGroupLessons.run,
+                // EDIT of the group. Checked before the owner/manage checks below, so
+                // the schedule's creator cannot fire it after losing EDIT.
+                Object groupId = schedule.getMetadata().get(LessonConsolidationService.METADATA_GROUP_ID_KEY);
+                if (groupId == null || groupId.toString().isBlank()) {
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity("This lesson consolidation schedule names no group and cannot be fired.").build();
+                }
+                resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
             }
 
             if (isHitlSchedule(schedule)) {
@@ -1266,10 +1279,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             return null;
         }
         Map<String, Object> current = stored != null ? stored.getMetadata() : null;
+        // The name must stay too: status, replacement and removal find a group's
+        // schedule by "lesson-consolidation-<groupId>", so renaming G's schedule to
+        // H's name would hand H's endpoints a row that consolidates G.
         if (LessonConsolidationService.isLessonConsolidationSchedule(current)
                 && LessonConsolidationService.isLessonConsolidationSchedule(body)
                 && String.valueOf(current.get(LessonConsolidationService.METADATA_GROUP_ID_KEY))
-                        .equals(String.valueOf(body.get(LessonConsolidationService.METADATA_GROUP_ID_KEY)))) {
+                        .equals(String.valueOf(body.get(LessonConsolidationService.METADATA_GROUP_ID_KEY)))
+                && Objects.equals(stored.getName(), schedule.getName())) {
             return null;
         }
         LOGGER.warnf("Refused %s of a schedule whose body declares %s — lesson consolidation schedules are minted "

@@ -7741,7 +7741,7 @@
     "notShared": "Non partagées avec cette équipe : {{ids}}",
     "consolidationTitle": "Consolidation",
     "consolidationOff": "Non configurée. Ajoutez lessonConfig.consolidation à la configuration du groupe (un modèle et un plafond de coût).",
-    "scheduledAt": "Planifiée : {{cron}}",
+    "scheduledAt": "Planifiée : {{cron}} ({{zone}})",
     "notScheduled": "Non planifiée",
     "noModel": "Aucun modèle configuré",
     "cron": "Expression cron",
@@ -7762,6 +7762,9 @@
     "merged": "Fusionnée",
     "runDone": "Consolidation terminée",
     "scheduled": "Consolidation planifiée",
+    "runSkipped": "Consolidation ignorée : {{reason}}",
+    "timeZone": "Fuseau horaire",
+    "loadError": "Impossible de charger cette section.",
     "configLabel": "Leçons de l'équipe",
     "configValue": "partage avec {{share}}, lit depuis {{read}}{{consolidation}}",
     "configConsolidation": ", consolide"

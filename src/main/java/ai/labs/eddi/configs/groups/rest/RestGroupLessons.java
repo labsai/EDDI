@@ -21,6 +21,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.DateTimeException;
@@ -51,6 +52,14 @@ public class RestGroupLessons implements IRestGroupLessons {
     private final IAgentGroupStore groupStore;
     private final SecurityIdentity identity;
     private final ResourceAccessGuard accessGuard;
+
+    /**
+     * The minimum cron interval every schedule must keep (shared with
+     * {@code RestScheduleStore}); field-injected so the constructor stays as it
+     * was.
+     */
+    @ConfigProperty(name = "eddi.schedule.min-interval-seconds", defaultValue = "60")
+    long minIntervalSeconds = 60;
 
     @Inject
     public RestGroupLessons(LessonService lessons, ILessonHistoryStore history, LessonConsolidationService consolidation,
@@ -150,7 +159,15 @@ public class RestGroupLessons implements IRestGroupLessons {
                         "Lesson consolidation is not configured for this group. Add lessonConfig.consolidation to the group configuration first.");
             }
             ZoneId zone = request.timeZone() != null && !request.timeZone().isBlank() ? ZoneId.of(request.timeZone()) : ZoneId.of("UTC");
-            Instant firstFire = CronParser.computeNextFire(request.cronExpression().trim(), Instant.now(), zone);
+            String cron = request.cronExpression().trim();
+            CronParser.validate(cron);
+            // The same floor RestScheduleStore.validateSchedule applies to every schedule.
+            long intervalSeconds = CronParser.computeMinIntervalSeconds(cron, zone);
+            if (intervalSeconds < minIntervalSeconds) {
+                return error(Response.Status.BAD_REQUEST, String.format("Invalid schedule: the cron interval (%ds) is below the minimum allowed "
+                        + "(%ds, eddi.schedule.min-interval-seconds)", intervalSeconds, minIntervalSeconds));
+            }
+            Instant firstFire = CronParser.computeNextFire(cron, Instant.now(), zone);
             String name = SCHEDULE_NAME_PREFIX + groupId;
             scheduleStore.deleteSchedulesByName(name);
 
@@ -158,7 +175,7 @@ public class RestGroupLessons implements IRestGroupLessons {
             var schedule = new ScheduleConfiguration();
             schedule.setName(name);
             schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
-            schedule.setCronExpression(request.cronExpression().trim());
+            schedule.setCronExpression(cron);
             schedule.setTimeZone(zone.getId());
             schedule.setEnabled(true);
             schedule.setUserId(principal);
@@ -174,7 +191,8 @@ public class RestGroupLessons implements IRestGroupLessons {
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return error(Response.Status.NOT_FOUND, e.getMessage());
-        } catch (IllegalArgumentException | DateTimeException e) {
+        } catch (IllegalArgumentException | IllegalStateException | DateTimeException e) {
+            // IllegalStateException: a well-formed cron that never fires (0 0 30 2 *).
             return error(Response.Status.BAD_REQUEST, "Invalid schedule: " + e.getMessage());
         } catch (ForbiddenException e) {
             throw e;

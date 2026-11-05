@@ -7670,7 +7670,7 @@
     "notShared": "このチームと共有されていません：{{ids}}",
     "consolidationTitle": "統合",
     "consolidationOff": "未設定です。グループ設定に lessonConfig.consolidation（モデルとコスト上限）を追加してください。",
-    "scheduledAt": "スケジュール済み：{{cron}}",
+    "scheduledAt": "スケジュール済み：{{cron}}（{{zone}}）",
     "notScheduled": "未スケジュール",
     "noModel": "モデル未設定",
     "cron": "Cron 式",
@@ -7691,6 +7691,9 @@
     "merged": "統合済み",
     "runDone": "統合が完了しました",
     "scheduled": "統合をスケジュールしました",
+    "runSkipped": "統合をスキップしました：{{reason}}",
+    "timeZone": "タイムゾーン",
+    "loadError": "このセクションを読み込めませんでした。",
     "configLabel": "チームの教訓",
     "configValue": "{{share}} と共有、{{read}} から取得{{consolidation}}",
     "configConsolidation": "、統合あり"

@@ -53,3 +53,19 @@ Docs: [`docs/team-learning-loop.md`](../team-learning-loop.md#lessons).
 - The workspace page shows the lessons panel from the group's current version, not the URL's.
 - Docs: `maxCostPerRun` is an estimate, not a hard ceiling (the answer length is not enforced); history keeps the newest
   1,000 rows per team; an owner absent from both shared lists may still have lessons outside the cap.
+
+### Review follow-ups (second round)
+
+- Merged `feat/team-learning-loop` (which had `main` merged in): the full-metrics dashboard takes the base layout with the
+  lesson-consolidation panel beside the vote tie-break panel; operator **revision 57** (the base is at 56).
+- `lessonConfig.consolidation.parameters` follows the SERVICE judge's vault rule (`ServiceJudgeVaultGrants`): a
+  `${vault:...}` must name a secret granted to all agents. Checked at group save and again before each run's model call.
+- `RestGroupLessons.schedule` applies `eddi.schedule.min-interval-seconds` and answers an unsatisfiable cron
+  (`0 0 30 2 *`) with 400 instead of 500.
+- A retirement or a merge's duplicate drop whose conditional delete loses the race is no longer reported as applied; a
+  partial merge names the duplicate it kept.
+- `RestScheduleStore.fireNow` requires EDIT on a consolidation schedule's group before the owner checks; an update may
+  not rename a consolidation schedule (its name is how the group's endpoints find it).
+- Manager: a SKIPPED run toasts a warning with the reason instead of "finished"; the schedule control sends a time zone
+  (the viewer's by default) and the state badge shows the stored one; each section shows an error state when its read
+  fails, instead of the empty or "not configured" text.

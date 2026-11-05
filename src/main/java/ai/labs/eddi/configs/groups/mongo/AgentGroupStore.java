@@ -127,17 +127,22 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     }
 
     /**
-     * A SERVICE judge's vault references must name secrets granted to all agents (a
-     * group has no agent identity to check a narrower grant against). Needs the
-     * secret metadata, so it is not part of the static
+     * A SERVICE judge's vault references, and those of the lesson consolidation
+     * model ({@code lessonConfig.consolidation.parameters}), must name secrets
+     * granted to all agents (a group has no agent identity to check a narrower
+     * grant against). Needs the secret metadata, so it is not part of the static
      * {@link #memberAndLimitProblems}.
      */
     void validateServiceJudgeGrants(AgentGroupConfiguration config) {
-        if (serviceJudgeVaultGrants == null || config.getPhases() == null) {
+        if (serviceJudgeVaultGrants == null) {
             return;
         }
         List<String> problems = new ArrayList<>();
-        for (int i = 0; i < config.getPhases().size(); i++) {
+        var lessonConfig = config.getLessonConfig();
+        if (lessonConfig != null && lessonConfig.consolidation() != null) {
+            problems.addAll(serviceJudgeVaultGrants.problems("lessonConfig.consolidation.parameters", lessonConfig.consolidation().parameters()));
+        }
+        for (int i = 0; config.getPhases() != null && i < config.getPhases().size(); i++) {
             var phase = config.getPhases().get(i);
             var service = phase != null && phase.convergence() != null ? phase.convergence().service() : null;
             if (service != null) {

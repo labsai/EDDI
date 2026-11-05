@@ -7670,7 +7670,7 @@
     "notShared": "ไม่ได้แชร์กับทีมนี้: {{ids}}",
     "consolidationTitle": "การรวมบทเรียน",
     "consolidationOff": "ยังไม่ได้กำหนดค่า เพิ่ม lessonConfig.consolidation ในการกำหนดค่ากลุ่ม (โมเดลและเพดานค่าใช้จ่าย)",
-    "scheduledAt": "ตั้งเวลาไว้: {{cron}}",
+    "scheduledAt": "ตั้งเวลาไว้: {{cron}} ({{zone}})",
     "notScheduled": "ยังไม่ได้ตั้งเวลา",
     "noModel": "ยังไม่ได้กำหนดโมเดล",
     "cron": "นิพจน์ cron",
@@ -7691,6 +7691,9 @@
     "merged": "รวมแล้ว",
     "runDone": "การรวมเสร็จสิ้น",
     "scheduled": "ตั้งเวลาการรวมแล้ว",
+    "runSkipped": "ข้ามการรวม: {{reason}}",
+    "timeZone": "เขตเวลา",
+    "loadError": "ไม่สามารถโหลดส่วนนี้ได้",
     "configLabel": "บทเรียนของทีม",
     "configValue": "แชร์กับ {{share}} อ่านจาก {{read}}{{consolidation}}",
     "configConsolidation": " และรวมบทเรียน"

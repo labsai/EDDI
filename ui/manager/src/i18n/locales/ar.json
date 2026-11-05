@@ -7954,7 +7954,7 @@
     "notShared": "غير مشاركة مع هذا الفريق: {{ids}}",
     "consolidationTitle": "الدمج",
     "consolidationOff": "غير مهيأ. أضف lessonConfig.consolidation إلى إعدادات المجموعة (نموذج وسقف للتكلفة).",
-    "scheduledAt": "مجدول: {{cron}}",
+    "scheduledAt": "مجدول: {{cron}} ({{zone}})",
     "notScheduled": "غير مجدول",
     "noModel": "لم يُهيّأ أي نموذج",
     "cron": "تعبير cron",
@@ -7975,6 +7975,9 @@
     "merged": "مدموج",
     "runDone": "اكتمل الدمج",
     "scheduled": "تمت جدولة الدمج",
+    "runSkipped": "تم تخطي الدمج: {{reason}}",
+    "timeZone": "المنطقة الزمنية",
+    "loadError": "تعذر تحميل هذا القسم.",
     "configLabel": "دروس الفريق",
     "configValue": "يشارك مع {{share}}، يقرأ من {{read}}{{consolidation}}",
     "configConsolidation": "، يدمج"

@@ -7670,7 +7670,7 @@
     "notShared": "इस टीम के साथ साझा नहीं: {{ids}}",
     "consolidationTitle": "समेकन",
     "consolidationOff": "कॉन्फ़िगर नहीं है। समूह कॉन्फ़िगरेशन में lessonConfig.consolidation जोड़ें (एक मॉडल और लागत सीमा)।",
-    "scheduledAt": "निर्धारित: {{cron}}",
+    "scheduledAt": "निर्धारित: {{cron}} ({{zone}})",
     "notScheduled": "निर्धारित नहीं",
     "noModel": "कोई मॉडल कॉन्फ़िगर नहीं",
     "cron": "Cron अभिव्यक्ति",
@@ -7691,6 +7691,9 @@
     "merged": "मिलाया गया",
     "runDone": "समेकन पूरा हुआ",
     "scheduled": "समेकन निर्धारित हुआ",
+    "runSkipped": "समेकन छोड़ा गया: {{reason}}",
+    "timeZone": "समय क्षेत्र",
+    "loadError": "यह अनुभाग लोड नहीं हो सका।",
     "configLabel": "टीम के सबक",
     "configValue": "{{share}} के साथ साझा, {{read}} से पढ़ता है{{consolidation}}",
     "configConsolidation": ", समेकन करता है"

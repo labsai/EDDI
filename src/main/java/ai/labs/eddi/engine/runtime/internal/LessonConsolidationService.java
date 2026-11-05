@@ -8,6 +8,7 @@ import java.util.Objects;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConsolidationConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.RetroConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -130,7 +131,8 @@ public class LessonConsolidationService {
      * @param applied
      *            whether it was applied (always false in a dry run)
      * @param note
-     *            why it was not applied, when it was not
+     *            why it was not applied, when it was not (including a merge whose
+     *            text was written but a duplicate of which changed and was kept)
      */
     public record ProposedAction(String type, List<String> keys, String text, String reason, List<String> evidence, boolean applied, String note) {
     }
@@ -156,6 +158,15 @@ public class LessonConsolidationService {
     private final TenantQuotaService tenantQuotaService;
     private final MeterRegistry meters;
     Clock clock = Clock.systemUTC();
+
+    /**
+     * The vault grant rule for {@code lessonConfig.consolidation.parameters},
+     * re-checked before every model call so a grant narrowed after the group was
+     * saved is caught. Field-injected so the constructor stays as it was; null (a
+     * service built by hand) skips the check.
+     */
+    @Inject
+    ServiceJudgeVaultGrants vaultGrants;
 
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
 
@@ -209,6 +220,12 @@ public class LessonConsolidationService {
         if (!config.hasModel()) {
             return failed(groupId,
                     "lessonConfig.consolidation needs llmProvider and llmModel: a background job has no parent task to inherit a model from");
+        }
+        if (vaultGrants != null) {
+            List<String> grantProblems = vaultGrants.problems("lessonConfig.consolidation.parameters", config.parameters());
+            if (!grantProblems.isEmpty()) {
+                return failed(groupId, grantProblems.getFirst());
+            }
         }
 
         // Oldest first: the duplicates worth merging are the ones that accumulated.
@@ -458,7 +475,8 @@ public class LessonConsolidationService {
             }
             try {
                 if ("MERGE".equals(action.type())) {
-                    if (!applyMerge(groupId, runId, action, snapshot, now)) {
+                    List<String> notDropped = applyMerge(groupId, runId, action, snapshot, now);
+                    if (notDropped == null) {
                         // The kept lesson was rewritten between the check above and the
                         // conditional write: the newer text stays, the duplicates too.
                         count("skipped_changed");
@@ -466,8 +484,19 @@ public class LessonConsolidationService {
                         continue;
                     }
                     count("merged");
+                    if (!notDropped.isEmpty()) {
+                        // The merged text is written, but a duplicate was rewritten
+                        // meanwhile and stays: not a fully applied merge.
+                        result.add(withNote(action, "partially applied: the merged text was written, but " + String.join(", ", notDropped)
+                                + " was written during the run and is kept"));
+                        continue;
+                    }
                 } else {
-                    applyRetire(groupId, runId, action, snapshot, now);
+                    if (!applyRetire(groupId, runId, action, snapshot, now)) {
+                        count("skipped_changed");
+                        result.add(withNote(action, "a lesson was written during the run; the newer text is kept"));
+                        continue;
+                    }
                     count("retired");
                 }
                 result.add(new ProposedAction(action.type(), action.keys(), action.text(), action.reason(), action.evidence(), true, null));
@@ -500,10 +529,11 @@ public class LessonConsolidationService {
     }
 
     /**
-     * @return false when the kept lesson changed after the snapshot and nothing was
-     *         merged
+     * @return {@code null} when the kept lesson changed after the snapshot and
+     *         nothing was merged; otherwise the keys of the duplicates that could
+     *         not be dropped because they changed meanwhile (empty when all were)
      */
-    private boolean applyMerge(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
+    private List<String> applyMerge(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
             throws IResourceStore.ResourceStoreException {
         String keepKey = action.keys().get(0);
         UserMemoryEntry keep = snapshot.get(keepKey);
@@ -519,20 +549,26 @@ public class LessonConsolidationService {
                         LessonService.RETRO_SOURCE, keep.groupIds(), keep.sourceConversationId(), false, keep.accessCount(), keep.createdAt(),
                         now),
                 keep.updatedAt())) {
-            return false;
+            return null;
         }
+        List<String> notDropped = new ArrayList<>();
         for (String key : action.keys().subList(1, action.keys().size())) {
             UserMemoryEntry dropped = snapshot.get(key);
-            userMemoryStore.deleteEntryIfUnchanged(dropped.id(), dropped.updatedAt());
+            if (!userMemoryStore.deleteEntryIfUnchanged(dropped.id(), dropped.updatedAt())) {
+                notDropped.add(key);
+            }
         }
-        return true;
+        return notDropped;
     }
 
-    private void applyRetire(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
+    /**
+     * @return false when the lesson changed after the snapshot and was kept
+     */
+    private boolean applyRetire(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
             throws IResourceStore.ResourceStoreException {
         UserMemoryEntry lesson = snapshot.get(action.keys().get(0));
         recordHistory(groupId, runId, lesson, Action.RETIRED, action.reason(), null, action.evidence(), now);
-        userMemoryStore.deleteEntryIfUnchanged(lesson.id(), lesson.updatedAt());
+        return userMemoryStore.deleteEntryIfUnchanged(lesson.id(), lesson.updatedAt());
     }
 
     private void recordHistory(String groupId, String runId, UserMemoryEntry lesson, Action action, String reason, String replacedBy,

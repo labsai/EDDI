@@ -8,6 +8,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LessonConsolidationConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -43,9 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.doubleThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -104,6 +107,7 @@ class LessonConsolidationServiceTest {
         when(outcomes.listByGroup(eq(GROUP), any(), anyInt())).thenAnswer(i -> List.copyOf(events));
         when(history.insertIfAbsent(any())).thenReturn(true);
         when(memory.replaceIfUnchanged(anyString(), any(), any())).thenReturn(true);
+        when(memory.deleteEntryIfUnchanged(anyString(), any())).thenReturn(true);
         service = new LessonConsolidationService(lessons, memory, history, outcomes, llm, quota, new SimpleMeterRegistry());
         service.clock = Clock.fixed(NOW, ZoneOffset.UTC);
     }
@@ -355,6 +359,49 @@ class LessonConsolidationServiceTest {
     }
 
     @Test
+    @DisplayName("a duplicate rewritten after the check is kept, and the merge is not reported as fully applied")
+    void aMergeWhoseDuplicateCannotBeDroppedIsPartial() throws Exception {
+        modelAnswers(MERGE_1_2);
+        when(memory.deleteEntryIfUnchanged(anyString(), any())).thenReturn(false);
+
+        Result r = service.run(GROUP, false);
+
+        assertEquals(Status.COMPLETED, r.status());
+        assertEquals(0, r.appliedCount());
+        assertTrue(r.actions().get(0).note().contains("retro:k2"), r.actions().get(0).note());
+        assertTrue(r.actions().get(0).note().contains("partially applied"), r.actions().get(0).note());
+    }
+
+    @Test
+    @DisplayName("a retirement whose conditional delete loses is skipped, not counted as applied")
+    void aRetirementLosingTheConditionalDeleteIsSkipped() throws Exception {
+        modelAnswers(RETIRE_3);
+        when(memory.deleteEntryIfUnchanged(anyString(), any())).thenReturn(false);
+
+        Result r = service.run(GROUP, false);
+
+        assertEquals(Status.COMPLETED, r.status());
+        assertEquals(0, r.appliedCount());
+        assertTrue(r.actions().get(0).note().contains("written during the run"), r.actions().get(0).note());
+    }
+
+    @Test
+    @DisplayName("an ungranted vault reference in the consolidation parameters fails the run before any model call")
+    void anUngrantedVaultReferenceFailsBeforeTheModelCall() {
+        var grants = mock(ServiceJudgeVaultGrants.class);
+        when(grants.problems(eq("lessonConfig.consolidation.parameters"), any()))
+                .thenReturn(List.of("lessonConfig.consolidation.parameters.apiKey needs a grant"));
+        service.vaultGrants = grants;
+        modelAnswers(MERGE_1_2);
+
+        Result r = service.run(GROUP, false);
+
+        assertEquals(Status.FAILED, r.status());
+        assertTrue(r.message().contains("apiKey needs a grant"), r.message());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+    }
+
+    @Test
     @DisplayName("a lesson deleted during the model call is a skipped action, not a failed run")
     void aLessonRemovedMeanwhileIsSkipped() throws Exception {
         modelAnswers(MERGE_1_2);
@@ -429,7 +476,7 @@ class LessonConsolidationServiceTest {
     void theCallIsChargedToTheTenantAtConfiguredPrices() {
         modelAnswers("{}");
         service.run(GROUP, false);
-        verify(quota).recordCost(eq("default"), org.mockito.ArgumentMatchers.doubleThat(d -> d > 0));
+        verify(quota).recordCost(eq("default"), doubleThat(d -> d > 0));
     }
 
     @Test
@@ -437,7 +484,7 @@ class LessonConsolidationServiceTest {
         consolidation = new LessonConsolidationConfig("anthropic", "claude-x", Map.of(), 5.0, null, null, 6, 40, 30, 20);
         modelAnswers("{}");
         service.run(GROUP, false);
-        verify(quota, never()).recordCost(anyString(), org.mockito.ArgumentMatchers.anyDouble());
+        verify(quota, never()).recordCost(anyString(), anyDouble());
     }
 
     @Test
