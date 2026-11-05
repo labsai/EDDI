@@ -861,6 +861,39 @@ langchain4j drivers but are not covered by these tests. Where a store does not, 
 and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
 backend.
 
+### Source connectors (for contributors)
+
+Each source `type` is served by one **source connector**, a CDI bean implementing
+`SourceConnector` (`modules/ingestion/connector`). The ingestion pipeline owns everything that is the
+same for every source: run claims, change detection, text extraction, embedding, chunk replacement,
+deletion reconciliation, budgets and run history. It never names a provider. A connector owns how to
+list the source, how to read one document, and what the provider's failures mean. `web`
+(`WebSourceConnector`, around the crawler) and `upload` (`UploadSourceConnector`, over the file store)
+are the two today. A new source type is one bean: `SourceConnectors` collects them by `type()` and
+refuses two beans for one type at startup.
+
+| Part | What it is |
+| --- | --- |
+| `discover(DiscoveryContext)` | Lists one partition from its cursor and hands each document to `context.accept(WorkItem)` as it is found, streamed rather than returned. Downloads nothing it does not have to. Returns a `DiscoveryResult`: the stop reason, the `Coverage`, and the next cursor |
+| `fetch(WorkItem, SourceContext)` | Reads one document as a `SourceDocument`. Not called for an item that arrived `prefetched`, which is what a crawler does, since it reads the page to find the next link |
+| `listPartitions` / `verifyAccess` | Drives, sites, mailboxes. The default is one implicit partition that is always accessible. **This version runs exactly one partition per source** |
+| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, and an optional prefetched document. When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched |
+| `SourceDocument` | `content`, which is one of three kinds: `HtmlPage` (page converter; blank text means navigation and is skipped), `FileBytes` (extracted by MIME type; no text means a definitive failure that retires older chunks) or `Text`. It also carries `versionToken` (the change key when present, otherwise the text hash), HTTP `validators`, `truncated` and `metadata` under `SourceMetadataKeys` |
+| `Coverage` | `FULL_LISTING`: an authoritative listing, where absence means deletion, even when the listing is empty. `FULL_TRAVERSAL`: a crawl; absence means deletion only if the run learned something definitive. `INCREMENTAL`: a change feed; absence means nothing, and deletions arrive as `DELETE` items. `PARTIAL`: nothing is concluded |
+| `SourceError` | `TRANSIENT`, `THROTTLED` (each with an optional retry-after), `AUTH`, `NOT_FOUND`, `PERMANENT`, `CURSOR_INVALID`. Only `NOT_FOUND` and `PERMANENT` count as evidence about a document. The others mean "could not look", and the document is kept. Per-document failures go to `context.reportFailure` or are thrown from `fetch` as `SourceException`. A whole-source failure thrown from `discover` fails the run |
+| Cursor | Opaque to the framework: one string per partition, JSON by convention, versioned and read by the connector. **It is not stored yet**: the pipeline passes no cursor, so every run lists in full |
+
+The connector chooses its own discovery style: (A) a listing plus a change feed, (B) a single delta
+call, or (C) a listing only, as `web` and `upload` do. The framework depends only on the coverage the
+connector reports.
+
+`SourceMetadataKeys` also reserves `acl.principals`, a list of namespaced principals such as
+`google:user:a@x.com`, `entra:group:<object-id>`, `link:organization` or `anyone`. It is schema only,
+and nothing enforces it yet. The shared `filters` block (`SourceFilters`: `formats`,
+`excludeNamePatterns`, `includePaths`, `maxFileBytes`) and the shared `partitions` block
+(`SourcePartitions`: `mode` `LISTED` | `ALL_ACCESSIBLE`, `ids`) are config models that a file-shaped
+connector adopts. No source type reads them yet.
+
 ## Observability
 
 RAG operations write audit traces to conversation memory:
