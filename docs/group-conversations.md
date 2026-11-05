@@ -346,9 +346,9 @@ peer-hidden until their phase completes (commit-reveal).
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
-  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is still rejected at save
-  time: humans can now be group *members* (I6), but a tie-break that waits on a
-  person needs its own resume machinery, which has not shipped.
+  `type: NONE` and the discussion continues. `HUMAN_DECIDES` pauses the
+  discussion until a named person picks one of the tied options (method
+  `vote+human-tiebreak`) — see [Group Human Decisions](group-human-decisions.md).
 - The result fires the `decision_reached` SSE event (which this feature also
   wires for debate verdicts) and renders a tally block in Slack.
 

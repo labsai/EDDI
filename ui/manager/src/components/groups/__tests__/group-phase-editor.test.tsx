@@ -369,13 +369,40 @@ describe("GroupPhaseEditor", () => {
       expect(savedConfig().phases![0]!.voteConfig!.quorum).toBeCloseTo(0.75);
     });
 
-    it("never offers HUMAN_DECIDES as a selectable tie policy — still save-time rejected by the backend", () => {
-      renderWithProviders(
-        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
-      );
+    it("offers HUMAN_DECIDES and saves who decides, how long they have and what a timeout does", () => {
+      const config = voteConfig();
+      config.members = [
+        { agentId: "a1", displayName: "Alice", speakingOrder: 1 },
+        { agentId: "founder@acme.com", displayName: "Founder", speakingOrder: 2, memberType: "HUMAN" },
+      ] as AgentGroupConfiguration["members"];
+      renderWithProviders(<GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
       const select = screen.getByTestId("phase-vote-tie-0") as HTMLSelectElement;
       const humanOption = Array.from(select.options).find((o) => o.value === "HUMAN_DECIDES")!;
-      expect(humanOption.disabled).toBe(true);
+      expect(humanOption.disabled).toBe(false);
+
+      fireEvent.change(select, { target: { value: "HUMAN_DECIDES" } });
+      // The single HUMAN member is the default decider, so nothing is missing yet.
+      expect(screen.getByTestId("phase-tiebreak-note-0")).not.toHaveAttribute("role", "alert");
+      // No moderator: the moderator fallback cannot be chosen.
+      const onTimeout = screen.getByTestId("phase-tiebreak-ontimeout-0") as HTMLSelectElement;
+      expect(Array.from(onTimeout.options).find((o) => o.value === "MODERATOR_DECIDES")!.disabled).toBe(true);
+      fireEvent.change(screen.getByTestId("phase-tiebreak-timeout-0"), { target: { value: "PT24H" } });
+      fireEvent.change(onTimeout, { target: { value: "ABORT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.voteConfig).toMatchObject({
+        tiePolicy: "HUMAN_DECIDES",
+        humanTieBreak: { timeout: "PT24H", onTimeout: "ABORT" },
+      });
+    });
+
+    it("asks for a decider when the group has no single HUMAN member", () => {
+      renderWithProviders(<GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
+      fireEvent.change(screen.getByTestId("phase-vote-tie-0"), { target: { value: "HUMAN_DECIDES" } });
+
+      expect(screen.getByTestId("phase-tiebreak-note-0")).toHaveAttribute("role", "alert");
+      fireEvent.change(screen.getByTestId("phase-tiebreak-decider-0"), { target: { value: "ceo@acme.com" } });
+      expect(screen.getByTestId("phase-tiebreak-note-0")).not.toHaveAttribute("role", "alert");
     });
   });
 

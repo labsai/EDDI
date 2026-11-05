@@ -494,16 +494,21 @@ public class PhaseExecutionEngine {
      * {@code MODERATOR_DECIDES} runs one moderator turn choosing among the
      * unresolved options (method {@code vote+moderator-tiebreak});
      * {@code NO_DECISION} records the honest {@code NONE}. {@code
-     * HUMAN_DECIDES} is save-time rejected until I6 ships human members, so
-     * reaching it here means hand-edited storage — it degrades to NO_DECISION with
-     * a WARN rather than guessing.
+     * HUMAN_DECIDES} records that same NONE (so the tally is visible while it
+     * waits) and returns the tie-break the caller must pause for — see
+     * {@link HumanTieBreakEngine}.
      * <p>
      * Like every decision producer, failure is prose-only, never a failed
      * discussion.
+     *
+     * @return the pending human tie-break, or {@code null} when nothing waits on a
+     *         human
      */
-    public void recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
-                                   int phaseIdx, List<TranscriptEntry> repeatEntries, List<GroupMember> speakers,
-                                   GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+    public HumanTieBreakEngine.PendingTieBreak recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                                                  ProtocolConfig protocol, int phaseIdx, List<TranscriptEntry> repeatEntries,
+                                                                  List<GroupMember> speakers, GroupDiscussionEventListener listener,
+                                                                  AtomicInteger turnCounter, int maxTurns) {
+        HumanTieBreakEngine.PendingTieBreak pendingTieBreak = null;
         var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
@@ -517,7 +522,7 @@ public class PhaseExecutionEngine {
                     "The vote could not run: only " + options.size() + " option(s) were available.",
                     null, null, List.of(), VoteTallyEngine.METHOD_VOTE, phase.name(), null));
             fireDecisionReached(gc, listener);
-            return;
+            return null;
         }
 
         List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
@@ -544,8 +549,20 @@ public class PhaseExecutionEngine {
                     yield moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
                 }
                 case HUMAN_DECIDES -> {
-                    LOGGER.warnf("Group %s: VOTE phase '%s' has tiePolicy HUMAN_DECIDES, which needs human group members (I6) — "
-                            + "recording NO_DECISION", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
+                    // The NONE record stands until the decider answers; the caller
+                    // pauses on the returned tie-break after persisting it.
+                    // The repeat's start by identity: a CONVERGENCE or FACILITATION entry appended
+                    // after the slice was taken would make a size difference point one too high.
+                    int repeatStart = transcriptSnapshot.size() - repeatEntries.size();
+                    if (!repeatEntries.isEmpty()) {
+                        for (int i = 0; i < transcriptSnapshot.size(); i++) {
+                            if (transcriptSnapshot.get(i) == repeatEntries.get(0)) {
+                                repeatStart = i;
+                                break;
+                            }
+                        }
+                    }
+                    pendingTieBreak = HumanTieBreakEngine.onTie(gc, config, phase, voteConfig, outcome, Math.max(0, repeatStart));
                     yield outcome.decision();
                 }
                 case NO_DECISION -> outcome.decision();
@@ -558,6 +575,25 @@ public class PhaseExecutionEngine {
                         ? LogSanitizer.sanitize(decision.outcome())
                         : "no decision (" + LogSanitizer.sanitize(decision.outcome()) + ")");
         fireDecisionReached(gc, listener);
+        return pendingTieBreak;
+    }
+
+    /**
+     * The {@code MODERATOR_DECIDES} policy run for a human tie-break that timed out
+     * ({@code humanTieBreak.onTimeout}), gated on turns and cost exactly as the
+     * policy is when a vote ties. Returns the unresolved record when the budget is
+     * spent or the moderator names no single option.
+     */
+    public DecisionRecord resolveTieByModerator(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                                ProtocolConfig protocol, int phaseIdx, VoteTallyEngine.TallyOutcome outcome,
+                                                GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+        if ((maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) || GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+            return outcome.decision();
+        }
+        if (turnCounter != null) {
+            turnCounter.incrementAndGet();
+        }
+        return moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
     }
 
     /**

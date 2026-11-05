@@ -3612,7 +3612,6 @@
     "voteOptionsList": "Opções (uma por linha)",
     "voteOptionsSource": "Opções da votação",
     "voteQuorum": "Quórum",
-    "voteTieHuman": "Decisão humana (ainda não disponível)",
     "voteTieModerator": "O moderador decide",
     "voteTieNoDecision": "Sem decisão",
     "voteTiePolicy": "Em caso de empate",
@@ -4355,6 +4354,20 @@
     "emptyDescription": "Este servidor não inclui modelos de grupo. Ainda pode criar um grupo de raiz com o assistente.",
     "wizardNote": "Prefere criar agentes ao longo do caminho ou começar do zero? O assistente de grupo oferece modelos iniciais mais leves.",
     "wizardLink": "Abrir o assistente de grupo"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "A votação precisa de uma decisão — {{name}}, você decide",
+    "chooseOne": "Escolha uma opção",
+    "rationalePlaceholder": "Motivo (opcional)",
+    "inboxBadge": "Desempate",
+    "inboxReason": "Aguardando {{member}} decidir a votação",
+    "policyOption": "Uma pessoa decide",
+    "decider": "Quem decide",
+    "timeout": "Tempo limite (ISO-8601)",
+    "onTimeout": "Ao expirar",
+    "onTimeoutAbort": "Cancelar a discussão",
+    "deciderRequired": "Informe quem decide — o grupo não tem exatamente um membro HUMAN para decidir por padrão.",
+    "note": "Um empate pausa a discussão até que quem decide escolha uma opção. Só essa pessoa ou um administrador pode responder."
   },
   "channels": {
     "agentIdPlaceholder": "ID do agente para processar mensagens",

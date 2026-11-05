@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.groups.validation.GroupGapsValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
 import ai.labs.eddi.configs.groups.HandoffConfigValidator;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -432,7 +433,8 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * groups;</li>
      * <li>a group containing HUMAN members may not be USED as a nested GROUP member
      * (one level deep here; {@code MemberTurnExecutor} carries the runtime backstop
-     * for configs edited afterwards);</li>
+     * for configs edited afterwards) — nor may a group whose VOTE phase uses
+     * {@code tiePolicy: HUMAN_DECIDES}, which pauses the same way;</li>
      * <li>{@code humanMemberConfig.turnTimeout} must parse as an ISO-8601
      * duration;</li>
      * <li>a HUMAN moderator is allowed but warned about — every synthesis then
@@ -456,6 +458,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                             "members['" + member.agentId() + "'] is a nested group that contains HUMAN members — "
                                     + "human turns cannot pause a nested discussion (I6 v1); remove the human from the "
                                     + "child group or flatten the hierarchy");
+                }
+                if (child != null && hasHumanDecidesVote(child)) {
+                    throw new IllegalArgumentException(
+                            "members['" + member.agentId() + "'] is a nested group with a VOTE phase using tiePolicy "
+                                    + "HUMAN_DECIDES — a tie-break pause cannot pause a nested discussion; use "
+                                    + "MODERATOR_DECIDES or NO_DECISION in the child group or flatten the hierarchy");
                 }
             }
         }
@@ -526,6 +534,19 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
         }
         return problems;
+    }
+
+    /**
+     * True if one of the config's explicit phases is a VOTE whose tie policy is
+     * {@code HUMAN_DECIDES}. Preset styles never expand to that policy, so only
+     * explicit phases are read. A {@code voteConfig} left on a non-VOTE phase (the
+     * Manager keeps it when the type is switched) never starts a vote, so it does
+     * not count.
+     */
+    static boolean hasHumanDecidesVote(AgentGroupConfiguration config) {
+        return config.getPhases() != null && config.getPhases().stream()
+                .anyMatch(p -> p != null && p.type() == AgentGroupConfiguration.PhaseType.VOTE && p.voteConfig() != null
+                        && p.voteConfig().tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES);
     }
 
     /** True if the config lists at least one HUMAN member. */
@@ -765,12 +786,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             if (voteConfig.optionsSource() == AgentGroupConfiguration.OptionsSource.EXPLICIT && voteConfig.options().size() < 2) {
                 throw new IllegalArgumentException(path + " with optionsSource EXPLICIT needs at least 2 options");
             }
-            if (voteConfig.tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES) {
-                // HUMAN members themselves DO ship (see the I6 matrix above, which
-                // validates them). What is missing is the resume machinery a tie
-                // break needs: a tally that stops mid-phase has no pause to re-enter.
-                throw new IllegalArgumentException(path + ".tiePolicy HUMAN_DECIDES is not supported yet — breaking a tie needs a "
-                        + "resume path that a paused VOTE phase does not have. Use MODERATOR_DECIDES or NO_DECISION");
+            List<String> tieBreakProblems = GroupGapsValidation.tieBreakProblems(path + ".voteConfig", voteConfig, groupConfiguration);
+            if (!tieBreakProblems.isEmpty()) {
+                throw new IllegalArgumentException(String.join("; ", tieBreakProblems));
             }
             for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
                 // isFinite: NaN passes every < comparison and would poison the

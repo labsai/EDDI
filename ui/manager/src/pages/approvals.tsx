@@ -140,6 +140,8 @@ function ApprovalQueueRow({
   const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
   /** I6: a member's turn, not a decision anyone takes from this queue. */
   const isHumanTurn = item.pauseType === "HUMAN_TURN";
+  /** A tied vote waiting for its decider (tiePolicy HUMAN_DECIDES) — still a human turn. */
+  const isTieBreak = isHumanTurn && item.pendingKind === "TIE_BREAK";
   /** A group phase pause: decided here, and reviewable in place like a tool call. */
   const isGroupDecision = !!item.groupId && !isHumanTurn;
   // A HUMAN turn names its member by id; the group's roster has the name a
@@ -260,18 +262,30 @@ function ApprovalQueueRow({
               data-testid={`human-turn-badge-${item.conversationId}`}
             >
               <UserCheck className="h-3 w-3" />{" "}
-              {t("hitl.humanTurn", "Member's turn")}
+              {isTieBreak ? t("groupTieBreak.inboxBadge", "Tie-break") : t("hitl.humanTurn", "Member's turn")}
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
             ? item.toolNames.join(", ")
             : isHumanTurn
-              ? t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
-                  member:
-                    turnMemberName ||
-                    item.pendingMemberId ||
-                    t("hitl.humanTurnMemberFallback", "a member"),
-                })
+              ? (
+                  <span
+                    data-testid={`human-turn-reason-${item.conversationId}`}
+                    data-reason-kind={isTieBreak ? "tie-break" : "turn"}
+                  >
+                    {isTieBreak
+                      ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
+                        t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
+                          member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                        })
+                      : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                          member:
+                            turnMemberName ||
+                            item.pendingMemberId ||
+                            t("hitl.humanTurnMemberFallback", "a member"),
+                        })}
+                  </span>
+                )
               : item.pauseReason || "—"}
         </td>
         <td className="px-4 py-3 text-muted-foreground text-xs max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pausedAt", "Paused")}>
