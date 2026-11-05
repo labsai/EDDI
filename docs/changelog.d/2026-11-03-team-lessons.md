@@ -57,7 +57,8 @@ Docs: [`docs/team-learning-loop.md`](../team-learning-loop.md#lessons).
 ### Review follow-ups (second round)
 
 - Merged `feat/team-learning-loop` (which had `main` merged in): the full-metrics dashboard takes the base layout with the
-  lesson-consolidation panel beside the vote tie-break panel; operator **revision 57** (the base is at 56).
+  lesson-consolidation panel beside the vote tie-break panel; operator **revision 58** (the base, after a second merge
+  that brought in the operator MCP integration, is at 57).
 - `lessonConfig.consolidation.parameters` follows the SERVICE judge's vault rule (`ServiceJudgeVaultGrants`): a
   `${vault:...}` must name a secret granted to all agents. Checked at group save and again before each run's model call.
 - `RestGroupLessons.schedule` applies `eddi.schedule.min-interval-seconds` and answers an unsatisfiable cron
