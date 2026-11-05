@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import type { SharedTaskList, TaskItem } from "./groups";
 import { seg } from "./path-segment";
+import type { WorkspaceHandoffs } from "./team-handoffs";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +
@@ -79,6 +80,8 @@ export interface GroupWorkspace {
   runningDiscussionId: string;
   /** Backlog task ids the in-flight claim pulled — cleared when the run settles. */
   pulledTaskIds: string[];
+  /** Cross-team handoff state: the intake inbox and the origin of handed-off tasks. Absent on a backend that predates handoff. */
+  handoffs?: WorkspaceHandoffs;
   created: string;
   lastModified: string;
   revision: string;
@@ -136,9 +139,9 @@ export function getGroupWorkspaceBacklog(groupId: string): Promise<TaskItem[]> {
  * duplicate subject, or lost a concurrent-write retry — the thrown ApiError's
  * `message` names which).
  *
- * NOTE: there is no companion delete/update endpoint for a single backlog task
- * (confirmed absent on both REST and MCP) — the only way a task leaves PENDING
- * today is via a cadence run pulling and completing it.
+ * NOTE: there is no update endpoint for a single backlog task. A task leaves
+ * PENDING when a cadence run pulls and completes it, and can be removed with
+ * `deleteWorkspaceBacklogTask` (team-handoffs.ts).
  */
 export function addWorkspaceBacklogTask(
   groupId: string,

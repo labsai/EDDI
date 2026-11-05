@@ -62,9 +62,9 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 
 ## Behavior Rule Safety Rules
 
-### Every rule MUST have an `actionmatcher` on `lastStep`
+### Rules that belong to a multi-step flow need an `actionmatcher` on `lastStep`
 
-Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, a rule that is part of a multi-step flow and has only `inputmatcher` conditions is dangerous — it matches globally regardless of conversation state, so gate it on the previous step's action. Global rules (small talk, "cancel", "start over") intentionally have no `lastStep` gate; they are meant to fire at any step.
 
 ```
 ❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
@@ -93,7 +93,7 @@ Within a group, rules are evaluated in order and — by default (`executionStrat
 
 ### Quick reply expressions must be unique identifiers
 
-Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
+Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS_PROPERTY` also has engine-defined meaning (when it is an action of the previous step, `PropertySetterTask` stores the next raw input as the property `user_input`). The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
 
 ```
 ❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
@@ -104,7 +104,7 @@ Do NOT reuse system action names as quick reply expressions. The reserved action
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 
-When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as a **contiguous sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present — it is AND semantics, not OR.
+When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as an **ordered, adjacent sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present, in that order and with nothing between them — it is AND semantics, not OR, and `b,a` does not match a step whose actions are `[a, b]`. The `inputmatcher` and `contextmatcher` expression lists behave the same way.
 
 ```
 ❌ WRONG — tries to match any of these, but actually requires ALL FIVE contiguously:
@@ -139,7 +139,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm` | Persisted to `usermemories` collection across conversations |
 | `secret` | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `PropertySetterTask.autoVaultSecret` and [Properties](properties.md).) For wizard-style agents that collect API keys and pass them to an endpoint (see [Reference Implementation](#reference-implementation)), prefer `scope: "conversation"` and delegate vaulting to the receiving service — a dev instance without a master key cannot complete a secret-scoped turn at all.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `SecretPropertyVault.autoVaultSecret` and [Properties](properties.md).) For wizard-style agents that collect API keys and pass them to an endpoint (see [Reference Implementation](#reference-implementation)), `scope: "conversation"` with vaulting delegated to the receiving service works on a dev instance without a master key, which cannot complete a secret-scoped turn at all. **The trade-off:** only `scope: "secret"` scrubs and vaults the value, so with `conversation` scope the plaintext key stays in the stored conversation (the `input:initial` data and the property) and in every later `{properties.x}` render until the conversation is deleted. Use that pattern for a development wizard only; real deployments should use `secret` scope with a vault key.
 
 ### Capturing user input vs. setting fixed values
 
@@ -270,7 +270,7 @@ save with out-of-range values answers 400 naming the field.
 
 ## ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID for anything shorter than 18 characters or containing a character other than `0-9a-fA-F` and `-` — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID unless the id is at least 18 characters long and is either all hex (an ObjectId-style id) or a canonical 8-4-4-4-12 UUID — dashes are accepted nowhere else — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
 
 The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
@@ -312,7 +312,7 @@ connections/
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
-> **Pipeline step**: If your output templates contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` as the last workflow step. Without it, Qute expressions are not resolved.
+> **Pipeline step**: If your output texts or quick replies contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` after every step that produces that output. Without it, Qute expressions in output are not resolved. Prompts, HTTP call bodies and property values need no such step: `LlmTask`, `ApiCallsTask` and `PropertySetterTask` render their own.
 
 ### URI format (v6 canonical)
 
@@ -327,6 +327,9 @@ Always use v6 canonical URIs in new configs:
 | Property | `eddi://ai.labs.property/propertysetterstore/propertysetters/{id}?version=1` |
 | Output | `eddi://ai.labs.output/outputstore/outputsets/{id}?version=1` |
 | LLM | `eddi://ai.labs.llm/llmstore/llms/{id}?version=1` |
+| MCP calls | `eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/{id}?version=1` |
+| RAG | `eddi://ai.labs.rag/ragstore/rags/{id}?version=1` |
+| Parser | `eddi://ai.labs.parser/parserstore/parsers/{id}?version=1` |
 | Dictionary | `eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}?version=1` |
 
 > Legacy URIs (e.g. `ai.labs.bot/botstore/bots/`) are auto-normalized by `AbstractBackupService.normalizeLegacyUris()` during import, but new configs should always use v6 format.
@@ -343,7 +346,7 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.llm` | `eddi://ai.labs.llm/...` | Optional — LLM interaction |
 | `eddi://ai.labs.mcpcalls` | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls |
 | `eddi://ai.labs.rag` | `eddi://ai.labs.rag/...` | Optional — binds a knowledge base; retrieval itself runs inside the LLM task |
-| `eddi://ai.labs.templating`| — (no config URI) | Yes when any output or system prompt contains `{…}` placeholders — must be last |
+| `eddi://ai.labs.templating`| — (no config URI) | Yes when output texts or quick replies contain `{…}` placeholders — place it after every step that produces output |
 
 `eddi://ai.labs.rules` and `eddi://ai.labs.apicalls` are also registered as step types (aliases of `behavior` and `httpcalls`). Existing configs use the names in the table; write those.
 
@@ -353,7 +356,7 @@ Always use v6 canonical URIs in new configs:
 
 - Behavior rule patterns with `actionmatcher` + `inputmatcher`
 - Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from [Property Setter Patterns](#property-setter-patterns), deliberately **not** `scope: "secret"`)
-- HTTP call template syntax
+- HTTP call template syntax. Do not copy its request-body pattern: it splices free-text input such as the system prompt into JSON string literals, which a value like `hi","deploy":true` can break out of. In your own configs serialise values with `{json:serialize(properties.x)}` (see [HTTP Calls](httpcalls.md)). The fixture also uses the legacy key `retryHttpCallInstruction` (a `@JsonAlias`; write `retryApiCallInstruction`) and sets `expressionsAsActions: true` in its behavior config, which is a simplification: keep it off when an action triggers something that matters
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
 

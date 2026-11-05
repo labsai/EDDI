@@ -182,15 +182,58 @@ describe("GroupPhaseEditor", () => {
     expect(savedConfig().phases![0]!.convergence).toBeNull();
   });
 
-  it("warns that the SERVICE judge is not wired yet", () => {
+  it("edits the SERVICE judge's model and saves it with the convergence block", () => {
     renderWithProviders(
       <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
     );
     fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
-    expect(screen.queryByTestId("phase-convergence-service-note-0")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("phase-convergence-service-0")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("phase-convergence-judge-0"), { target: { value: "SERVICE" } });
-    expect(screen.getByTestId("phase-convergence-service-note-0")).toBeInTheDocument();
+    // Without a model it says the moderator judges instead.
+    expect(screen.getByTestId("phase-convergence-service-note-0")).toHaveTextContent(/moderator agent judges instead/);
+
+    fireEvent.change(screen.getByTestId("phase-service-provider-0"), { target: { value: "openai" } });
+    fireEvent.change(screen.getByTestId("phase-service-model-0"), { target: { value: "gpt-4o-mini" } });
+    fireEvent.change(screen.getByTestId("phase-service-apikey-0"), { target: { value: "${vault:judge-key}" } });
+    fireEvent.change(screen.getByTestId("phase-service-input-price-0"), { target: { value: "0.15" } });
+    fireEvent.change(screen.getByTestId("phase-service-timeout-0"), { target: { value: "90000" } });
+    expect(screen.getByTestId("phase-convergence-service-note-0")).toHaveTextContent(/no moderator needed/);
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence).toMatchObject({
+      judge: "SERVICE",
+      service: {
+        llmProvider: "openai",
+        llmModel: "gpt-4o-mini",
+        parameters: { apiKey: "${vault:judge-key}" },
+        inputPricePer1M: 0.15,
+        timeoutMs: 60000,
+      },
+    });
+  });
+
+  it("keeps a SERVICE judge's other parameters when the key is edited", () => {
+    const config = makeConfig({
+      phases: [
+        phase("Discussion", {
+          repeats: 4,
+          convergence: {
+            enabled: true,
+            minRepeats: 2,
+            threshold: 0.8,
+            judge: "SERVICE",
+            service: { llmProvider: "openai", llmModel: "m", parameters: { baseUrl: "https://llm.example", apiKey: "${vault:a}" } },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("phase-service-apikey-0"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence!.service!.parameters).toEqual({ baseUrl: "https://llm.example" });
   });
 
   /**

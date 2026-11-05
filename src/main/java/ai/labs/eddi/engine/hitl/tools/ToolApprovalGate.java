@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.hitl.tools;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.hitl.oversight.OversightMetrics;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.SuspendedGate;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import java.util.ArrayList;
@@ -61,7 +63,7 @@ public class ToolApprovalGate {
      */
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
                                Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
-        if (cfg == null || cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) {
+        if (cfg == null || (cfg.getRequireApproval() == null || cfg.getRequireApproval().isEmpty()) && SuspendedGate.none(cfg)) {
             return new GateResult(List.of(), List.copyOf(batch), Map.of());
         }
         List<CompiledPattern> require = compileAll(cfg.getRequireApproval());
@@ -90,7 +92,9 @@ public class ToolApprovalGate {
             }
             List<String> addresses = addressesOf(request.name(), toolSources, toolEndpoints);
             if (firstMatch(exempt, addresses) != null) {
-                allowed.add(request);
+                if (!gatedAsSuspended(request, addresses, cfg, gated, reasons)) {
+                    allowed.add(request);
+                }
                 continue;
             }
             CompiledPattern match = firstMatch(require, addresses);
@@ -99,11 +103,45 @@ public class ToolApprovalGate {
                 if (request.id() != null && !request.id().isBlank()) {
                     reasons.put(request.id(), match.raw());
                 }
-            } else {
+            } else if (!gatedAsSuspended(request, addresses, cfg, gated, reasons)) {
                 allowed.add(request);
             }
         }
         return new GateResult(gated, allowed, reasons);
+    }
+
+    /**
+     * Gates a call the config would allow when it matches a suspended
+     * earned-autonomy pattern (see {@link SuspendedGate}); a suspension only ever
+     * adds a gate.
+     */
+    private static boolean gatedAsSuspended(ToolExecutionRequest request, List<String> addresses, ToolApprovalsConfig cfg,
+                                            List<ToolExecutionRequest> gated, Map<String, String> reasons) {
+        String suspended = SuspendedGate.match(cfg, addresses);
+        if (suspended == null) {
+            return false;
+        }
+        gated.add(request);
+        if (request.id() != null && !request.id().isBlank()) {
+            reasons.put(request.id(), SuspendedGate.REASON_PREFIX + suspended);
+        }
+        OversightMetrics.suspensionGated();
+        return true;
+    }
+
+    /**
+     * The exempt pattern that lets a call through, or null when it is not exempt —
+     * built on {@link #addressesOf}, so it asks exactly the question the gate asks.
+     * Used by the sampled audit to tell an exempt call from an unmatched one.
+     */
+    public static String firstExemptMatch(String name, Map<String, String> toolSources, Map<String, String> toolEndpoints,
+                                          ToolApprovalsConfig cfg) {
+        if (cfg == null || cfg.getExempt() == null || name == null) {
+            return null;
+        }
+        CompiledPattern match = firstMatch(compileAll(cfg.getExempt()),
+                addressesOf(name, toolSources != null ? toolSources : Map.of(), toolEndpoints != null ? toolEndpoints : Map.of()));
+        return match != null ? match.raw() : null;
     }
 
     /**

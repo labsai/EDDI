@@ -776,6 +776,24 @@ describe("ApprovalBanner — fewest steps under requireExplicitPerCall", () => {
     });
   });
 
+  it("single call: an amendment identical to the shown arguments is a plain approval and carries no reason code", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={{ ...oneCall({ arguments: '{"a":1}' }), reasonCodes: [{ code: "TONE", label: "Tone" }] }}
+        onDecide={onDecide}
+        requireExplicitPerCall
+      />,
+    );
+    fireEvent.change(screen.getByTestId("reason-code"), { target: { value: "TONE" } });
+    fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+    fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: '{"a":1}' } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, { c1: { verdict: "APPROVED" } });
+  });
+
   it("single call: Reject still confirms and rejects the batch", () => {
     const onDecide = vi.fn();
     renderWithProviders(

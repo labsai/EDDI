@@ -32,7 +32,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Async document ingestion into knowledge base vector stores. Uses virtual
- * threads (NATS JetStream support planned for future).
+ * threads. Ingestion status is held per instance (Caffeine, one-hour expiry),
+ * so an id polled on another instance reports {@code unknown}.
  */
 @ApplicationScoped
 public class RagIngestionService {

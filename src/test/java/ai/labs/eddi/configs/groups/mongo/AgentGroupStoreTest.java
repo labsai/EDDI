@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.ServiceJudgeConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -224,6 +226,28 @@ class AgentGroupStoreTest {
         var e = assertThrows(IllegalArgumentException.class, () -> store.rejectNestingCycle("g1", parent));
         assertTrue(e.getMessage().contains("g1"), e.getMessage());
         assertDoesNotThrow(() -> store.rejectNestingCycle("g3", parent));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void serviceJudgeVaultGrantProblemsRejectTheSave() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
+        var grants = mock(ServiceJudgeVaultGrants.class);
+        store.serviceJudgeVaultGrants = grants;
+        var service = new ServiceJudgeConfig("openai", "gpt-4o-mini", Map.of("apiKey", "${vault:k}"), null, null, null);
+        var convergence = new AgentGroupConfiguration.ConvergenceConfig(true, 2, 0.8, "SERVICE", null, service);
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        c.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("P", AgentGroupConfiguration.PhaseType.OPINION, "ALL",
+                AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1, false, convergence)));
+
+        when(grants.problems(any(), any())).thenReturn(List.of());
+        assertDoesNotThrow(() -> store.validateServiceJudgeGrants(c));
+
+        when(grants.problems(eq("phases[0].convergence.service.parameters"), any())).thenReturn(List.of("x.apiKey needs a grant"));
+        var e = assertThrows(IllegalArgumentException.class, () -> store.validateServiceJudgeGrants(c));
+        assertTrue(e.getMessage().contains("x.apiKey needs a grant"), e.getMessage());
     }
 
     @Test
@@ -506,6 +530,57 @@ class AgentGroupStoreTest {
                         TiePolicy.HUMAN_DECIDES)));
         var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(unnamed));
         assertTrue(ex.getMessage().contains("humanTieBreak.decider"), ex.getMessage());
+    }
+
+    /**
+     * A nested group's tie-break pause would be cancelled by the parent's turn
+     * (nested pauses are unsupported), so the tie would never be decided — refuse
+     * it at save time, like a nested HUMAN member.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesVote_isRejected() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var child = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null))));
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> store.validateHumanMembers(parent));
+        assertTrue(ex.getMessage().contains("members['g2']") && ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
+
+        var moderatorChild = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.MODERATOR_DECIDES)));
+        doReturn(moderatorChild).when(store).readChildConfig("g2");
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
+    }
+
+    /**
+     * A HUMAN_DECIDES voteConfig left on a non-VOTE phase never starts a vote, so
+     * it must not refuse the parent that nests the group.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesConfigOnNonVotePhase_isAccepted() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var staleVoteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null));
+        var opinion = new DiscussionPhase("Opinions", PhaseType.OPINION, "ALL", TurnOrder.PARALLEL, ContextScope.NONE, false, null, 1, false,
+                null, false, staleVoteConfig);
+        var child = voteGroup(opinion);
+        assertFalse(AgentGroupStore.hasHumanDecidesVote(child));
+
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
     }
 
     @Test

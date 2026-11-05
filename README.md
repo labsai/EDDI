@@ -70,6 +70,16 @@ bash install.sh --eddi-version=6.5.0       # Pin a release (image and compose fi
 bash install.sh --dry-run                  # Show the image tag and the git ref the files come from
 ```
 
+PowerShell equivalents (`install.ps1`):
+
+```powershell
+.\install.ps1 -Defaults                    # All defaults, no prompts
+.\install.ps1 -Database postgres -WithAuth # PostgreSQL + Keycloak
+.\install.ps1 -Full                        # Everything enabled
+.\install.ps1 -Local                       # Build Docker image from local source (run from a repo checkout, after .\mvnw.cmd package -DskipTests)
+.\install.ps1 -DryRun                      # Show what would be done
+```
+
 With the default `latest` image, the compose files are downloaded from the newest
 release's tag (looked up through the GitHub API), not from `main`.
 
@@ -322,7 +332,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (80+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). On an authenticated instance `/mcp` is an OAuth protected resource, so clients [sign themselves in](docs/mcp-server.md#the-client-signs-itself-in-preferred). Connect agents to external [MCP tool servers](docs/mcp-client.md) |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (96 tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). On an authenticated instance `/mcp` is an OAuth protected resource, so clients [sign themselves in](docs/mcp-server.md#the-client-signs-itself-in-preferred). Connect agents to external [MCP tool servers](docs/mcp-client.md) |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation. Outbound, [connections](docs/connections.md) give agents per-user OAuth grants to external systems |
@@ -500,7 +510,7 @@ Both UIs live in this repository (`ui/manager`, `ui/chat`) and are built into th
 | **[Agent Config Authoring](docs/agent-config-authoring.md)** | Rules and pitfalls for writing agent JSON          |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge bases, crawled and uploaded sources, retrieval |
-| **[MCP Server](docs/mcp-server.md)**                         | 80+ tools for AI-assisted agent management         |
+| **[MCP Server](docs/mcp-server.md)**                         | 96 tools for AI-assisted agent management         |
 | **[MCP Client](docs/mcp-client.md)**                         | Connecting agents to external MCP servers          |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
 | **[OpenAI-Compatible API](docs/open-webui-integration.md)**  | Agents as OpenAI models for Open WebUI & SDKs      |

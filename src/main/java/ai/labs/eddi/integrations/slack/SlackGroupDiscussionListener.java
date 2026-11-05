@@ -86,6 +86,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     private volatile boolean synthesisPosted = false;
     private volatile String groupQuestion;
     private volatile String groupConversationId;
+    private volatile boolean showApprovalContext = false;
 
     /**
      * Context snapshot for an agent's participation — used for follow-up
@@ -145,6 +146,15 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         this.hitlApprovalChannel = hitlApprovalChannel;
         this.hitlApproverUserIds = hitlApproverUserIds;
         this.integrationName = integrationName;
+    }
+
+    /**
+     * Whether the group's {@code approvalContext} is rendered on the approval card
+     * in the channel (the integration's {@code hitlApprovalContext} opt-in).
+     * Default {@code false}: the card carries a one-line hint instead.
+     */
+    public void setShowApprovalContext(boolean showApprovalContext) {
+        this.showApprovalContext = showApprovalContext;
     }
 
     @Override
@@ -482,9 +492,18 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
                     actionValue, includeButtons);
+            // The group's approvalContext (rendered at pause commit), between the facts and
+            // the buttons.
+            boolean contextShown = SlackApprovalContextBlocks.insertBeforeActions(blocks, event.approvalContext(), showApprovalContext);
             String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
             try {
-                slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+                if (contextShown) {
+                    // Conversation text on the card: no link or media preview of anything a member
+                    // wrote.
+                    slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback, false);
+                } else {
+                    slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+                }
             } catch (SlackDeliveryException e) {
                 LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
                         LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));

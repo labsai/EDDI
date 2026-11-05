@@ -217,21 +217,19 @@ public class ChatModelRegistry {
      *            references still in place
      */
     private void requireSecretsAllowedAt(String type, Map<String, String> params) {
-        boolean explicitEndpoint = false;
         for (String key : ENDPOINT_KEYS) {
             String endpoint = params.get(key);
             if (endpoint != null && !endpoint.isBlank()) {
-                explicitEndpoint = true;
                 vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
             }
         }
-        if (explicitEndpoint) {
-            return;
-        }
-        // No endpoint key: the builder's own default applies. For most providers that
-        // is one fixed vendor host (nothing for an editor to choose), but a builder
-        // whose default an editor can steer — an OpenAI-compatible preset's region —
-        // names it, and it is held to the same check before anything is resolved.
+        // The builder's own default. For most providers that is one fixed vendor host
+        // (nothing for an editor to choose), but a builder whose default an editor can
+        // steer — an OpenAI-compatible preset's region — names it, and it is held to
+        // the same check before anything is resolved. Checked even when an endpoint
+        // key is set: a key the builder does not read (an OpenAI-compatible preset
+        // reads only baseUrl) must not stand in for the URL it does use. A builder
+        // reports no default once the key it reads is set.
         var builderProvider = languageModelApiConnectorBuilders.get(type);
         String defaultEndpoint = builderProvider == null ? null : builderProvider.get().defaultEndpoint(params);
         if (defaultEndpoint != null && !defaultEndpoint.isBlank()) {

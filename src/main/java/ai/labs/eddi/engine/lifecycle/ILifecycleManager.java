@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
+import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 
 import java.util.List;
@@ -49,5 +50,20 @@ public interface ILifecycleManager {
     default boolean reviseAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, HitlRevisionRequest request)
             throws LifecycleException, ConversationPauseException {
         return false;
+    }
+
+    /**
+     * Has the task at {@code absoluteIndex} replace the answer it gave before a
+     * RULE pause with an approver's edit ({@code hitlConfig.review
+     * .allowAnswerEdits}). Only that task's answer slot changes; nothing runs
+     * again.
+     *
+     * @return what happened; the default (a manager that cannot edit) refuses with
+     *         {@code CONFIG_DRIFT}
+     * @since 6.7.0
+     */
+    default ReviewerEditRequest.Outcome replaceAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, ReviewerEditRequest request)
+            throws LifecycleException {
+        return ReviewerEditRequest.Outcome.refused("CONFIG_DRIFT", null);
     }
 }

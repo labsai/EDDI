@@ -7,12 +7,15 @@ package ai.labs.eddi.configs.groups.mongo;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.groups.validation.GroupGapsValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
+import ai.labs.eddi.configs.groups.HandoffConfigValidator;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeValidation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -46,6 +49,13 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
 
     private static final Logger LOGGER = Logger.getLogger(AgentGroupStore.class);
 
+    /**
+     * Field-injected so the constructor tests build stays as it was; null (a store
+     * built by hand) skips the grant rule.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
     @Inject
     public AgentGroupStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "groups", documentBuilder, AgentGroupConfiguration.class);
@@ -56,9 +66,11 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
+        validateServiceJudgeGrants(groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);
@@ -78,10 +90,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
+        validateServiceJudgeGrants(groupConfiguration);
         rejectNestingCycle(id, groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);
@@ -104,6 +118,29 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      */
     static void validateMembersAndLimits(AgentGroupConfiguration config) {
         List<String> problems = memberAndLimitProblems(config);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A SERVICE judge's vault references must name secrets granted to all agents (a
+     * group has no agent identity to check a narrower grant against). Needs the
+     * secret metadata, so it is not part of the static
+     * {@link #memberAndLimitProblems}.
+     */
+    void validateServiceJudgeGrants(AgentGroupConfiguration config) {
+        if (serviceJudgeVaultGrants == null || config.getPhases() == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (int i = 0; i < config.getPhases().size(); i++) {
+            var phase = config.getPhases().get(i);
+            var service = phase != null && phase.convergence() != null ? phase.convergence().service() : null;
+            if (service != null) {
+                problems.addAll(serviceJudgeVaultGrants.problems("phases[" + i + "].convergence.service.parameters", service.parameters()));
+            }
+        }
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }
@@ -178,6 +215,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     && !AgentGroupConfiguration.ConvergenceConfig.MODE_VERDICT.equals(convergence.mode())) {
                 problems.add("phases[" + i + "].convergence.mode must be SIMILARITY or VERDICT, got " + convergence.mode());
             }
+            problems.addAll(ServiceJudgeValidation.problems("phases[" + i + "].convergence", convergence, config.getName()));
         }
         problems.addAll(presetRoleProblems(config));
         return problems;
@@ -395,7 +433,8 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * groups;</li>
      * <li>a group containing HUMAN members may not be USED as a nested GROUP member
      * (one level deep here; {@code MemberTurnExecutor} carries the runtime backstop
-     * for configs edited afterwards);</li>
+     * for configs edited afterwards) — nor may a group whose VOTE phase uses
+     * {@code tiePolicy: HUMAN_DECIDES}, which pauses the same way;</li>
      * <li>{@code humanMemberConfig.turnTimeout} must parse as an ISO-8601
      * duration;</li>
      * <li>a HUMAN moderator is allowed but warned about — every synthesis then
@@ -419,6 +458,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                             "members['" + member.agentId() + "'] is a nested group that contains HUMAN members — "
                                     + "human turns cannot pause a nested discussion (I6 v1); remove the human from the "
                                     + "child group or flatten the hierarchy");
+                }
+                if (child != null && hasHumanDecidesVote(child)) {
+                    throw new IllegalArgumentException(
+                            "members['" + member.agentId() + "'] is a nested group with a VOTE phase using tiePolicy "
+                                    + "HUMAN_DECIDES — a tie-break pause cannot pause a nested discussion; use "
+                                    + "MODERATOR_DECIDES or NO_DECISION in the child group or flatten the hierarchy");
                 }
             }
         }
@@ -484,6 +529,19 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
         }
         return problems;
+    }
+
+    /**
+     * True if one of the config's explicit phases is a VOTE whose tie policy is
+     * {@code HUMAN_DECIDES}. Preset styles never expand to that policy, so only
+     * explicit phases are read. A {@code voteConfig} left on a non-VOTE phase (the
+     * Manager keeps it when the type is switched) never starts a vote, so it does
+     * not count.
+     */
+    static boolean hasHumanDecidesVote(AgentGroupConfiguration config) {
+        return config.getPhases() != null && config.getPhases().stream()
+                .anyMatch(p -> p != null && p.type() == AgentGroupConfiguration.PhaseType.VOTE && p.voteConfig() != null
+                        && p.voteConfig().tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES);
     }
 
     /** True if the config lists at least one HUMAN member. */

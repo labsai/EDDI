@@ -983,7 +983,6 @@ public class OpenAiConversationBridge {
     /** Error code for input over {@code eddi.conversations.max-input-chars}. */
     static final String INPUT_TOO_LARGE_CODE = "input_too_large";
 
-    /** Translate a turn failure into the OpenAI error envelope. */
     /**
      * A {@link RejectedExecutionException} as the OpenAI error the REST surface
      * would answer: 503 {@code quota_accounting_unavailable} when the quota store
