@@ -21,8 +21,9 @@ may use, and chat, without any page answering 403.
   `AgentGroupConfiguration`. With workspaces enforced, `published` and `internal` visibility count
   as listed too. The Platform Operator (its agent id is read from the `platform.operator` global
   variable) is listed only by its explicit flag. `OperatorRevisionCheck.OPERATOR_VARIABLE` became
-  public for that. The flag is part of the JSON document, so ZIP export/import, agent sync and the
-  full-document MCP tools (`update_resource`, `update_group`) carry it.
+  public for that. The flag is part of the JSON document, so ZIP export/import and agent sync carry
+  it. Over MCP only a group's flag can be set, with `update_group`; `update_resource` does not
+  write the agent document, so an agent is listed from the Manager or over REST.
   `ListedFlagSerializationTest` pins the round trip and the default.
 - **B5.** `RestUserMemoryStoreCrossUserTest` runs the real `OwnershipValidator` and pins that
   `eddi-user` A gets 403 on every read and write of user B's memories, before the store is touched.

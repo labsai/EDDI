@@ -31,8 +31,13 @@ A **group** is included when the caller may use it (the same check as running a 
 `POST /groups/{groupId}/conversations`) and it is listed by the same rule. Groups are not deployed,
 so the first condition does not apply.
 
-An **anonymous** caller never sees more than the published agents, exactly as on `/v1/models`.
-They hold no subject, so under enforcement only `published` admits them.
+An **anonymous** caller depends on `authorization.enabled`:
+
+- **On:** both reads require the `eddi-admin`, `eddi-editor` or `eddi-user` role, so an anonymous
+  caller is refused and sees nothing, not even `published` entries.
+- **Off:** no role is checked, and workspaces cannot be enforced (they need the same switch), so
+  visibility is not consulted. Every caller, anonymous included, sees every deployed entry with
+  `"listed": true`, whatever its visibility says.
 
 ### Response shape
 
@@ -88,15 +93,19 @@ out without failing the rest of the list.
 ```
 
 `listed` is a field of the agent configuration and of the group configuration. **It defaults to
-`false`**, so upgrading a deployment lists nothing. Without that default, every signed-in user would
-be offered the Platform Operator, test agents and internal helpers the moment the catalog shipped.
+`false`**, so upgrading a deployment lists nothing by the flag alone. Without that default, every
+signed-in user would be offered the Platform Operator, test agents and internal helpers the moment
+the catalog shipped. With workspaces enforced, an existing resource whose visibility is already
+`published` or `internal` does enter the catalog on upgrade (next point), if the caller may use it
+and, for an agent, it is deployed. Check those visibilities before upgrading.
 
 - **Listing is not a permission.** A listed agent stays invisible to anyone who may not use it, and
   an unlisted agent stays usable by anyone who may (by its id, or through a link).
 - **With workspaces enforced**, `published` and `internal` visibility also count as listed. Those
   visibilities already mean "for everyone" or "for everyone signed in", so you do not need to set
-  the flag as well. With workspaces off, visibility is not consulted, and only the flag lists
-  anything.
+  the flag as well. The reverse also holds: switching the flag off does not unlist such an entry.
+  Only a narrower visibility (`team` or `private`) does, and that also changes who may use it.
+  With workspaces off, visibility is not consulted, and only the flag lists anything.
 - **The Platform Operator** counts as listed only through its own `listed: true`. Its visibility
   does not list it.
 
