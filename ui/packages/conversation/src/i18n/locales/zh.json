@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "正在使用 {{tool}}…",
   "conversation.indicator.escalating": "正在进一步查看…",
   "conversation.indicator.thinking": "思考中…",
+  "conversation.indicator.guardrail": "正在检查回复…",
   "conversation.message.noResponse": "无回复",
   "conversation.speaker.you": "你说：",
   "conversation.speaker.agent": "{{name}} 说：",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "评论",
   "conversation.rating.comment.placeholder": "还有其他想说的吗？（可选）",
   "conversation.rating.send": "发送",
-  "conversation.rating.skip": "跳过"
+  "conversation.rating.skip": "跳过",
+  "conversation.guardrail.notice": "防护栏（{{phase}}）：{{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "输入",
+  "conversation.guardrail.phaseOutput": "输出",
+  "conversation.guardrail.actionBlock": "已拦截",
+  "conversation.guardrail.actionRedact": "已脱敏",
+  "conversation.guardrail.actionReprompt": "已重新询问模型",
+  "conversation.guardrail.actionWarn": "已标记"
 }

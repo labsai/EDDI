@@ -296,3 +296,13 @@ describe("ChatMessage — guardrail notices", () => {
     expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
   });
 });
+
+describe("ChatMessage — designer images", () => {
+  it("renders image output items as images, without a \"No response\" placeholder", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentNoContent, images: [{ uri: "https://cdn.example/chart.png", alt: "Chart" }] }} />,
+    );
+    expect(screen.getByRole("img", { name: "Chart" })).toHaveAttribute("src", "https://cdn.example/chart.png");
+    expect(screen.queryByText("No response")).toBeNull();
+  });
+});

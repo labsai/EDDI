@@ -1,8 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { X, AlertCircle, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
@@ -26,6 +23,7 @@ import {
   type TranscriptEntry,
   type GroupConversationState,
 } from "@/lib/api/groups";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -290,12 +288,12 @@ function AgentEntryCard({
               )}
             >
               <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                <ConversationMarkdown escapeRawHtml>
                   {truncateContent(
                     parsedContent,
                     t("groups.contentTruncated", "[Content truncated]"),
                   )}
-                </ReactMarkdown>
+                </ConversationMarkdown>
               </div>
               {isCollapsible && !isExpanded && (
                 <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -388,12 +386,12 @@ function SynthesisEntryCard({
           <AgentFailedNotice className="ps-6" />
         ) : hasContent ? (
           <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+            <ConversationMarkdown escapeRawHtml>
               {truncateContent(
                 parsedContent,
                 t("groups.contentTruncated", "[Content truncated]"),
               )}
-            </ReactMarkdown>
+            </ConversationMarkdown>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground italic ps-6">
@@ -535,9 +533,9 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           {isAgentFailurePlaceholder(content) ? (
             <AgentFailedNotice />
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+            <ConversationMarkdown escapeRawHtml>
               {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
-            </ReactMarkdown>
+            </ConversationMarkdown>
           )}
         </div>
         {isCollapsible && !isExpanded && (

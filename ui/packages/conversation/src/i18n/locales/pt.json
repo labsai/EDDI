@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "Usando {{tool}}…",
   "conversation.indicator.escalating": "Analisando com mais cuidado…",
   "conversation.indicator.thinking": "Pensando…",
+  "conversation.indicator.guardrail": "Verificando a resposta…",
   "conversation.message.noResponse": "Sem resposta",
   "conversation.speaker.you": "Você disse:",
   "conversation.speaker.agent": "{{name}} disse:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "Comentário",
   "conversation.rating.comment.placeholder": "Algo mais? (opcional)",
   "conversation.rating.send": "Enviar",
-  "conversation.rating.skip": "Pular"
+  "conversation.rating.skip": "Pular",
+  "conversation.guardrail.notice": "Guardrail ({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "entrada",
+  "conversation.guardrail.phaseOutput": "saída",
+  "conversation.guardrail.actionBlock": "bloqueou",
+  "conversation.guardrail.actionRedact": "ocultou texto",
+  "conversation.guardrail.actionReprompt": "repetiu a pergunta ao modelo",
+  "conversation.guardrail.actionWarn": "emitiu um aviso"
 }

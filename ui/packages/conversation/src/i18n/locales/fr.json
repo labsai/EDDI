@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "Utilisation de {{tool}}…",
   "conversation.indicator.escalating": "Examen plus approfondi…",
   "conversation.indicator.thinking": "Réflexion…",
+  "conversation.indicator.guardrail": "Vérification de la réponse…",
   "conversation.message.noResponse": "Aucune réponse",
   "conversation.speaker.you": "Vous avez dit :",
   "conversation.speaker.agent": "{{name}} a dit :",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "Commentaire",
   "conversation.rating.comment.placeholder": "Autre chose ? (facultatif)",
   "conversation.rating.send": "Envoyer",
-  "conversation.rating.skip": "Passer"
+  "conversation.rating.skip": "Passer",
+  "conversation.guardrail.notice": "Garde-fou ({{phase}}) : {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "entrée",
+  "conversation.guardrail.phaseOutput": "sortie",
+  "conversation.guardrail.actionBlock": "bloqué",
+  "conversation.guardrail.actionRedact": "masqué",
+  "conversation.guardrail.actionReprompt": "modèle relancé",
+  "conversation.guardrail.actionWarn": "signalé"
 }

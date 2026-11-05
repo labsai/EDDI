@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ConversationSnapshot, type SSEEvent } from "@eddi/core";
 import { AgentConversation, SECRET_BUBBLE } from "./agent-conversation";
+import { initialConversationState } from "./state";
 import type { AgentTransport } from "./transport";
 
 type Snap = Partial<ConversationSnapshot>;
@@ -551,5 +552,187 @@ describe("pause, cancel, stop", () => {
     expect(await c.refreshAfterPause(() => false)).toBe(true);
     expect(texts(c)).toEqual(["Awaiting approval", "Done"]);
     expect(c.getSnapshot().conversationState).toBe("READY");
+  });
+});
+
+describe("host hooks (a host with its own store and its own copy)", () => {
+  it("keeps the state in the host's store and notifies through it", async () => {
+    let held = { ...initialConversationState };
+    const listeners = new Set<() => void>();
+    const store = {
+      get: () => held,
+      set: (next: typeof held) => {
+        held = next;
+        listeners.forEach((l) => l());
+      },
+      subscribe: (l: () => void) => {
+        listeners.add(l);
+        return () => {
+          listeners.delete(l);
+        };
+      },
+    };
+    const c = await opened(fakeTransport(), { store });
+    const listener = vi.fn();
+    c.subscribe(listener);
+    await c.send("hello");
+    expect(held.messages.map((m) => m.content)).toEqual(["hello", "hi"]);
+    expect(c.getSnapshot()).toBe(held);
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it("follows the host's generation: a turn it moved past writes nothing", async () => {
+    let gen = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transport = fakeTransport({
+      stream: vi.fn(async function* () {
+        await gate;
+        yield ev("token", "late");
+        yield done({ conversationState: "READY", conversationOutputs: [output("late")] });
+      }),
+    });
+    const c = await opened(transport, { generation: () => gen });
+    const sending = c.send("hi");
+    gen += 1;
+    c.dispatch({ type: "CLEAR_MESSAGES" });
+    release();
+    await sending;
+    expect(texts(c)).toEqual([]);
+  });
+
+  it("drains a detached stream for the grace period, then aborts it", async () => {
+    let aborted = false;
+    let reached!: () => void;
+    const atGate = new Promise<void>((r) => (reached = r));
+    const transport = fakeTransport({
+      stream: vi.fn((_id: string | null, _text: string, { signal }: { signal: AbortSignal }) =>
+        (async function* () {
+          yield ev("token", "A");
+          await new Promise<void>((_, reject) => {
+            signal.addEventListener("abort", () => {
+              aborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            });
+            reached();
+          });
+        })(),
+      ),
+    });
+    const c = await opened(transport, { detachedGraceMs: 1000 });
+    const sending = c.send("hi");
+    await atGate;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      c.reset();
+      vi.advanceTimersByTime(999);
+      expect(aborted).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+    await sending;
+    expect(texts(c)).toEqual([]);
+  });
+
+  it("hands a refusal to the host, which presents it; the turn still ends", async () => {
+    const presentFailure = vi.fn((_f: unknown, ctx: { withdraw(): void }) => {
+      ctx.withdraw();
+      return true;
+    });
+    const transport = fakeTransport({
+      stream: vi.fn(() => events(ev("error", { code: "agent_mismatch", message: "Agent version mismatch" }))),
+    });
+    const c = await opened(transport, { presentFailure, refreshAfterStream: false });
+    c.dispatch({ type: "SET_INPUT_FIELD", field: { subType: "password" } });
+    const result = await c.send("key", true);
+    expect(result.outcome).toBe("refused");
+    expect(presentFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "refused", code: "agent_mismatch", message: "Agent version mismatch" }),
+      expect.objectContaining({ text: "key", isSecret: true, answeredField: { subType: "password" } }),
+    );
+    // No notice of the controller's own: the host said it.
+    expect(texts(c)).toEqual([]);
+    expect(c.getSnapshot().isProcessing).toBe(false);
+    expect(transport.read).toHaveBeenCalledTimes(1); // the open only
+  });
+
+  it("hands a failed request to the host and reports it to the caller", async () => {
+    const transport = fakeTransport({
+      say: vi.fn(async () => {
+        throw new ApiError(500, "boom", "Send failed");
+      }),
+    });
+    const presentFailure = vi.fn(() => true);
+    const c = await opened(transport, { streaming: false, presentFailure });
+    const result = await c.send("hi");
+    expect(result).toEqual(expect.objectContaining({ outcome: "failed" }));
+    expect(presentFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: "failed", status: 500 }), expect.anything());
+    // The host kept the bubble (it did not withdraw).
+    expect(texts(c)).toEqual(["hi"]);
+  });
+
+  it("feeds every event of the turn on screen to onStreamEvent and brackets the turn", async () => {
+    const seen: string[] = [];
+    const c = await opened(fakeTransport(), {
+      onStreamEvent: (e) => seen.push(e.type),
+      onTurnStarting: () => seen.push("start"),
+      onTurnEnd: () => seen.push("end"),
+    });
+    await c.send("hello");
+    expect(seen).toEqual(["start", "done", "end"]);
+  });
+
+  it("shows why a finished turn failed in its reply, after the reconcile", async () => {
+    const transport = fakeTransport({
+      stream: vi.fn(() =>
+        events(ev("token", "Part"), done({ conversationState: "ERROR", conversationOutputs: [output("Partial")] })),
+      ),
+    });
+    const onTurnSnapshot = vi.fn();
+    const c = await opened(transport, {
+      turnFailure: (s) => (s.conversationState === "ERROR" ? "Task failed" : null),
+      onTurnSnapshot,
+    });
+    await c.send("go");
+    expect(texts(c)).toEqual(["go", "Partial\n\n⚠️ Task failed"]);
+    expect(onTurnSnapshot).toHaveBeenCalledWith(expect.objectContaining({ conversationState: "ERROR" }));
+  });
+
+  it("shows files as chips, and never forwards one with a secret turn", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport, { attachmentDisplay: "chips" });
+    const file = { storageRef: "s1", fileName: "a.png", mimeType: "image/png", previewUrl: "blob:x" };
+    await c.send("look", false, { attachments: [file] });
+    const user = c.getSnapshot().messages.find((m) => m.role === "user");
+    expect(user?.content).toBe("look");
+    expect(user?.attachments).toEqual([{ fileName: "a.png", mimeType: "image/png", previewUrl: "blob:x" }]);
+    expect(transport.stream).toHaveBeenLastCalledWith(
+      "c1",
+      "look",
+      expect.objectContaining({ context: { attachment_0: { type: "object", value: { storageRef: "s1", fileName: "a.png" } } } }),
+    );
+    await c.send("pw", true, { attachments: [file] });
+    expect(transport.stream).toHaveBeenLastCalledWith(
+      "c1",
+      "pw",
+      expect.objectContaining({ context: { secretInput: { type: "string", value: "true" } } }),
+    );
+  });
+
+  it("reads output texts the host's way", async () => {
+    const transport = fakeTransport({
+      say: vi.fn(async () => ({ conversationOutputs: [{ "output:text:x": "legacy" }] }) as unknown as Snap),
+    });
+    const c = await opened(transport, {
+      streaming: false,
+      outputTexts: (o) =>
+        Object.entries(o)
+          .filter(([k]) => k.startsWith("output:text:"))
+          .map(([, v]) => String(v)),
+    });
+    await c.send("hi");
+    expect(texts(c)).toEqual(["hi", "legacy"]);
   });
 });

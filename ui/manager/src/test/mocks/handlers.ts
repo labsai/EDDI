@@ -765,6 +765,16 @@ export const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
 /** The reply to {@link RICH_MARKDOWN_TRIGGER}. */
 export const MOCK_RICH_MARKDOWN = "Euler: $$e^{i\\pi} + 1 = 0$$\n\n```js\nconst answer = 42;\n```";
 
+/**
+ * A chat message containing this gets a streamed reply with an `image` output
+ * item (the agent designer's, not the model's), so the feature matrix can see
+ * designer images rendered. Same-origin, so the image is the app's own icon.
+ */
+export const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
+/** The image item of the reply to {@link IMAGE_OUTPUT_TRIGGER}. */
+export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "EDDI logo" };
+
 /** The reason the mocked failed turn reports. */
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
@@ -1708,7 +1718,15 @@ export const handlers = [
               conversationOutputs: [{ output: [{ type: "text", text: MOCK_RICH_MARKDOWN }] }],
             }),
           ]
-        : [
+        : body.includes(IMAGE_OUTPUT_TRIGGER)
+          ? [
+              frame("token", "Here is the logo."),
+              frame("done", {
+                conversationState: "READY",
+                conversationOutputs: [{ output: [{ type: "text", text: "Here is the logo." }, MOCK_OUTPUT_IMAGE] }],
+              }),
+            ]
+          : [
             frame("token", "Happy to help."),
             frame("done", {
               conversationState: "READY",

@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "جارٍ استخدام {{tool}}…",
   "conversation.indicator.escalating": "جارٍ التدقيق أكثر…",
   "conversation.indicator.thinking": "جارٍ التفكير…",
+  "conversation.indicator.guardrail": "جارٍ التحقق من الرد…",
   "conversation.message.noResponse": "لا يوجد رد",
   "conversation.speaker.you": "قلتَ:",
   "conversation.speaker.agent": "قال {{name}}:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "تعليق",
   "conversation.rating.comment.placeholder": "هل هناك شيء آخر؟ (اختياري)",
   "conversation.rating.send": "إرسال",
-  "conversation.rating.skip": "تخطٍّ"
+  "conversation.rating.skip": "تخطٍّ",
+  "conversation.guardrail.notice": "حاجز الحماية ({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "الإدخال",
+  "conversation.guardrail.phaseOutput": "الإخراج",
+  "conversation.guardrail.actionBlock": "حظر",
+  "conversation.guardrail.actionRedact": "نقّح",
+  "conversation.guardrail.actionReprompt": "أعاد السؤال للنموذج",
+  "conversation.guardrail.actionWarn": "حذّر"
 }

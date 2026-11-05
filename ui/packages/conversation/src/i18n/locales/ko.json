@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "{{tool}} 사용 중…",
   "conversation.indicator.escalating": "더 자세히 살펴보는 중…",
   "conversation.indicator.thinking": "생각하는 중…",
+  "conversation.indicator.guardrail": "답변을 확인하는 중…",
   "conversation.message.noResponse": "응답 없음",
   "conversation.speaker.you": "내가 한 말:",
   "conversation.speaker.agent": "{{name}}의 말:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "의견",
   "conversation.rating.comment.placeholder": "더 하실 말씀이 있나요? (선택 사항)",
   "conversation.rating.send": "보내기",
-  "conversation.rating.skip": "건너뛰기"
+  "conversation.rating.skip": "건너뛰기",
+  "conversation.guardrail.notice": "가드레일({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "입력",
+  "conversation.guardrail.phaseOutput": "출력",
+  "conversation.guardrail.actionBlock": "차단됨",
+  "conversation.guardrail.actionRedact": "마스킹됨",
+  "conversation.guardrail.actionReprompt": "모델에 재요청됨",
+  "conversation.guardrail.actionWarn": "경고됨"
 }

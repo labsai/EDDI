@@ -1,7 +1,4 @@
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { Scale, Gavel, HandCoins, Lightbulb } from "lucide-react";
 import { formatMarkdownText } from "./group-utils";
 import { cn } from "@/lib/utils";
@@ -13,6 +10,7 @@ import type {
   StructuredPayload,
   VotePayload,
 } from "@/lib/group-payloads";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 /**
  * The body of a transcript turn whose stored content is a JSON contract rather
@@ -239,7 +237,7 @@ function BargainBody({ payload, className }: { payload: BargainPayload; classNam
           data-testid="bargain-reasoning"
         >
           {/* No rehypeRaw: member output is untrusted, so raw HTML stays escaped. */}
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(payload.reasoning)}</ReactMarkdown>
+          <ConversationMarkdown escapeRawHtml>{formatMarkdownText(payload.reasoning)}</ConversationMarkdown>
         </div>
       )}
     </div>

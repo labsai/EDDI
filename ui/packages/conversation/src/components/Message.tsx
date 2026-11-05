@@ -9,7 +9,8 @@
 
 import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { RatingInput, RatingProfile, StoredRating } from "@eddi/core";
-import type { ConversationMessage } from "../controller/state";
+import { FileText, ShieldAlert } from "lucide-react";
+import type { ConversationMessage, GuardrailNotice, MessageAttachment } from "../controller/state";
 import { CopyButton, MarkdownContent } from "../markdown/Markdown";
 import { useConversationText } from "../react/hooks";
 import { StepRating } from "./StepRating";
@@ -119,10 +120,13 @@ export const Message = memo(function Message({
                 name: agentName?.trim() || t("conversation.speaker.agentDefault"),
               })}{" "}
         </span>
+        {isUser && message.attachments?.length ? <MessageAttachments attachments={message.attachments} /> : null}
         {isUser ? (
-          <p dir="auto" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-            {message.content}
-          </p>
+          message.content ? (
+            <p dir="auto" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+              {message.content}
+            </p>
+          ) : null
         ) : enableMarkdown ? (
           <div className="markdown-body" dir="auto">
             {hasContent ? (
@@ -154,6 +158,7 @@ export const Message = memo(function Message({
             ))}
           </div>
         )}
+        {!isUser && message.guardrails?.length ? <GuardrailNotes notices={message.guardrails} /> : null}
         {!isUser && hasContent && !message.isStreaming && (
           <CopyButton getText={getMessageText} label={t("conversation.copy.message")} className="message__copy" />
         )}
@@ -169,3 +174,78 @@ export const Message = memo(function Message({
     </div>
   );
 });
+
+/** A size as people read it: bytes, KB or MB. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The files a user sent with a message: an image as its local preview, any
+ * other file as a chip with its name and size. A file too large to forward
+ * inline says so — the model gets a note in its place.
+ */
+export function MessageAttachments({ attachments }: { attachments: readonly MessageAttachment[] }) {
+  const t = useConversationText();
+  return (
+    <div className="message__attachments" data-testid="message-attachments">
+      {attachments.map((a, i) => (
+        <div key={`${a.fileName}-${i}`} className="message__attachment">
+          {a.previewUrl && a.mimeType?.startsWith("image/") ? (
+            <img className="message__attachment-image" src={a.previewUrl} alt={a.fileName} />
+          ) : (
+            <span className="message__attachment-file" title={a.fileName}>
+              <FileText size="1em" aria-hidden="true" />
+              <span className="message__attachment-name">{a.fileName}</span>
+              {a.sizeBytes != null && <span className="message__attachment-size">{formatSize(a.sizeBytes)}</span>}
+            </span>
+          )}
+          {a.forwardableInline === false && (
+            <span className="message__attachment-note" data-testid="attachment-not-forwarded">
+              {t("conversation.attach.chipLarge")}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One quiet line per guardrail that fired on a reply: the phase, which
+ * guardrail, and what it did. The outcome is already in the reply (a block
+ * message, a rewrite); this is the reason. Never the screened text.
+ */
+export function GuardrailNotes({ notices }: { notices: readonly GuardrailNotice[] }) {
+  const t = useConversationText();
+  return (
+    <ul className="message__guardrails" data-testid="guardrail-notices">
+      {notices.map((n, i) => {
+        const phase =
+          n.phase === "input"
+            ? t("conversation.guardrail.phaseInput")
+            : n.phase === "output"
+              ? t("conversation.guardrail.phaseOutput")
+              : n.phase;
+        const action =
+          n.action === "block"
+            ? t("conversation.guardrail.actionBlock")
+            : n.action === "redact"
+              ? t("conversation.guardrail.actionRedact")
+              : n.action === "reprompt"
+                ? t("conversation.guardrail.actionReprompt")
+                : n.action === "warn"
+                  ? t("conversation.guardrail.actionWarn")
+                  : n.action;
+        return (
+          <li key={i} className="message__guardrail" data-testid="guardrail-notice">
+            <ShieldAlert size="1em" aria-hidden="true" />
+            {t("conversation.guardrail.notice", { phase, type: n.type, action })}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

@@ -82,7 +82,13 @@ const i18nCell: Cell = {
   },
 };
 
-const NO_RICH = "renders markdown without the shared renderer's KaTeX/highlight.js (phase 6 moves the operator; the member thread is still its own)";
+/**
+ * The operator renders through the one markdown renderer since phase 3c (the
+ * §2.5 guard in @eddi/conversation fails on any other react-markdown import),
+ * but its chat needs an activated operator, which MSW does not provide.
+ */
+const OPERATOR_RICH =
+  "renders replies through MarkdownContent (phase 3c; the one-renderer guard in packages/conversation pins it) — needs an activated operator, which MSW does not provide; the renderer's KaTeX/highlight are covered by packages/conversation and the chat-panel cells";
 
 /**
  * Mirrors RICH_MARKDOWN_TRIGGER in src/test/mocks/handlers.ts: a message that
@@ -98,6 +104,19 @@ async function askForRichMarkdown(page: Page) {
   await input.press("Enter");
 }
 
+/** The same trigger in the member thread, whose replies use the same renderer since phase 3c. */
+async function askThreadForRichMarkdown(page: Page) {
+  const input = page.getByTestId("thread-input");
+  await input.fill(`Please ${RICH_MARKDOWN_TRIGGER}`);
+  await input.press("Enter");
+}
+
+/**
+ * Mirrors IMAGE_OUTPUT_TRIGGER in src/test/mocks/handlers.ts: the reply carries
+ * an `image` output item, which the chat renders as an image.
+ */
+const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
 const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
   katex: {
     "chat-panel": {
@@ -108,8 +127,14 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
         await expect(page.locator(".katex").first()).toBeVisible({ timeout: 15_000 });
       },
     },
-    operator: { status: "no", reason: NO_RICH },
-    "workforce-thread": { status: "no", reason: NO_RICH },
+    operator: { status: "unit", reason: OPERATOR_RICH },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        await askThreadForRichMarkdown(page);
+        await expect(page.locator(".katex").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
   },
   highlight: {
     "chat-panel": {
@@ -119,16 +144,37 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
         await expect(page.locator("code.hljs").first()).toBeVisible({ timeout: 15_000 });
       },
     },
-    operator: { status: "no", reason: NO_RICH },
-    "workforce-thread": { status: "no", reason: NO_RICH },
+    operator: { status: "unit", reason: OPERATOR_RICH },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        await askThreadForRichMarkdown(page);
+        await expect(page.locator("code.hljs").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
   },
   "output-images": {
     "chat-panel": {
-      status: "no",
-      reason: "the Manager's bubble renders text parts only; image output items arrive with ChatPanel's move onto AgentConversation and Message",
+      status: "yes",
+      check: async (page) => {
+        await startSupportChat(page);
+        const input = page.getByTestId("chat-input");
+        await input.fill(`Please ${IMAGE_OUTPUT_TRIGGER}`);
+        await input.press("Enter");
+        // A designer image renders as an image (a model's image would be a link).
+        await expect(page.getByTestId("message-images").locator("img")).toBeVisible({ timeout: 15_000 });
+      },
     },
-    operator: { status: "no", reason: NO_RICH },
-    "workforce-thread": { status: "no", reason: NO_RICH },
+    operator: { status: "no", reason: "the operator chat renders text replies only (its own loop until phase 6)" },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        const input = page.getByTestId("thread-input");
+        await input.fill(`Please ${IMAGE_OUTPUT_TRIGGER}`);
+        await input.press("Enter");
+        await expect(page.getByTestId("message-images").locator("img")).toBeVisible({ timeout: 15_000 });
+      },
+    },
   },
   "quick-replies": {
     "chat-panel": {
@@ -140,7 +186,10 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
       },
     },
     operator: { status: "no", reason: "the operator chat renders no quick replies" },
-    "workforce-thread": { status: "no", reason: "the member thread renders no quick replies" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks quick replies, but it renders none yet",
+    },
   },
   "input-field": {
     "chat-panel": {
@@ -148,7 +197,10 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
       reason: "partial support; no MSW agent sends inputField — see components/chat/__tests__ (secret-input-field)",
     },
     operator: { status: "no", reason: "the operator chat ignores inputField" },
-    "workforce-thread": { status: "no", reason: "the member thread ignores inputField" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks the requested field, but it renders no field yet",
+    },
   },
   "secret-input": {
     "chat-panel": {

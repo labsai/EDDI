@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowUpCircle,
   Check,
@@ -27,6 +25,7 @@ import {
   type UpdateCheckErrorReason,
 } from "@/lib/api/updates";
 import { cn } from "@/lib/utils";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 /**
  * The GitHub mark, drawn as lucide-react 0.x drew it (ISC licence).
@@ -340,41 +339,6 @@ function ErrorText({ reason }: { reason: UpdateCheckErrorReason }) {
 /* ─── Release notes ───────────────────────────────────────────────────────── */
 
 /**
- * Markdown element overrides for release notes.
- *
- * Dropping `rehypeRaw` stops raw `<img>` tags, but **not** markdown image
- * syntax — `![x](https://tracker.example/pixel.png)` is a first-class markdown
- * node, and react-markdown renders it as a real `<img>` that the browser
- * fetches the moment the notes are expanded. That is a beacon fired at an
- * arbitrary host from a page whose stated contract is that api.github.com is
- * the only one it ever contacts, and whoever writes the release notes chooses
- * the host.
- *
- * So images become links: the URL stays visible and reachable, but nothing is
- * fetched until a human clicks. Links are safe as-is — they do not load
- * anything on render.
- */
-const MARKDOWN_COMPONENTS = {
-  img: ({ src, alt, title }: { src?: string | Blob; alt?: string; title?: string }) => {
-    const href = typeof src === "string" ? src : undefined;
-    const label = alt?.trim() || href || "image";
-    if (!href) return <span className="text-muted-foreground italic">{label}</span>;
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={title ?? href}
-        className="text-primary underline underline-offset-2"
-        data-testid="update-notes-image-link"
-      >
-        {label}
-      </a>
-    );
-  },
-} as const;
-
-/**
  * The "what did I actually get" half of an update prompt.
  *
  * Collapsed by default — a version number is the answer to "should I update",
@@ -429,7 +393,8 @@ function ReleaseNotes({
       {open && (
         <div id="update-release-notes-body" className="space-y-3 border-t border-border/60 p-3">
           {preview.markdown ? (
-            /* Deliberately NO rehypeRaw: release notes are third-party text, so
+            /* The one markdown renderer (§2.5), images as links, with raw HTML
+               ESCAPED (`escapeRawHtml`): release notes are third-party text, so
                raw HTML stays escaped rather than being injected live. EDDI's
                notes rely on that — they write `<conversationId>` and `<tool>`
                as prose placeholders, which a raw-HTML pass would swallow.
@@ -441,9 +406,7 @@ function ReleaseNotes({
                Tailwind v4 — so they described behaviour that was already coming
                from somewhere else. */
             <div className="prose prose-sm dark:prose-invert max-h-96 max-w-none overflow-y-auto [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                {preview.markdown}
-              </ReactMarkdown>
+              <ConversationMarkdown escapeRawHtml>{preview.markdown}</ConversationMarkdown>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">

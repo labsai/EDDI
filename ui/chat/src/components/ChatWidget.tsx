@@ -25,6 +25,7 @@ import {
   createConversationTransport,
   createManagedTransport,
   indicatorStatusText,
+  guardrailActive,
 } from "@eddi/conversation";
 
 import {
@@ -561,6 +562,8 @@ export function ChatWidget() {
   const lastMessage = state.messages[state.messages.length - 1];
   const replyIsStreaming =
     !!lastMessage?.isStreaming && lastMessage.role !== "user" && !!lastMessage.content;
+  // A guardrail fired on the reply being written: the wait is it at work.
+  const guardrailOnReply = guardrailActive(state.messages, state.isProcessing);
   const isEnded = state.conversationState === "ENDED";
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
@@ -615,7 +618,7 @@ export function ChatWidget() {
               data-testid="chat-activity-status"
             >
               {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
-                ? indicatorStatusText(state.isEscalating, state.activeTool, t)
+                ? indicatorStatusText(state.isEscalating, state.activeTool, t, guardrailOnReply)
                 : ""}
             </div>
 
@@ -682,6 +685,7 @@ export function ChatWidget() {
                   <ThinkingIndicator
                     escalating={state.isEscalating}
                     tool={state.activeTool}
+                    guardrail={guardrailOnReply}
                   />
                 )}
                 {state.isProcessing &&

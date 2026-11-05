@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "Usando {{tool}}…",
   "conversation.indicator.escalating": "Revisando con más detalle…",
   "conversation.indicator.thinking": "Pensando…",
+  "conversation.indicator.guardrail": "Revisando la respuesta…",
   "conversation.message.noResponse": "Sin respuesta",
   "conversation.speaker.you": "Dijiste:",
   "conversation.speaker.agent": "{{name}} dijo:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "Comentario",
   "conversation.rating.comment.placeholder": "¿Algo más? (opcional)",
   "conversation.rating.send": "Enviar",
-  "conversation.rating.skip": "Omitir"
+  "conversation.rating.skip": "Omitir",
+  "conversation.guardrail.notice": "Salvaguarda ({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "entrada",
+  "conversation.guardrail.phaseOutput": "salida",
+  "conversation.guardrail.actionBlock": "bloqueó",
+  "conversation.guardrail.actionRedact": "ocultó texto",
+  "conversation.guardrail.actionReprompt": "repreguntó al modelo",
+  "conversation.guardrail.actionWarn": "advirtió"
 }

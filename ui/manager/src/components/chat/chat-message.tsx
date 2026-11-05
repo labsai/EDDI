@@ -186,9 +186,25 @@ export const ChatMessage = memo(function ChatMessage({
                 </ConversationMarkdown>
               ) : message.isStreaming ? (
                 <TypingIndicator />
-              ) : (
+              ) : message.images?.length ? null : (
                 <p className="text-muted-foreground italic">{t("groups.noResponse", "No response")}</p>
               )}
+              {message.images?.length ? (
+                /* Images the agent designer put in the output (never ones from
+                   the model's text, which the renderer turns into links). */
+                <div className="not-prose flex flex-wrap gap-2" data-testid="message-images">
+                  {message.images.map((image, i) => (
+                    <img
+                      key={`${image.uri}-${i}`}
+                      src={image.uri}
+                      alt={image.alt ?? ""}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      className="max-h-80 max-w-full rounded-lg"
+                    />
+                  ))}
+                </div>
+              ) : null}
             </div>
           )}
         </div>

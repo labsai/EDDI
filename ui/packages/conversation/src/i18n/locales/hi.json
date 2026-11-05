@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "{{tool}} का उपयोग हो रहा है…",
   "conversation.indicator.escalating": "और ध्यान से देखा जा रहा है…",
   "conversation.indicator.thinking": "सोच रहा है…",
+  "conversation.indicator.guardrail": "उत्तर की जाँच हो रही है…",
   "conversation.message.noResponse": "कोई जवाब नहीं",
   "conversation.speaker.you": "आपने कहा:",
   "conversation.speaker.agent": "{{name}} ने कहा:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "टिप्पणी",
   "conversation.rating.comment.placeholder": "कुछ और? (वैकल्पिक)",
   "conversation.rating.send": "भेजें",
-  "conversation.rating.skip": "छोड़ें"
+  "conversation.rating.skip": "छोड़ें",
+  "conversation.guardrail.notice": "गार्डरेल ({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "इनपुट",
+  "conversation.guardrail.phaseOutput": "आउटपुट",
+  "conversation.guardrail.actionBlock": "ने ब्लॉक किया",
+  "conversation.guardrail.actionRedact": "ने रिडैक्ट किया",
+  "conversation.guardrail.actionReprompt": "ने मॉडल से दोबारा पूछा",
+  "conversation.guardrail.actionWarn": "ने चेतावनी दी"
 }
