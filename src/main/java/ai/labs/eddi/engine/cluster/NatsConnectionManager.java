@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.ConnectionListener;
+import io.nats.client.AuthenticationException;
 import io.nats.client.Consumer;
 import io.nats.client.ErrorListener;
 import io.nats.client.JetStream;
@@ -27,17 +28,29 @@ import org.jboss.logging.Logger;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedTrustManager;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,6 +58,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -68,6 +82,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * outage switches every area to its degraded policy (see
  * {@code docs/clustering.md}).
  * <p>
+ * <b>A misconfiguration is not an outage.</b> An authentication or TLS failure,
+ * or client options that cannot be built, cannot heal by retrying; such a cause
+ * is logged at ERROR, counted in {@code eddi.cluster.nats.errors{cause}} and
+ * reported by {@link #readinessProblem()}, so the node leaves the load balancer
+ * instead of serving every turn unfenced while all checks stay green.
+ * <p>
  * Only resolved when {@code eddi.messaging.type=nats}: the bean is
  * {@code @Typed} to itself and reached through {@code Instance}, so an
  * in-memory deployment never instantiates it, registers none of its meters and
@@ -83,6 +103,47 @@ public class NatsConnectionManager {
     public enum Status {
         STOPPED, CONNECTING, CONNECTED, DISCONNECTED, CLOSED
     }
+
+    /**
+     * Why a NATS call or connection attempt failed — the {@code cause} tag of
+     * {@code eddi.cluster.nats.errors}.
+     */
+    public enum ErrorCause {
+        /** Bad credentials, an expired user or an authorization violation. */
+        AUTH(true),
+        /** A TLS handshake failure: untrusted, expired or mismatched certificate. */
+        TLS(true),
+        /** Client options could not be built (credentials or TLS material). */
+        CONFIG(true),
+        /** A subject permission violation on an established connection. */
+        PERMISSION(false),
+        /** A timeout talking to the server. */
+        TIMEOUT(false),
+        /** Connection refused, reset, unknown host and other network I/O. */
+        IO(false),
+        /** A subscription that cannot keep up with its messages. */
+        SLOW_CONSUMER(false),
+        /** An error the server reported that matches nothing above. */
+        SERVER(false), OTHER(false);
+
+        private final boolean misconfiguration;
+
+        ErrorCause(boolean misconfiguration) {
+            this.misconfiguration = misconfiguration;
+        }
+
+        /** True for a cause that retrying cannot heal. */
+        public boolean isMisconfiguration() {
+            return misconfiguration;
+        }
+
+        public String tag() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+    }
+
+    /** Repeats of one cause are logged at most this often. */
+    static final long ERROR_LOG_INTERVAL_MILLIS = 60_000;
 
     private final ClusterConfig config;
     private final NodeIdentity node;
@@ -106,6 +167,21 @@ public class NatsConnectionManager {
      * connected.
      */
     private volatile long unavailableSinceMillis;
+    /**
+     * Whether this node has been connected at least once since it booted; until
+     * then it cannot take a single lease (see {@link #readinessProblem()}).
+     */
+    private volatile boolean everConnected;
+    /**
+     * The last failure retrying cannot heal, while it is unresolved: cleared by the
+     * next successful connection.
+     */
+    private volatile ErrorCause misconfiguration;
+    private volatile String misconfigurationDetail;
+    /** The last NATS error of any cause, for diagnostics. */
+    private volatile String lastError;
+    private final Map<ErrorCause, Counter> errorCounters = new EnumMap<>(ErrorCause.class);
+    private final Map<ErrorCause, AtomicLong> lastLoggedMillis = new EnumMap<>(ErrorCause.class);
     private volatile ScheduledExecutorService scheduler;
     /**
      * Lease heartbeats and lease-waiter timers only. Kept apart from
@@ -131,7 +207,13 @@ public class NatsConnectionManager {
         this.meterRegistry = meterRegistry;
         // Created here rather than in start(): components built before the startup
         // event (a lease manager injected into an early bean) can already schedule.
-        this.scheduler = Executors.newScheduledThreadPool(2, daemon("eddi-cluster-" + node.nodeId()));
+        // The two timer threads only keep time; every job runs on a virtual thread, so
+        // jobs that block on NATS or the database cannot delay presence past its TTL.
+        this.scheduler = new OffloadingScheduler(Executors.newScheduledThreadPool(2, daemon("eddi-cluster-" + node.nodeId())),
+                "eddi-cluster-" + node.nodeId());
+        for (ErrorCause cause : ErrorCause.values()) {
+            lastLoggedMillis.put(cause, new AtomicLong());
+        }
         this.leaseScheduler = Executors.newSingleThreadScheduledExecutor(daemon("eddi-cluster-lease-" + node.nodeId()));
         this.hookExecutor = Executors.newFixedThreadPool(2, daemon("eddi-cluster-connect-" + node.nodeId()));
     }
@@ -157,12 +239,11 @@ public class NatsConnectionManager {
         Options options;
         try {
             options = buildOptions();
-        } catch (IOException | GeneralSecurityException e) {
+        } catch (IOException | GeneralSecurityException | RuntimeException e) {
             // Misconfigured credentials or TLS material cannot heal by retrying: say so
-            // loudly and stay degraded rather than failing the boot of an otherwise
-            // working node.
-            LOGGER.errorf(e, "NATS client options could not be built (credentials/TLS): %s — this node runs in degraded mode",
-                    e.getMessage());
+            // loudly, and keep the node out of the load balancer (readinessProblem) rather
+            // than serving every turn unfenced.
+            recordError(ErrorCause.CONFIG, "NATS client options could not be built (credentials/TLS): " + e.getMessage(), e);
             return;
         }
         try {
@@ -183,8 +264,13 @@ public class NatsConnectionManager {
                 .reconnectJitter(Duration.ofMillis(500))
                 .maxReconnects(-1)
                 .reconnectBufferSize(8L * 1024 * 1024)
+                // A server lost without a TCP reset is noticed only through missed pings;
+                // the jnats default (2 min x 2) kept a dead connection "up" for minutes.
+                .pingInterval(config.natsPingInterval())
+                .maxPingsOut(config.natsMaxPingsOut())
+                .inboxPrefix(config.natsInboxPrefix() + ".")
                 .connectionListener(new Listener())
-                .errorListener(new QuietErrorListener());
+                .errorListener(new ClassifyingErrorListener());
         if (config.natsUsername().isPresent()) {
             builder.userInfo(config.natsUsername().get(), config.natsPassword().orElse(""));
         }
@@ -197,66 +283,129 @@ public class NatsConnectionManager {
             String seed = Files.readString(Path.of(config.natsNkeySeedFile().get()), StandardCharsets.UTF_8).trim();
             builder.authHandler(Nats.staticCredentials(null, seed.toCharArray()));
         }
-        // A tls:// or wss:// URL turns TLS on in jnats by itself, with
-        // SSLContext.getDefault() and so without the host-name check: build our
-        // context for those URLs too, not only when the flag is set.
-        if (config.natsTlsEnabled() || anyUrlRequestsTls(config.natsServers())) {
+        // Not only when eddi.nats.tls.enabled: a tls:// or wss:// server without an
+        // explicit context made jnats fall back to the JVM default context, which
+        // checks no host name — any CA-signed certificate for any host was accepted.
+        // (opentls://, jnats' trust-anything scheme, fails ClusterConfig.validate().)
+        if (config.natsTlsRequired()) {
             builder.sslContext(buildSslContext());
             if (config.natsTlsVerifyHostname()) {
-                // jnats' default (ResolveToAll) dials the resolved IP addresses, and the
-                // TLS upgrade then names the IP, so the host-name check compared the
-                // certificate with the address instead of the name in eddi.nats.url.
-                // HappyEyeballs dials the name itself and still falls back across
-                // addresses.
+                // jnats' default (ResolveToAll) dials the resolved IP addresses. The
+                // certificate check (ServerNameTrustManager) uses the configured names
+                // either way; HappyEyeballs dials the name itself, so the handshake also
+                // carries it (SNI), and still falls back across addresses.
                 builder.hostnameResolveMode(Options.HostnameResolveMode.HappyEyeballs);
             }
         }
         return builder.build();
     }
 
-    /**
-     * {@code opentls://} is left out on purpose: it is jnats' explicit
-     * trust-any-certificate scheme, and an operator who wrote it asked for that.
-     */
-    static boolean anyUrlRequestsTls(List<String> servers) {
-        return servers.stream().map(s -> s.toLowerCase(Locale.ROOT))
-                .anyMatch(s -> s.startsWith("tls://") || s.startsWith("wss://"));
-    }
-
-    private SSLContext buildSslContext() throws IOException, GeneralSecurityException {
-        SSLContext context = baseSslContext();
-        // jnats sets no endpoint identification algorithm, so without this the JDK
-        // accepts a trusted certificate issued for ANY host.
-        return config.natsTlsVerifyHostname() ? new HostnameVerifyingSslContext(context) : context;
-    }
-
-    /**
-     * The JVM's default context when no EDDI trust or key store is configured: it
-     * carries the {@code javax.net.ssl.keyStore} client certificate and the trust
-     * store a {@code tls://} URL used before EDDI built the context. A fresh
-     * context initialised with no key managers would drop that certificate and
-     * break mTLS.
-     */
-    SSLContext baseSslContext() throws IOException, GeneralSecurityException {
-        if (config.natsTlsTruststorePath().isEmpty() && config.natsTlsKeystorePath().isEmpty()) {
-            return SSLContext.getDefault();
-        }
-        TrustManagerFactory tmf = null;
-        if (config.natsTlsTruststorePath().isPresent()) {
-            KeyStore trust = loadKeyStore(config.natsTlsTruststorePath().get(), config.natsTlsTruststorePassword().orElse(""));
-            tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(trust);
-        }
-        KeyManagerFactory kmf = null;
+    SSLContext buildSslContext() throws IOException, GeneralSecurityException {
+        TrustManager[] trustManagers = trustManagers();
+        KeyManagerFactory kmf;
         if (config.natsTlsKeystorePath().isPresent()) {
             char[] password = config.natsTlsKeystorePassword().orElse("").toCharArray();
             KeyStore keys = loadKeyStore(config.natsTlsKeystorePath().get(), new String(password));
             kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             kmf.init(keys, password);
+        } else {
+            kmf = defaultKeyManagerFactory();
         }
         SSLContext context = SSLContext.getInstance("TLS");
-        context.init(kmf == null ? null : kmf.getKeyManagers(), tmf == null ? null : tmf.getTrustManagers(), null);
+        context.init(kmf == null ? null : kmf.getKeyManagers(), trustManagers, null);
         return context;
+    }
+
+    /**
+     * The JVM's default client certificate ({@code javax.net.ssl.keyStore}), for a
+     * node that configures no EDDI key store: {@code SSLContext.getDefault()} reads
+     * it, but a context initialised with no key managers would not, and mutual TLS
+     * would silently stop presenting a certificate. {@code null} when no such key
+     * store is set.
+     */
+    static KeyManagerFactory defaultKeyManagerFactory() throws IOException, GeneralSecurityException {
+        String path = System.getProperty("javax.net.ssl.keyStore", "");
+        if (path.isBlank()) {
+            return null;
+        }
+        String type = System.getProperty("javax.net.ssl.keyStoreType", KeyStore.getDefaultType());
+        String provider = System.getProperty("javax.net.ssl.keyStoreProvider", "");
+        char[] password = System.getProperty("javax.net.ssl.keyStorePassword", "").toCharArray();
+        KeyStore keys = provider.isBlank() ? KeyStore.getInstance(type) : KeyStore.getInstance(type, provider);
+        if ("NONE".equals(path)) {
+            keys.load(null, password);
+        } else {
+            try (InputStream in = Files.newInputStream(Path.of(path))) {
+                keys.load(in, password);
+            }
+        }
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(keys, password);
+        return kmf;
+    }
+
+    /**
+     * The trust store's managers (or the JVM's default CAs), each X.509 one wrapped
+     * so that the certificate must also name a configured NATS host
+     * ({@link ServerNameTrustManager}) unless
+     * {@code eddi.nats.tls.verify-hostname=false}. jnats sets no endpoint
+     * identification, and with its default resolution it dials — and hands TLS —
+     * the resolved IP (so do servers it discovers from INFO): without this, a
+     * certificate for ANY host the trust store accepts authenticated the broker.
+     */
+    TrustManager[] trustManagers() throws IOException, GeneralSecurityException {
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        if (config.natsTlsTruststorePath().isPresent()) {
+            tmf.init(loadTrustStore(config.natsTlsTruststorePath().get(), config.natsTlsTruststorePassword().orElse("")));
+        } else {
+            tmf.init((KeyStore) null);
+        }
+        TrustManager[] trustManagers = tmf.getTrustManagers();
+        if (config.natsTlsVerifyHostname()) {
+            List<String> hosts = ServerNameTrustManager.hostsOf(config.natsServers());
+            for (int i = 0; i < trustManagers.length; i++) {
+                if (trustManagers[i] instanceof X509ExtendedTrustManager x509) {
+                    trustManagers[i] = new ServerNameTrustManager(x509, hosts);
+                }
+            }
+        }
+        return trustManagers;
+    }
+
+    /**
+     * A trust store from a PKCS12/JKS file or from PEM certificates — the
+     * {@code ca.crt} of a {@code kubernetes.io/tls} Secret (cert-manager), which is
+     * what the Helm chart mounts. A PEM file may hold a whole chain.
+     */
+    static KeyStore loadTrustStore(String path, String password) throws IOException, GeneralSecurityException {
+        if (!isPem(Path.of(path))) {
+            return loadKeyStore(path, password);
+        }
+        Collection<? extends Certificate> certificates;
+        try (InputStream in = Files.newInputStream(Path.of(path))) {
+            certificates = CertificateFactory.getInstance("X.509").generateCertificates(in);
+        }
+        if (certificates.isEmpty()) {
+            throw new CertificateException("No certificate in the PEM trust store " + path);
+        }
+        KeyStore store = KeyStore.getInstance("PKCS12");
+        store.load(null, null);
+        int i = 0;
+        for (Certificate certificate : certificates) {
+            store.setCertificateEntry("nats-ca-" + i++, certificate);
+        }
+        return store;
+    }
+
+    private static boolean isPem(Path path) throws IOException {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".pem") || name.endsWith(".crt") || name.endsWith(".cer")) {
+            return true;
+        }
+        try (InputStream in = Files.newInputStream(path)) {
+            byte[] head = in.readNBytes(64);
+            return new String(head, StandardCharsets.US_ASCII).contains("-----BEGIN");
+        }
     }
 
     private static KeyStore loadKeyStore(String path, String password) throws IOException, GeneralSecurityException {
@@ -268,7 +417,7 @@ public class NatsConnectionManager {
         return store;
     }
 
-    private void registerMeters() {
+    void registerMeters() {
         Gauge.builder("eddi.cluster.nats.connected", this, m -> m.isConnected() ? 1 : 0)
                 .description("1 while this node is connected to NATS").register(meterRegistry);
         Gauge.builder("eddi.cluster.degraded", this, m -> m.isDegraded() ? 1 : 0)
@@ -276,6 +425,141 @@ public class NatsConnectionManager {
                 .register(meterRegistry);
         reconnectCounter = Counter.builder("eddi.cluster.nats.reconnects").description("NATS reconnects of this node")
                 .register(meterRegistry);
+        // Registered eagerly, every cause at 0, so that increase() sees the first error
+        // on a pod rather than starting the series at 1.
+        for (ErrorCause cause : ErrorCause.values()) {
+            errorCounters.put(cause, Counter.builder("eddi.cluster.nats.errors").tag("cause", cause.tag())
+                    .description("NATS errors of this node, by cause").register(meterRegistry));
+        }
+        Gauge.builder("eddi.cluster.nats.misconfigured", this, m -> m.misconfiguration == null ? 0 : 1)
+                .description("1 while the NATS connection fails for a reason retrying cannot heal (auth, TLS, client options)")
+                .register(meterRegistry);
+    }
+
+    /**
+     * Counts an error under its cause and logs it: a misconfiguration at ERROR, any
+     * other cause at WARN — each cause at most once a minute, so a reconnect loop
+     * does not flood the log, and the rest at DEBUG.
+     */
+    void recordError(ErrorCause cause, String message, Throwable error) {
+        lastError = cause.tag() + ": " + message;
+        Counter counter = errorCounters.get(cause);
+        if (counter != null) {
+            counter.increment();
+        }
+        if (cause.isMisconfiguration()) {
+            misconfiguration = cause;
+            misconfigurationDetail = message;
+        }
+        long now = System.currentTimeMillis();
+        AtomicLong last = lastLoggedMillis.get(cause);
+        long previous = last.get();
+        boolean log = now - previous >= ERROR_LOG_INTERVAL_MILLIS && last.compareAndSet(previous, now);
+        if (!log) {
+            LOGGER.debugf(error, "NATS %s error (node %s): %s", cause.tag(), node, message);
+        } else if (cause.isMisconfiguration()) {
+            LOGGER.errorf(error, "NATS %s error (node %s): %s — this cannot heal by retrying; the node reports not-ready "
+                    + "until it connects (eddi.cluster.readiness.fail-on-misconfiguration)", cause.tag(), node, message);
+        } else {
+            LOGGER.warnf("NATS %s error (node %s): %s", cause.tag(), node, message);
+        }
+    }
+
+    /** The cause of a NATS exception, from its type and its chain of causes. */
+    static ErrorCause classify(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof AuthenticationException) {
+                return ErrorCause.AUTH;
+            }
+            if (t instanceof CertificateException || t instanceof SSLPeerUnverifiedException
+                    || (t instanceof SSLException && isTlsPolicyFailure(t.getMessage()))) {
+                return ErrorCause.TLS;
+            }
+            if (t instanceof TimeoutException || t instanceof SocketTimeoutException) {
+                return ErrorCause.TIMEOUT;
+            }
+            String message = t.getMessage();
+            if (message != null) {
+                ErrorCause byMessage = classify(message);
+                if (byMessage == ErrorCause.AUTH || byMessage == ErrorCause.PERMISSION) {
+                    return byMessage;
+                }
+            }
+        }
+        for (Throwable t = error; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof IOException) {
+                return ErrorCause.IO;
+            }
+        }
+        return ErrorCause.OTHER;
+    }
+
+    /**
+     * Whether an {@link SSLException}'s message names a certificate or handshake
+     * policy failure, which retrying cannot heal. A handshake the peer cut off or a
+     * reset connection is an ordinary transport failure (a NATS restart, a network
+     * blip) and must not report the node as misconfigured.
+     */
+    static boolean isTlsPolicyFailure(String message) {
+        if (message == null) {
+            return false;
+        }
+        String m = message.toLowerCase(Locale.ROOT);
+        return m.contains("pkix") || m.contains("certificat") || m.contains("subject alternative") || m.contains("no name matching")
+                || m.contains("no appropriate protocol") || m.contains("protocol_version") || m.contains("handshake_failure")
+                || m.contains("bad_certificate") || m.contains("unknown_ca") || m.contains("no cipher suites in common")
+                || m.contains("unsupported_certificate") || m.contains("access_denied");
+    }
+
+    /** The cause of an error the server reported ({@code -ERR '...'}). */
+    static ErrorCause classify(String error) {
+        String e = error == null ? "" : error.toLowerCase(Locale.ROOT);
+        if (e.contains("authorization violation") || e.contains("authentication") || e.contains("user authentication expired")
+                || e.contains("account authentication expired")) {
+            return ErrorCause.AUTH;
+        }
+        if (e.contains("permissions violation")) {
+            return ErrorCause.PERMISSION;
+        }
+        if (e.contains("tls") || e.contains("certificate")) {
+            return ErrorCause.TLS;
+        }
+        if (e.contains("slow consumer")) {
+            return ErrorCause.SLOW_CONSUMER;
+        }
+        return ErrorCause.SERVER;
+    }
+
+    /**
+     * Why this node should not take traffic, if it should not: it has never
+     * connected since boot ({@code eddi.cluster.readiness.require-first-connect}),
+     * or its connection fails for a reason retrying cannot heal
+     * ({@code eddi.cluster.readiness.fail-on-misconfiguration}). Empty while
+     * connected — and during an ordinary outage after a first connection, which
+     * every replica sees at once and which must never empty the load balancer.
+     */
+    public Optional<String> readinessProblem() {
+        if (isConnected()) {
+            return Optional.empty();
+        }
+        ErrorCause cause = misconfiguration;
+        if (cause != null && config.readinessFailOnMisconfiguration()) {
+            return Optional.of("NATS " + cause.tag() + " error: " + misconfigurationDetail);
+        }
+        if (!everConnected && config.readinessRequireFirstConnect()) {
+            return Optional.of("not connected to NATS since boot");
+        }
+        return Optional.empty();
+    }
+
+    /** The last NATS error this node saw (any cause), or {@code null}. */
+    public String lastError() {
+        return lastError;
+    }
+
+    /** True once this node has been connected at least once since it booted. */
+    public boolean hasEverConnected() {
+        return everConnected;
     }
 
     /** Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread. */
@@ -316,6 +600,10 @@ public class NatsConnectionManager {
                     initContexts(conn);
                     status = Status.CONNECTED;
                     unavailableSinceMillis = 0;
+                    everConnected = true;
+                    misconfiguration = null;
+                    misconfigurationDetail = null;
+                    warnAboutReplication(conn);
                     if (reconnect) {
                         reconnects.incrementAndGet();
                         if (reconnectCounter != null) {
@@ -363,24 +651,52 @@ public class NatsConnectionManager {
         }
     }
 
-    private final class QuietErrorListener implements ErrorListener {
+    /**
+     * R1 buckets and streams on a NATS cluster of three or more servers lose their
+     * data, and this cluster its lease service, with any single server; the default
+     * {@code eddi.nats.replicas=1} used to be applied silently to an external
+     * three-node NATS. A replica count above the servers the client knows of cannot
+     * be placed at all.
+     */
+    void warnAboutReplication(Connection conn) {
+        int servers;
+        try {
+            servers = conn.getServers() == null ? 0 : conn.getServers().size();
+        } catch (RuntimeException e) {
+            return;
+        }
+        int replicas = config.natsReplicas();
+        if (replicas == 1 && servers >= 3) {
+            LOGGER.warnf("eddi.nats.replicas=1 on a NATS cluster of %d servers: every bucket and stream (leases, nonces, dead letters, "
+                    + "audit positions) lives on ONE server and is lost or unavailable with it. Set eddi.nats.replicas=3", servers);
+        } else if (servers > 0 && replicas > servers) {
+            LOGGER.warnf("eddi.nats.replicas=%d but the client knows only %d NATS server(s): buckets and streams cannot be "
+                    + "created with more replicas than there are servers", replicas, servers);
+        }
+    }
+
+    /**
+     * Classifies every error the client reports, counts it and logs it (see
+     * {@link #recordError}). A refused connection while reconnecting is reported on
+     * every attempt; the rate limit keeps it to one WARN a minute.
+     */
+    private final class ClassifyingErrorListener implements ErrorListener {
         @Override
         public void errorOccurred(Connection conn, String error) {
             anyConnection = conn;
-            LOGGER.warnf("NATS error: %s", error);
+            recordError(classify(error), error, null);
         }
 
         @Override
         public void exceptionOccurred(Connection conn, Exception exp) {
             anyConnection = conn;
-            // Connection refused while reconnecting is reported here on every attempt;
-            // the state machine already says "disconnected", so keep it at DEBUG.
-            LOGGER.debugf(exp, "NATS exception: %s", exp.getMessage());
+            ErrorCause cause = classify(exp);
+            recordError(cause, exp.getClass().getSimpleName() + ": " + exp.getMessage(), cause.isMisconfiguration() ? exp : null);
         }
 
         @Override
         public void slowConsumerDetected(Connection conn, Consumer consumer) {
-            LOGGER.warn("NATS slow consumer detected");
+            recordError(ErrorCause.SLOW_CONSUMER, "slow consumer detected: messages are being dropped", null);
         }
     }
 
@@ -470,7 +786,9 @@ public class NatsConnectionManager {
     }
 
     /**
-     * The node's scheduler for heartbeats, presence and polls; never a turn thread.
+     * The node's scheduler for presence, polls and sweeps; never a turn thread. Its
+     * tasks run on virtual threads (see {@link OffloadingScheduler}), so they may
+     * block on NATS or the database without delaying each other.
      */
     public ScheduledExecutorService scheduler() {
         ScheduledExecutorService s = scheduler;

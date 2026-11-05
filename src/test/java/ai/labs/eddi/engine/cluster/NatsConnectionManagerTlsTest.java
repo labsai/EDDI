@@ -8,24 +8,46 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.Options;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NatsConnectionManagerTlsTest {
 
-    private static Options optionsFor(String url) throws Exception {
+    private static NatsConnectionManager managerFor(String url) {
         ClusterConfig config = ClusterConfig.defaults().withNatsUrl(url);
-        NatsConnectionManager manager = new NatsConnectionManager(config, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
+        return new NatsConnectionManager(config, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
+    }
+
+    private static Options optionsFor(String url) throws Exception {
+        NatsConnectionManager manager = managerFor(url);
         try {
             return manager.buildOptions();
+        } finally {
+            manager.shutdown();
+        }
+    }
+
+    /** Every X.509 trust manager checks the configured host names. */
+    private static void assertVerifiesHostNames(String url) throws Exception {
+        NatsConnectionManager manager = managerFor(url);
+        try {
+            TrustManager[] trustManagers = manager.trustManagers();
+            assertTrue(trustManagers.length > 0);
+            for (TrustManager trustManager : trustManagers) {
+                if (trustManager instanceof X509TrustManager) {
+                    assertInstanceOf(ServerNameTrustManager.class, trustManager);
+                }
+            }
         } finally {
             manager.shutdown();
         }
@@ -37,28 +59,33 @@ class NatsConnectionManagerTlsTest {
      */
     @Test
     void aTlsUrlGetsTheHostNameVerifyingContextWithoutTheFlag() throws Exception {
-        Options options = optionsFor("tls://nats.example:4222");
-        assertInstanceOf(HostnameVerifyingSslContext.class, options.getSslContext());
+        SSLContext context = optionsFor("tls://nats.example:4222").getSslContext();
+        assertNotNull(context);
+        assertNotSame(SSLContext.getDefault(), context, "the JVM default context checks no host name");
+        assertVerifiesHostNames("tls://nats.example:4222");
     }
 
     /**
-     * Without an EDDI trust or key store the JVM default context is the base, so a
-     * javax.net.ssl.keyStore client certificate (mTLS) still goes out.
+     * Without an EDDI key store and without {@code javax.net.ssl.keyStore} there is
+     * no client certificate to present (with it, NatsTlsHandshakeTest shows the
+     * JVM's certificate going out).
      */
     @Test
-    void withoutEddiTlsMaterialTheJvmDefaultContextIsKept() throws Exception {
-        ClusterConfig config = ClusterConfig.defaults().withNatsUrl("tls://nats.example:4222");
-        NatsConnectionManager manager = new NatsConnectionManager(config, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
+    void withoutAnyKeyStoreNoClientCertificateIsPresented() throws Exception {
+        String previous = System.getProperty("javax.net.ssl.keyStore");
+        System.clearProperty("javax.net.ssl.keyStore");
         try {
-            assertSame(SSLContext.getDefault(), manager.baseSslContext());
+            assertNull(NatsConnectionManager.defaultKeyManagerFactory());
         } finally {
-            manager.shutdown();
+            if (previous != null) {
+                System.setProperty("javax.net.ssl.keyStore", previous);
+            }
         }
     }
 
     /**
      * jnats' default resolution dials the resolved IP and the TLS upgrade then
-     * names the IP; the host-name check must see the name in the URL.
+     * names the IP; with host-name verification the node dials the name.
      */
     @Test
     void hostNameVerificationDialsTheHostName() throws Exception {
@@ -69,6 +96,9 @@ class NatsConnectionManagerTlsTest {
         NatsConnectionManager manager = new NatsConnectionManager(unverified, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
         try {
             assertNotEquals(Options.HostnameResolveMode.HappyEyeballs, manager.buildOptions().hostnameResolveMode());
+            for (TrustManager trustManager : manager.trustManagers()) {
+                assertFalse(trustManager instanceof ServerNameTrustManager, "verify-hostname=false must not check names");
+            }
         } finally {
             manager.shutdown();
         }
@@ -76,13 +106,16 @@ class NatsConnectionManagerTlsTest {
 
     @Test
     void aWebsocketTlsUrlGetsItToo() throws Exception {
-        assertInstanceOf(HostnameVerifyingSslContext.class, optionsFor("wss://nats.example:443").getSslContext());
+        assertNotNull(optionsFor("wss://nats.example:443").getSslContext());
+        assertVerifiesHostNames("wss://nats.example:443");
     }
 
     @Test
     void schemesThatRequestTls() {
-        assertTrue(NatsConnectionManager.anyUrlRequestsTls(List.of("nats://a:4222", "TLS://b:4222")));
-        assertFalse(NatsConnectionManager.anyUrlRequestsTls(List.of("nats://a:4222")));
-        assertFalse(NatsConnectionManager.anyUrlRequestsTls(List.of("opentls://a:4222")), "opentls is jnats' explicit trust-any scheme");
+        assertTrue(ClusterConfig.defaults().withNatsUrl("nats://a:4222,TLS://b:4222").natsTlsRequired());
+        assertFalse(ClusterConfig.defaults().withNatsUrl("nats://a:4222").natsTlsRequired());
+        // opentls:// (jnats' trust-anything scheme) is refused by
+        // ClusterConfig.validate().
+        assertFalse(ClusterConfig.defaults().withNatsUrl("opentls://a:4222").natsTlsRequired());
     }
 }

@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -260,6 +261,34 @@ class GracefulShutdownServiceTest {
         shutdownService.onShutdown(new ShutdownEvent());
 
         assertTrue(shutdownService.isShuttingDown());
+    }
+
+    /**
+     * C7: turns used to be refused from the moment of SIGTERM, while the endpoint
+     * removal had not yet reached every proxy — a burst of 503s on every rolling
+     * update and scale-in. Readiness goes DOWN at once; the gate closes after the
+     * readiness grace.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("during the readiness grace, readiness is DOWN but turns are still admitted")
+    void turnsAreAdmittedDuringTheReadinessGrace() throws Exception {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        when(coordinator.getQueueDepths()).thenReturn(Map.of());
+        var shutdownService = new GracefulShutdownService(coordinator, 1_000L, 600L, 1L);
+        var healthCheck = new ShutdownReadinessHealthCheck(shutdownService);
+
+        Thread drainThread = new Thread(shutdownService::drain);
+        drainThread.start();
+        Thread.sleep(200);
+
+        assertEquals(HealthCheckResponse.Status.DOWN, healthCheck.call().getStatus(), "readiness flips at once");
+        assertFalse(shutdownService.isShuttingDown(), "turns still routed here during the grace are served, not refused");
+        verify(coordinator, never()).beginShutdown();
+
+        drainThread.join(10_000);
+        assertTrue(shutdownService.isShuttingDown(), "after the grace the gate is closed");
+        verify(coordinator).beginShutdown();
     }
 
     @Test
