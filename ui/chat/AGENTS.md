@@ -77,10 +77,13 @@ conversation, shared with every other agent surface (phase 3b):
   package, with a case in `agent-conversation.test.ts`, never here.
 - **The components** — `Message` (the one markdown renderer, `MarkdownContent`: KaTeX,
   highlight.js and the raw-HTML parser each a lazy chunk; images in model text become
-  links), `MessageList` (the transcript that follows new content), `Composer`,
-  `SecretInput`, `QuickReplies`, `ThinkingIndicator` / `TypingIndicator`, `PausedCard`,
-  `RatingCard`, `StepRating`, `ScrollToBottom`. They keep their BEM class names, styled
-  by `chat.css` here.
+  links; a reply's guardrail notes and a sent message's attachments under the bubble),
+  `MessageList` (the transcript that follows new content), `Composer`, `SecretInput`,
+  `QuickReplies`, `ThinkingIndicator` (thinking, tool, cascade, and "Checking the
+  reply…" while a guardrail that fired is at work — `guardrailActive`) /
+  `TypingIndicator`, `PausedCard`, `RatingCard`, `StepRating`, `ScrollToBottom`. They
+  keep their BEM class names, styled by `chat.css` here. The controller's host hooks
+  (README → Host hooks) are the Manager's; the widget uses none of them.
 - **The `conversation.*` strings** — every string those render, in the eleven locales,
   merged into the widget's bundles by `withConversationLocales` (`src/i18n`).
   `ChatProvider` hands the widget's `t` to the components (`ConversationTextProvider`)
