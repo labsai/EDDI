@@ -121,6 +121,7 @@
 - [Code Review Standards](code-review-standards.md)
 - [Build Reproducibility](build-reproducibility.md)
 - [Changelog](changelog.md)
+  - [November 2026](changelog/2026-11.md)
   - [October 2026](changelog/2026-10.md)
   - [September 2026](changelog/2026-09.md)
   - [August 2026](changelog/2026-08.md)
