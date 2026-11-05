@@ -855,11 +855,14 @@ same explanation instead of the buttons, because it has no id for the endpoints 
 ### Store support for replacement
 
 Replacing a document's chunks needs `removeAll(Filter)` on the vector store, with a compound filter
-(document id and owning source). Verified for `in-memory` and `pgvector`. The other supported stores —
-`mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma` — are expected to support it through their
-langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
-and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
-backend.
+(document id and owning source). Verified for `in-memory`, `pgvector` and `chroma` — Chroma by
+`ChromaReplacementIT`, which runs a changed page, a page removed from the site and a deleted upload
+through the real ingestion pipeline against a `chromadb/chroma:1.1.0` container (the image
+`docker-compose.chroma.yml` ships, on the default `apiVersion` `V2`) and finds the stale chunks gone
+with `replaceUnsupported` not raised. The other supported stores — `mongodb-atlas`,
+`elasticsearch`, `qdrant` — are expected to support it through their langchain4j drivers but are not
+covered by these tests. Where a store does not, the run still succeeds and reports
+`replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that backend.
 
 ## Observability
 
@@ -1037,8 +1040,8 @@ parameter rather than ignoring it.
 > store was replaced or removed. Its remaining writes would otherwise land in a store nothing reads,
 > outside the cap. The next run re-embeds into the current store. Any agent expected to answer from a knowledge base after a restart needs a persistent store.
 > `storeType` still **defaults to** `in-memory`, so persistence is opt-in: `pgvector` is the
-> recommended choice, and — with `in-memory` — one of the two stores whose document-replacement
-> semantics are verified (see [Ingestion Sources](#ingestion-sources)).
+> recommended choice, and — with `in-memory` and `chroma` — one of the three stores whose
+> document-replacement semantics are verified (see [Ingestion Sources](#ingestion-sources)).
 
 ## Capabilities
 
