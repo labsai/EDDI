@@ -1306,4 +1306,62 @@ class RagSourceIngestionServiceTest {
             assertTrue(fileStore.list(keyOf(source)).isEmpty());
         }
     }
+
+    @Nested
+    @DisplayName("which source holds a document by name")
+    class SourceHoldingDocument {
+
+        private IngestionSource upload() {
+            var source = new IngestionSource();
+            source.setId("src-files");
+            source.setName("handbooks");
+            source.setType(IngestionSource.TYPE_UPLOAD);
+            return source;
+        }
+
+        private RagConfiguration knowledgeBase(IngestionSource... sources) {
+            var config = new RagConfiguration();
+            config.setName("product-docs");
+            config.setSources(List.of(sources));
+            return config;
+        }
+
+        @Test
+        @DisplayName("an upload source holds its files, by name and by id")
+        void uploadedFile() {
+            var upload = upload();
+            var file = fileStore.store(IngestionPipeline.stateKey(KB_ID, upload), "handbook.pdf", "application/pdf",
+                    "x".getBytes(UTF_8));
+            var kb = knowledgeBase(source(null), upload);
+
+            assertEquals("src-files",
+                    service.sourceHoldingDocument(KB_ID, kb, "handbook.pdf").map(IngestionSource::getId).orElse(null));
+            assertEquals("src-files",
+                    service.sourceHoldingDocument(KB_ID, kb, file.fileId()).map(IngestionSource::getId).orElse(null));
+            assertTrue(service.sourceHoldingDocument(KB_ID, kb, "pricing.md").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a crawling source holds the pages its state records, until they are tombstoned")
+        void crawledPage() {
+            var crawl = source(null);
+            String key = IngestionPipeline.stateKey(KB_ID, crawl);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.recordIngested(key, "https://example.com/pricing", "hash", null, null, runId);
+            var kb = knowledgeBase(crawl);
+
+            assertEquals(SOURCE_ID, service.sourceHoldingDocument(KB_ID, kb, "https://example.com/pricing")
+                    .map(IngestionSource::getId).orElse(null));
+
+            stateStore.markTombstoned(key, List.of("https://example.com/pricing"));
+            assertTrue(service.sourceHoldingDocument(KB_ID, kb, "https://example.com/pricing").isEmpty(),
+                    "a tombstoned page's vectors are already gone");
+        }
+
+        @Test
+        @DisplayName("a knowledge base without sources holds nothing")
+        void noSources() {
+            assertTrue(service.sourceHoldingDocument(KB_ID, new RagConfiguration(), "pricing.md").isEmpty());
+        }
+    }
 }
