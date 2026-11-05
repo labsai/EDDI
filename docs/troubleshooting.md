@@ -31,7 +31,7 @@ In production mode (`java -jar`, the Docker image), several guards refuse to sta
 
 - **Error:** `IllegalStateException: OIDC must be enabled in production. Set QUARKUS_OIDC_TENANT_ENABLED=true and configure your Keycloak realm, or explicitly opt out with EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true.`
 - **Cause:** `quarkus.oidc.tenant-enabled=false` (the shipped default) in production mode, without the opt-out.
-- **Fix:** Turn on OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus your realm settings). For a local or demo setup only, set `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. EDDI then logs `[SECURITY]` ... `OIDC is DISABLED in production mode!` at startup and an hourly `REMINDER: OIDC is DISABLED in production.` warning.
+- **Fix:** Turn on OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus your realm settings). For a local or demo setup only, set `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. EDDI then logs `[SECURITY]` ... `OIDC is DISABLED in production mode!` once at startup. A repeating `REMINDER: OIDC is DISABLED in production.` warning is opt-in via `EDDI_SECURITY_UNAUTHENTICATED_REMINDER_INTERVAL` (default `off`).
 
 ### Boot fails: high-value surfaces open without authentication
 
