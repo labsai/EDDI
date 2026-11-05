@@ -37,6 +37,7 @@ import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -68,6 +69,11 @@ import ai.labs.eddi.engine.cluster.NodeIdentity;
  * JetStream while holding the per-conversation lock, which stacked 10/20/30 s
  * delays when NATS was slow.
  * <p>
+ * <b>Handoff</b>: when a turn finishes and the next turn of the same
+ * conversation is already queued on this node, the lease goes straight to it
+ * (see {@link IConversationLeaseManager#handOver}) — no release, no new acquire
+ * — unless another node is waiting for it.
+ * <p>
  * <b>Acquire timeout</b> ({@code eddi.cluster.lease.acquire-timeout}, 45 s):
  * the task is discarded (its {@code onDiscarded} answers the caller 409 with
  * {@code Retry-After}); it is NOT dead-lettered, because the input was never
@@ -91,6 +97,27 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     private final ClusterPresence presence;
     private final Duration acquireTimeout;
     private final ExecutorService continuations = Executors.newVirtualThreadPerTaskExecutor();
+    /**
+     * Leases parked for the next queued turn of a conversation while
+     * {@code submitNext} hands it to {@link #execute}. Each parking is its own
+     * {@link Handoff}, compared by identity: the same lease is parked again by
+     * every turn it is handed to, so a turn's cleanup must only ever take back its
+     * own parking, never the one the next turn has just made.
+     */
+    private final Map<String, Handoff> handoffs = new ConcurrentHashMap<>();
+
+    /**
+     * One parking of a lease. Deliberately not a record: {@code equals} must stay
+     * identity so {@code handoffs.remove(key, parked)} cannot match a later parking
+     * of the same lease.
+     */
+    private static final class Handoff {
+        final LeaseHandle lease;
+
+        Handoff(LeaseHandle lease) {
+            this.lease = lease;
+        }
+    }
     private final List<Consumer<DeadLetterEntry>> deadLetterListeners = new CopyOnWriteArrayList<>();
     private volatile long cachedDeadLetterCount;
     private volatile long cachedTurnDeadLetters;
@@ -166,6 +193,20 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      */
     @Override
     protected void execute(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable) {
+        Handoff parked = handoffs.remove(conversationId);
+        LeaseHandle handedOver = parked == null ? null : parked.lease;
+        if (handedOver != null) {
+            if (!handedOver.isLost()) {
+                try {
+                    continuations.execute(() -> runUnderLease(conversationId, queue, callable, handedOver));
+                    return;
+                } catch (RejectedExecutionException e) {
+                    leases.release(handedOver);
+                    throw e;
+                }
+            }
+            leases.release(handedOver);
+        }
         leases.acquire(conversationId, acquireTimeout)
                 .whenCompleteAsync((lease, failure) -> {
                     if (failure != null) {
@@ -186,9 +227,8 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
                 @Override
                 public void onComplete(Void result) {
-                    leases.release(lease);
                     totalProcessed.incrementAndGet();
-                    submitNext(conversationId, queue);
+                    releaseOrHandOver(conversationId, queue, lease);
                 }
 
                 @Override
@@ -215,6 +255,39 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                 notifyDiscarded(conversationId, new DiscardedTask(discardable, e));
             }
             submitNext(conversationId, queue);
+        }
+    }
+
+    /**
+     * After a turn: hands the lease straight to the next turn of the conversation
+     * queued on this node, if there is one and the lease manager allows it (the
+     * lease is healthy and no other node is waiting for it), instead of releasing
+     * it and acquiring it again — which cost the queued turn several NATS round
+     * trips and let a turn arriving on another node in between find the lease held.
+     * {@link #execute} takes the parked lease while {@code submitNext} runs; a
+     * lease nobody took is released.
+     * <p>
+     * The cleanup removes this call's own {@link Handoff}, not "the lease": once
+     * {@code submitNext} has handed the lease on, the next turn can run to its end
+     * and park the very same lease again before this thread reaches its
+     * {@code finally}. Matching on the lease took that new parking, released the
+     * lease, and made the turn after it acquire afresh — NATS round trips, and a
+     * window for another node to take the conversation.
+     */
+    private void releaseOrHandOver(String conversationId, BlockingQueue<Callable<Void>> queue, LeaseHandle lease) {
+        if (!leases.handOver(lease)) {
+            leases.release(lease);
+            submitNext(conversationId, queue);
+            return;
+        }
+        Handoff parked = new Handoff(lease);
+        handoffs.put(conversationId, parked);
+        try {
+            submitNext(conversationId, queue);
+        } finally {
+            if (handoffs.remove(conversationId, parked)) {
+                leases.release(lease); // no queued turn took it
+            }
         }
     }
 

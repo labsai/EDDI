@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -33,7 +34,11 @@ import java.util.Map;
  * <p>
  * <strong>Strategies:</strong>
  * <ul>
- * <li>{@code truncate} — hard cut at limit with truncation note (default)</li>
+ * <li>{@code headTail} — keep the start and the end, drop the middle, with a
+ * note in its place (default when no strategy is set). The end of a tool result
+ * is where exit codes, error messages and totals usually sit.</li>
+ * <li>{@code truncate} — hard cut at limit with truncation note: keeps the
+ * start only</li>
  * <li>{@code paginate} — split into pages, return first page + responseId for
  * fetch_tool_response_page</li>
  * <li>{@code summarize} — route through a cheap summarizer model, inheriting
@@ -53,6 +58,19 @@ public class ToolResponseTruncator {
     private static final String PAGINATION_SUFFIX = "\n\n[PAGINATED: Response was %d characters. " +
             "This is page 1 of %d. Use fetch_tool_response_page(responseId=\"%s\", pageNumber=N) to retrieve more pages.]";
     private static final String SUMMARY_HEADER = "[SUMMARY — original: %d chars, tool: %s]\n";
+    private static final String HEAD_TAIL_MARKER = "\n\n[TRUNCATED: Response was %d characters, limit is %d. " +
+            "The middle %d characters were omitted; the first %d and the last %d are shown. " +
+            "Request more specific data or use pagination if available.]\n\n";
+
+    /** The strategy used when {@code truncationStrategy} is not set. */
+    static final String DEFAULT_STRATEGY = "headtail";
+
+    /**
+     * Share of the kept characters taken from the start under {@code headTail}; the
+     * rest comes from the end. The start usually says what the result is, the end
+     * how it finished, and the start is the larger part of both.
+     */
+    static final double HEAD_SHARE = 0.7;
 
     /**
      * Cost ceiling: responses larger than this (≈ 50k tokens) are too expensive to
@@ -167,9 +185,10 @@ public class ToolResponseTruncator {
         }
 
         // Determine strategy
-        String strategy = limits.getTruncationStrategy() != null ? limits.getTruncationStrategy() : "truncate";
+        String strategy = limits.getTruncationStrategy() != null ? limits.getTruncationStrategy() : DEFAULT_STRATEGY;
 
-        return switch (strategy.toLowerCase()) {
+        return switch (strategy.toLowerCase(Locale.ROOT)) {
+            case "headtail" -> headTailResponse(toolName, result, maxChars);
             case "paginate" -> paginateResponse(conversationId, toolName, result, maxChars);
             case "summarize" -> summarizeResponse(toolName, result, maxChars, limits, taskType, taskParameters,
                     spend != null ? spend : SummarizerSpend.UNMETERED);
@@ -186,6 +205,37 @@ public class ToolResponseTruncator {
 
         LOGGER.debugf("Truncated tool '%s' response: %d -> %d chars", sanitize(toolName), originalLength, maxChars);
         incrementCounter(toolName, "truncate");
+
+        return truncated;
+    }
+
+    /**
+     * Head-and-tail truncation: keeps {@link #HEAD_SHARE} of {@code maxChars} from
+     * the start and the rest from the end, with a note in place of the middle. The
+     * kept content is exactly {@code maxChars} characters, as with
+     * {@code truncate}; only the note is extra.
+     * <p>
+     * Neither cut splits a surrogate pair, so an emoji or other supplementary
+     * character at a boundary is dropped whole rather than leaving half of it.
+     */
+    private String headTailResponse(String toolName, String result, int maxChars) {
+        int originalLength = result.length();
+        int headEnd = (int) (maxChars * HEAD_SHARE);
+        int tailStart = originalLength - (maxChars - headEnd);
+        if (headEnd > 0 && Character.isHighSurrogate(result.charAt(headEnd - 1))) {
+            headEnd--;
+        }
+        if (tailStart < originalLength && Character.isLowSurrogate(result.charAt(tailStart))) {
+            tailStart++;
+        }
+        int tailLength = originalLength - tailStart;
+        String truncated = result.substring(0, headEnd)
+                + HEAD_TAIL_MARKER.formatted(originalLength, maxChars, tailStart - headEnd, headEnd, tailLength)
+                + result.substring(tailStart);
+
+        LOGGER.debugf("Truncated tool '%s' response (head and tail): %d -> %d chars", sanitize(toolName), originalLength,
+                headEnd + tailLength);
+        incrementCounter(toolName, "headtail");
 
         return truncated;
     }

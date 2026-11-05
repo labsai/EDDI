@@ -209,8 +209,8 @@ class BuiltInGuardrailsTest {
         }
 
         @Test
-        void inputOnly() {
-            assertEquals(Set.of(GuardrailPhase.INPUT), guardrail.phases());
+        void inputAndToolCallArguments() {
+            assertEquals(Set.of(GuardrailPhase.INPUT, GuardrailPhase.TOOL_CALL), guardrail.phases());
         }
 
         @ParameterizedTest
@@ -439,8 +439,8 @@ class BuiltInGuardrailsTest {
         }
 
         @Test
-        void outputOnly() {
-            assertEquals(Set.of(GuardrailPhase.OUTPUT), guardrail.phases());
+        void outputAndToolCallArguments() {
+            assertEquals(Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL), guardrail.phases());
         }
     }
 }

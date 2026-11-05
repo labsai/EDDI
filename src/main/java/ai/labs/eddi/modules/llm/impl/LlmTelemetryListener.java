@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.pricing.MeteredTokenUsage;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.listener.ChatModelErrorContext;
@@ -349,6 +350,22 @@ public class LlmTelemetryListener implements ChatModelListener {
         if (usage.outputTokenCount() != null) {
             meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", tag, "type", "output")
                     .increment(usage.outputTokenCount());
+        }
+        if (usage instanceof MeteredTokenUsage metered) {
+            incrementIfPositive("cache_read", provider, tag, metered.cacheReadTokens());
+            incrementIfPositive("cache_write", provider, tag, metered.cacheWriteTokens());
+            incrementIfPositive("reasoning", provider, tag, metered.reasoningTokens());
+        }
+    }
+
+    /**
+     * The normalized cache and thinking counts. {@code cache_read} and
+     * {@code cache_write} are subsets of {@code input}; {@code reasoning} is a
+     * subset of {@code output}.
+     */
+    private void incrementIfPositive(String type, String provider, String modelTag, int tokens) {
+        if (tokens > 0) {
+            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", modelTag, "type", type).increment(tokens);
         }
     }
 

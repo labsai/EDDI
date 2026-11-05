@@ -68,6 +68,12 @@ misbehaving source cannot decide how much heap one sync takes; the sync then fai
 has its own fixed 256 MiB cap, and is then unpacked under the
 [archive limits](import-export-an-agent.md#archive-limits).
 
+**So is the number of requests.** A sync fetches each document once — a workflow the
+source agent names several times is read and parsed once, and a document that failed is
+not asked for again — and stops after `eddi.backup.sync.max-requests` requests (default
+`10000`) with `502`, so a source naming thousands of distinct documents cannot keep a
+request worker fetching them one by one.
+
 ## Workflow
 
 ### 1. List Remote Agents
@@ -396,15 +402,15 @@ before; the first sync that writes one gives it a baseline.
 
 ### Parser documents and older promotions
 
-Parser documents travel since this release. Two consequences for what was
-promoted before:
+Parser documents travel with the agent. Two consequences for what was
+promoted by older versions:
 
 - **An agent promoted earlier names a parser its instance never had.** Its parser
   step kept the source's parser id. The next sync recreates that parser on the
   target and repoints the step (it is counted under `created`). Nothing about the
   agent's behaviour changes: the pipeline builds its parser from the workflow step
   itself and never loads the document.
-- **An archive exported before this release carries no parser document.** It
+- **An archive exported by an older version carries no parser document.** It
   imports exactly as it always did — the parser step is kept and its reference is
   left as the archive wrote it, rather than the step being dropped or the import
   refused.

@@ -31,7 +31,7 @@
 
 services:
   nats:
-    image: nats:2.11-alpine
+    image: nats:2.11.17-alpine@sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
     command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
     # Loopback-only host bindings: NATS runs here with no auth, and the monitoring
     # endpoint (8222) exposes server/connection state. EDDI reaches the broker

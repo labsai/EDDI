@@ -43,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -638,6 +639,134 @@ class IngestionPipelineTest {
             assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
             assertTrue(exploding.activeRun(IngestionPipeline.stateKey(KB_RESOURCE_ID, source())).isEmpty(),
                     "the run must be closed even when the failure came from the state store");
+        }
+
+        @Test
+        @DisplayName("vectors are not published when run ownership cannot be verified after the embedding call")
+        void unverifiableOwnershipDoesNotPublish() {
+            var down = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (down[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+            };
+            // The store goes away while the provider is computing the embeddings.
+            doAnswer(invocation -> {
+                down[0] = true;
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", pageWith("x"))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry());
+
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertTrue(embeddingStore.segments().isEmpty(),
+                    "a run that cannot confirm it still owns its source must not publish vectors");
+        }
+
+        private static String seedPage(String text) {
+            return "<html><head><title>Docs</title></head><body><main><p>" + text + "</p><a href=\"" + SITE
+                    + "/keep\">k</a></main></body></html>";
+        }
+
+        @Test
+        @DisplayName("a document skipped because ownership could not be verified is not counted as missing")
+        void unverifiableOwnershipDoesNotTombstone() {
+            var armOnLookup = new boolean[1];
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<DocumentState> lookup(String sourceId, String documentId) {
+                    if (armOnLookup[0] && documentId.equals(SITE)) {
+                        armOnLookup[0] = false;
+                        armed[0] = true;
+                    }
+                    return super.lookup(sourceId, documentId);
+                }
+
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (armed[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+
+                @Override
+                public synchronized List<DocumentState> bumpAndFindMissing(String sourceId, String runId,
+                                                                           int threshold) {
+                    // The store has recovered by the time the run reconciles.
+                    armed[0] = false;
+                    return super.bumpAndFindMissing(sourceId, runId, threshold);
+                }
+            };
+            IngestionSource strict = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(1);
+            strict.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, strict);
+
+            new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("First version."))
+                    .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            assertFalse(flaky.lookup(sourceKey, SITE).orElseThrow().tombstoned());
+
+            // The page changed, and the store cannot confirm ownership when it is time to
+            // write.
+            armOnLookup[0] = true;
+            IngestionReport report = new IngestionPipeline(
+                    new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Second version."))
+                            .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+
+            assertEquals(0, report.documentsTombstoned(), "the run learned nothing about the page, so it is not gone");
+            assertFalse(flaky.lookup(sourceKey, SITE).orElseThrow().tombstoned());
+        }
+
+        @Test
+        @DisplayName("embeddings discarded for lost ownership still count against the segment budget")
+        void discardedEmbeddingsAreCharged() {
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (armed[0]) {
+                        armed[0] = false;
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+            };
+            // The store fails once, right after the first (paid) embedding call.
+            doAnswer(invocation -> {
+                armed[0] = true;
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            IngestionSource capped = leafSource();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(1);
+            settings.setCostPerThousandSegments(1000.0);
+            capped.setSettings(settings);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><head><title>T</title></head><body><main><p>Seed.</p><a href=\"" + SITE
+                            + "/a\">a</a></main></body></html>")
+                    .page(SITE + "/a", pageWith("Second page."));
+            var pipeline = new IngestionPipeline(new WebCrawler(site), new HtmlToMarkdownConverter(), flaky, fileStore,
+                    extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+
+            verify(embeddingModel, times(1)).embedAll(any());
+            assertEquals(1.0, report.costUsd(), 0.0001, "the discarded call was paid for");
         }
 
         @Test

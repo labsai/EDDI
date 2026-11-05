@@ -57,6 +57,7 @@ import { TaskResponseValidationSection } from "./llm/task-response-validation-se
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
 import { TaskGuardrailsSection } from "./llm/task-guardrails-section";
+import { TaskToolCallGuardrailsSection } from "./llm/task-tool-call-guardrails-section";
 import { ModelSettingsSection } from "./llm/model-settings-section";
 import { ParameterVerdictNote } from "./llm/model-settings/parameter-verdict-note";
 import { numberProblem } from "./llm/model-settings/model-settings-utils";
@@ -2023,6 +2024,8 @@ function TaskEditor({
 
 
           <TaskGuardrailsSection task={task} onChange={onChange} readOnly={readOnly} />
+
+          <TaskToolCallGuardrailsSection task={task} onChange={onChange} readOnly={readOnly} />
 
 
           <TaskToolApprovalsSection task={task} onChange={onChange} readOnly={readOnly} />

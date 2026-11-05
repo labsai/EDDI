@@ -287,6 +287,16 @@ The `CapabilityRegistryService` exposes metrics at `/q/metrics`:
 |---|---|
 | `eddi.capability.query.count` | Total number of capability queries |
 | `eddi.capability.query.time` | Query execution time distribution |
+| `eddi.capability.strategy.applied{strategy}` | How often each selection strategy was applied |
+| `eddi.capability.miss.count` | Queries for a skill that no registered agent offers. It is not incremented when candidates exist but are removed later by attribute or access filtering, so it does not count every query that returns nothing |
+
+### Audit
+
+Each selection made by a `capabilitymatch` condition writes a `CAPABILITY_SELECTION` audit entry carrying the skill, the strategy, the candidate agent ids and the selected agent id, so routing decisions can be reviewed afterwards. Collection is best-effort: no entry is written when auditing is disabled for the conversation or the collector fails, so do not treat the trail as complete (see [audit-ledger.md](audit-ledger.md)).
+
+### REST
+
+The registry can also be queried over REST with `GET /capabilities` and `GET /capabilities/skills` (admin and editor roles).
 
 ---
 

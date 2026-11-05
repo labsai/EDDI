@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -27,6 +28,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -256,6 +258,25 @@ public interface IConversationMemory extends Serializable {
         return false;
     }
 
+    /**
+     * Cluster mode: binds the check that tells whether the lease this turn runs
+     * under can still be trusted (see {@code LeaseHandle#isLost}). Once it answers
+     * {@code true} the memory reads as cancelled, so every cooperative-cancel check
+     * of the pipeline — task boundaries, the LLM tool loop, the guard before the
+     * user-memory write — stops the turn without waiting for the lease manager's
+     * lost-callback to arrive. Transient, never persisted; {@code null} unbinds.
+     */
+    default void setLeaseLostCheck(BooleanSupplier leaseLost) {
+    }
+
+    /**
+     * Whether the lease bound with {@link #setLeaseLostCheck} is lost.
+     * {@code false} without a lease (single node, degraded mode).
+     */
+    default boolean isLeaseLost() {
+        return false;
+    }
+
     // === HITL pause bookmark ===
 
     /** Workflow ID where the pipeline paused. */
@@ -325,6 +346,16 @@ public interface IConversationMemory extends Serializable {
         return null;
     }
     default void setHitlPendingToolCalls(PendingToolCallBatch batch) {
+    }
+
+    /**
+     * The approval-card context rendered when the current pause was committed; null
+     * unless the agent configures {@code hitlConfig.approvalContext}.
+     */
+    default RenderedApprovalContext getHitlApprovalContext() {
+        return null;
+    }
+    default void setHitlApprovalContext(RenderedApprovalContext context) {
     }
 
     /**

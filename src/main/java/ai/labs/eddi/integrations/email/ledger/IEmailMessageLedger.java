@@ -10,10 +10,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The email message ledger (email plan §12): one row per message EDDI sends or,
- * in later phases, receives — its state, its retries, and the facts needed to
- * rebuild it. MongoDB and PostgreSQL twins, selected by
- * {@code eddi.datastore.type}.
+ * The email message ledger (email plan §12): one row per message EDDI sends or
+ * receives — its state, its retries, and the facts needed to rebuild it.
+ * MongoDB and PostgreSQL twins, selected by {@code eddi.datastore.type}.
  * <p>
  * <b>What a row is not:</b> a copy of the message. No body, subject or rendered
  * MIME is ever stored; a retry re-renders the message from its source (for a
@@ -27,8 +26,8 @@ import java.util.Optional;
  * <b>Exactly once, cluster-wide.</b> Two unique keys make every insert a claim:
  * {@link LedgerEntry#idempotencyKey()} (one notification per pause per
  * recipient however many pods observe the pause) and
- * {@code (integrationId, direction, messageId)} (the inbound dedup key of Phase
- * 2). {@link #insertIfAbsent} returns {@code false} for the loser.
+ * {@code (integrationId, direction, messageId)} (the inbound dedup key of
+ * trigger mode). {@link #insertIfAbsent} returns {@code false} for the loser.
  * <p>
  * <b>Claims.</b> A row is worked on by whoever holds its
  * {@link LedgerEntry#claimToken()}: the inserting pod for the immediate first
@@ -38,7 +37,7 @@ import java.util.Optional;
  * on the token, so a claim that was taken over cannot overwrite the new owner's
  * result.
  * <p>
- * <b>Inbound (Phase 2).</b> A trigger-mode mail is a {@link Kind#TRIGGER} row,
+ * <b>Inbound.</b> A trigger-mode mail is a {@link Kind#TRIGGER} row,
  * {@link Direction#IN}, keyed by its Message-ID, moving
  * {@code RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED} through
  * conditional {@link #transition}s. While a row is {@code RECEIVED},
@@ -46,13 +45,13 @@ import java.util.Optional;
  * {@code TURN_SUBMITTED}, it is the deadline after which the turn counts as
  * stranded ({@link #findDue}).
  * <p>
- * <b>Replies (Phase 3).</b> A conversation-mode reply is a {@link Kind#REPLY}
- * row, {@link Direction#OUT}, under an idempotency key derived from
- * conversation, step and reply kind, worked like a notification (claim, lease,
- * complete, reschedule). Its Message-ID is what a correspondent's next mail
- * names in {@code In-Reply-To}/{@code References}, so the row is also the
- * thread index ({@link #findByMessage} with {@link Direction#OUT}). Relay
- * webhooks will add single-use replay tokens.
+ * <b>Replies.</b> A conversation-mode reply is a {@link Kind#REPLY} row,
+ * {@link Direction#OUT}, under an idempotency key derived from conversation,
+ * step and reply kind, worked like a notification (claim, lease, complete,
+ * reschedule). Its Message-ID is what a correspondent's next mail names in
+ * {@code In-Reply-To}/{@code References}, so the row is also the thread index
+ * ({@link #findByMessage} with {@link Direction#OUT}). Relay webhooks will add
+ * single-use replay tokens.
  */
 public interface IEmailMessageLedger {
 
@@ -93,11 +92,11 @@ public interface IEmailMessageLedger {
 
     /** What a message is for. */
     enum Kind {
-        /** A HITL approval notification (Phase 1). */
+        /** A HITL approval notification. */
         NOTIFY,
-        /** A conversation-mode reply (Phase 3). */
+        /** A conversation-mode reply. */
         REPLY,
-        /** An inbound mail that starts a turn (trigger mode, Phase 2). */
+        /** An inbound mail that starts a turn (trigger mode). */
         TRIGGER,
         /**
          * A one-off notice to an integration's owners (a budget was reached), sent

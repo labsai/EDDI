@@ -373,8 +373,13 @@ public class ToolExecutionService {
         Span span = startToolSpan(toolName);
         try (Scope ignored = span.makeCurrent()) {
             // 1. Check rate limit — per conversation, so one conversation exhausting
-            // its allowance cannot starve the same tool for every other user.
-            if (enableRateLimiting && !rateLimiter.tryAcquire(conversationId, toolName, rateLimit)) {
+            // its allowance cannot starve the same tool for every other user. A task
+            // with rate limiting off skips only its own limit: the operator's
+            // deployment-wide ceiling (eddi.tools.ratelimit.global.*) still applies.
+            boolean admitted = enableRateLimiting
+                    ? rateLimiter.tryAcquire(conversationId, toolName, rateLimit)
+                    : !rateLimiter.refusedByGlobalLimit(toolName);
+            if (!admitted) {
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                 meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
                 markFailed(span, "rate_limited");

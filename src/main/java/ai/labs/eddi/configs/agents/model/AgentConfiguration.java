@@ -7,7 +7,10 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
 import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
+import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
+import ai.labs.eddi.configs.hitl.model.OversightConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -967,8 +970,8 @@ public class AgentConfiguration {
     private boolean enableMemoryTools = false;
 
     /**
-     * Memory configuration — only meaningful when {@code enableMemoryTools} is
-     * true.
+     * Memory configuration (recall order and size, default visibility). Applies
+     * whenever declared; {@code enableMemoryTools} only gates the LLM memory tool.
      */
     private UserMemoryConfig userMemoryConfig;
 
@@ -1749,6 +1752,23 @@ public class AgentConfiguration {
             this.toolApprovals = toolApprovals;
         }
 
+        /**
+         * Sampled audit of ungated tool calls and the earned-autonomy policy — see
+         * {@link OversightConfig}. Absent = nothing sampled, nothing recommended or
+         * suspended.
+         *
+         * @since 6.7.0
+         */
+        private OversightConfig oversight;
+
+        public OversightConfig getOversight() {
+            return oversight;
+        }
+
+        public void setOversight(OversightConfig oversight) {
+            this.oversight = oversight;
+        }
+
         /** Default for {@link #maxRevisionsPerTurn} when the field is absent. */
         public static final int DEFAULT_MAX_REVISIONS_PER_TURN = 3;
 
@@ -1794,6 +1814,41 @@ public class AgentConfiguration {
         @JsonIgnore
         public int effectiveMaxRevisionsPerTurn() {
             return maxRevisionsPerTurn != null ? maxRevisionsPerTurn : DEFAULT_MAX_REVISIONS_PER_TURN;
+        }
+
+        /**
+         * Edit-on-approve and the audit taxonomy (approval category, reason codes) —
+         * see {@link HitlReviewConfig}. Absent = approve/reject only, derived category,
+         * built-in reason codes.
+         *
+         * @since 6.7.0
+         */
+        private HitlReviewConfig review;
+
+        public HitlReviewConfig getReview() {
+            return review;
+        }
+
+        public void setReview(HitlReviewConfig review) {
+            this.review = review;
+        }
+
+        /**
+         * Context rendered for the approver when this agent pauses a conversation: the
+         * draft, its sources, the claims it makes (see {@link ApprovalContextBlock}).
+         * Rendered once when the pause is committed. Absent = no context, the card is
+         * unchanged.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> approvalContext;
+
+        public List<ApprovalContextBlock> getApprovalContext() {
+            return approvalContext;
+        }
+
+        public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
+            this.approvalContext = approvalContext;
         }
 
         /**

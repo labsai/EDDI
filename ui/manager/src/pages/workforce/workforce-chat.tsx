@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { markAgentUsed } from "@/hooks/use-recent-agents";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -28,6 +30,16 @@ export function WorkforceChat() {
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedAgentName = useChatStore((s) => s.selectedAgentName);
   const effectiveAgentId = selectedAgentId || searchParams.get("agentId") || null;
+
+  // Feeds the "last used" ordering on the Workforce dashboard. While a deep link
+  // names a different agent than the one still selected, ChatPanel has not
+  // resolved it yet; recording now would credit the previous agent.
+  const urlAgentId = searchParams.get("agentId");
+  useEffect(() => {
+    if (!selectedAgentId) return;
+    if (urlAgentId && urlAgentId !== selectedAgentId) return;
+    markAgentUsed(selectedAgentId);
+  }, [selectedAgentId, urlAgentId]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">

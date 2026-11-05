@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -11,6 +13,8 @@ import ai.labs.eddi.utils.RestUtilities;
 
 import java.net.URI;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -58,15 +62,54 @@ final class WorkflowReferenceAccess {
     }
 
     /**
-     * The resource ids a workflow's structural references name — the ones the
-     * authoring-time check has already vetted.
+     * The resource ids a workflow's structural references name with {@code VIEW} —
+     * the ones the authoring-time check has already vetted for reading.
+     * <p>
+     * An agent or group reference is left out: the authoring check gave it only
+     * {@code USE}, and an id is an id whatever the authority it is spelled under.
+     * An agent-shaped reference carrying a configuration's id used to exempt that
+     * configuration, named elsewhere in the workflow, from the export's own
+     * {@code VIEW} check — so {@code USE} on it was enough to carry its content
+     * away.
      */
     static Set<String> referencedIds(WorkflowConfiguration workflow) {
         Set<String> ids = new HashSet<>();
         for (URI uri : RestWorkflowStore.referencedResources(workflow).values()) {
-            ids.add(RestUtilities.extractResourceId(uri).getId());
+            if (!USE_ONLY_REFERENCE_TYPES.contains(uri.getHost())) {
+                ids.add(RestUtilities.extractResourceId(uri).getId());
+            }
         }
         return ids;
+    }
+
+    /**
+     * The reference types {@code RestWorkflowStore} checks for {@code USE} only;
+     * the same set as its own.
+     */
+    private static final Set<String> USE_ONLY_REFERENCE_TYPES = Set.of("ai.labs.agent", "ai.labs.group");
+
+    /**
+     * {@code RestParserStore}'s rule for a parser document written straight to its
+     * store: every dictionary (or other resource) its extensions name needs
+     * {@code VIEW}. Import and upgrade create parsers through {@code IParserStore},
+     * so a parser could keep naming a private dictionary the archive left out, and
+     * the standalone parse endpoint then matched input against that dictionary's
+     * expressions. Resources this run created pass, because their creator owns
+     * them.
+     *
+     * @throws io.quarkus.security.ForbiddenException
+     *             naming the first reference the caller may not read
+     */
+    static void requireAccessToParserReferences(ResourceAccessGuard guard, ParserConfiguration parser) {
+        if (guard == null || guard.seesEverything() || parser == null) {
+            return;
+        }
+        Map<String, URI> references = new LinkedHashMap<>();
+        RestWorkflowStore.addExtensionReferences(parser.getExtensions(), references);
+        for (URI uri : references.values()) {
+            guard.requireAccess(RestUtilities.extractResourceId(uri).getId(), AccessLevel.VIEW,
+                    "configuration referenced by this parser (" + uri.getHost() + ")");
+        }
     }
 
     /**

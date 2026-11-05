@@ -35,6 +35,11 @@ public final class SlackHitlSupport {
     // ─── platformConfig keys (see ChannelIntegrationConfiguration Javadoc) ───
     public static final String CFG_HITL_APPROVAL_CHANNEL = "hitlApprovalChannel";
     public static final String CFG_HITL_APPROVER_USER_IDS = "hitlApproverUserIds";
+    /**
+     * {@code "true"} shows the agent's {@code approvalContext} on the card, in the
+     * channel.
+     */
+    public static final String CFG_HITL_APPROVAL_CONTEXT = "hitlApprovalContext";
 
     // ─── Block Kit action ids ───
     public static final String ACTION_APPROVE = "hitl_approve";
@@ -67,6 +72,25 @@ public final class SlackHitlSupport {
     public static final String PAUSE_TYPE_TOOL_CALL = "TOOL_CALL";
 
     /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
+    /** Shown in place of the buttons when no approver user ids are configured. */
+    public static final String NO_APPROVERS_NOTE = "No approver user ids configured — approve or reject via the API.";
+
+    /**
+     * Shown in place of the buttons on a conversation's card whose pause could not
+     * be read yet: buttons that do not know their pause could approve a later one.
+     * Only the conversation's own user reaches it by writing in the thread; a
+     * message from anyone else opens their own conversation.
+     */
+    public static final String UNKNOWN_PAUSE_NOTE = "The pause could not be read yet, so this card has no buttons. The conversation's user "
+            + "can send another message in its thread to get a card with buttons, or approve or reject via the API (REST or MCP).";
+
+    /**
+     * The group counterpart of {@link #UNKNOWN_PAUSE_NOTE}: a reply in the
+     * discussion's thread does not post the card again.
+     */
+    public static final String UNKNOWN_GROUP_PAUSE_NOTE = "The pause could not be read, so this card has no buttons — approve or reject "
+            + "via the API (REST or MCP).";
+
     public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
 
     /** Notice when the user keeps messaging a paused conversation. */
@@ -262,6 +286,38 @@ public final class SlackHitlSupport {
                                                                 String title, String subjectLabel, String subjectId, String agentLabel,
                                                                 String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
                                                                 String pauseType, PendingToolCallBatch pendingToolCalls) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason, timeoutInfo, actionValue, includeButtons,
+                pauseType, pendingToolCalls, SlackHitlEditModal.CardEdits.NONE);
+    }
+
+    /**
+     * As above, with the card's edit controls (6.7): "✏️ Edit &amp; approve" and
+     * "Reject with reason…" join Approve and Reject in the {@code actions} block,
+     * which stays the LAST block of the card; a hint line goes right above it.
+     *
+     * @param edits
+     *            see {@link SlackHitlEditModal#forCard}; {@code CardEdits.NONE}
+     *            renders the pre-6.7 card
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls,
+                                                                SlackHitlEditModal.CardEdits edits) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason, timeoutInfo, actionValue, includeButtons,
+                pauseType, pendingToolCalls, edits, null);
+    }
+
+    /**
+     * As above, with the line shown in place of the buttons when there are none:
+     * {@code null} for {@link #NO_APPROVERS_NOTE}, or why this card has none (for
+     * example {@link #UNKNOWN_PAUSE_NOTE}) so the reader knows what to do instead.
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls,
+                                                                SlackHitlEditModal.CardEdits edits, String noButtonsNote) {
 
         var blocks = new ArrayList<Map<String, Object>>();
 
@@ -288,15 +344,25 @@ public final class SlackHitlSupport {
         }
 
         if (includeButtons) {
+            SlackHitlEditModal.CardEdits cardEdits = edits != null ? edits : SlackHitlEditModal.CardEdits.NONE;
+            if (cardEdits.hint() != null && !cardEdits.hint().isBlank()) {
+                blocks.add(context(safe(cardEdits.hint())));
+            }
+            var elements = new ArrayList<Map<String, Object>>();
+            elements.add(button("✅ Approve", ACTION_APPROVE, actionValue, "primary"));
+            if (cardEdits.edit()) {
+                elements.add(button("✏️ Edit & approve", SlackHitlEditModal.ACTION_EDIT, actionValue, null));
+            }
+            elements.add(button("⛔ Reject", ACTION_REJECT, actionValue, "danger"));
+            if (cardEdits.rejectWithReason()) {
+                elements.add(button("Reject with reason…", SlackHitlEditModal.ACTION_REJECT_REASON, actionValue, null));
+            }
             var actions = new LinkedHashMap<String, Object>();
             actions.put("type", "actions");
-            actions.put("elements", List.of(
-                    button("✅ Approve", ACTION_APPROVE, actionValue, "primary"),
-                    button("⛔ Reject", ACTION_REJECT, actionValue, "danger")));
+            actions.put("elements", elements);
             blocks.add(actions);
         } else {
-            blocks.add(context(
-                    "No approver user ids configured — approve or reject via the API."));
+            blocks.add(context(noButtonsNote != null ? noButtonsNote : NO_APPROVERS_NOTE));
         }
 
         return blocks;

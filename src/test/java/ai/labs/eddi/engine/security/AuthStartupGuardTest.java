@@ -10,7 +10,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import io.quarkus.scheduler.Scheduled;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -273,5 +280,86 @@ class AuthStartupGuardTest {
 
         assertTrue(collides.rolesClaimDiagnostic().isPresent());
         assertTrue(clear.rolesClaimDiagnostic().isEmpty());
+    }
+
+    // ---- unauthenticated-production reminder ----
+
+    private List<LogRecord> captureGuardLogs(Runnable action) {
+        List<LogRecord> seen = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord r) {
+                seen.add(r);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger jul = Logger.getLogger(AuthStartupGuard.class.getName());
+        // logging.properties turns ai.labs.eddi OFF for plain unit tests; open it or
+        // nothing is captured and the assertions below prove nothing.
+        Level previous = jul.getLevel();
+        jul.setLevel(Level.ALL);
+        jul.addHandler(handler);
+        try {
+            action.run();
+        } finally {
+            jul.removeHandler(handler);
+            jul.setLevel(previous);
+        }
+        return seen;
+    }
+
+    private static long count(List<LogRecord> records, Level level, String text) {
+        return records.stream().filter(r -> r.getLevel().equals(level) && String.valueOf(r.getMessage()).contains(text)).count();
+    }
+
+    @Test
+    @DisplayName("Escape hatch -> exactly one startup ERROR, and no WARN reminder at startup")
+    void escapeHatchLogsOneStartupError() throws Exception {
+        AuthStartupGuard guard = createGuard(false, true, LaunchMode.NORMAL);
+
+        List<LogRecord> logs = captureGuardLogs(() -> guard.onStart(new StartupEvent()));
+
+        assertEquals(1, count(logs, Level.SEVERE, "OIDC is DISABLED in production mode"), "one startup ERROR");
+        assertEquals(0, count(logs, Level.WARNING, "REMINDER"));
+    }
+
+    @Test
+    @DisplayName("The periodic reminder is off unless eddi.security.unauthenticated-reminder-interval is set")
+    void reminderScheduleIsOffByDefault() throws Exception {
+        Scheduled scheduled = AuthStartupGuard.class.getDeclaredMethod("periodicAuthWarning").getAnnotation(Scheduled.class);
+        assertEquals("${eddi.security.unauthenticated-reminder-interval:off}", scheduled.every(),
+                "the schedule must come from the property and default to Quarkus' 'off'");
+    }
+
+    @Test
+    @DisplayName("When the reminder fires it warns, but never twice within five minutes")
+    void reminderWarnsWhenFiredAndIsThrottled() throws Exception {
+        AuthStartupGuard guard = createGuard(false, true, LaunchMode.NORMAL);
+        guard.onStart(new StartupEvent());
+
+        List<LogRecord> logs = captureGuardLogs(() -> {
+            guard.periodicAuthWarning();
+            guard.periodicAuthWarning();
+        });
+
+        assertEquals(1, count(logs, Level.WARNING, "REMINDER: OIDC is DISABLED"), "second call inside the minimum gap is suppressed");
+    }
+
+    @Test
+    @DisplayName("The reminder is silent unless the unauthenticated escape hatch was used")
+    void reminderSilentWithoutWarnMode() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL);
+        guard.onStart(new StartupEvent());
+
+        List<LogRecord> logs = captureGuardLogs(guard::periodicAuthWarning);
+
+        assertEquals(0, logs.size());
     }
 }

@@ -53,6 +53,15 @@ public interface ContentGuardrail {
     }
 
     /**
+     * Whether evaluating this guardrail makes a model call, the thing a tool-call
+     * screening budget meters. Not the same question as {@link #screensHistory()}:
+     * the expression guardrail skips the history window but is deterministic.
+     */
+    default boolean callsModel() {
+        return false;
+    }
+
+    /**
      * Checks this guardrail's {@code parameters} when the task is deployed: a
      * message naming the problem, or null when the configuration is usable. A
      * configuration that cannot work at all (rather than one that is merely

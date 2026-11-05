@@ -285,6 +285,19 @@ class ChannelTargetRouterWebhookTest {
     }
 
     @Test
+    void everyReferenceInACompositeBotTokenIsCheckedAgainstSlack() throws Exception {
+        // The resolver expands both references, so both must be allowed to go to Slack,
+        // not only the first one.
+        var config = slack(Map.of("channelId", "C1", "botToken", "${vault:open-part}${vault:restricted-part}"));
+        storeIntegration(config);
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not allowed")).when(vaultHostAllowlist)
+                .requireAllowed(eq(List.of("${vault:open-part}", "${vault:restricted-part}")), eq("https://slack.com/api/"), anyString());
+
+        assertNull(router.getBotToken("slack", "C1"));
+        verify(secretResolver, never()).resolveValue("${vault:open-part}${vault:restricted-part}");
+    }
+
+    @Test
     void slackBotTokenAllowedToGoToSlackIsResolved() throws Exception {
         var config = slack(Map.of("channelId", "C1", "botToken", "${vault:token}"));
         storeIntegration(config);

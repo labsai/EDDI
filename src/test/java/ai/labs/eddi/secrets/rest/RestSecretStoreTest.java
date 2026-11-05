@@ -484,6 +484,21 @@ class RestSecretStoreTest {
     }
 
     @Test
+    void updateGrant_aStalePreconditionWritesNoHostList() throws Exception {
+        // The 409 says nothing was written. With the host list written first, a stale
+        // request could still clear or widen where the key may be sent.
+        givenSecretGrantedTo(List.of("agentOne"));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false,
+                new IRestSecretStore.GrantRequest(List.of("agentOne"), null, List.of("agentOne", "agentTwo"), List.of("*")));
+
+        assertEquals(409, resp.getStatus());
+        assertEquals(List.of("agentOne"), entityOf(resp).get("allowedAgents"));
+        verify(secretProvider, never()).updateAllowedHosts(any(), any());
+        verify(secretProvider, never()).updateGrant(any(), any(), any(), any());
+    }
+
+    @Test
     void updateGrant_dryRunAnswersAStalePreconditionWith409() throws Exception {
         givenSecretGrantedTo(List.of("agentOne"));
 

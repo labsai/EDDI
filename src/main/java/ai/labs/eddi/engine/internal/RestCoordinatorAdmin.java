@@ -6,18 +6,17 @@ package ai.labs.eddi.engine.internal;
 
 import java.util.Map;
 import java.util.LinkedHashMap;
-import java.util.HashMap;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.WebApplicationException;
-import ai.labs.eddi.engine.model.InputData;
-import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
-import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.cluster.admin.ClusterAdminService;
 import ai.labs.eddi.engine.api.IRestCoordinatorAdmin;
+import ai.labs.eddi.engine.model.ClusterAdminModels.ItemOutcome;
 import ai.labs.eddi.engine.model.CoordinatorStatus;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
@@ -74,9 +73,19 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
     @Inject
     IClusterRpc clusterRpc;
 
-    /** Submits replays. Field-injected; null in tests. */
+    /**
+     * Replays dead letters (claim, commit-gated delete, audit). Field-injected;
+     * null in tests.
+     */
     @Inject
-    IConversationService conversationService;
+    ClusterAdminService clusterAdmin;
+
+    /**
+     * The calling administrator, recorded with a replay. Field-injected; null in
+     * tests.
+     */
+    @Inject
+    SecurityIdentity identity;
 
     @Override
     public CoordinatorStatus getStatus(String scope) {
@@ -112,36 +121,44 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
     /**
      * A replay is a NEW turn: the failed task is gone, and re-running it would
      * repeat any side effect it already performed. The entry's captured input is
-     * submitted through the conversation service as the calling admin, with the
-     * context {@code replayOf=<entry id>}; the entry is removed only once the turn
-     * was accepted. Used to delete the entry and answer "replayed" without
-     * replaying anything.
+     * submitted through the conversation service, with the context
+     * {@code replayOf=<entry id>}.
+     * <p>
+     * Goes through the same path as the cluster console's bulk replay (A7): the
+     * entry is claimed first, so two administrators replaying it at once run it
+     * once; it is removed only once the replayed turn commits, so a turn that is
+     * skipped, times out waiting for its lease, is drained or fails keeps its
+     * input; every replay of it carries the same {@code Idempotency-Key}; and the
+     * replay is written to the audit ledger with the calling administrator.
      */
     @Override
     public void replayDeadLetter(String entryId) {
-        DeadLetterEntry entry = coordinator.getDeadLetter(entryId)
-                .orElseThrow(() -> new NotFoundException("Dead-letter entry not found: " + sanitize(entryId)));
-        if (!entry.isReplayable() || conversationService == null) {
-            throw new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN)
-                    .entity("Dead-letter entry " + sanitize(entryId) + " cannot be replayed: its input was not captured "
-                            + "(eddi.coordinator.dead-letter.capture-input=false, or not a conversation turn). Discard it instead.")
-                    .build());
+        if (clusterAdmin == null) {
+            throw new WebApplicationException(Response.status(Response.Status.SERVICE_UNAVAILABLE).type(MediaType.TEXT_PLAIN)
+                    .entity("Replay is not available on this node").build());
         }
-        Map<String, Context> context = new HashMap<>();
-        context.put("replayOf", new Context(Context.ContextType.string, entryId));
-        InputData input = new InputData(String.valueOf(entry.turn().get("input")), context);
-        try {
-            conversationService.say(entry.conversationId(), false, true, List.of(), input, false, snapshot -> {
-            });
-        } catch (Exception e) {
-            throw new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN)
-                    .entity("Replay of " + sanitize(entryId) + " was not accepted (" + e.getClass().getSimpleName() + ": "
-                            + sanitize(String.valueOf(e.getMessage())) + "); the entry is kept.")
-                    .build());
+        ItemOutcome outcome = clusterAdmin.replay(List.of(entryId), actor()).results().get(0);
+        switch (outcome.outcome()) {
+            case "REPLAYED" -> log.infof("Dead-letter %s replayed as a new turn via REST; the entry is removed once the turn commits",
+                    sanitize(entryId));
+            case "NOT_FOUND" -> throw new NotFoundException("Dead-letter entry not found: " + sanitize(entryId));
+            case "NOT_REPLAYABLE" -> throw conflict("Dead-letter entry " + sanitize(entryId) + " cannot be replayed ("
+                    + outcome.message() + "): its input was not captured (eddi.coordinator.dead-letter.capture-input=false, or not a "
+                    + "conversation turn), or its caller was already told to retry. Discard it instead.");
+            default -> throw conflict("Replay of " + sanitize(entryId) + " was not accepted (" + outcome.outcome() + ": "
+                    + sanitize(String.valueOf(outcome.message())) + "); the entry is kept.");
         }
-        coordinator.replayDeadLetter(entryId);
-        log.infof("Dead-letter %s of conversation %s replayed as a new turn via REST", sanitize(entryId),
-                sanitize(entry.conversationId()));
+    }
+
+    private static WebApplicationException conflict(String message) {
+        return new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN).entity(message).build());
+    }
+
+    private String actor() {
+        if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
+            return "anonymous";
+        }
+        return identity.getPrincipal().getName();
     }
 
     @Override

@@ -8,7 +8,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +38,15 @@ import java.util.Map;
  * </ol>
  * Apart from that one escape, invalid JSON is never "fixed" (no trailing-comma
  * repair, no quote swapping): it either parses or it is {@link Kind#INVALID}.
+ * <p>
+ * Three more local rescues are opt-in through {@link RescueOptions} (absent =
+ * none of them runs): a one-level unescape of a double-escaped object
+ * ({@code {\"a\": \"b\"}}, accepted only if it then parses to an object and
+ * only for a reply that did not parse as it was); {@code fieldAliases}, which
+ * rename a top-level key of a parsed object when the target key is absent; and
+ * {@code wrap}, which turns a still-unparseable prose reply into
+ * <code>{ wrapField: text }</code> (never text that starts with {@code {} or
+ * {@code [}, and never text over the configured length).
  *
  * <h2>Reasons</h2> {@link JsonOutcome#reason()} is always one of this class'
  * own constants. It never contains model output, because it is meant to be fed
@@ -90,16 +101,24 @@ public final class ModelOutputParser {
      *            Never model output
      * @param raw
      *            the reply exactly as received
+     * @param wrapped
+     *            true when the value is a plain-text reply wrapped into an object
+     *            ({@link RescueOptions#wrapField()}); also true on a wrapped reply
+     *            that then broke the shape
      */
-    public record JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw) {
+    public record JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw, boolean wrapped) {
+
+        public JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw) {
+            this(kind, value, repaired, reason, raw, false);
+        }
 
         /**
          * The label recorded on the step and used as the metric tag:
-         * {@code valid|repaired|invalid|empty|schema_mismatch}.
+         * {@code valid|repaired|wrapped|invalid|empty|schema_mismatch}.
          */
         public String label() {
             return switch (kind) {
-                case VALID -> repaired ? "repaired" : "valid";
+                case VALID -> wrapped ? "wrapped" : repaired ? "repaired" : "valid";
                 case INVALID -> "invalid";
                 case EMPTY -> "empty";
                 case SCHEMA_MISMATCH -> "schema_mismatch";
@@ -132,12 +151,28 @@ public final class ModelOutputParser {
      *            only labels the one-time warning for an unusable schema
      */
     public JsonOutcome parse(String raw, boolean convertToObject, String responseSchema, List<String> nonBlankFields, String taskId) {
-        JsonOutcome outcome = parse(raw, convertToObject);
+        return parse(raw, convertToObject, responseSchema, nonBlankFields, taskId, RescueOptions.NONE);
+    }
+
+    /**
+     * As above with the local rescue options of the task: the double-escape repair,
+     * {@code fieldAliases} and the plain-text {@code wrap}. This is the one path
+     * every caller shares, so a reply that one caller (live turn, resume, the
+     * format-retry runner's detection, the circuit breaker) sees as usable is
+     * usable for all of them. The order is: fence strip / object extraction,
+     * {@code \'} repair, double-escape repair, parse, aliases, shape validation,
+     * and only for a reply that is still not JSON, {@code wrap}.
+     */
+    public JsonOutcome parse(String raw, boolean convertToObject, String responseSchema, List<String> nonBlankFields, String taskId,
+                             RescueOptions rescue) {
+        JsonOutcome outcome = parse(raw, convertToObject, rescue);
         if (!convertToObject || outcome.kind() != Kind.VALID) {
             return outcome;
         }
         return shapeValidator.validate(outcome.value(), responseSchema, nonBlankFields, taskId)
-                .map(reason -> new JsonOutcome(Kind.SCHEMA_MISMATCH, outcome.value(), outcome.repaired(), reason, outcome.raw())).orElse(outcome);
+                .map(reason -> new JsonOutcome(Kind.SCHEMA_MISMATCH, outcome.value(), outcome.repaired(), reason, outcome.raw(),
+                        outcome.wrapped()))
+                .orElse(outcome);
     }
 
     /**
@@ -148,9 +183,18 @@ public final class ModelOutputParser {
      *            outcome — callers do not record an outcome in that mode
      */
     public JsonOutcome parse(String raw, boolean convertToObject) {
+        return parse(raw, convertToObject, RescueOptions.NONE);
+    }
+
+    /**
+     * As {@link #parse(String, boolean)} with rescue options;
+     * {@link RescueOptions#NONE} is exactly the two-argument form.
+     */
+    public JsonOutcome parse(String raw, boolean convertToObject, RescueOptions rescue) {
         if (!convertToObject) {
             return new JsonOutcome(Kind.VALID, raw, false, null, raw);
         }
+        RescueOptions options = rescue != null ? rescue : RescueOptions.NONE;
         String trimmed = raw == null ? "" : raw.trim();
         if (trimmed.isEmpty()) {
             return new JsonOutcome(Kind.EMPTY, raw, false, null, raw);
@@ -163,7 +207,16 @@ public final class ModelOutputParser {
 
         Object parsed = tryParseWhole(whole);
         if (parsed != null) {
-            return new JsonOutcome(Kind.VALID, parsed, normalised, null, raw);
+            return valid(parsed, normalised, options, raw);
+        }
+
+        // Double-escaped object ({\"a\": \"b\"}): only when asked for, only for a reply
+        // that did not parse, and only accepted as a JSON object.
+        if (options.doubleEscape() && looksDoubleEscaped(unfenced)) {
+            Object unescaped = tryParseWhole(dropApostropheEscapes(unescapeOneLevel(unfenced)));
+            if (unescaped instanceof Map<?, ?>) {
+                return valid(unescaped, true, options, raw);
+            }
         }
 
         // Extraction: successive top-level balanced candidates, first one that parses.
@@ -189,12 +242,104 @@ public final class ModelOutputParser {
             // set {} is..." must stay the user's answer, not become a List or empty Map.
             // A top-level array is accepted only as the whole reply, handled above.
             if (value instanceof Map<?, ?> map && !map.isEmpty()) {
-                return new JsonOutcome(Kind.VALID, value, true, null, raw);
+                return valid(value, true, options, raw);
             }
             reason = value == null ? REASON_INVALID_SYNTAX : REASON_NO_OBJECT;
             from = scan.end() + 1;
         }
-        return new JsonOutcome(Kind.INVALID, raw, false, reason, raw);
+        JsonOutcome wrapped = wrap(trimmed, unfenced, options, raw);
+        return wrapped != null ? wrapped : new JsonOutcome(Kind.INVALID, raw, false, reason, raw);
+    }
+
+    /** A parsed reply, with the task's field aliases applied. */
+    private static JsonOutcome valid(Object parsed, boolean repaired, RescueOptions options, String raw) {
+        if (options.fieldAliases().isEmpty() || !(parsed instanceof Map<?, ?> map)) {
+            return new JsonOutcome(Kind.VALID, parsed, repaired, null, raw);
+        }
+        Map<String, Object> renamed = null;
+        for (Map.Entry<String, String> alias : options.fieldAliases().entrySet()) {
+            Map<?, ?> current = renamed != null ? renamed : map;
+            // Rename only into an absent target: when the model sent both keys, the
+            // target is the one the template reads and it wins.
+            if (current.containsKey(alias.getKey()) && !current.containsKey(alias.getValue())) {
+                if (renamed == null) {
+                    renamed = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> e : map.entrySet()) {
+                        renamed.put(String.valueOf(e.getKey()), e.getValue());
+                    }
+                }
+                renamed.put(alias.getValue(), renamed.remove(alias.getKey()));
+            }
+        }
+        return renamed == null ? new JsonOutcome(Kind.VALID, parsed, repaired, null, raw) : new JsonOutcome(Kind.VALID, renamed, true, null, raw);
+    }
+
+    /**
+     * {@code { wrapField: text }} (plus {@code wrapDefaults}) for a reply that is
+     * prose, or null when wrapping is off or the reply is not wrappable: it starts
+     * with {@code {} or {@code [} (broken JSON, not prose, with or without a
+     * fence), or it is longer than the cap.
+     */
+    private static JsonOutcome wrap(String trimmed, String unfenced, RescueOptions options, String raw) {
+        if (!options.wraps() || trimmed.length() > options.wrapMaxChars() || startsLikeJson(trimmed) || startsLikeJson(unfenced)) {
+            return null;
+        }
+        Map<String, Object> wrapped = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : options.wrapDefaults().entrySet()) {
+            wrapped.put(e.getKey(), deepCopy(e.getValue()));
+        }
+        wrapped.put(options.wrapField(), trimmed);
+        return new JsonOutcome(Kind.VALID, wrapped, true, null, raw, true);
+    }
+
+    private static boolean startsLikeJson(String text) {
+        return text.startsWith("{") || text.startsWith("[");
+    }
+
+    /**
+     * A copy of a configured default, so no reply shares a list with the config.
+     */
+    private static Object deepCopy(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((k, v) -> copy.put(String.valueOf(k), deepCopy(v)));
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(v -> copy.add(deepCopy(v)));
+            return copy;
+        }
+        return value;
+    }
+
+    /**
+     * Whether an unparseable text has the shape of an object that was JSON-escaped
+     * once too often: it opens with {@code {\"}, or it opens with a brace and holds
+     * an escaped value after a key ({@code "k": \"v}).
+     */
+    private static boolean looksDoubleEscaped(String text) {
+        return text.startsWith("{\\\"") || text.startsWith("{") && (text.contains("\": \\\"") || text.contains("\":\\\""));
+    }
+
+    /**
+     * One level of JSON string-unescaping applied to the whole text: {@code \"}
+     * becomes {@code "} and {@code \\} becomes {@code \} (so {@code \\n} becomes
+     * the JSON escape {@code \n} and {@code \\\"} becomes {@code \"}). Every other
+     * backslash is copied as it is. Left to right and pairwise, so an escaped
+     * backslash is never read as the start of another escape.
+     */
+    static String unescapeOneLevel(String text) {
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\\' && i + 1 < text.length() && (text.charAt(i + 1) == '"' || text.charAt(i + 1) == '\\')) {
+                out.append(text.charAt(++i));
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     /**

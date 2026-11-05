@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.engine.pricing.SystemSpendMeter;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextWindowConfig;
@@ -18,7 +21,6 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
-import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
@@ -268,6 +270,10 @@ public class GroupContextBuilder {
                 // All PhaseType values handled above; default required by checkstyle
             }
         }
+
+        // Everything quoted from another participant is cleaned and bounded in one
+        // place, for every phase type and for custom inputTemplates alike.
+        PeerContentGuard.apply(data);
 
         String rendered;
         try {
@@ -532,6 +538,7 @@ public class GroupContextBuilder {
     static final String WINDOW_SUMMARY_INSTRUCTIONS = """
             Summarize the group discussion entries below for a participant who must continue the discussion.
             Preserve: each speaker's position and key arguments, decisions reached, open disagreements, and task outcomes.
+            Copy every opaque identifier exactly as written (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names).
             [format: bullet points] [limit: 500 tokens]""";
 
     /**
@@ -601,6 +608,13 @@ public class GroupContextBuilder {
                 ? "## Summary of entries 1-" + alreadyCovered + ":\n" + previousSummary + "\n\n## New entries:\n" + newSlice
                 : newSlice;
 
+        if (!SystemSpendMeter.admit() || UnpricedCallPolicy.check(PriceOverride.of(window.inputPricePer1M(), window.outputPricePer1M()),
+                window.llmProvider(), window.llmModel(), null, false, "group_window") != null) {
+            LOGGER.warnf(
+                    "Group %s: tenant cost budget reached or summary model unpriced under strict pricing — plain truncation instead of a window summary",
+                    LogSanitizer.sanitize(gc.getId()));
+            return null;
+        }
         try {
             var result = summarizationService.summarizeWithUsage(content, WINDOW_SUMMARY_INSTRUCTIONS,
                     window.llmProvider(), window.llmModel());
@@ -619,10 +633,11 @@ public class GroupContextBuilder {
             // I1: the summarizer's own spend is discussion spend. Keyed per variant
             // and boundary so a re-run of the same extension replaces (idempotent)
             // while distinct extensions sum.
-            double cost = TokenPricing.cost(window.inputPricePer1M(), window.outputPricePer1M(),
-                    Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
             String costKey = "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough;
-            GroupCostLedger.recordSystemCost(gc, costKey, cost);
+            // priced through the one resolver, recorded in the ledger AND charged to the
+            // tenant
+            double cost = SystemSpendMeter.charge(gc, costKey, PriceOverride.of(window.inputPricePer1M(), window.outputPricePer1M()),
+                    result.tokenUsage(), costKey);
             // recordSystemCost drops a non-positive or non-finite cost, so an
             // unpriced window bills nothing — report no key rather than inviting
             // a $0 frame the UI would have to filter out again.
