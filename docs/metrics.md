@@ -1051,6 +1051,9 @@ eddi_dream_users_processed_total            # Users a dream cycle worked through
 eddi_dream_entries_pruned_total             # Stale memory entries removed
 eddi_dream_entries_summarized_total         # Entries folded into a consolidation
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
+eddi_dream_contradictions_contested_total   # Entries marked CONTESTED (mark_contested / supersede_older)
+eddi_dream_contradictions_superseded_total  # Older entries marked SUPERSEDED (supersede_older)
+eddi_dream_contradictions_cleared_total     # Contests lifted and superseded entries restored once the disagreement was gone
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
 eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
@@ -1075,7 +1078,15 @@ the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user
 did **not** make because the memory was written after the cycle read it — every Dream write is a
 compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
 on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
-a quieter hour helps.
+a quieter hour helps. An assessment Dream could not write for the same reason
+(`contradictionResolution`) counts here too.
+
+The three `eddi_dream_contradictions_*` counters other than `found` stay at zero under the
+default `contradictionResolution: keep_newest`, which only detects. With `mark_contested` or
+`supersede_older`, `contested` and `superseded` count entries newly marked — an entry already
+marked is not counted again — and `cleared` counts entries returned to `ACCEPTED` because the
+other side of the disagreement was rewritten, deleted or retired. See
+[user-memory.md](user-memory.md#contradiction-resolution).
 
 ### Conversation Summarization Metrics
 

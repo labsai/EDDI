@@ -160,8 +160,10 @@ public class UserMemoryTool {
             // do it constantly — they do not see their earlier tool calls, so they save
             // the same facts again each turn — and counting it spent the whole
             // maxWritesPerTurn budget on re-saves, refusing the one new fact the user had
-            // just shared.
-            if (existing != null && Objects.equals(existing.value(), value) && Objects.equals(existing.category(), normalizedCategory)
+            // just shared. A contested or superseded entry is the exception: re-stating
+            // it is the user confirming the value, and only a write records that.
+            if (existing != null && existing.assessment() == UserMemoryEntry.Assessment.ACCEPTED && Objects.equals(existing.value(), value)
+                    && Objects.equals(existing.category(), normalizedCategory)
                     && existing.visibility() == vis
                     && (vis != Visibility.group || Set.copyOf(existing.groupIds()).equals(Set.copyOf(groupIds)))) {
                 return "✅ Already remembered (unchanged): %s = %s [%s, %s]".formatted(trimmedKey, value, normalizedCategory, vis);
@@ -287,8 +289,7 @@ public class UserMemoryTool {
                 return "No memories found for this user.";
             }
 
-            return entries.stream().map(e -> "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility()))
-                    .collect(Collectors.joining("\n"));
+            return entries.stream().map(UserMemoryTool::describe).collect(Collectors.joining("\n"));
 
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.errorf("[MEMORY] Failed to recall memories: %s", e.getMessage());
@@ -308,8 +309,7 @@ public class UserMemoryTool {
                 return "No memories matching '%s' found.".formatted(query);
             }
 
-            return entries.stream().map(e -> "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility()))
-                    .collect(Collectors.joining("\n"));
+            return entries.stream().map(UserMemoryTool::describe).collect(Collectors.joining("\n"));
 
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.errorf("[MEMORY] Failed to search memories: %s", e.getMessage());
@@ -424,6 +424,20 @@ public class UserMemoryTool {
         // A configured default must always be writable.
         allowed.add(defaultVisibility());
         return allowed;
+    }
+
+    /**
+     * One line of a recall or search answer. A disputed entry says so, so the model
+     * can ask the user rather than act on either value; the competing value is not
+     * shown — it may be another agent's private memory.
+     */
+    private static String describe(UserMemoryEntry e) {
+        String line = "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility());
+        return switch (e.assessment()) {
+            case CONTESTED -> line + " (contested: another memory holds a different value — confirm with the user)";
+            case SUPERSEDED -> line + " (superseded by a newer memory)";
+            case ACCEPTED -> line;
+        };
     }
 
     private static String globalKeyRefusal(String key) {

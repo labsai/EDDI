@@ -345,6 +345,41 @@ class UserMemoryToolTest {
         assertTrue(result.contains("color = blue"));
     }
 
+    /**
+     * Re-stating a contested value is the user confirming it; skipping the write as
+     * "unchanged" would leave the contest standing forever.
+     */
+    @Test
+    void rememberFact_reStatingAContestedValue_isAWrite() throws Exception {
+        var contested = stored("lang", "German", "preference", Visibility.self, "agent-1", List.of())
+                .withAssessment(UserMemoryEntry.Assessment.CONTESTED, null);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(contested));
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        String result = tool.rememberFact("lang", "German", "preference", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store).upsert(argThat(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED));
+    }
+
+    @Test
+    void recallMemories_marksContestedAndSupersededEntries() throws Exception {
+        Instant now = Instant.now();
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "lang", "German", "fact", Visibility.self, "agent-1", List.of(), null, true, 0, now, now,
+                        UserMemoryEntry.Assessment.CONTESTED, null),
+                new UserMemoryEntry("2", "user-1", "city", "Graz", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now,
+                        UserMemoryEntry.Assessment.SUPERSEDED, "3"),
+                new UserMemoryEntry("3", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now));
+        when(store.getVisibleEntries("user-1", "agent-1", List.of(), "most_recent", 50)).thenReturn(entries);
+
+        String[] lines = tool.recallMemories().split("\n");
+
+        assertTrue(lines[0].startsWith("• lang = German [fact, self] (contested"), lines[0]);
+        assertTrue(lines[1].startsWith("• city = Graz [fact, self] (superseded"), lines[1]);
+        assertEquals("• color = teal [fact, self]", lines[2], "an accepted entry reads exactly as before");
+    }
+
     @Test
     void recallMemories_shouldReturnEmptyMessage() throws Exception {
         when(store.getVisibleEntries("user-1", "agent-1", List.of(), "most_recent", 50)).thenReturn(List.of());
