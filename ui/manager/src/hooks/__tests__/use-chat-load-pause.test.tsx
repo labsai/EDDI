@@ -77,6 +77,46 @@ describe("useLoadConversation — pause re-establishment", () => {
   });
 });
 
+describe("useLoadConversation — quick replies on resume", () => {
+  function mockWithQuickReplies(conversationState: string) {
+    server.use(
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          conversationId: "conv-x",
+          agentId: "a1",
+          agentVersion: 1,
+          conversationState,
+          environment: "production",
+          conversationSteps: [{ conversationStep: [] }, { conversationStep: [] }],
+          conversationOutputs: [
+            { output: [{ type: "text", text: "Hi" }], quickReplies: [{ value: "Old" }] },
+            { output: [{ type: "text", text: "Pick one" }], quickReplies: [{ value: "Red" }, { value: "Blue" }] },
+          ],
+          redoAvailable: false,
+        }),
+      ),
+    );
+  }
+
+  it("offers the last reply's quick replies again when a conversation is resumed", async () => {
+    mockWithQuickReplies("READY");
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-x" });
+    });
+    expect(useChatStore.getState().quickReplies).toEqual(["Red", "Blue"]);
+  });
+
+  it("offers none while the reopened conversation's turn is still executing", async () => {
+    mockWithQuickReplies("IN_PROGRESS");
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-x" });
+    });
+    expect(useChatStore.getState().quickReplies).toEqual([]);
+  });
+});
+
 describe("useLoadConversation — agent binding", () => {
   it("refuses a conversation that belongs to a different agent than the one requested", async () => {
     // The Manager's deep link pairs ?agentId with ?conversationId independently.

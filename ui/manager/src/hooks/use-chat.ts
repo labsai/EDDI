@@ -1650,11 +1650,15 @@ function installSnapshot(snapshot: SimpleConversationMemorySnapshot) {
   // predecessor asked for. While a turn executes, the last stored reply's
   // field is the one being answered, so none is offered.
   const outputs = snapshot.conversationOutputs ?? [];
-  const inputField =
-    snapshot.conversationState === "IN_PROGRESS"
-      ? undefined
-      : extractInputField(outputs[outputs.length - 1]);
+  const settled = snapshot.conversationState !== "IN_PROGRESS";
+  const inputField = settled ? extractInputField(outputs[outputs.length - 1]) : undefined;
   store.setState({ activeInputField: inputField ?? null });
+  // The quick replies the last reply offered are still the open question: a
+  // resumed conversation used to show none until the next turn. Same rule as
+  // AgentConversation's resume (@eddi/conversation); set either way, so a
+  // reply that offers none clears its predecessor's buttons. This stays here
+  // until ChatPanel moves onto that controller.
+  store.getState().setQuickReplies(settled ? extractQuickReplies(outputs[outputs.length - 1]) : []);
 }
 
 /** Load an existing conversation to resume it. */

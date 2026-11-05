@@ -755,6 +755,16 @@ export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
  */
 export const TASK_FAILURE_TRIGGER = "trigger a task failure";
 
+/**
+ * A chat message containing this gets a streamed reply with display math and a
+ * fenced code block, so the feature matrix can see the one markdown renderer's
+ * KaTeX and highlight.js at work.
+ */
+export const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** The reply to {@link RICH_MARKDOWN_TRIGGER}. */
+export const MOCK_RICH_MARKDOWN = "Euler: $$e^{i\\pi} + 1 = 0$$\n\n```js\nconst answer = 42;\n```";
+
 /** The reason the mocked failed turn reports. */
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
@@ -1690,13 +1700,21 @@ export const handlers = [
             ],
           }),
         ]
-      : [
-          frame("token", "Happy to help."),
-          frame("done", {
-            conversationState: "READY",
-            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
-          }),
-        ];
+      : body.includes(RICH_MARKDOWN_TRIGGER)
+        ? [
+            frame("token", MOCK_RICH_MARKDOWN),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: MOCK_RICH_MARKDOWN }] }],
+            }),
+          ]
+        : [
+            frame("token", "Happy to help."),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+            }),
+          ];
     return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
   }),
 

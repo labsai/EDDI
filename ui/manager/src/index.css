@@ -2,6 +2,9 @@
 /* The design tokens — semantic colours, the brand/warn/ochre scales, radius,
    font, light and dark (ui/packages/ui/src/styles/theme.css). */
 @import '@eddi/ui/theme.css';
+/* The one markdown renderer's code-block copy button, wide tables and
+   highlight.js tokens, from the shared tokens (ui/packages/conversation). */
+@import '@eddi/conversation/markdown.css';
 /* Real typography for the `prose` classes every markdown surface already
    wears. Without this plugin they were inert: preflight strips heading sizes,
    list bullets and margins, and nothing put them back — chat replies rendered
