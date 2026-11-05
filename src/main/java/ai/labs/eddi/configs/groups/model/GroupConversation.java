@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -62,7 +63,12 @@ public class GroupConversation {
     // (tornDownAgentIds), all resume-consumed. No migration entries needed:
     // Jackson defaults each on legacy documents to its pre-v4 behavior
     // (null / null / -1 / empty set).
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    // v5: PendingHumanInput.detail and ResumePoint kind TIE_BREAK (human
+    // tie-breaks,
+    // human task-force tasks), both resume-consumed — an older pod resolving one
+    // would re-run the vote's last repeat. Identity hop: a null detail is the
+    // pre-v5 speaking turn.
+    public static final int CURRENT_SCHEMA_VERSION = 5;
     /**
      * The version a stored document claims when its JSON carries no
      * {@code schemaVersion} key — i.e. it was written before F6 existed, which is
@@ -158,6 +164,12 @@ public class GroupConversation {
      * pause/resume keeps the table as it stood.
      */
     private NegotiationState negotiation;
+    /**
+     * Cross-team handoff state of this discussion: the lineage a cadence stamped,
+     * the per-run cap ledger and a bounded record of what was handed off.
+     * {@code null} until something needs it; an old document reads as hop 0.
+     */
+    private HandoffRunState handoffState;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
@@ -478,6 +490,14 @@ public class GroupConversation {
      */
     private String hitlApprovalTimeout;
     /**
+     * The approval-card context rendered once when the current pause was committed
+     * ({@code hitlConfig.approvalContext}); {@code null} when none is configured.
+     * Display only: nothing resume-time depends on it, so it does <b>not</b> bump
+     * {@link #CURRENT_SCHEMA_VERSION} — an older pod re-saving the document drops
+     * it and loses nothing but the card text. Cleared with the pause bookmark.
+     */
+    private RenderedApprovalContext hitlApprovalContext;
+    /**
      * Fingerprint of the task state at the previous TASK-granularity pause (#4). A
      * resume that re-pauses at the SAME phase with an identical fingerprint made no
      * progress — the discussion is failed instead of re-pausing, guaranteeing
@@ -485,6 +505,14 @@ public class GroupConversation {
      * cleared on successful completion.
      */
     private String hitlLastPauseFingerprint;
+    /**
+     * I1: the cost ceiling fired under {@code SYNTHESIZE_NOW} in this round, so
+     * only SYNTHESIS phases still run. Persisted because a synthesis phase that
+     * requires approval pauses the run: the resumed leg must keep skipping the
+     * remaining work phases (and their approval gates) instead of starting over
+     * with the skip-ahead off. Cleared on completion and at a round's start.
+     */
+    private boolean costCeilingSkipAhead;
     private Instant created;
     private Instant lastModified;
 
@@ -805,6 +833,14 @@ public class GroupConversation {
     public static final String RESUME_KIND_HUMAN_TURN_PARALLEL = "HUMAN_TURN_PARALLEL";
 
     /**
+     * {@link ResumePoint#pauseKind()} of a tied vote waiting for its human decider
+     * ({@code tiePolicy: HUMAN_DECIDES}). The bookmark names the finished VOTE
+     * phase; the resolution resumes at the phase after it (or at the vote phase's
+     * own approval gate), never inside it.
+     */
+    public static final String RESUME_KIND_TIE_BREAK = "TIE_BREAK";
+
+    /**
      * The one turn a paused {@code AWAITING_HUMAN_INPUT} discussion is waiting on
      * (I6). Persisted with the document so the prompt survives a restart and the
      * approval/inbox surfaces can display exactly what the member was asked.
@@ -835,9 +871,20 @@ public class GroupConversation {
      *            notwithstanding
      * @param requestedAt
      *            when the turn was requested
+     * @param detail
+     *            what kind of answer is asked for when it is not a plain speaking
+     *            turn — a tie-break among options, or a task-force task.
+     *            {@code null} (every document written before it existed) is a
+     *            speaking turn or a facilitator escalation, as before
      */
     public record PendingHumanInput(String memberId, String displayName, int phaseIdx, int repeatIdx, int speakerIdx,
-            String entryType, String renderedPrompt, String onTimeout, Instant requestedAt) {
+            String entryType, String renderedPrompt, String onTimeout, Instant requestedAt, HumanRequestDetail detail) {
+
+        /** A plain speaking turn (no detail). */
+        public PendingHumanInput(String memberId, String displayName, int phaseIdx, int repeatIdx, int speakerIdx,
+                String entryType, String renderedPrompt, String onTimeout, Instant requestedAt) {
+            this(memberId, displayName, phaseIdx, repeatIdx, speakerIdx, entryType, renderedPrompt, onTimeout, requestedAt, null);
+        }
     }
 
     /**
@@ -1211,6 +1258,26 @@ public class GroupConversation {
         this.negotiation = negotiation;
     }
 
+    public HandoffRunState getHandoffState() {
+        return handoffState;
+    }
+
+    public void setHandoffState(HandoffRunState handoffState) {
+        this.handoffState = handoffState;
+    }
+
+    /**
+     * The handoff state, created on first use. Synchronized: PARALLEL members build
+     * their tools at the same time, and two of them must share ONE ledger.
+     */
+    @JsonIgnore
+    public synchronized HandoffRunState handoffStateOrCreate() {
+        if (handoffState == null) {
+            handoffState = new HandoffRunState();
+        }
+        return handoffState;
+    }
+
     /** The negotiation state, created on first use (I11). */
     @JsonIgnore
     public NegotiationState negotiationState() {
@@ -1579,11 +1646,27 @@ public class GroupConversation {
         this.hitlApprovalTimeout = hitlApprovalTimeout;
     }
 
+    public RenderedApprovalContext getHitlApprovalContext() {
+        return hitlApprovalContext;
+    }
+
+    public void setHitlApprovalContext(RenderedApprovalContext hitlApprovalContext) {
+        this.hitlApprovalContext = hitlApprovalContext;
+    }
+
     public String getHitlLastPauseFingerprint() {
         return hitlLastPauseFingerprint;
     }
 
     public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
         this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
+    }
+
+    public boolean isCostCeilingSkipAhead() {
+        return costCeilingSkipAhead;
+    }
+
+    public void setCostCeilingSkipAhead(boolean costCeilingSkipAhead) {
+        this.costCeilingSkipAhead = costCeilingSkipAhead;
     }
 }

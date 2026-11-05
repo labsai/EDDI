@@ -17,6 +17,8 @@ Agent (.agent.json)
       └─ Extension 2: LangChain (eddi://ai.labs.llm)
 ```
 
+> `ai.labs.rules` and `ai.labs.apicalls` are registered aliases of `ai.labs.behavior` and `ai.labs.httpcalls`, and `ai.labs.langchain` of `ai.labs.llm`; both spellings work, and the extension store returns the canonical IDs.
+
 ### What Extensions Do
 
 Each extension type corresponds to a **lifecycle task** or **resource** that the agent can use:

@@ -42,7 +42,7 @@ import java.util.UUID;
  * <li>{@code skill} — required skill name (e.g., "language-translation" or a
  * template expression)</li>
  * <li>{@code strategy} — selection strategy: "highest_confidence",
- * "round_robin", "all"</li>
+ * "round_robin", "random", "all"</li>
  * <li>{@code minResults} — minimum number of matching agents required (default:
  * 1)</li>
  * </ul>

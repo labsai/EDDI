@@ -63,6 +63,44 @@ public interface ISharedKv {
     }
 
     /**
+     * The last record of a key as the bucket's stream leader holds it: its live
+     * value, or the revision of the delete marker that removed it.
+     * <p>
+     * {@code live == null && revision == 0} means nothing is known — the key was
+     * never written, its record aged out, or the store keeps no delete markers.
+     * {@code live == null && revision > 0} is a deleted key: an
+     * {@link #update(String, byte[], long)} at that revision recreates it, and
+     * fails if anybody wrote the key since — the same guarantee as {@link #create},
+     * in one round trip instead of the three a NATS {@code create} needs on a
+     * deleted key.
+     */
+    record Latest(Versioned live, long revision) {
+
+        public boolean isLive() {
+            return live != null;
+        }
+    }
+
+    /**
+     * The key's {@link Latest} record. The default knows no delete markers: an
+     * absent key reads as "nothing known", so the caller falls back to
+     * {@link #create}.
+     */
+    default Latest latest(String key) {
+        return get(key).map(v -> new Latest(v, v.revision())).orElse(new Latest(null, 0));
+    }
+
+    /**
+     * Writes {@code value} to a key that holds no live value: at the delete marker
+     * {@code latest} names, or by {@link #create} when it names none.
+     *
+     * @return the new revision, or empty when somebody wrote the key in between
+     */
+    default OptionalLong createAt(String key, byte[] value, Latest latest) {
+        return latest.revision() > 0 ? update(key, value, latest.revision()) : create(key, value);
+    }
+
+    /**
      * Replaces the value only while the key is still at {@code expectedRevision}.
      *
      * @return the new revision, or empty on a conflict
@@ -78,6 +116,17 @@ public interface ISharedKv {
      * @return false on a conflict (somebody wrote the key since)
      */
     boolean delete(String key, long expectedRevision);
+
+    /**
+     * Like {@link #delete(String, long)}, but answers the revision of the delete
+     * marker it wrote, so whoever acquires the key next can recreate it with one
+     * {@link #update} at that revision. {@code 0} when the store does not tell.
+     *
+     * @return empty on a conflict (somebody wrote the key since)
+     */
+    default OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+        return delete(key, expectedRevision) ? OptionalLong.of(0) : OptionalLong.empty();
+    }
 
     /** Unconditional delete; a missing key is not an error. */
     void delete(String key);

@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -32,6 +33,7 @@ import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
@@ -65,6 +67,7 @@ public class PhaseExecutionEngine {
     private final GroupContextBuilder contextBuilder;
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
+    private ServiceConvergenceJudge serviceJudge;
 
     /**
      * The {@code memberConversationIds} key the convergence judge's own private
@@ -91,6 +94,15 @@ public class PhaseExecutionEngine {
     }
 
     /**
+     * Wires the {@code judge: "SERVICE"} convergence judge. A setter, not a
+     * constructor argument, so the engine's many construction sites stay as they
+     * are; without it every judge runs on the moderator agent, as before.
+     */
+    public void setServiceJudge(ServiceConvergenceJudge serviceJudge) {
+        this.serviceJudge = serviceJudge;
+    }
+
+    /**
      * Control-flow signal (I6): the phase reached a HUMAN member's turn and the
      * discussion must pause for their input. Thrown by the sequential loop and the
      * parallel human tail, caught ONLY by {@code executeDiscussion}'s phase
@@ -105,6 +117,7 @@ public class PhaseExecutionEngine {
         private final int speakerIdx;
         private final String renderedPrompt;
         private final boolean parallel;
+        private final transient HumanRequestDetail detail;
 
         /**
          * @param member
@@ -120,11 +133,25 @@ public class PhaseExecutionEngine {
          *            whether this turn belongs to a PARALLEL phase's human tail
          */
         public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel) {
+            this(member, speakerIdx, renderedPrompt, parallel, null);
+        }
+
+        /**
+         * @param detail
+         *            what the pause asks for when it is not a speaking turn — a
+         *            task-force task ({@link GroupHumanTasks}); {@code null} for a turn
+         */
+        public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel, HumanRequestDetail detail) {
             super("Human member turn required: " + member.agentId(), null, false, false);
             this.member = member;
             this.speakerIdx = speakerIdx;
             this.renderedPrompt = renderedPrompt;
             this.parallel = parallel;
+            this.detail = detail;
+        }
+
+        public HumanRequestDetail detail() {
+            return detail;
         }
 
         public GroupMember member() {
@@ -236,9 +263,9 @@ public class PhaseExecutionEngine {
         }
 
         var verdict = verdictMode
-                ? runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
                         ConvergenceDetector.buildVerdictInput(currentQuestion(gc), repeatEntries), ConvergenceDetector::parseVerdict, listener)
-                : runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
                         ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries),
                         output -> ConvergenceDetector.parseJudgeVerdict(output, convergence.threshold()), listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
@@ -483,16 +510,21 @@ public class PhaseExecutionEngine {
      * {@code MODERATOR_DECIDES} runs one moderator turn choosing among the
      * unresolved options (method {@code vote+moderator-tiebreak});
      * {@code NO_DECISION} records the honest {@code NONE}. {@code
-     * HUMAN_DECIDES} is save-time rejected until I6 ships human members, so
-     * reaching it here means hand-edited storage — it degrades to NO_DECISION with
-     * a WARN rather than guessing.
+     * HUMAN_DECIDES} records that same NONE (so the tally is visible while it
+     * waits) and returns the tie-break the caller must pause for — see
+     * {@link HumanTieBreakEngine}.
      * <p>
      * Like every decision producer, failure is prose-only, never a failed
      * discussion.
+     *
+     * @return the pending human tie-break, or {@code null} when nothing waits on a
+     *         human
      */
-    public void recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
-                                   int phaseIdx, List<TranscriptEntry> repeatEntries, List<GroupMember> speakers,
-                                   GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+    public HumanTieBreakEngine.PendingTieBreak recordVoteDecision(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                                                  ProtocolConfig protocol, int phaseIdx, List<TranscriptEntry> repeatEntries,
+                                                                  List<GroupMember> speakers, GroupDiscussionEventListener listener,
+                                                                  AtomicInteger turnCounter, int maxTurns) {
+        HumanTieBreakEngine.PendingTieBreak pendingTieBreak = null;
         var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
@@ -506,7 +538,7 @@ public class PhaseExecutionEngine {
                     "The vote could not run: only " + options.size() + " option(s) were available.",
                     null, null, List.of(), VoteTallyEngine.METHOD_VOTE, phase.name(), null));
             fireDecisionReached(gc, listener);
-            return;
+            return null;
         }
 
         List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
@@ -533,8 +565,20 @@ public class PhaseExecutionEngine {
                     yield moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
                 }
                 case HUMAN_DECIDES -> {
-                    LOGGER.warnf("Group %s: VOTE phase '%s' has tiePolicy HUMAN_DECIDES, which needs human group members (I6) — "
-                            + "recording NO_DECISION", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()));
+                    // The NONE record stands until the decider answers; the caller
+                    // pauses on the returned tie-break after persisting it.
+                    // The repeat's start by identity: a CONVERGENCE or FACILITATION entry appended
+                    // after the slice was taken would make a size difference point one too high.
+                    int repeatStart = transcriptSnapshot.size() - repeatEntries.size();
+                    if (!repeatEntries.isEmpty()) {
+                        for (int i = 0; i < transcriptSnapshot.size(); i++) {
+                            if (transcriptSnapshot.get(i) == repeatEntries.get(0)) {
+                                repeatStart = i;
+                                break;
+                            }
+                        }
+                    }
+                    pendingTieBreak = HumanTieBreakEngine.onTie(gc, config, phase, voteConfig, outcome, Math.max(0, repeatStart));
                     yield outcome.decision();
                 }
                 case NO_DECISION -> outcome.decision();
@@ -547,6 +591,25 @@ public class PhaseExecutionEngine {
                         ? LogSanitizer.sanitize(decision.outcome())
                         : "no decision (" + LogSanitizer.sanitize(decision.outcome()) + ")");
         fireDecisionReached(gc, listener);
+        return pendingTieBreak;
+    }
+
+    /**
+     * The {@code MODERATOR_DECIDES} policy run for a human tie-break that timed out
+     * ({@code humanTieBreak.onTimeout}), gated on turns and cost exactly as the
+     * policy is when a vote ties. Returns the unresolved record when the budget is
+     * spent or the moderator names no single option.
+     */
+    public DecisionRecord resolveTieByModerator(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
+                                                ProtocolConfig protocol, int phaseIdx, VoteTallyEngine.TallyOutcome outcome,
+                                                GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns) {
+        if ((maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) || GroupCostLedger.wouldExceedCeiling(gc, protocol)) {
+            return outcome.decision();
+        }
+        if (turnCounter != null) {
+            turnCounter.incrementAndGet();
+        }
+        return moderatorTiebreak(gc, config, phase, protocol, phaseIdx, outcome, listener);
     }
 
     /**
@@ -660,9 +723,17 @@ public class PhaseExecutionEngine {
     }
 
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
-                                                            ProtocolConfig protocol, int phaseIdx, ConvergenceConfig convergence, String input,
-                                                            Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
+                                                            ProtocolConfig protocol, int phaseIdx, int repeat, ConvergenceConfig convergence,
+                                                            String input, Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
                                                             GroupDiscussionEventListener listener) {
+        // SERVICE judge first: it needs no moderator, so it must run before the
+        // no-moderator early return. Empty = run the moderator judge below.
+        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = serviceJudge != null
+                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input, parser, listener)
+                : Optional.empty();
+        if (serviceVerdict.isPresent()) {
+            return serviceVerdict.get();
+        }
         String moderatorAgentId = config.getModeratorAgentId();
         if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
             // Nothing to run the judge on. Not an error: a phase can enable
@@ -670,11 +741,6 @@ public class PhaseExecutionEngine {
             // is to keep going rather than to guess.
             return ConvergenceDetector.ConvergenceVerdict.notConverged("Convergence judge skipped — no moderator agent configured");
         }
-        if (ConvergenceConfig.JUDGE_SERVICE.equals(convergence.judge())) {
-            LOGGER.warnf("Phase '%s' requests judge=SERVICE, which is not wired yet — falling back to the moderator agent. "
-                    + "See ConvergenceConfig's Javadoc.", phase.name());
-        }
-
         var judge = new GroupMember(moderatorAgentId, "Convergence Judge", 0, "MODERATOR");
         try {
             // JUDGE_CONVERSATION_KEY, not the moderator's agent id: the judge runs the

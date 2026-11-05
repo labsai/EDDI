@@ -238,10 +238,11 @@ final class FormatRetryRunner {
      */
     record Policy(Set<Trigger> retryOn, int maxRetries, double truncationFactor, String correctiveMessage, long minAttemptMs,
             Double maxRetryCostUsd, Double inputPricePer1M, Double outputPricePer1M, boolean convertToObject, Integer baseMaxOutputTokens,
-            String responseSchema, List<String> nonBlankFields, String taskId, String emptyAction, ReaskSpend spend) {
+            String responseSchema, List<String> nonBlankFields, String taskId, String emptyAction, ReaskSpend spend, RescueOptions rescue) {
 
         Policy {
             spend = spend != null ? spend : ReaskSpend.NONE;
+            rescue = rescue != null ? rescue : RescueOptions.NONE;
         }
 
         /**
@@ -250,7 +251,7 @@ final class FormatRetryRunner {
          */
         Policy withSpend(ReaskSpend newSpend) {
             return new Policy(retryOn, maxRetries, truncationFactor, correctiveMessage, minAttemptMs, maxRetryCostUsd, inputPricePer1M,
-                    outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema, nonBlankFields, taskId, emptyAction, newSpend);
+                    outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema, nonBlankFields, taskId, emptyAction, newSpend, rescue);
         }
 
         /**
@@ -272,6 +273,19 @@ final class FormatRetryRunner {
          */
         static Policy from(ResponseValidation validation, Integer stepMaxFormatRetries, boolean convertToObject, Integer baseMaxOutputTokens,
                            Double inputPricePer1M, Double outputPricePer1M, String responseSchema, List<String> nonBlankFields, String taskId) {
+            return from(validation, stepMaxFormatRetries, convertToObject, baseMaxOutputTokens, inputPricePer1M, outputPricePer1M, responseSchema,
+                    nonBlankFields, taskId, RescueOptions.of(validation, null));
+        }
+
+        /**
+         * As above, with the task's local rescue options ({@link RescueOptions#of}) so
+         * the detection of an unusable reply sees the reply the way {@code LlmTask}
+         * will store it: a wrapped, de-escaped or alias-renamed reply is usable and is
+         * not re-asked.
+         */
+        static Policy from(ResponseValidation validation, Integer stepMaxFormatRetries, boolean convertToObject, Integer baseMaxOutputTokens,
+                           Double inputPricePer1M, Double outputPricePer1M, String responseSchema, List<String> nonBlankFields, String taskId,
+                           RescueOptions rescue) {
             if (validation == null || !validation.isEnabled()) {
                 return null;
             }
@@ -295,7 +309,7 @@ final class FormatRetryRunner {
             }
             return new Policy(Set.copyOf(on), retries, validation.getTruncationRetryFactor(), corrective, validation.getMinAttemptMs(),
                     validation.getMaxRetryCostUsd(), inputPricePer1M, outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema,
-                    nonBlankFields, taskId, validation.getOnEmpty(), null);
+                    nonBlankFields, taskId, validation.getOnEmpty(), null, rescue);
         }
 
         private static void addIfRetry(Set<Trigger> on, Trigger trigger, String action) {
@@ -482,10 +496,15 @@ final class FormatRetryRunner {
      * reason), or null when the reply is usable (or this runner has no parser).
      */
     Detection classifyJsonReply(String text, String responseSchema, List<String> nonBlankFields, String taskId) {
+        return classifyJsonReply(text, responseSchema, nonBlankFields, taskId, RescueOptions.NONE);
+    }
+
+    /** As above, seeing the reply through the task's local rescue options. */
+    Detection classifyJsonReply(String text, String responseSchema, List<String> nonBlankFields, String taskId, RescueOptions rescue) {
         if (parser == null || text == null || text.isBlank()) {
             return null;
         }
-        ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, responseSchema, nonBlankFields, taskId);
+        ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, responseSchema, nonBlankFields, taskId, rescue);
         if (outcome.kind() == ModelOutputParser.Kind.INVALID) {
             return new Detection(Trigger.INVALID_JSON, outcome.reason());
         }
@@ -528,7 +547,8 @@ final class FormatRetryRunner {
         }
         if ((policy.retries(Trigger.INVALID_JSON) || policy.retries(Trigger.SCHEMA_MISMATCH)) && parser != null && text != null
                 && !text.isBlank()) {
-            ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, policy.responseSchema(), policy.nonBlankFields(), policy.taskId());
+            ModelOutputParser.JsonOutcome outcome = parser.parse(text, true, policy.responseSchema(), policy.nonBlankFields(), policy.taskId(),
+                    policy.rescue());
             if (outcome.kind() == ModelOutputParser.Kind.INVALID && policy.retries(Trigger.INVALID_JSON)) {
                 return new Detection(Trigger.INVALID_JSON, outcome.reason());
             }

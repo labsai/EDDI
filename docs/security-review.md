@@ -43,7 +43,7 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 - CVE-2026-25526 (Jinjava template injection) — mitigated by upgrading dependency
 
 #### Phase 2: SSRF & Input Validation (April 13)
-- `SafeHttpClient` introduced — all HTTP calls must go through SSRF-validated client
+- `SafeHttpClient` introduced — all HTTP calls must go through SSRF-validated client (since replaced by `OutboundHttp`)
 - `UrlValidationUtils` — blocks private/loopback/link-local IPs
 - `PathNavigator` replaced OGNL (eliminated arbitrary code execution risk)
 - Regex injection hardening in user-facing pattern inputs

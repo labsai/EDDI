@@ -48,6 +48,8 @@ public interface IAgent {
 
     /**
      * Whether the agent enables the LLM memory tools ({@code enableMemoryTools}).
+     * The default is a fallback for implementations that do not carry the flag; it
+     * treats a declared memory config as enabling them.
      */
     default boolean isMemoryToolsEnabled() {
         return getUserMemoryConfig() != null;

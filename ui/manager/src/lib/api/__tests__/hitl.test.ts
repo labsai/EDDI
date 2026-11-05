@@ -14,6 +14,7 @@ import {
   MAX_TOOL_CALL_NOTE_LENGTH,
   MAX_PAUSE_REASON_LENGTH,
   AMENDED_ARGS_MAX_BYTES,
+  HITL_CLIENT_HEADERS,
   type HitlDecision,
   type GroupApprovalRequest,
   type ApprovalStatusSummary,
@@ -57,8 +58,10 @@ describe("HITL API", () => {
       expect(api.post).toHaveBeenCalledTimes(1);
       expect(api.post).toHaveBeenCalledWith(
         `/agents/${conversationId}/resume`,
-        decision
+        decision,
+        HITL_CLIENT_HEADERS,
       );
+      expect(HITL_CLIENT_HEADERS).toEqual({ "X-EDDI-Client": "manager" });
     });
   });
 
@@ -162,7 +165,8 @@ describe("HITL API", () => {
       expect(api.post).toHaveBeenCalledTimes(1);
       expect(api.post).toHaveBeenCalledWith(
         `/groups/${groupId}/conversations/${gcId}/approve`,
-        request
+        request,
+        HITL_CLIENT_HEADERS,
       );
     });
   });
@@ -264,6 +268,7 @@ describe("HITL API", () => {
         "dynamic",
         "memory",
         "recall",
+        "team",
       ]);
     });
   });

@@ -461,6 +461,11 @@ public class HtmlToMarkdownConverter {
             if (!item.tagName().equalsIgnoreCase("li")) {
                 continue;
             }
+            if (!walk.visit()) {
+                // An item is an element too, and one written here never passes through
+                // convertElement: count it, or a page of empty items escapes the budget.
+                break;
+            }
 
             // The item's own content, without its nested lists: small, and the only
             // thing that needs re-indenting.

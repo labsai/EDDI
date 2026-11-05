@@ -45,9 +45,11 @@ Quarkus profiles prefix the key: `%dev.eddi.usermemories.deleteOlderThanDays=-1`
 applies in dev mode only.
 
 > **Empty is not the same as unset.** Several properties ship deliberately empty
-> (`eddi.vault.master-key`, `eddi.deployment.env`). An empty value is a real
-> value that disables or defaults the feature; it is not an error, and startup
-> will not complain.
+> (`eddi.vault.master-key`, `eddi.openai-compat.api-key`). An empty value is a real
+> value that disables or defaults the feature; it is not an error. One exception:
+> with `authorization.enabled=true`, the OpenAI-compatible API enabled and an empty
+> `eddi.openai-compat.api-key`, startup fails (`OpenAiStartupGuard`) unless
+> `eddi.openai-compat.http-policy=authenticated` is set or the API is disabled.
 
 ---
 
@@ -152,10 +154,10 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
 | `eddi.nats.request-timeout` | `2s` | Timeout of every KV, JetStream and RPC call. While disconnected, calls fail at once instead |
 | `eddi.nats.reconnect-wait` | `1s` | Pause between reconnect attempts (plus jitter); reconnects never stop |
-| `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation |
-| `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
+| `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation. Its holder stops trusting it earlier: `ttl − 2 × heartbeat-interval` after the last renewal NATS acknowledged (10 s by default; when that is less than 1.5 heartbeats, halfway between one heartbeat and the TTL), the running turn is cancelled |
+| `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns (each lease is renewed once 3/4 of an interval has passed since its last renewal; the check runs every quarter interval). At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
-| `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others. The same knowledge stops it handing the lease straight to its own next queued turn |
 | `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
@@ -213,11 +215,14 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when a `/stream` SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.resume-cancel-on-client-disconnect` | `false` | The same for `POST /agents/{id}/resume/stream` only. Off by default: a resume is a deliberate human decision whose approved tool calls may already have run, so a dropped connection must not discard the turn. `true` cancels (and discards) the resumed turn |
 | `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
-| `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream). Past it the call fails instead of reading on |
+| `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream), and one MCP server response to the MCP client. Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
+| `eddi.llm.pricing.unpriced-policy-floor` | `ALLOW` | The loosest the price catalog's `unpricedPolicy` may be: `ALLOW`, `REFUSE_WHEN_BUDGETED` or `REFUSE`. The effective policy is the stricter of the two, so neither a catalog edit nor a store outage goes below it; an unparseable value reads as `REFUSE`. See [Model Pricing](model-pricing.md#strict-mode) |
+| `eddi.llm.pricing.provider-normalization` | `true` | Normalize provider token usage before pricing (Anthropic/Bedrock cache tokens added to input, Gemini thinking to output). `false` restores the pre-catalog counts. See [Model Pricing](model-pricing.md#what-the-providers-report) |
 
 ---
 
@@ -294,6 +299,7 @@ Full narrative: [agent-testing.md](agent-testing.md).
 
 | Property | Default | Description |
 |---|---|---|
+| `eddi.security.unauthenticated-reminder-interval` | `off` | Repeat the "OIDC is DISABLED" WARN at this interval (e.g. `1h`) when running unauthenticated in production; `off` logs only the startup ERROR. Values under `5m` are throttled to `5m` |
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
 | `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects; also every configured LLM/embedding endpoint, vector-store host and OpenAPI spec location (exempt: `eddi.self.base-url` and the `allowed-hosts` below). Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.security.ssrf-protection.allowed-hosts` | *(unset)* | Internal hosts httpCalls, LLM/embedding endpoints, vector stores and OpenAPI spec locations may still reach with `eddi.security.ssrf-protection.enabled=true`: comma-separated exact `host` or `host:port` entries, case-insensitive, no wildcards (a bare host matches any port). Listed hosts skip the private-address check, never the cloud-metadata check. While protection is **off**, an httpCall whose host or port is a template is refused at deploy time, and production logs a `[SECURITY]` WARN at startup. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
@@ -314,7 +320,7 @@ Full narrative: [agent-testing.md](agent-testing.md).
 | `eddi.metrics.http-policy` | `eddi-metrics-reader` | Quarkus HTTP policy for `/q/metrics`. The default admits a token carrying one of `eddi.metrics.roles-allowed`; with OIDC on, an anonymous scrape gets 401 and a token without the role 403. `authenticated` admits any token (the 6.5 default); `permit` opens this one path — only where it cannot be reached from outside. See [monitoring-guide.md → Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on) |
 | `eddi.metrics.dedicated-scrape-threads` | `true` | Serves `GET`/`HEAD /q/metrics` on two threads of its own instead of the worker pool the blocking REST endpoints share, so the scrape still answers when that pool is saturated (in a load test, conversation starts held it for 106 s and the scrape timed out throughout). The permission above still applies. `false` hands the endpoint back to Quarkus' own handler |
 | `eddi.metrics.roles-allowed` | `eddi-admin,eddi-metrics` | The realm roles the default metrics policy admits. `eddi-metrics` is not in the shipped realm: create it and give it to the scrape's service account |
-| `eddi.api-docs.http-policy` | `eddi-api-docs-reader` | Quarkus HTTP policy for the API description — `/openapi`, `/q/openapi`, `/q/swagger-ui`. The default admits a token carrying one of `eddi.api-docs.roles-allowed`; `authenticated` admits any token, `permit` anyone. See [security.md → Deny by default](security.md#deny-by-default-and-what-a-role-less-token-reaches) |
+| `eddi.api-docs.http-policy` | `eddi-api-docs-reader` | Quarkus HTTP policy for the API description — `/openapi`, `/q/openapi` (and their `.json`/`.yaml`/`.yml` forms), `/q/swagger-ui`. The default admits a token carrying one of `eddi.api-docs.roles-allowed`; `authenticated` admits any token, `permit` anyone. See [security.md → Deny by default](security.md#deny-by-default-and-what-a-role-less-token-reaches) |
 | `eddi.api-docs.roles-allowed` | `eddi-admin,eddi-editor,eddi-user,eddi-approver,eddi-viewer` | The realm roles the default API-description policy admits — any EDDI role. The Manager reads `/openapi` for the backend version, and the Platform Operator for its tool list |
 | `eddi.chat.frame-ancestors` | `'none'` | CSP `frame-ancestors` for the Chat UI at `/chat` — the origins allowed to embed it in an `<iframe>`, space-separated (`https://www.example.com https://*.example.org`). The default refuses every embedder; the rest of EDDI always sends `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
 | `eddi.chat.url-token.enabled` | `false` | Whether the Chat UI honours a bearer token passed as `?token=` in its URL. Off, the widget ignores the parameter (and says so in the browser console, naming this property) and takes a token only from the `postMessage` hand-off (`?tokenOrigin=`) or `ChatConfig.authToken`. A token in the URL lets a crafted link sign the widget in as whoever minted it (login CSRF), and the first request logs it before the widget strips it from the address bar — turn this on only for an embedding that cannot use the hand-off. See [the Chat UI embedding contract](chat-ui-embedding.md) |
@@ -411,11 +417,21 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
+| `eddi.hitl.approval-context.max-total-chars` | `8000` | Cap on the text of all `approvalContext` blocks of one pause, summed; further blocks are dropped and the context is marked truncated. See [hitl-approval-context.md](hitl-approval-context.md) |
+| `eddi.hitl.approval-context.render-timeout-ms` | `500` | Wall-clock limit for rendering one `approvalContext` block. A block that exceeds it shows as `render_failed`; the pause is committed regardless |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
+| `eddi.hitl.analytics.retention` | `P400D` | How long approval-decision facts (the analytics projection of `hitl.approval` ledger entries) are kept. The ledger itself keeps the evidence. See [hitl-oversight.md](hitl-oversight.md) |
+| `eddi.hitl.analytics.initial-backfill` | `P90D` | How far back the one-time first-start rebuild reads the ledger into approval analytics. `P0D` disables it; `POST /hitl/analytics/rebuild` runs one by hand |
+| `eddi.hitl.samples.enabled` | `true` | Cluster-wide switch for the sampled audit of ungated tool calls (`hitlConfig.oversight.sampledAudit`) |
+| `eddi.hitl.samples.retention` | `P180D` | How long audit samples are kept |
+| `eddi.hitl.autonomy.maintenance-interval` | `PT1H` | How often the `hitl-autonomy-maintenance` system schedule runs (sample expiry, earned-autonomy evaluation, retention); at least 60 s |
+| `eddi.hitl.autonomy.suspension-cache-ttl` | `PT15S` | How long a node trusts its cached list of an agent's suspended categories — the longest a suspension takes to reach every pod |
+| `eddi.hitl.autonomy.max-agents-per-run` | `500` | Deployed agents one maintenance run evaluates (round-robin) |
+| `eddi.hitl.oversight.self-hosts` | *(empty)* | Extra names this deployment is reached by (`host` or `host:port`, comma-separated; a bare host matches any port). An httpcall to one of them, to `eddi.self.base-url`'s origin or to a loopback address carries `X-EDDI-Agent-Call`, so the oversight API can refuse an agent's own write. No other host ever sees the header |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
 
 ---
@@ -425,7 +441,7 @@ Full guide: [hitl.md](hitl.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.tools.budget.enforce-by-default` | `true` | Whether a per-conversation tool cost ceiling (`maxBudgetPerConversation`) refuses calls when the task does not set `enforceBudget` itself. `false` makes such ceilings advisory (tracked, never refused) and names each one in a WARN. See [langchain.md](langchain.md#budgets) |
-| `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
+| `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call; a task with `enableRateLimiting: false` skips only its own limit, never this one |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
 | `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
@@ -499,6 +515,7 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
 | `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
 | `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
+| `eddi.backup.sync.max-requests` | `10000` | Most requests one sync preview or sync sends to the source instance. Each document is fetched once per sync (a failed one is not retried), but how many distinct documents there are is the source's to decide; past the budget the sync fails with `502` instead of reading on. A real agent needs a few hundred |
 | `eddi.backup.sync.max-response-bytes` | `16777216` (16 MiB) | Most bytes live sync accepts in one JSON response from the source instance (descriptor listings, configs). A larger declared `Content-Length` is refused before reading, an undeclared body is cut off at the cap, and the sync fails with `502`. Bounds how much heap a compromised or misbehaving source can make one sync take. The archive a first-time sync downloads has its own fixed 256 MiB cap |
 
 > `require-https`, `allow-private-targets` and `allowed-sources` decide what `POST /backup/import/sync*` will read an agent **from**.
@@ -656,6 +673,8 @@ below. See [Enabling connections](connections.md#enabling-connections).
 |---|---|---|
 | `eddi.groups.max-depth` | `3` | Nesting limit for groups-of-groups |
 | `eddi.groups.cadence.claim-ttl` | `PT24H` | How long a standing-team cadence claim is held |
+| `eddi.groups.handoff.max-hops` | `3` | How many team boundaries one piece of work may cross by [cross-team handoff](team-handoff.md) before further handoffs are refused as a loop |
+| `eddi.groups.handoff.decline-memory` | `P30D` | How long a declined handoff blocks the same handoff being filed again. An upper limit, not a guarantee: only the 200 most recent decline tombstones are kept per workspace, so older declines can be forgotten sooner |
 | `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
@@ -684,6 +703,10 @@ The brand is normally edited at runtime (`/administration/branding`, `eddi-admin
 | `eddi.branding.color.chat-accent` | *(unset: the primary)* | The Chat UI's accent |
 | `eddi.branding.powered-by` | *(unset: `true`)* | Show "Powered by EDDI" |
 | `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
+| `eddi.update-check.enabled` | `true` (env `EDDI_UPDATE_CHECK_ENABLED`) | The daily "is a newer EDDI out?" check against `api.github.com`, with a notification for administrators. `false` stops it entirely, the first check after the first boot included, and locks the Manager's switch off. See [Docker → Update check](docker.md#update-check) |
+| `eddi.update-check.interval` | `24h` | How often the update check runs |
+| `eddi.update-check.initial-delay` | `1m` | Delay after boot before the first update check |
+| `eddi.update-check.url` | GitHub `labsai/EDDI` `releases/latest` API | Release lookup endpoint; change only for a mirror or a test |
 | `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
 
 The Helm chart sets each of these from its `eddi.branding.*` values, and mounts a ConfigMap of images as `assets-dir` ([White-Labeling → Helm](white-labeling.md#helm)). The MCP server's `serverInfo` follows the product name unless `quarkus.mcp.server.server-info.name` is set.
@@ -720,6 +743,19 @@ The Helm chart sets each of these from its `eddi.branding.*` values, and mounts 
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
+
+## Other keys EDDI reads
+
+Outside the `eddi.*` namespace, EDDI reads a few keys of its own from `application.properties`:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `httpClient.maxConnectionPerRoute` | `200` | Legacy HTTP client: connections per route |
+| `httpClient.connectTimeoutInMillis` | `10000` | Legacy HTTP client: connect timeout |
+| `httpClient.idleTimeoutInMillis` | `60000` | Legacy HTTP client: idle connection timeout |
+| `httpClient.maxRedirects` | `5` | Legacy HTTP client: redirects followed |
+
+Standard Quarkus keys (for example `quarkus.http.ssl.certificate.*` for TLS on the HTTPS port, `quarkus.http.non-application-root-path`, `quarkus.oidc.*`) are documented by Quarkus and are not repeated here.
 
 ## Migration
 

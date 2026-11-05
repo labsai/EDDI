@@ -333,6 +333,10 @@ public final class McpApiToolBuilder {
             // The base for relative $refs is the URL the document was finally read
             // from: after a redirect that differs from the location the editor gave.
             OpenApiSpecFetcher.FetchedSpec fetched = specFetcher.fetchSpec(location);
+            // A downloaded document is the publisher's, not the editor's: a file: or
+            // classpath: $ref in it would be read from the local filesystem by the
+            // parser's 3.1 resolver. Relative refs stay (they resolve against the URL).
+            rejectUnsafeRefs(fetched.content(), true);
             result = new OpenAPIV3Parser().readContents(fetched.content(), null, parseOptions, fetched.location());
         }
 
@@ -385,12 +389,29 @@ public final class McpApiToolBuilder {
      *             cannot be deserialized for inspection
      */
     static void rejectUnsafeInlineRefs(String specContent) {
+        rejectUnsafeRefs(specContent, false);
+    }
+
+    /**
+     * {@link #rejectUnsafeInlineRefs} for either kind of document. A
+     * {@code downloaded} one has a base URL, against which a relative {@code $ref}
+     * ({@code ./pet.yaml}, {@code /schemas/pet.json}) resolves to an http(s) URL,
+     * so only a ref with an explicit scheme other than http(s) — or a UNC path — is
+     * refused there; an inline document has no base, and its relative refs would be
+     * read from the process working directory.
+     */
+    static void rejectUnsafeRefs(String specContent, boolean downloaded) {
         if (specContent == null) {
             return;
         }
-        Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
-        while (matcher.find()) {
-            checkInlineRef(matcher.group(1));
+        if (!downloaded) {
+            // The cheap first gate for an editor's own document. Not for a downloaded
+            // one: a description or YAML comment that merely mentions "$ref: file:..."
+            // would refuse a valid spec, and the decoded tree below is the authority.
+            Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
+            while (matcher.find()) {
+                checkRef(matcher.group(1), false);
+            }
         }
 
         JsonNode root = deserializeLikeParser(specContent);
@@ -403,7 +424,13 @@ public final class McpApiToolBuilder {
             if (node.isObject()) {
                 JsonNode ref = node.get("$ref");
                 if (ref != null && ref.isValueNode()) {
-                    checkInlineRef(ref.asText());
+                    checkRef(ref.asText(), downloaded);
+                }
+                // An OpenAPI 3.1 schema $id is the base its relative refs resolve against:
+                // under "file:///etc/" a bare "secret.yaml" is a local file.
+                JsonNode id = downloaded ? node.get("$id") : null;
+                if (id != null && id.isTextual()) {
+                    checkSchemaId(id.asText());
                 }
             }
             if (node.isContainerNode()) {
@@ -429,7 +456,25 @@ public final class McpApiToolBuilder {
         }
     }
 
-    private static void checkInlineRef(String rawRef) {
+    private static final Pattern EXPLICIT_SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
+
+    /**
+     * Refuses a schema {@code $id} that would turn relative references into local
+     * reads: {@code file:}, {@code jar:}, {@code classpath:}, a drive or UNC path.
+     * Other schemes ({@code urn:}, http) cannot be read from the filesystem.
+     */
+    private static void checkSchemaId(String rawId) {
+        String id = rawId.trim();
+        String lower = id.toLowerCase(Locale.ROOT);
+        boolean local = lower.startsWith("file:") || lower.startsWith("jar:") || lower.startsWith("classpath:") || id.startsWith("\\\\")
+                || (id.length() > 1 && Character.isLetter(id.charAt(0)) && id.charAt(1) == ':' && !lower.startsWith("urn:"));
+        if (local) {
+            throw new IllegalArgumentException("Downloaded OpenAPI spec declares a schema $id '" + id
+                    + "' that resolves its relative $refs against the local filesystem; refused.");
+        }
+    }
+
+    private static void checkRef(String rawRef, boolean downloaded) {
         String ref = rawRef.trim();
         if (ref.isEmpty() || ref.startsWith("#")) {
             return; // internal fragment reference
@@ -438,7 +483,10 @@ public final class McpApiToolBuilder {
         if (lower.startsWith("http://") || lower.startsWith("https://")) {
             return; // URL ref — guarded by setSafelyResolveURL
         }
-        throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
+        if (downloaded && !ref.startsWith("\\\\") && !EXPLICIT_SCHEME.matcher(ref).find()) {
+            return; // relative to the document's URL
+        }
+        throw new IllegalArgumentException((downloaded ? "Downloaded" : "Inline") + " OpenAPI spec contains an external $ref '" + ref
                 + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
     }
 
@@ -525,6 +573,9 @@ public final class McpApiToolBuilder {
         // Parameters (path + query)
         var paramDescriptions = new LinkedHashMap<String, String>();
         var queryParams = new LinkedHashMap<String, String>();
+        // The JSON Schema of the same parameters, for ApiCall.argumentSchema: typed
+        // tool parameters, and a check of every call before the approval gate.
+        var argumentProperties = new LinkedHashMap<String, Object>();
 
         for (Parameter param : parameters) {
             if (param == null || param.getName() == null) {
@@ -548,8 +599,10 @@ public final class McpApiToolBuilder {
                 // the tool parameter the model fills) uses the safe variable name.
                 queryParams.put(paramName, "{" + variableName + "}");
                 paramDescriptions.put(variableName, paramDesc);
+                argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
             } else if ("path".equals(param.getIn())) {
                 paramDescriptions.put(variableName, paramDesc);
+                argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
             }
             // header/cookie params are skipped for now
         }
@@ -582,8 +635,10 @@ public final class McpApiToolBuilder {
                     }
                     bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
                     paramDescriptions.put(renamed, variable.getValue());
+                    argumentProperties.put(renamed, bodyMapping.argumentSchema(openAPI));
                 } else {
                     paramDescriptions.put(variableName, variable.getValue());
+                    argumentProperties.put(variableName, bodyMapping.argumentSchema(openAPI));
                 }
             }
             request.setBody(bodyTemplate);
@@ -594,6 +649,15 @@ public final class McpApiToolBuilder {
         // Set parameter descriptions for LLM tool use
         if (!paramDescriptions.isEmpty()) {
             httpCall.setParameters(paramDescriptions);
+            // Every parameter stays required, as the untyped tools always made them: an
+            // omitted query value would render as an empty "?name=". Requiredness INSIDE
+            // the body is the spec's own.
+            var argumentSchema = new LinkedHashMap<String, Object>();
+            argumentSchema.put("type", "object");
+            argumentSchema.put("properties", argumentProperties);
+            argumentSchema.put("required", new ArrayList<>(paramDescriptions.keySet()));
+            httpCall.setArgumentSchema(argumentSchema);
+            httpCall.setUnknownFields(ApiCall.UNKNOWN_FIELDS_REJECT);
         }
 
         return httpCall;
@@ -609,7 +673,20 @@ public final class McpApiToolBuilder {
      * A request body ready to be written into a call: the content type to send, and
      * the template plus the tool parameters that fill it.
      */
-    private record BodyMapping(String contentType, BodyTemplate body) {
+    private record BodyMapping(String contentType, BodyTemplate body, Schema<?> schema) {
+
+        /**
+         * The argument schema of the body variable: a string for a text body, the
+         * resolved schema for a JSON one (untyped when the spec declares none).
+         */
+        Map<String, Object> argumentSchema(OpenAPI openAPI) {
+            if (TEXT_MEDIA_TYPE.equals(contentType)) {
+                Map<String, Object> string = new LinkedHashMap<>();
+                string.put("type", "string");
+                return string;
+            }
+            return OpenApiArgumentSchemas.bodySchema(schema, openAPI);
+        }
     }
 
     /**
@@ -663,14 +740,15 @@ public final class McpApiToolBuilder {
         MediaType media = selected.getValue();
         String selectedType = baseMediaType(selected.getKey());
         if (TEXT_MEDIA_TYPE.equals(selectedType)) {
-            return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media));
+            return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media), null);
         }
         // An RFC 6902 patch is declared as application/json-patch+json ONLY, and is
         // chosen only when plain JSON is not declared (selectSupportedBody prefers
         // it). It is the same single-variable JSON body, with a description that
         // says what the array IS and sent under its own content type.
         if (JSON_PATCH_MEDIA_TYPE.equals(selectedType)) {
-            return new BodyMapping(JSON_PATCH_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI), true));
+            return new BodyMapping(JSON_PATCH_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI), true),
+                    media.getSchema());
         }
         // One level of $ref resolution, HERE and deliberately not resolveFully():
         // the parser leaves component references unresolved, so a body
@@ -683,7 +761,7 @@ public final class McpApiToolBuilder {
         // Nested property refs stay unresolved: the top-level field
         // names and requiredness are what the model needs to write a
         // correct body.
-        return new BodyMapping(JSON_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI)));
+        return new BodyMapping(JSON_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI)), media.getSchema());
     }
 
     /**
