@@ -120,6 +120,8 @@
     "workspaces": "مساحات العمل",
     "breadcrumb": "مسار التنقل",
     "checkingVersion": "جارٍ التحقق من الإصدار...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} تجريبي {{version}}",
     "expandSidebar": "توسيع الشريط الجانبي",
     "collapseSidebar": "طي الشريط الجانبي",
     "branding": "الهوية التجارية",
@@ -7447,6 +7449,7 @@
     "sourceLabel": "مصدر الهوية التجارية الحالية:",
     "updated": "آخر حفظ {{when}} بواسطة {{who}}، المراجعة {{revision}}",
     "saveFailed": "لم تُحفظ الهوية التجارية: {{reason}}",
+    "writeTimeout": "لم يستجب الخادم في الوقت المناسب. أعد تحميل الصفحة لمعرفة ما إذا طُبّق التغيير.",
     "warningsTitle": "تم الحفظ، مع تحذير من الخادم:",
     "toast": {
       "applyFailed": "تم الحفظ، لكن تعذّر على هذا التبويب تحميل الهوية الجديدة. أعد تحميل الصفحة لرؤيتها.",

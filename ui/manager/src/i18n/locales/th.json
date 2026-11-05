@@ -120,6 +120,8 @@
     "workspaces": "พื้นที่ทำงาน",
     "breadcrumb": "เส้นทางนำทาง",
     "checkingVersion": "กำลังตรวจสอบเวอร์ชัน...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} เดโม {{version}}",
     "expandSidebar": "ขยายแถบด้านข้าง",
     "collapseSidebar": "ย่อแถบด้านข้าง",
     "branding": "แบรนด์",
@@ -7163,6 +7165,7 @@
     "sourceLabel": "แบรนด์ที่ใช้อยู่มาจาก:",
     "updated": "บันทึกล่าสุด {{when}} โดย {{who}} รุ่นแก้ไข {{revision}}",
     "saveFailed": "ไม่ได้บันทึกแบรนด์: {{reason}}",
+    "writeTimeout": "เซิร์ฟเวอร์ไม่ตอบกลับภายในเวลาที่กำหนด โหลดหน้าใหม่เพื่อดูว่าการเปลี่ยนแปลงถูกนำไปใช้หรือไม่",
     "warningsTitle": "บันทึกแล้ว พร้อมคำเตือนจากเซิร์ฟเวอร์:",
     "toast": {
       "applyFailed": "บันทึกแล้ว แต่แท็บนี้โหลดแบรนด์ใหม่ไม่ได้ โปรดโหลดหน้าใหม่เพื่อดู",

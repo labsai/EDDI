@@ -423,6 +423,12 @@ public class WebCrawler {
             if (link.attr("rel").toLowerCase().contains("nofollow")) {
                 continue;
             }
+            // The bound applies to the URL that will be fetched: canonicalizing drops
+            // tracking
+            // parameters, so a short canonical id must not let an oversized href through.
+            if (CrawlUrls.stripFragment(href).length() > MAX_LINK_LENGTH) {
+                continue;
+            }
             String canonical = CrawlUrls.canonicalize(href);
             if (canonical.isEmpty() || visited.contains(canonical) || queued.contains(canonical)) {
                 continue;
@@ -552,6 +558,11 @@ public class WebCrawler {
                 if (pagesFromSitemaps >= MAX_SITEMAP_URLS) {
                     counters.discoveryIncomplete = true;
                     break;
+                }
+                // Bounded as fetched, before canonicalization drops tracking parameters (see
+                // enqueueLinks)
+                if (url == null || CrawlUrls.stripFragment(url).length() > MAX_LINK_LENGTH) {
+                    continue;
                 }
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list

@@ -941,7 +941,7 @@ eddi_vault_grant_update_count_total         # allowedAgents edited without the v
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures (store unreachable, decryption failed) — not "no such key"
 eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
-eddi_vault_legacy_unbound_opened_count_total # Values opened only through the no-AAD legacy fallback; zero after a rotate-dek = safe to set eddi.vault.accept-unbound-legacy-data=false
+eddi_vault_legacy_unbound_opened_count_total # Fallback attempts for values opened only through the no-AAD legacy fallback (refused ones included); cumulative, so after a rotate-dek on every tenant watch its rate, not its total: once the rate has stayed at zero over your whole observation period it is safe to set eddi.vault.accept-unbound-legacy-data=false
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver

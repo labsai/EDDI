@@ -68,8 +68,8 @@ down, the amount is held back and charged with the next charge.
 
 | Where | What |
 |---|---|
-| A new discussion (`discuss`, async start, a cadence-created one) | Refused before anything is created. REST: **409** with the reason as text |
-| A follow-up or continuation of an existing root discussion | Refused the same way |
+| A new discussion (`discuss`, async start, a cadence-created one) | Refused before anything is created. REST: **409** with the reason as text; the streaming endpoint sends the same text in its `group_error` event |
+| A follow-up or continuation of an existing root discussion | Refused the same way (**409** with the reason; a streamed continuation sends it in `group_error`) |
 | A standing-team cadence fire | **Skipped**, not failed: a success that is not retried, with the backlog untouched. The skip text says the budget is spent |
 | A discussion already running | Runs on. It is *not* cut short by a gate; its own ceiling (below) handles it |
 | A resume after an HITL pause or a human input | Not gated: work already started is not abandoned |
