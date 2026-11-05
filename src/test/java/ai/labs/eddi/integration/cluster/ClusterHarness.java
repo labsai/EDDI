@@ -79,7 +79,7 @@ final class ClusterHarness {
     }
 
     static final int NODES = 3;
-    static final String NATS_PASSWORD = "e2e-nats-password-0123456789";
+    static final String NATS_PASSWORD = "fixturefixturefixture";
     static final String VAULT_KEY = "e2e-test-master-key-0123456789abcdef";
     static final int MOCK_PORT = 18210;
     /** {@code eddi.cluster.lease.ttl}; the suite runs the defaults. */
