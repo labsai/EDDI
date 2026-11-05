@@ -528,6 +528,15 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("the sharing endpoint's question gets the same answer while enforcement is off")
+        void mayReadGrantsIsStructuralWhenNotEnforcing() {
+            assertFalse(guard(identity("carol"), notEnforcing, mock(IDocumentDescriptorStore.class))
+                    .mayReadGrants(publishedWithGrantsOwnedBy("alice")));
+            assertTrue(guard(identity("alice"), notEnforcing, mock(IDocumentDescriptorStore.class))
+                    .mayReadGrants(publishedWithGrantsOwnedBy("alice")));
+        }
+
+        @Test
         @DisplayName("an owner still sees their own grants while enforcement is off")
         void ownerKeepsGrantsWhenNotEnforcing() {
             var g = guard(identity("alice"), notEnforcing, mock(IDocumentDescriptorStore.class));

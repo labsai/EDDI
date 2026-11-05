@@ -231,6 +231,8 @@ export function ApprovalBanner({
   const editableAnswer = surface === "regular" ? (rulePause?.editableAnswer ?? null) : null;
   const reasonCodes = (toolPause?.reasonCodes ?? rulePause?.reasonCodes ?? []);
   const isEditing = editing && !!editableAnswer;
+  // The same test handleSubmit applies: an editor opened and left as it was is a plain approval.
+  const hasEdit = isEditing && !!editableAnswer && editedAnswer !== editableAnswer.draft;
 
   // Every gated call must carry an explicit verdict before Approve is offered.
   // Checked against callStates directly (not toolDecisions, which is built only
@@ -296,7 +298,12 @@ export function ApprovalBanner({
     const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
-      const amend = s?.amend?.trim();
+      // An amendment identical to the arguments shown is no amendment: the server
+      // compares it with the stored arguments and would answer a reason code on
+      // that "plain approval" with a 400. Arguments redacted for display differ from
+      // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      const typed = s?.amend?.trim();
+      const amend = typed && typed !== call.arguments ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;
@@ -338,7 +345,14 @@ export function ApprovalBanner({
       // An edit identical to the draft is a plain approval - and is not held to the
       // edit limits (a blank or over-long draft can still be approved as it stands).
       const changed = editedAnswer !== editableAnswer.draft;
-      const error = changed ? validateEditedAnswer(t, editedAnswer, editableAnswer) : null;
+      const error = changed
+        ? editedAnswer.includes("<REDACTED>")
+          ? t(
+              "hitlReview.redactedMarkerRemains",
+              "The text still contains the redaction marker <REDACTED>. Remove it, or approve without edits: the server cannot apply an edit that keeps it.",
+            )
+          : validateEditedAnswer(t, editedAnswer, editableAnswer)
+        : null;
       if (error) {
         setSubmitError(error);
         return;
@@ -411,7 +425,7 @@ export function ApprovalBanner({
               confirmLabel: t("hitl.approve", "Approve"),
               variant: "warning" as const,
             }
-          : isEditing
+          : hasEdit
             ? {
                 title: t("hitlReview.confirmApproveEditedTitle", "Approve with your edits?"),
                 description: t(
@@ -738,7 +752,9 @@ export function ApprovalBanner({
             ? t("hitlReview.lastEditScreenedOut", "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.", {
                 guardrail: rulePause.lastEditRefused.guardrail ?? "",
               })
-            : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
+            : rulePause.lastEditRefused.reason === "REDACTED_CONTENT"
+              ? t("hitlReview.lastEditRedacted", "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.")
+              : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
         </p>
       )}
       {editableAnswer && (
@@ -871,7 +887,7 @@ export function ApprovalBanner({
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {perCallReview
             ? t("hitl.submitDecisions", "Submit decisions")
-            : isEditing
+            : hasEdit
               ? t("hitlReview.approveEdited", "Approve with edits")
               : t("hitl.approve", "Approve")}
         </button>

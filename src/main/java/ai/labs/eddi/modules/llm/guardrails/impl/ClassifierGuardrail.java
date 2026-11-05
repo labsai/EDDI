@@ -164,6 +164,11 @@ public class ClassifierGuardrail implements ContentGuardrail {
         return false;
     }
 
+    @Override
+    public boolean callsModel() {
+        return true;
+    }
+
     /**
      * A classifier must be able to tell "safe" apart from "anything else": with a
      * custom {@code unsafeLabel} and no {@code safeLabel} there is no answer that

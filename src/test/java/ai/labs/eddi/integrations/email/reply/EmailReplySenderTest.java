@@ -30,6 +30,7 @@ import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.qute.Engine;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.enterprise.inject.Instance;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
@@ -563,6 +564,47 @@ class EmailReplySenderTest {
                     EmailUserIdentity.anonymous(), mail("<q9@supplier.com>", SENDER), "x", NOW).isEmpty(), "anonymous: never");
             verify(conversations, never()).readConversation(anyString(), any(), any(), any());
             verify(audit, atLeastOnce()).submit(any());
+        }
+
+        @Test
+        @DisplayName("a group reply's retry chooses its recipient again: Reply-To routing switched off since stops it")
+        void retryRechecksTheRecipient() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            String user = EmailUserIdentity.perSender(INTEGRATION, SENDER);
+            Map<String, Object> mail = mail();
+            mail.put("replyTo", List.of("form-user@example.org"));
+            integration(Map.of("honorReplyTo", "true"));
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+
+            var row = sender.onGroupCompleted(INTEGRATION, settings(Map.of("honorReplyTo", "true")), inbound, "gc-1", user, mail,
+                    "The panel recommends B.", NOW).orElseThrow();
+            assertEquals("form-user@example.org", row.recipient());
+            integration(Map.of()); // the owner turns Reply-To routing off
+            sender.sweep(ledger.findById(row.id()).orElseThrow().nextAttemptAt().plusSeconds(1));
+
+            assertTrue(transport.recipients.isEmpty(), "not sent to the Reply-To any more");
+            assertEquals(State.SUPPRESSED, ledger.findById(row.id()).orElseThrow().state());
+            assertFalse(sender.holdsGroupReply(row.id()));
+        }
+
+        @Test
+        @DisplayName("a group reply's retry is rendered again: a changed address is its From, under the same Message-ID")
+        void retryRendersWithTheCurrentAddress() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            String user = EmailUserIdentity.perSender(INTEGRATION, SENDER);
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+
+            var row = sender.onGroupCompleted(INTEGRATION, settings(), inbound, "gc-1", user, mail(), "The panel recommends B.", NOW)
+                    .orElseThrow();
+            integration(Map.of("address", "orders@contoso.com")); // the mailbox moved
+            sender.sweep(ledger.findById(row.id()).orElseThrow().nextAttemptAt().plusSeconds(1));
+
+            assertEquals(List.of(SENDER), transport.recipients);
+            var sent = parse(transport.messages.get(0));
+            assertEquals("orders@contoso.com", ((InternetAddress) sent.getFrom()[0]).getAddress());
+            assertEquals(row.messageId(), sent.getMessageID());
+            assertTrue(sent.getContent().toString().contains("The panel recommends B."));
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
         }
     }
 }

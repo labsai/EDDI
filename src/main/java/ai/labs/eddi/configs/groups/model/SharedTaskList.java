@@ -654,6 +654,9 @@ public class SharedTaskList {
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
                 reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
+        // the next result is a new one: an edit recorded against the superseded result
+        // no longer describes it
+        reviewerEdits.remove(taskId);
         return u;
     }
 

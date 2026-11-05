@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
@@ -60,6 +61,15 @@ final class ReviewerEditStep {
     }
 
     /**
+     * Whether {@code edited} carries the redaction placeholder although the stored
+     * {@code draft} does not, i.e. the placeholder came from the served view.
+     */
+    static boolean replacesConcealedContent(String draft, String edited) {
+        return edited != null && edited.contains(SecretRedactionFilter.REDACTED)
+                && (draft == null || !draft.contains(SecretRedactionFilter.REDACTED));
+    }
+
+    /**
      * Applies the decision's {@code editedAnswer} to the draft the candidate
      * describes.
      *
@@ -72,6 +82,11 @@ final class ReviewerEditStep {
         ReviewerEditRequest.Outcome outcome;
         if (workflow == null) {
             outcome = ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_CONFIG_DRIFT, null);
+        } else if (replacesConcealedContent(candidate.getDraft(), decision.getEditedAnswer())) {
+            // The approver edited the REDACTED view (HitlReviewDetails.forRule), whose
+            // placeholders stand for text they never saw. Applying the whole string
+            // would overwrite that text with the placeholder.
+            outcome = ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_REDACTED_CONTENT, null);
         } else {
             step.setCurrentWorkflowId(workflow.getWorkflowId());
             outcome = workflow.getLifecycleManager().replaceAnswerAt(memory, candidate.getLifecycleIndex(),

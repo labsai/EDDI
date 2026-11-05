@@ -166,20 +166,16 @@ memory.getCurrentStep().storeData(
 );
 ```
 
-### Example: LangChain Task
+### Example: Reading history
+
+The snippets on this page are illustrative sketches, not copy-paste code. Real keys are the constants in `MemoryKeys` (`input`, `input:initial`, `expressions:parsed`, `actions`, `output:*`, `context:*`, `taskErrors`, `properties:changes`).
 
 ```java
-// Reads conversation history
-List<IConversationStep> history = memory.getPreviousSteps().getAllSteps();
-
-// Calls LLM with history
-String llmResponse = langChainService.chat(history, currentInput);
-
-// Stores LLM response in memory
-memory.getCurrentStep().storeData(
-    dataFactory.createData("llmResponse", llmResponse)
-);
+// Previous steps are an IConversationStepStack: get(i), size(), getAllLatestData(prefix) ...
+List<IData<String>> pastInputs = memory.getPreviousSteps().getAllLatestData("input");
 ```
+
+The LLM task does not read this raw history. It builds its message list through `ConversationHistoryBuilder` (see [What the LLM sees](#what-the-llm-sees)).
 
 ### Example: HTTP Calls Task
 
@@ -529,7 +525,8 @@ String userName = httpData.getResult().getString("name");
 
 ```java
 IConversationStepStack previousSteps = memory.getPreviousSteps();
-for (IConversationStep step : previousSteps) {
+for (int i = 0; i < previousSteps.size(); i++) {
+    IConversationStep step = previousSteps.get(i);
     IData<String> inputData = step.getLatestData("input");
     if (inputData != null) {
         String pastInput = inputData.getResult();
@@ -657,6 +654,14 @@ state: IN_PROGRESS → READY (ENDED on CONVERSATION_END, ERROR on failure)
 `ConversationService` then saves the snapshot to the datastore and updates the cached state. `secret` properties are not handled here: they were vaulted when their property instruction ran.
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
+
+## What the LLM sees
+
+Conversation memory has two audiences. Pipeline tasks (behavior rules, property setter, and so on) see the **full memory**: every step and every data key. The LLM sees only a **windowed view** that `ConversationHistoryBuilder` assembles from the last N conversation outputs, converted to chat messages. "The conversation is too long" is therefore two different problems: the LLM context window (what the model sees) and the stored document size. Windowing and summaries change only the first; the full conversation always stays in the database. See [Conversation Window Management](langchain.md#conversation-window-management) and [Rolling Conversation Summary](langchain.md#rolling-conversation-summary), and [Memory Policy](memory-policy.md) for what is hidden from the model after a failed task.
+
+## Conversation store and lifecycle
+
+The stored snapshot is served by `/conversationstore/conversations` (read a simple or raw log, list, `DELETE` one conversation or a set, `POST end-inactive` and `POST end` to end conversations, `GET active/{agentId}`). Deleting a conversation goes through `ConversationPurgeService`, which removes the conversation together with what hangs off it: vault slots, attachments, checkpoints, the HITL journal, the stored memory and the conversation descriptor. Checkpoints (`IConversationCheckpointStore`) are saved snapshots of the conversation properties and the step index (`MemoryCheckpoint`), not of the steps or outputs. A rollback restores the properties only, so a checkpoint is not a backup of the whole conversation. For erasure on behalf of a data subject see [GDPR compliance](gdpr-compliance.md).
 
 ## Related Documentation
 

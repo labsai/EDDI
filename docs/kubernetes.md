@@ -798,6 +798,15 @@ existing install delete the old objects by hand — `kubectl apply -k` does not
 prune: `kubectl delete clusterrolebinding eddi-prometheus` and
 `kubectl delete clusterrole eddi-prometheus`.
 
+Prometheus has no login of its own, so the component also ships a `NetworkPolicy`
+(`prometheus-network-policy`) that admits only the Grafana pod on port 9090; other pods
+in the cluster cannot query it or list its scrape targets (`kubectl port-forward` still
+works). To let another client in, such as a federating Prometheus, patch its pod selector
+into that policy's `from` list. A client in another namespace needs a
+`namespaceSelector` **in the same `from` entry** as its `podSelector` (a `podSelector`
+alone selects pods in the policy's own namespace only). It takes effect only where the
+CNI enforces NetworkPolicy.
+
 With the auth component, `/q/metrics` requires a token and an anonymous scrape
 answers 401 — see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on).
 

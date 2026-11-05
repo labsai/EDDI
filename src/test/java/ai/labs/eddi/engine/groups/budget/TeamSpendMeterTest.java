@@ -129,6 +129,35 @@ class TeamSpendMeterTest {
     }
 
     @Test
+    void theKillSwitchLiftsTheCeilingOfARunThatAlreadyHasOne() {
+        GroupConversation gc = gc(0, 1.0);
+        t.meter.beginLeg(gc, config);
+        assertNotNull(gc.getTeamBudgetState().getCeilingUsd(), "precondition: the run has a team ceiling");
+
+        t.meter.meteringEnabled = false;
+        t.meter.beginLeg(gc, config);
+
+        assertNull(gc.getTeamBudgetState(), "the next leg drops the persisted state");
+        assertNull(TeamBudgetCeilings.effective(gc, null).ceiling());
+    }
+
+    @Test
+    void aBudgetAddedToARunningDiscussionChargesOnlyWhatItSpendsAfterwards() {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-old");
+        gc.setGroupId("g1");
+        gc.setTotalCost(4.0); // spent before the group had a teamBudget
+
+        t.meter.beginLeg(gc, config);
+        assertEquals(0.0, spent(), 1e-9, "no back-fill");
+        assertEquals(4.0, gc.getTeamBudgetState().getChargedUsd(), 1e-9, "the baseline");
+
+        gc.setTotalCost(5.5);
+        t.meter.charge(gc);
+        assertEquals(1.5, spent(), 1e-9);
+    }
+
+    @Test
     void theCeilingIsAnchoredToTheRunsOwnLedger() {
         t.store.addSpend("g1", MONTH, 30.0, TeamBudgetTestSupport.CLOCK.instant());
         GroupConversation gc = gc(0, 1.0);

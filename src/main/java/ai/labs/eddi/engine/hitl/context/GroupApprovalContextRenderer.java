@@ -233,8 +233,15 @@ public class GroupApprovalContextRenderer {
         return group;
     }
 
+    /**
+     * Artifacts larger than this are not parsed into the template data (their
+     * capped text still is).
+     */
+    static final int MAX_JSON_PARSE_CHARS = 256 * 1024;
+
     private static Object parseJson(String content) {
-        if (content == null || content.isBlank()) {
+        if (content == null || content.isBlank() || content.length() > MAX_JSON_PARSE_CHARS) {
+            // a card needs a bounded value, and the parse runs on the pause commit path
             return null;
         }
         try {

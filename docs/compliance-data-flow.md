@@ -147,6 +147,9 @@ Besides the LLM provider, these leave the deployment as a side effect of a featu
 | **Email message ledger** | ✅ recipient address of each HITL notification and conversation-mode reply, the sender address of each inbound mail of an email integration, conversation id, Message-ID — never a body or subject | TDE (deployer) | `eddi.email.ledger-retention` (default `30d`) | ✅ Deleted (matched by the user id's address, an `email:<integrationId>:<address>` identity's address, and the user directory's recorded email) | The SMTP relay of `eddi.mail.smtp.*` is a processor: it receives each notification's recipient, the agent name, pause reason and redacted tool arguments; see [hitl.md](hitl.md#email-notifications) |
 | **Email suppression list** | ✅ per integration: SHA-256 of an address a reply bounced from permanently, its domain, the bounce status, when | TDE (deployer) | Until an administrator clears it, the integration is deleted, or the address is erased | ✅ Deleted (matched like the ledger) | Never mailed while listed; see [email-integration.md](email-integration.md#bounces-and-the-suppression-list) |
 | **Email mailbox state** | ❌ per mailbox: IMAP cursor, poll back-off, the day's spend, notice keys | TDE (deployer) | Until the integration is deleted | — | No address, subject or body |
+| **Conversation ratings, tool quotas, alerts, A2A tasks, user directory, workspace notifications** | ✅ userId-keyed rows (ratings and the step they rate; per-user tool counters; alert subscriptions; a peer's A2A tasks; directory entries; notification rows) | TDE (deployer) | Until deleted | ✅ Deleted by the matching GDPR participant | Erased in step 15 of the cascade, see [gdpr-compliance.md](gdpr-compliance.md) |
+| **Personal-space secrets and variables; OAuth connection grants** | ✅ per-user values; a refresh token for the user's account at the provider | AES-256-GCM (secrets); TDE (deployer) | Until deleted | ✅ Deleted (provider-side consent is not revoked) | Includes `scope: secret` property slots |
+| **Cluster erased-markers** | ❌ user-id pseudonym only | NATS KV (deployer) | Short-lived marker | — | Written so other replicas stop work for an erased user |
 | **Schedules** | ✅ userId, trigger payloads | TDE (deployer) | Until deleted | ✅ Deleted | Owned by the creating user |
 | **Audit Ledger** | ✅ userId, prompts, responses, LLM detail, tool calls; admin actions name their actor | TDE (deployer) + HMAC (when a key is set) | Indefinite — no application-level expiry | ⚠️ Rows kept; content **redacted**, userId **pseudonymized** (`eddi.audit.erasure-mode`) | EU AI Act Arts. 12/19 record-keeping |
 | **Audit dead-letter sink** | ✅ whole audit entries | Deployer | Never expired by EDDI | ❌ Not reached | Only written when the ledger cannot persist; see [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) |
@@ -211,14 +214,16 @@ Two stores are kept rather than deleted:
   and tool calls are replaced by a redaction marker and its userId by a keyed
   pseudonym; a row that verified before is re-signed so it still verifies. See
   [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion).
-- **Database logs** — the userId is replaced by `gdpr-erased:<sha256(userId)>`.
+- **Database logs** — the userId is replaced by a keyed pseudonym (`gdpr-erased:k1:…`, the audit ledger's key) or, when the ledger does not sign, a per-deployment-salted one (`gdpr-erased:s1:…`). Only rows from older releases, or an erasure that could not read the salt, carry the unsalted `gdpr-erased:<sha256(userId)>`.
   The log message text is not rewritten; bound it with
   `eddi.logs.db-retention-days`.
 
 > **This is pseudonymisation, not anonymisation, and the distinction is legal as
-> well as technical.** The database-log pseudonym is a deterministic, unsalted
-> digest: anyone holding a list of candidate user IDs can hash each one and match
-> it against the stored value. The audit ledger's v5 pseudonym is keyed
+> well as technical.** The database-log pseudonym is keyed or salted
+> (`gdpr-erased:k1:…` / `gdpr-erased:s1:…`), so a list of candidate user IDs cannot
+> be hashed and matched against it without the key or salt. Rows from older
+> releases, and the fallback used when the salt cannot be read, hold an unsalted
+> digest that can be matched that way. The audit ledger's v5 pseudonym is keyed
 > (`gdpr-erased:k1:<HMAC(key, userId)>`) and cannot be recomputed without the
 > ledger's key — but whoever holds the key can.
 >

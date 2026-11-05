@@ -160,6 +160,39 @@ describe("tool-call guardrail helpers", () => {
     expect(pointerProblem("/items/x*")).toBe(true);
   });
 
+  it("validates tool patterns like ToolApprovalPatterns: known source, endpoint slash, 256 characters", () => {
+    expect(toolPatternProblem("mcq:read_*")).toBe(true);
+    expect(toolPatternProblem("http.post:issues/*")).toBe(true);
+    expect(toolPatternProblem("http.post:/issues/*")).toBe(false);
+    expect(toolPatternProblem("mcp:add_issue_comment")).toBe(false);
+    expect(toolPatternProblem("builtin:*")).toBe(false);
+    expect(toolPatternProblem("mcp.post:/x")).toBe(true);
+    expect(toolPatternProblem("a".repeat(256))).toBe(false);
+    expect(toolPatternProblem("a".repeat(257))).toBe(true);
+  });
+
+  it("warns when an entry exceeds the server's pattern and pointer limits", () => {
+    show(
+      <Harness
+        initial={{
+          ...base,
+          toolCallGuardrails: [
+            {
+              type: "regex-filter",
+              action: "block",
+              tools: Array.from({ length: 33 }, (_, i) => `mcp:t${i}`),
+              fields: Array.from({ length: 17 }, (_, i) => `/f${i}`),
+              parameters: {},
+            },
+          ],
+        } as LlmTask}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("tool-call-guardrail-edit-0"));
+    expect(screen.getByTestId("tool-call-guardrail-tools-too-many")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-call-guardrail-fields-too-many")).toBeInTheDocument();
+  });
+
   it("validates tool pattern characters", () => {
     expect(toolPatternProblem("http.post:/issues/{id}")).toBe(false);
     expect(toolPatternProblem("mcp:*")).toBe(false);

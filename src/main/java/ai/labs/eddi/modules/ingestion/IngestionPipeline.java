@@ -1002,6 +1002,12 @@ public class IngestionPipeline {
          */
         private int inconclusive;
         private int segments;
+        /**
+         * Segments the provider embedded and the run then refused to publish because it
+         * no longer owned its source. Not stored, but paid for: they count against the
+         * run's segment budget and cost.
+         */
+        private int discardedSegments;
         private int tombstoned;
         private boolean replaceUnsupported;
         private boolean tombstoningSkipped;
@@ -1110,9 +1116,14 @@ public class IngestionPipeline {
                         .map(active -> !runId.equals(active.runId()))
                         .orElse(true);
             } catch (RuntimeException e) {
-                // A store that cannot answer has not taken the run away. The writes
-                // themselves are fenced; this only decides whether to keep working.
-                return true;
+                // A store that cannot answer has not taken the run away, so the run is not
+                // marked superseded and keeps going. But the checks made with {@code now}
+                // guard a vector write that no fence covers: publishing on an unverified
+                // answer could make a removed source's text retrievable again, so those
+                // refuse until the store can say. The document is not recorded, and the
+                // next run takes it.
+                LOGGER.debugf(e, "Could not verify that run %s still owns its source", LogSanitizer.sanitize(runId));
+                return !now;
             }
             if (superseded) {
                 LOGGER.warnf("Ingestion run %s of source '%s' no longer owns its source — it was purged, removed "
@@ -1148,7 +1159,7 @@ public class IngestionPipeline {
 
         private double currentCost() {
             Double rate = source.settings().getCostPerThousandSegments();
-            return rate != null && rate > 0 ? (segments / 1000.0) * rate : 0.0;
+            return rate != null && rate > 0 ? ((segments + discardedSegments) / 1000.0) * rate : 0.0;
         }
 
         @Override
@@ -1242,7 +1253,11 @@ public class IngestionPipeline {
                 return;
             }
             var known = stateStore.lookup(sourceKey, file.fileId());
-            if (known.isEmpty() || known.get().tombstoned() || !stillOwnsRun(true)) {
+            if (known.isEmpty() || known.get().tombstoned()) {
+                return;
+            }
+            if (!stillOwnsRun(true)) {
+                ownershipUnverified(file.fileId(), true);
                 return;
             }
             try {
@@ -1325,13 +1340,15 @@ public class IngestionPipeline {
             }
             if (!stillOwnsRun(true)) {
                 // Nothing written for a source that is no longer this run's: the
-                // chunks would belong to nobody.
+                // chunks would belong to nobody. Nothing was embedded either, so
+                // nothing is charged to the segment budget.
+                ownershipUnverified(documentId, existing.isPresent());
                 return;
             }
 
             List<TextSegment> textSegments = split(documentId, url, title, markdown);
             int budget = source.settings().maxSegmentsPerRunOrDefault();
-            if (textSegments.size() > budget - segments) {
+            if (textSegments.size() > budget - segments - discardedSegments) {
                 // Checked before the provider is paid, not after: the budget is
                 // documented as a hard ceiling, and a check after embedding let the
                 // document that crossed it through whole.
@@ -1341,6 +1358,8 @@ public class IngestionPipeline {
 
             int stored = embed(documentId, textSegments);
             if (stored < 0) {
+                discardedSegments += textSegments.size();
+                ownershipUnverified(documentId, existing.isPresent());
                 return;
             }
             segments += stored;
@@ -1352,10 +1371,35 @@ public class IngestionPipeline {
             // provider timeout marks a page done forever.
             stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId);
 
-            if (segments >= source.settings().maxSegmentsPerRunOrDefault()) {
+            if (segments + discardedSegments >= source.settings().maxSegmentsPerRunOrDefault()) {
                 budgetExhausted = true;
                 LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
                         LogSanitizer.sanitize(source.getName()), segments);
+            }
+        }
+
+        /**
+         * A document left alone because the run could not confirm it still owns its
+         * source.
+         *
+         * <p>
+         * The run learned nothing about the document, so it must not count as missing:
+         * left unmarked, the reconciliation at the end of the run bumps its miss
+         * counter, and a store that stays unwell for {@code tombstoneAfterMissedRuns}
+         * runs deletes pages that are still there. It is marked the way an unreachable
+         * page is, and counted as inconclusive, which also keeps the orphan sweep from
+         * running on an incomplete picture.
+         */
+        private void ownershipUnverified(String documentId, boolean known) {
+            inconclusive++;
+            if (known && mode == Mode.INGEST) {
+                try {
+                    stateStore.recordUnreachable(sourceKey, documentId, runId);
+                } catch (RuntimeException e) {
+                    // The same store that could not answer may not take this either; the
+                    // run is inconclusive regardless, which keeps the sweep away.
+                    LOGGER.debugf(e, "Could not mark document %s unreachable", LogSanitizer.sanitize(documentId));
+                }
             }
         }
 

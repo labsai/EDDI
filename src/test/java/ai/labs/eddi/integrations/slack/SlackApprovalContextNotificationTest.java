@@ -76,6 +76,9 @@ class SlackApprovalContextNotificationTest {
 
     private static ConversationMemorySnapshot bookmark(boolean withContext) {
         var bookmark = new ConversationMemorySnapshot();
+        // A readable pause time: a card whose pause cannot be read is posted without
+        // buttons.
+        bookmark.setHitlPausedAt(Instant.parse("2026-09-01T10:00:00Z"));
         if (withContext) {
             bookmark.setHitlApprovalContext(
                     RenderedApprovalContext.of(List.of(new Item("Draft", "Acme cuts onboarding to 3 days <!channel>", false, "agent", null, null)),

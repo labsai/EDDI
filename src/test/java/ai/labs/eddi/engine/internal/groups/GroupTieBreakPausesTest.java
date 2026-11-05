@@ -310,6 +310,21 @@ class GroupTieBreakPausesTest {
         }
 
         @Test
+        @DisplayName("a resume that fails before the discussion owns the leg drops the token and fails the conversation")
+        void resumeFailureCleansUp() throws Exception {
+            paused(null);
+            doThrow(new IllegalStateException("store down")).when(service).executeDiscussion(any(), any(), any(),
+                    anyString(), any(), anyInt());
+
+            coordinator.submitHumanInput(GC_ID, DECIDER, null, "SEO", DECIDER, null);
+            assertTrue(controls.containsKey(GC_ID), "the resume registered its token");
+            submitted.getFirst().run();
+
+            assertTrue(!controls.containsKey(GC_ID), "the token does not linger");
+            verify(conversationStore).compareAndSetState(GC_ID, GroupConversationState.IN_PROGRESS, GroupConversationState.FAILED);
+        }
+
+        @Test
         @DisplayName("an executor that refuses the resume restores the pause")
         void rollback() throws Exception {
             var gc = paused(null);
@@ -358,6 +373,22 @@ class GroupTieBreakPausesTest {
             verify(memberTurnExecutor, never()).executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
                     any());
             verify(service).executeDiscussion(eq(gc), any(), any(), anyString(), any(), eq(2));
+        }
+
+        @Test
+        @DisplayName("MODERATOR_DECIDES honours an inherited cost ceiling when the group has none of its own")
+        void moderatorInheritedCeiling() throws Exception {
+            config = configWith(false, OnTieBreakTimeout.MODERATOR_DECIDES);
+            var gc = paused(null);
+            gc.setInheritedCostCeiling(1.0);
+            gc.setTotalCost(2.0);
+
+            coordinator.skipHumanTurnOnTimeout(GC_ID, null);
+            submitted.getFirst().run();
+
+            assertEquals(DecisionType.NONE, gc.getDecision().type());
+            verify(memberTurnExecutor, never()).executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                    any());
         }
 
         @Test

@@ -24,7 +24,7 @@ opt-in pieces close that:
   reviewed / Reschedule, per-task *Outcomes*, a *What came of approvals* table and the outcome setting on the group
   config panel. `groupLearning.*` in all 11 locales.
 - **Platform Operator.** Read-only grants for the outcomes, due-reviews and outcome-analytics endpoints and a prompt
-  section; **revision 54**. Deliberately not granted: recording an outcome or a bet verdict.
+  section; **revision 56** (above the open #1245's 55). Deliberately not granted: recording an outcome or a bet verdict.
 
 ### Design decisions
 

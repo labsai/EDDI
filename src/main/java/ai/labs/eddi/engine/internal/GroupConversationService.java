@@ -34,6 +34,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -46,10 +47,10 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
-import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetContext;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
+import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -306,6 +307,13 @@ public class GroupConversationService implements IGroupConversationService, User
     SummarizationService summarizationService;
 
     /**
+     * The vault-grant rule the SERVICE judge re-checks before resolving its
+     * parameters.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
+    /**
      * Files {@code handoffConfig.onDecision} rules once a discussion completes.
      * Null in tests that build the service by hand: no rules fire.
      */
@@ -393,7 +401,8 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
-        this.phaseExecutionEngine.setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry));
+        this.phaseExecutionEngine
+                .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
@@ -549,7 +558,7 @@ public class GroupConversationService implements IGroupConversationService, User
      * discussion had left when it dispatched this one. Either side may be
      * {@code null} (unlimited); {@code null} only wins when BOTH are null.
      */
-    static Double effectiveCostCeiling(Double own, Double inherited) {
+    public static Double effectiveCostCeiling(Double own, Double inherited) {
         if (own == null) {
             return inherited;
         }
@@ -1627,6 +1636,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // throws.
             if (decisionHandoffs != null) {
                 decisionHandoffs.afterCompleted(gc, config, listener);
+                persistDecisionHandoffs(gc);
             }
 
             if (listener != null) {
@@ -1821,6 +1831,27 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
+    }
+
+    /**
+     * Persists the filed-handoff records {@code afterCompleted} added to a
+     * COMPLETED document. The completion write above ran before them, and no later
+     * write follows on the normal path, so without this the stored discussion would
+     * omit {@code handoffState.filed}. Conditional on the stored state still being
+     * COMPLETED, and best-effort: filing is idempotent (deterministic dedupe keys),
+     * so a lost write only costs the record, never a duplicate hand-off.
+     */
+    private void persistDecisionHandoffs(GroupConversation gc) {
+        if (gc.getHandoffState() == null) {
+            return;
+        }
+        try {
+            conversationStore.updateIfState(gc, GroupConversationState.COMPLETED);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.warnf("Could not persist decision handoffs of group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    e.getMessage());
+        }
     }
 
     /**
@@ -2190,14 +2221,18 @@ public class GroupConversationService implements IGroupConversationService, User
     /**
      * The cost ceiling a follow-up turn runs under: the group's current
      * {@code protocol.maxCostPerDiscussion}, tightened by the budget a nested
-     * discussion inherited and by the team-budget ceiling of a root discussion
-     * ({@code teamBudgetState.ceilingUsd}) — the same resolution
-     * {@code executeDiscussion} and {@code TeamBudgetCeilings} apply to every phase
-     * turn. {@code null} means unlimited. A config that cannot be loaded is NOT
-     * treated as "no ceiling": the store failure (or a missing group) propagates,
-     * so a transient error cannot let a follow-up run a paid member turn unchecked.
-     * (resolveAgentTimeoutSeconds swallows its own lookup errors and falls back to
-     * a default, so it would not catch this either.)
+     * discussion inherited — the same resolution {@code executeDiscussion} applies
+     * to every phase turn. {@code null} means unlimited. A config that cannot be
+     * loaded is NOT treated as "no ceiling": the store failure (or a missing group)
+     * propagates, so a transient error cannot let a follow-up run a paid member
+     * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
+     * and falls back to a default, so it would not catch this either.)
+     * <p>
+     * F6: a follow-up is also a leg of the run for its team budget. This starts
+     * that leg ({@link TeamSpendMeter#beginLeg}: sweep what is uncharged, refresh
+     * the team ceiling) and tightens the result by the team ceiling, the same one
+     * every phase turn sees through {@code TeamBudgetCeilings}. The follow-up's
+     * cost is charged by its callback ({@link #chargeTeamBudget}).
      * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
@@ -2209,14 +2244,16 @@ public class GroupConversationService implements IGroupConversationService, User
         }
         AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
         Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
-        // F6: and by the team ceiling the last leg left on the document, exactly as
-        // GroupCostLedger reads it for a phase turn — without it a follow-up on a
-        // discussion that already reached its team's budget ran one more paid turn.
-        TeamBudgetState teamState = gc.getTeamBudgetState();
-        Double team = teamState != null && teamState.getCeilingUsd() != null && !teamState.getCeilingUsd().isNaN()
-                ? teamState.getCeilingUsd()
-                : null;
-        return effectiveCostCeiling(effectiveCostCeiling(own, gc.getInheritedCostCeiling()), team);
+        Double ceiling = effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        if (teamSpendMeter != null && config != null) {
+            teamSpendMeter.beginLeg(gc, config);
+            TeamBudgetState state = gc.getTeamBudgetState();
+            Double team = state == null ? null : state.getCeilingUsd();
+            if (team != null && !team.isNaN() && (ceiling == null || team < ceiling)) {
+                ceiling = team;
+            }
+        }
+        return ceiling;
     }
 
     /**
@@ -2815,18 +2852,49 @@ public class GroupConversationService implements IGroupConversationService, User
         return leaseManager != null && clusterRpc != null && leaseManager.isClustered() && clusterRpc.isClustered();
     }
 
+    /**
+     * Pauses between the tries of {@link #holdGroupLease}. The previous leg of a
+     * discussion persists its state and fires its completion before its
+     * {@code finally} releases the lease, so a continuation started on another node
+     * in that gap would otherwise take the discussion for running elsewhere.
+     */
+    long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
+
     void holdGroupLease(String groupConversationId) {
         if (clustered()) {
-            var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
+            String key = IConversationLeaseManager.GROUP + groupConversationId;
+            var lease = leaseManager.tryAcquireKey(key);
+            for (int i = 0; lease.isEmpty() && i < groupLeaseRetryMillis.length; i++) {
+                var current = leaseManager.peekKey(key);
+                if (current.isEmpty() || nodeIdentity == null || nodeIdentity.nodeId().equals(current.get().node())) {
+                    break;
+                }
+                try {
+                    Thread.sleep(groupLeaseRetryMillis[i]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                lease = leaseManager.tryAcquireKey(key);
+            }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
-            } else {
-                // Held elsewhere — most likely a stale lease of a node that died, which
-                // expires with its TTL. The discussion still runs; a cancel forwarded to
-                // that holder is answered "not here" and falls back to the database path.
-                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)",
-                        LogSanitizer.sanitize(groupConversationId));
+                return;
             }
+            // A11: the lease is exclusive. A lease of a node that died or restarted is
+            // taken over by tryAcquireKey itself, so one still held by another node means
+            // that node runs this discussion: running it here as well made two legs write
+            // the same discussion, and a cancel was forwarded to only one of them. This
+            // leg stops without writing (the persisted state stands).
+            var holder = leaseManager.peekKey(key);
+            if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
+                throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
+                        new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
+            }
+            // No holder could be read (NATS unreachable): the discussion runs, as every
+            // turn does in degraded mode; a cancel then takes the database path.
+            LOGGER.warnf("Group discussion %s runs without its group lease (NATS unreachable or the lease could not be read)",
+                    LogSanitizer.sanitize(groupConversationId));
         }
     }
 

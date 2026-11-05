@@ -74,14 +74,16 @@ A call governed by the rule is recorded under its `approvalCategory`; any other 
 
 ## Deciding with an edit
 
-All checks run **before** the pause is consumed: a malformed edit is a `400` and the conversation stays paused.
+Request validation runs **before** the pause is consumed: a malformed edit is a `400` and the conversation stays
+paused. Screening and the redacted-content check run **after** it, while the turn resumes: an edit refused there is
+not a `400` but a new pause (see "A refused edit" below), so read `approval-status` after the resume.
 
 ### Rule pause edits
 
 `POST /agents/{conversationId}/resume`
 
 ```json
-{ "verdict": "APPROVED", "editedAnswer": "The release is Monday.", "reasonCode": "FACTUAL_ERROR", "pauseId": "1762077600000" }
+{ "verdict": "APPROVED", "editedAnswer": "The release is Monday.", "reasonCode": "FALSE_CLAIM", "pauseId": "1762077600000" }
 ```
 
 - Valid only with `APPROVED`, on a **rule** pause, when the agent version the conversation is pinned to allows it.
@@ -94,7 +96,9 @@ All checks run **before** the pause is consumed: a malformed edit is a `400` and
 **What the engine does.** The LLM task that gave the draft replaces it **in place**: its own output item and data
 keys (`langchain:<type>:<taskId>`, `output:text:langchain:<type>`). Nothing after it is cut back and nothing runs
 again — not `postResponse`, not later tasks, not the rule that paused (it would pause again). The pipeline then
-resumes after the pause as for any approval. The step records `hitl:edit:applied` (digests and sizes, never the
+resumes after the pause as for any approval. A task with `addToOutput: false` has no output item to replace: the
+edit reaches only what reads its data key after the pause (an output template, a later rule), not properties its
+`postResponse` already set from the draft. The step records `hitl:edit:applied` (digests and sizes, never the
 original text — the original stays in the paused turn's LLM audit entry), `hitl:edit:outcome`, and the conversation
 output `hitlAnswerEdited = "true"` (`{memory.current.hitlAnswerEdited}` in templates).
 
@@ -103,7 +107,8 @@ reprompter: a `reprompt` finding cannot ask the human again, so it acts as `bloc
 `block` refuses it. Guardrail calls that cost money are admitted against the conversation's spend like a live
 answer's.
 
-**A refused edit** (blocked by a guardrail, or the LLM configuration changed since the pause) cannot be applied, but
+**A refused edit** (blocked by a guardrail, the LLM configuration changed since the pause, or the edit still carries a
+redaction placeholder: `REDACTED_CONTENT`) cannot be applied, but
 the human's decision stands: the turn **pauses again** on the same task with the unchanged draft and a new
 `pauseId`, the next `approval-status` carries `pauseDetails.lastEditRefused = {reason, guardrail, at}`, and the
 ledger records a `hitl.edit.refused` entry.
@@ -112,7 +117,9 @@ ledger records a `hitl.edit.refused` entry.
 system role; later model calls see it as the assistant's earlier turn. Every later gated tool call still pauses.
 
 **Streaming clients** may already have shown the draft token by token during the paused turn. The resume reply and
-the `HitlResumeCompletedEvent` snapshot carry the final text — render from them. Tasks between the answer and the
+the `HitlResumeCompletedEvent` snapshot carry the final text — render from them. The reply carries it only when
+asked for: pass `returnCurrentStepOnly`, `returnDetailed` or `returningFields` on the resume (a reply needs
+owner-or-admin access, as `say` does); without any of them the resume answers an empty `200`. Tasks between the answer and the
 pause saw the draft and are not re-run: put the pause rule directly after the LLM task.
 
 ### Tool-call pause — amendments and reasons
@@ -227,7 +234,7 @@ arguments) counts differing leaf JSON paths. `editedText` (answer, task result, 
 is secret-redacted and capped at 32 KB; GDPR erasure redacts it with the rest of the entry's output. The original text
 is not in the entry: it is in the paused turn's LLM entry (rule pause) or the signed transcript (groups).
 
-**`hitl.edit.refused`**: `{schema: 2, decisionId, unitKind, reason: SCREENED_OUT | CONFIG_DRIFT, guardrail?}`. A unit
+**`hitl.edit.refused`**: `{schema: 2, decisionId, unitKind, reason: SCREENED_OUT | CONFIG_DRIFT | REDACTED_CONTENT, guardrail?}`. A unit
 with `APPROVED_EDITED` whose `decisionId` has such an entry was **not** applied; the same pause was followed by a new
 pause.
 
@@ -242,13 +249,15 @@ Right after an entry with at least one unit is submitted, the engine fires the C
 `fireAsync` — observe it with `@ObservesAsync`. Each `HitlDecisionUnit` is self-contained (decision context repeated
 on every unit: conversation, agent or group, user, pause, latency, decider, channel, category, outcome, reason, edit).
 Delivery is best-effort; a consumer that must not miss a decision rebuilds from the ledger
-(`IAuditStore.getEntriesByTask("hitl.approval", …)` + `HitlApprovalAudit.parse`), which yields the same units. No
-event is fired when the ledger is disabled.
+(`IAuditStore.getEntriesByTask("hitl.approval", …)` + `HitlApprovalAudit.parse`), which yields the same units. The
+ledger's own submission is a bounded queue: when it is full the entry is dropped (logged by the ledger) while the event
+is still fired, so the ledger is a fallback for a consumer that was down, not a no-miss guarantee. No event is fired
+when the ledger is disabled.
 
 ### Metrics
 
 `eddi_hitl_decision_total{surface, outcome, channel}` (one per unit), `eddi_hitl_edit_chars{kind}` (distribution of
-`charsChanged`) and `eddi_hitl_answer_edit_total{outcome}` (applied, screened_out, config_drift). Categories stay out
+`charsChanged`) and `eddi_hitl_answer_edit_total{outcome}` (applied, screened_out, config_drift, redacted_content). Categories stay out
 of metric tags because their cardinality is configurable.
 
 ## Worked example — a GitHub reply with one-click Slack approval

@@ -5,7 +5,9 @@ import { EditorSection } from "../editor-section";
 import { GuardrailSheet } from "./guardrail-sheet";
 import { ACTION_TEXT, TYPE_TEXT, effectiveAction, isKnownGuardrailType, summarizeGuardrail, typesForPhase } from "./guardrails";
 import {
+  MAX_FIELDS,
   MAX_TOOL_CALL_GUARDRAILS,
+  MAX_TOOL_PATTERNS,
   fieldsToText,
   linesOf,
   newToolCallGuardrail,
@@ -249,6 +251,14 @@ function TargetFields({
             {t("toolCallGuardrails.toolsRequired", "Name at least one tool; the server refuses an entry without one.")}
           </Notice>
         )}
+        {tools.length > MAX_TOOL_PATTERNS && (
+          <Notice testId="tool-call-guardrail-tools-too-many">
+            {t("toolCallGuardrails.toolsTooMany", "At most {{max}} tool patterns are allowed; this entry has {{count}}.", {
+              max: MAX_TOOL_PATTERNS,
+              count: tools.length,
+            })}
+          </Notice>
+        )}
         {badTool !== undefined && (
           <Notice testId="tool-call-guardrail-tools-invalid">
             {t("toolCallGuardrails.toolsInvalid", "{{pattern}} is not a valid tool pattern.", { pattern: badTool })}
@@ -278,6 +288,14 @@ function TargetFields({
             'One JSON pointer per line, e.g. /body or /items/*/text; "" is the whole arguments. Empty: every string in the arguments.',
           )}
         </p>
+        {fields.length > MAX_FIELDS && (
+          <Notice testId="tool-call-guardrail-fields-too-many">
+            {t("toolCallGuardrails.fieldsTooMany", "At most {{max}} field pointers are allowed; this entry has {{count}}.", {
+              max: MAX_FIELDS,
+              count: fields.length,
+            })}
+          </Notice>
+        )}
         {badField !== undefined && (
           <Notice testId="tool-call-guardrail-fields-invalid">
             {t("toolCallGuardrails.fieldsInvalid", "{{field}} is not a valid field pointer.", { field: badField })}

@@ -12,7 +12,7 @@ This document describes the security measures applied to EDDI's AI Agent Tooling
 
 EDDI authenticates requests via [Keycloak](https://www.keycloak.org/) (or another OIDC provider) using the Quarkus OIDC extension. Enforcement is switched by `quarkus.oidc.tenant-enabled`, which defaults to `false` — but EDDI does **not** silently run open in production. In production launch mode (the packaged jar and the Docker image; `quarkus:dev` and tests are exempt) two startup guards refuse to boot an unauthenticated instance:
 
-- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR at startup and repeats a WARN every hour.
+- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR once at startup. A periodic WARN reminder is off by default; set `EDDI_SECURITY_UNAUTHENTICATED_REMINDER_INTERVAL` (e.g. `1h`, minimum `5m`) to repeat it.
 - **`HighValueSurfaceGuard`** fails startup when `authorization.enabled` is false (it follows `quarkus.oidc.tenant-enabled`) unless each of the two most sensitive surfaces is opted out on its own: `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` for `/mcp` and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` for `/secretstore`. The general opt-out above does not cover them.
 
 The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick start works, and binds EDDI to `127.0.0.1` for that reason. For anything reachable from another machine, remove them and set `QUARKUS_OIDC_TENANT_ENABLED=true` instead.
@@ -283,15 +283,15 @@ A valid token from your realm is not, by itself, a reason to answer. Two layers 
 - **`quarkus.security.jaxrs.deny-unannotated-endpoints=true`.** A JAX-RS resource method with no security annotation — `@RolesAllowed`, `@PermitAll`, `@Authenticated` or `@DenyAll`, on the method, its class, or the resource interface — is refused to everyone. Every deliberately public endpoint says so with `@PermitAll`: the SPA shells (`/manage`, `/chat`, `/welcome`, `/workforce`), the OAuth callback `/connections/callback`, the Slack webhook (signature-verified in the handler) and A2A discovery. `EndpointSecurityAnnotationsTest` walks every compiled resource and fails the build on a method that says nothing, so the safe default cannot turn into an outage. Like every rule here it applies only while authorization is on.
 - **Roles on the surfaces that used to ask only for a token:** `/q/metrics` and the API description (table above), `GET /a2a/agents` (`eddi-admin`, `eddi-editor`, `eddi-user` — the tier the A2A JSON-RPC endpoint requires), the per-conversation `/conversationstore/conversations/**` operations (any EDDI role, on top of the owner check), and `/v1` in `authenticated` mode — see below.
 
-**`/v1` in OIDC mode.** With `eddi.openai-compat.http-policy=authenticated`, `OpenAiAuthFilter` now requires `eddi-admin`, `eddi-editor` or `eddi-user` — the roles `POST /agents/{id}/start` and A2A require — and answers `403` (`insufficient_permissions`) to any other token. It used to accept any token the realm issued. The default `permit` mode is unchanged: its credential is the shared API key, and the caller is Open WebUI acting for its own users, who hold no EDDI identity.
+**`/v1` in OIDC mode.** With `eddi.openai-compat.http-policy=authenticated`, `OpenAiAuthFilter` requires `eddi-admin`, `eddi-editor` or `eddi-user` — the roles `POST /agents/{id}/start` and A2A require — and answers `403` (`insufficient_permissions`) to any other token. The default `permit` mode is unchanged: its credential is the shared API key, and the caller is Open WebUI acting for its own users, who hold no EDDI identity.
 
 ### Conversations are not configuration
 
-Conversation descriptors share the `descriptors` collection with configuration descriptors, and the generic descriptor API used to take either. Since this release:
+Conversation descriptors share the `descriptors` collection with configuration descriptors, and the generic descriptor API does not serve conversation descriptors:
 
 - `GET /descriptorstore/descriptors` requires `type` to name a configuration type (one of the types the configuration stores declare, e.g. `ai.labs.agent`); anything else — `ai.labs.conversation`, a blank type, a prefix — is a `400`.
 - `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
-- **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
+- **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it.
 
 ### Editors never read a plaintext credential back
 
@@ -339,7 +339,7 @@ This starts Keycloak 26 on port 8180 with:
 - **Realm**: `eddi`
 - **Clients**: `eddi-frontend` (SPA, public), `eddi-backend` (bearer-only), `eddi-mcp` (public, code+PKCE only — what an MCP client logs in through; see [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance))
 - **Roles**: `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` (plus `eddi-approver`, used by the HITL approval endpoints)
-- **Test users**: `viewer`/`viewer` (`eddi-viewer`), `user`/`user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor` + `eddi-viewer`), which ships **without a password** — set one in the admin console at http://localhost:8180 (`admin`/`admin`)
+- **Test users**: `viewer` (`eddi-viewer`), `user` (`eddi-user`), and `eddi` (`eddi-admin` + `eddi-editor` + `eddi-viewer`). **None of them ships with a password** — set one in the admin console at http://localhost:8180 (the compose file's own console login is `admin`/`admin`, for local development only)
 
 > `keycloak/eddi-realm.json` is the source of truth for client ids. Provisioning a
 > realm by hand from a doc that names a different one gets you `invalid_client`
@@ -366,7 +366,7 @@ none. The import logs `Referenced client scope 'profile' doesn't exist. Ignoring
 and carries on. Tokens still authenticated and still carried their roles, so
 logins worked and role checks passed, but every caller's principal had no name.
 
-**From this release on, such a token is refused outright:** every request answers
+**Such a token is refused outright:** every request answers
 `401` (see [The Token Must Name the User](#the-token-must-name-the-user) above),
 so an install carrying an unrepaired realm cannot be used until the repair below
 has been run. Up to and including 6.4.0 the same token was let through, and the
@@ -464,10 +464,25 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 - **Streaming.** An output guardrail that can change the answer forces the task to buffer it — streamed tokens cannot be retracted.
 - **A sandboxed evaluator, and a closed vocabulary.** The `expression` type runs an author's expression over the model's JSON answer with `SafeJsonExpression`, a small recursive-descent language of its own (paths, decimal arithmetic, comparisons, logic, nine fixed functions) — no script engine, no SpEL/OGNL-style language, no reflection, no method calls, no template engine; an unknown function is a deploy-time syntax error, so no name is ever looked up at run time. The expression is author configuration, but the data is model output, so evaluation is bounded on both sides: an expression of at most 2000 characters, 32 levels of nesting and 500 parts (refused at deploy, never a `StackOverflowError`); at most 10,000 values per path and 200,000 steps per evaluation; numbers beyond 1000 digits or a ±1000 scale are refused rather than materialised; an answer over 262,144 characters, or with a repeated key, is not evaluated. Anything it cannot evaluate is *could not decide* and `failMode` applies — never a pass. A failed check reprompts with EDDI's fixed frame around the author's `fix` text only: no value read or computed from the answer reaches the corrective message, so a model cannot steer its own next prompt through the check. The evaluator is fuzzed (`SafeJsonExpressionFuzzTest`, and a ClusterFuzzLite target).
 - **A quality check does not override the safety checks around it.** `onExhausted: "deliver-best"` lets a `reprompt` guardrail whose retries are spent deliver its best attempt instead of blocking. That attempt is first re-screened by every output guardrail **after** it in the list (the ones before it already screened it: redactions applied, a blocking finding blocks). The exhausted guardrail itself does not re-screen what it delivers, so on a `classifier` it delivers the very attempt it flagged: the deploy warns, and a safety classifier should keep `onExhausted: "block"`.
-- **Model-backed screening, and its availability trade-off.** The `classifier` type asks a safety-classifier model the agent designer configures (EDDI ships and endorses none). It reaches the model through the LLM provider client, not `SafeHttpClient`: classifier endpoints are typically in-cluster, and a configured classifier `baseUrl` is the same trust class as a task's own model `baseUrl` — only configuration authors can set either. A classifier that is unreachable, times out (`timeoutMs`, default 3 s, bounded by the turn deadline) or answers something that is not a label has not checked the text, and `failMode` decides: **`closed`** (the default for `block`/`reprompt`) refuses the turn, so a classifier outage becomes an outage of every guarded agent — the safe choice where letting unscreened text through is the worse failure; **`open`** records a `warn` (reason `classifier_unavailable` / `classifier_unparseable`) and lets the text through, keeping the agent available while the screen is down. Pick per guardrail, watch `eddi.guardrail.classifier.duration{outcome}` and the `classifier_unavailable` audit reasons, and size the classifier for the input path: it runs before the main model on every turn.
+- **Model-backed screening, and its availability trade-off.** The `classifier` type asks a safety-classifier model the agent designer configures (EDDI ships and endorses none). It reaches the model through the LLM provider client, not `OutboundHttp`: classifier endpoints are typically in-cluster, and a configured classifier `baseUrl` is the same trust class as a task's own model `baseUrl` — only configuration authors can set either. A classifier that is unreachable, times out (`timeoutMs`, default 3 s, bounded by the turn deadline) or answers something that is not a label has not checked the text, and `failMode` decides: **`closed`** (the default for `block`/`reprompt`) refuses the turn, so a classifier outage becomes an outage of every guarded agent — the safe choice where letting unscreened text through is the worse failure; **`open`** records a `warn` (reason `classifier_unavailable` / `classifier_unparseable`) and lets the text through, keeping the agent available while the screen is down. Pick per guardrail, watch `eddi.guardrail.classifier.duration{outcome}` and the `classifier_unavailable` audit reasons, and size the classifier for the input path: it runs before the main model on every turn.
 - **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
 ---
+
+### Cluster control plane (NATS)
+
+In cluster mode the nodes steer each other over NATS: node RPCs (cancel, drain, GDPR stop,
+forwarding of dead letters) and cluster events (deployments, secret rotations, cache
+evictions). Every node holds the same NATS credentials, so without more those credentials
+alone control every node. Set `eddi.cluster.signing.key` — a random value of at least 32
+characters, the same on every node and kept outside NATS — and every RPC, reply and event is
+signed with HMAC-SHA256 over its subject, a timestamp, a nonce and its body hash; a node
+refuses what does not verify (constant-time comparison), what is older than the window, and a
+nonce it has already seen. `eddi.cluster.signing.required=true` also refuses unsigned
+messages once every node signs. Without a key a WARN is logged at boot and nothing changes
+for existing installs. Webhook delivery de-duplication fails closed while NATS is unreachable
+(`eddi.cluster.degraded.nonces=reject`, the default). Details, the threat model and the
+rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
@@ -568,8 +583,8 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 >
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse
-> `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`,
-> `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
+> `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`, `168.63.129.16`,
+> `192.0.0.192`, `metadata.google.internal`, `metadata.goog` and the whole link-local range (`169.254.0.0/16`,
 > `fe80::/10`) — including a hostname that resolves there
 > (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
 > the instance's cloud credentials; nobody configures it as an API. A URL whose
@@ -646,7 +661,12 @@ IPv6 addresses that carry an IPv4 address are unwrapped and the IPv4 address is 
 Cloud provider metadata services are explicitly blocked by IP and hostname:
 
 - `169.254.169.254` (AWS, GCP, Azure metadata)
-- `metadata.google.internal` (GCP)
+- `fd00:ec2::254` (AWS IPv6 metadata)
+- `100.100.100.200` (Alibaba Cloud)
+- `168.63.129.16` (Azure WireServer)
+- `192.0.0.192` (Oracle Cloud)
+- `metadata.google.internal`, `metadata.goog` (GCP)
+- the whole link-local range (`169.254.0.0/16`, `fe80::/10`), including a hostname that resolves there
 
 ### Internal Hostname Blocking
 
@@ -664,7 +684,7 @@ The checks above resolve the host; the HTTP client then resolves it **again** to
 | --- | --- | --- |
 | httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. With protection off, a redirect hop may connect to a private or loopback peer only when the hop before it connected to that same class (or the host is allow-listed) — the "no step into a more private class" rule, applied to the connected peer as well as the name. | Nothing for the address check |
 | `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
-| LLM providers and embedding models (langchain4j JDK client, `BoundedJdkHttpClient`) | Models are cached for as long as they are used, so the endpoint is validated when the model is built **and** again before every request the cached client sends (OpenAI, OpenAI-compatible presets, Ollama, Anthropic, Gemini, Mistral; OpenAI and Ollama embeddings). | The same cache-expiry window as any pre-connect check. Providers built on their own SDK transport (Azure, Bedrock, Vertex, Oracle, Hugging Face; the other embedding providers) and vector stores are checked at build time only. A MongoDB Atlas store's checks cover the hosts its connection string names; replica-set members the driver discovers from those seeds are not re-checked, so list only seeds you trust |
+| LLM providers and embedding models (langchain4j JDK client, `BoundedJdkHttpClient`) | Models are cached for as long as they are used, so the endpoint is validated when the model is built **and** again before every request the cached client sends (OpenAI, OpenAI-compatible presets, Ollama, Anthropic, Gemini, Mistral; OpenAI, Ollama, Gemini and Mistral embeddings; the Chroma vector store). | The same cache-expiry window as any pre-connect check. Providers built on their own SDK transport (Azure, Bedrock, Vertex, Oracle, Hugging Face; the other embedding providers) and the other vector stores are checked at build time only. A MongoDB Atlas store's checks cover the hosts its connection string names and its `proxyHost`; replica-set members the driver discovers from those seeds are not re-checked, so list only seeds you trust |
 | MCP servers (langchain4j transport on `BoundedJdkHttpClient`, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again by the transport's HTTP client before each request — handshake, `tools/list`, every tool call — is sent. The same client caps each response at `eddi.llm.max-response-bytes`. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
 
 Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.
@@ -938,6 +958,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 - **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `true`, deployment fallback `eddi.tools.budget.enforce-by-default`)
 - **Scope:** `maxBudgetPerConversation` bounds **tool** cost only. LLM token spend is governed separately and per run by the model cascade's `maxCostPerRun`; the two are not summed
 - **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001, `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
+- **`enableCostTracking: false` does not switch an enforced ceiling off:** a task with an enforced `maxBudgetPerConversation` still records each call's charge, because the ceiling is checked against those charges; without them it would never be reached
 - **Eviction:** To prevent unbounded memory growth, the tracker caps per-conversation entries at 10 000 and evicts the oldest ~10% when the limit is reached
 - **Behaviour:** Enforcement is the **default** (6.6.0, security review finding M8). A configured `maxBudgetPerConversation` is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Opting out — `enforceBudget: false` per task, or `eddi.tools.budget.enforce-by-default=false` per deployment — keeps cost tracking and reporting and turns the refusal off; every task whose ceiling is opted out is named once in a WARN rather than lapsing silently, and the MCP `get_agent`/`deploy_agent` tools report the effective default as `toolBudgetEnforcedByDefault`. Until 6.6.0 this was an opt-in whose deployment key was not declared, so every stored ceiling was advisory
 
@@ -988,7 +1009,7 @@ The `ApiCallExecutor` uses strict equality (`equals`) rather than prefix matchin
 
 When adding a new tool to EDDI:
 
-1. **Validate all URLs** with `UrlValidationUtils.validateUrl()` before making any outbound request
+1. **Send all outbound HTTP through `OutboundHttp`** (`@Inject OutboundHttp`, `OutboundRequest.get(Profile.DEFAULT, uri)`, with a `BodyMode` that caps the body). It applies the SSRF policy to the URL and every redirect hop; never build an `HttpClient` yourself. Call `UrlValidationUtils.validateUrl()` directly only where you cannot use `OutboundHttp`
 2. **Never use `ScriptEngine`** or any form of dynamic code evaluation
 3. **Add `@Tool` annotations** with clear descriptions so the LLM understands the tool's purpose and constraints
 4. **Write unit tests** that specifically verify rejection of malicious inputs (SSRF URLs, injection strings)

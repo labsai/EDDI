@@ -16,6 +16,7 @@ import io.quarkus.scheduler.Scheduled;
 
 import java.util.Arrays;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Startup guard that prevents accidental unauthenticated production
@@ -30,8 +31,12 @@ import java.util.Optional;
  * {@link LaunchMode#DEVELOPMENT} and {@link LaunchMode#TEST} are exempt — OIDC
  * is typically disabled during development and in integration tests.
  * <p>
- * When the escape hatch IS used, an ERROR is logged at startup and a WARN
- * reminder is emitted hourly for monitoring visibility.
+ * When the escape hatch IS used, one ERROR is logged at startup. A repeating
+ * WARN reminder is opt-in via
+ * {@code eddi.security.unauthenticated-reminder-interval} (off by default):
+ * deployments that knowingly run unauthenticated inside a private network would
+ * otherwise raise the same WARN every hour forever, which is noise for
+ * alerting/SIEM and in the persisted WARN history.
  *
  * @since 6.0.2
  */
@@ -123,17 +128,33 @@ public class AuthStartupGuard {
         }
     }
 
+    /** Shortest gap between two reminders, whatever interval is configured. */
+    static final long MIN_REMINDER_GAP_NANOS = TimeUnit.MINUTES.toNanos(5);
+
+    private volatile long lastReminderNanos;
+    private volatile boolean reminded;
+
     /**
-     * Periodic warning when running unauthenticated in production. Logs at WARN
-     * level every hour (not every 60 seconds) to avoid polluting alerting/SIEM with
-     * 525k identical ERROR lines per year.
+     * Optional periodic reminder when running unauthenticated in production. Off by
+     * default ({@code off} is Quarkus' disable value for {@code every}); set
+     * {@code eddi.security.unauthenticated-reminder-interval} to a duration such as
+     * {@code 1h} to repeat it. The startup ERROR already logged once; repeating it
+     * by default produced 8,760 identical WARNs a year for operators who chose this
+     * deliberately. Intervals under five minutes are throttled to five minutes.
      */
-    @Scheduled(every = "3600s")
+    @Scheduled(every = "${eddi.security.unauthenticated-reminder-interval:off}", identity = "auth-unauthenticated-reminder")
     void periodicAuthWarning() {
-        if (warnMode) {
-            LOGGER.warn("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "
-                    + "All API endpoints are unauthenticated. Set QUARKUS_OIDC_TENANT_ENABLED=true.");
+        if (!warnMode) {
+            return;
         }
+        long now = System.nanoTime();
+        if (reminded && now - lastReminderNanos < MIN_REMINDER_GAP_NANOS) {
+            return;
+        }
+        reminded = true;
+        lastReminderNanos = now;
+        LOGGER.warn("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "
+                + "All API endpoints are unauthenticated. Set QUARKUS_OIDC_TENANT_ENABLED=true.");
     }
 
     /**

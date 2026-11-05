@@ -39,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -76,6 +77,11 @@ public class ConversationMemory implements IConversationMemory {
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
+    /**
+     * Cluster mode: whether this turn's lease is lost; see
+     * {@link #setLeaseLostCheck}.
+     */
+    private transient volatile BooleanSupplier leaseLostCheck;
     /**
      * Optimistic-concurrency revision of the document this memory was loaded from.
      * See {@link IConversationMemory#getRevision()}.
@@ -662,7 +668,18 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public boolean isCancelled() {
-        return cancelled;
+        return cancelled || isLeaseLost();
+    }
+
+    @Override
+    public void setLeaseLostCheck(BooleanSupplier leaseLost) {
+        this.leaseLostCheck = leaseLost;
+    }
+
+    @Override
+    public boolean isLeaseLost() {
+        BooleanSupplier check = leaseLostCheck;
+        return check != null && check.getAsBoolean();
     }
 
     /**

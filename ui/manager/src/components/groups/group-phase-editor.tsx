@@ -18,8 +18,8 @@ import type {
 } from "@/lib/api/groups";
 import { DEFAULT_VOTE_QUORUM } from "@/lib/api/groups";
 import { getStylePhases } from "@/lib/hitl-config";
-import { ServiceJudgeFields } from "@/components/groups/service-judge-fields";
 import { HumanTieBreakFields } from "@/components/groups/human-tie-break-fields";
+import { ServiceJudgeFields } from "@/components/groups/service-judge-fields";
 import {
   CONVERGENCE_MIN_REPEATS_FLOOR,
   DEFAULT_CONVERGENCE_THRESHOLD,

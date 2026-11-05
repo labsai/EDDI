@@ -608,10 +608,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents, nested groups, or
-     * humans (I6). Whether members may create and co-edit shared artifacts
-     * mid-discussion (I17). {@code null} means the artifact tools are absent
-     * entirely.
+     * Whether members may create and co-edit shared artifacts mid-discussion (I17).
+     * {@code null} means the artifact tools are absent entirely.
      */
     private ArtifactConfig artifactConfig;
 
@@ -684,7 +682,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents or nested groups.
+     * A member of the group. Members can be individual agents, nested groups, or
+     * humans (I6).
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its

@@ -500,6 +500,34 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("another sender's mail with the Message-ID of a mail waiting for its retry neither runs nor enters that conversation")
+        void foreignMailWithAWaitingMessageIdIsNotTheWaitingMail() throws Exception {
+            AtomicInteger says = new AtomicInteger();
+            doAnswer(invocation -> {
+                if (says.incrementAndGet() == 1) {
+                    throw new QuotaExceededException("tenant over its API-call rate");
+                }
+                sayConversations.add(invocation.getArgument(0));
+                inputs.add(invocation.getArgument(4));
+                return null;
+            }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(),
+                    any(ConversationResponseHandler.class));
+            String messageId = "<waiting-" + System.nanoTime() + "@supplier.com>";
+            EmailTestMail mail = EmailTestMail.mail().messageId(messageId);
+            Instant now = Instant.now();
+            assertEquals(Disposition.STOP, processor.process(context(Map.of()), mail.polled(1), now));
+            assertEquals("conv-1", row(mail).conversationId());
+
+            EmailTestMail forged = EmailTestMail.mail().messageId(messageId).from("mallory@supplier.com");
+            assertEquals(Disposition.DEFERRED, processor.process(context(Map.of()), forged.polled(2), now.plus(Duration.ofMinutes(6))));
+            assertTrue(sayConversations.isEmpty(), "the foreign mail reached no conversation");
+            assertEquals(State.RECEIVED, row(mail).state());
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), mail.polled(1), now.plus(Duration.ofMinutes(7))));
+            assertEquals(List.of("conv-1"), sayConversations);
+        }
+
+        @Test
         @DisplayName("a retry whose earlier conversation has ended since starts a new one")
         void retryAfterStartEndedConversation() throws Exception {
             AtomicInteger says = new AtomicInteger();

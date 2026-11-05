@@ -248,6 +248,39 @@ class GroupHitlReviewTest {
         verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
+    @Test
+    @DisplayName("an edit that leaves the text as it was is a plain approval: it cannot carry an edit reason code")
+    void unchangedEditTakesNoReasonCode() throws Exception {
+        groupConfig(true, List.of(new DiscussionPhase("Execute", PhaseType.EXECUTE)));
+        var gc = taskPause();
+        doReturn(gc).when(conversationStore).read(GC_ID);
+        String a = gc.getTaskList().all().get(0).id();
+        var request = new GroupApprovalRequest();
+        request.setDecision(approved());
+        request.setTaskDecisions(Map.of(a, taskDecision(HitlVerdict.APPROVED, "Result of A", null, "TONE")));
+
+        assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
+        verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("an unchanged synthesis edit takes no reason code either")
+    void unchangedSynthesisEditTakesNoReasonCode() throws Exception {
+        groupConfig(true, List.of(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+        var gc = phasePause("Synthesis");
+        doReturn(gc).when(conversationStore).read(GC_ID);
+        var decision = approved();
+        decision.setEditedAnswer("Option A wins.");
+        decision.setReasonCode("TONE");
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
+        verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+    }
+
     private GroupConversation phasePause(String phaseName) {
         var gc = new GroupConversation();
         gc.setId(GC_ID);

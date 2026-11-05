@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -130,7 +131,8 @@ public class GroupTieBreakPauses {
         gc.setPausedPhaseName(phase.name());
         gc.setPausedTurnCount(currentTurnCount);
         gc.setHitlPauseType(HitlPauseType.HUMAN_TURN);
-        gc.setHitlPauseReason("Vote tied — waiting for " + tieBreak.deciderDisplayName() + " to decide — phase: " + phase.name());
+        gc.setHitlPauseReason((tieBreak.quorumReached() ? "Vote tied" : "Vote did not reach quorum") + " — waiting for "
+                + tieBreak.deciderDisplayName() + " to decide — phase: " + phase.name());
         gc.setHitlApprovalTimeout(tieBreak.timeout());
         gc.setHitlTimeoutPolicy(null);
         RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
@@ -320,6 +322,20 @@ public class GroupTieBreakPauses {
                 groupConversationService.executeDiscussion(gc, config, context.phases(), question, listener, phaseIdx + 1);
             } catch (Exception e) {
                 LOGGER.errorf(e, "Resumed group discussion %s failed after its tie-break", groupConversationId);
+                // executeDiscussion handles its own failures; the steps before it (the
+                // moderator
+                // decision, the decision event, the phase's approval gate) do not. No leg is
+                // running now: without this the token lingers and the conversation stays
+                // IN_PROGRESS forever. The CAS is a no-op when the leg already ended the
+                // document.
+                discussionControls.remove(groupConversationId);
+                try {
+                    conversationStore.compareAndSetState(groupConversationId, GroupConversationState.IN_PROGRESS,
+                            GroupConversationState.FAILED);
+                } catch (Exception failEx) {
+                    LOGGER.warnf("Could not mark %s FAILED after a tie-break resume error: %s", LogSanitizer.sanitize(groupConversationId),
+                            LogSanitizer.sanitize(failEx.getMessage()));
+                }
             }
         };
         try {
@@ -372,10 +388,18 @@ public class GroupTieBreakPauses {
      */
     private void decideByModerator(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, int phaseIdx,
                                    GroupConversation.PendingHumanInput pending, GroupDiscussionEventListener listener) {
-        ProtocolConfig protocol = config.getProtocol() != null
+        ProtocolConfig base = config.getProtocol() != null
                 ? config.getProtocol()
                 : new ProtocolConfig(ProtocolConfig.DEFAULT_AGENT_TIMEOUT_SECONDS, ProtocolConfig.MemberFailurePolicy.SKIP,
                         ProtocolConfig.DEFAULT_MAX_RETRIES, ProtocolConfig.MemberUnavailablePolicy.SKIP);
+        // The same resolution executeDiscussion applies at the top of a leg: a cadence
+        // run's maxCostPerRun or a parent's remaining budget is persisted as the
+        // inherited ceiling, and a group with no ceiling of its own is gated by it.
+        Double ceiling = GroupConversationService.effectiveCostCeiling(base.maxCostPerDiscussion(), gc.getInheritedCostCeiling());
+        ProtocolConfig protocol = Objects.equals(ceiling, base.maxCostPerDiscussion())
+                ? base
+                : new ProtocolConfig(base.agentTimeoutSeconds(), base.onAgentFailure(), base.maxRetries(), base.onMemberUnavailable(),
+                        base.maxTurns(), ceiling, base.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
         var turnCounter = new AtomicInteger(Math.max(gc.getPausedTurnCount(), 0));
         var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending));

@@ -121,6 +121,12 @@ describe("ApprovalContextEditor", () => {
     expect(validateApprovalContextBlock(block, "rule")).toBeNull();
   });
 
+  it("a nested call property is not the call root: {properties.call.summary} is fine outside a rule", () => {
+    const block = { label: "Summary", template: "{properties.call.summary}" };
+    expect(validateApprovalContextBlock(block, "agent")).toBeNull();
+    expect(validateApprovalContextBlock({ label: "Post", template: "{ call.args.text}" }, "agent")).toBe("callOutsideRule");
+  });
+
   it("mirrors the backend limits at their boundaries", () => {
     const b = (maxChars: number) => ({ label: "L", template: "{a}", maxChars });
     for (const bad of [49, 2901, 0, -1, 10.5]) expect(validateApprovalContextBlock(b(bad), "agent")).toBe("maxChars");

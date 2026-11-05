@@ -77,6 +77,14 @@ final class SlackRedactedArgumentsMerge {
     }
 
     private static JsonNode mergeNode(String path, JsonNode raw, JsonNode redacted, JsonNode submitted) throws MergeException {
+        // A redacted leaf cannot be replaced by an object or array: the leaf check
+        // below would never
+        // run on the container's children, and the value the reviewer never saw would
+        // be dropped.
+        if ((submitted.isObject() || submitted.isArray()) && redacted != null && raw != null && !redacted.isContainerNode()
+                && !raw.isContainerNode() && !redacted.equals(raw)) {
+            throw new MergeException(path + " holds a redacted secret and cannot be replaced in Slack — edit it in the Manager");
+        }
         if (submitted.isObject()) {
             ObjectNode out = JSON.createObjectNode();
             Iterator<Map.Entry<String, JsonNode>> fields = submitted.fields();

@@ -12,7 +12,7 @@ helps deployers determine their compliance obligations.
 
 ## Risk Classification
 
-The EU AI Act classifies AI systems into four risk tiers. The deployer
+The EU AI Act classifies AI systems into risk tiers (unacceptable risk, which is prohibited outright, then high, limited and minimal risk). The sections below cover the three tiers you can deploy into. The deployer
 (not EDDI as infrastructure) determines the risk level based on the
 **use case**, not the technology.
 
@@ -24,7 +24,7 @@ Your EDDI agents are **high-risk** if used for:
 |---|---|
 | **Healthcare** | Patient triage, symptom assessment, treatment recommendations |
 | **Employment** | Resume screening, interview assessment, performance evaluation |
-| **Credit & Finance** | Credit scoring, loan eligibility, fraud detection |
+| **Credit & Finance** | Credit scoring, loan eligibility (AI used to detect financial fraud is excluded from this Annex III category) |
 | **Education** | Student assessment, admission decisions |
 | **Law Enforcement** | Suspect profiling, crime prediction |
 | **Critical Infrastructure** | Energy management, water treatment decisions |
@@ -45,7 +45,7 @@ don't fall into high-risk categories:
 | FAQ / help desk bots |
 
 **Obligations**: Transparency only — users must be informed they are
-interacting with an AI system (Article 52).
+interacting with an AI system (Article 50).
 
 ### Minimal-Risk AI Systems
 
@@ -113,7 +113,7 @@ tool calls. Either way the conversation enters `AWAITING_HUMAN` and a reviewer
 submits the APPROVED/REJECTED decision through
 `POST /agents/{conversationId}/resume`. Full reference: [`hitl.md`](hitl.md).
 
-### Articles 17/19 — Quality Management & Logging
+### Articles 12, 19 and 26(6) — Logging & Record-Keeping
 
 | Requirement | EDDI Feature | Status |
 |---|---|---|
@@ -158,13 +158,13 @@ All of the above, plus:
       LLM provider's responsibility — ensure your provider complies)
 - [ ] **Accuracy testing**: Regularly evaluate agent output quality
 - [ ] **Incident reporting**: Report serious incidents to the relevant
-      national authority (Art. 62)
+      national authority (Art. 73 for providers; Art. 26(5) for deployers)
 
 ---
 
 ## See Also
 
-- [audit-ledger.md](audit-ledger.md) — Immutable decision trail (Art. 17/19)
+- [audit-ledger.md](audit-ledger.md) — Append-only decision trail (Arts. 12/19)
 - [security.md](security.md) — Security architecture
 - [behavior-rules.md](behavior-rules.md) — Agent guardrails configuration
 - [hipaa-compliance.md](hipaa-compliance.md) — HIPAA compliance guide

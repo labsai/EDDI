@@ -403,7 +403,7 @@ public class GroupHitlCoordinator {
         // change the state the cleanup paths will read. The first two swallow their
         // own exceptions already; the listener is wrapped here for the same reason.
         deleteGroupHitlTimeoutSchedule(gc.getId());
-        auditHitlCancellation(gc, token.getSignal(), cancelledPausedAt);
+        auditHitlCancellation(gc, token.getSignal(), cancelledPausedAt, token.getSignalledBy());
         LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", LogSanitizer.sanitize(gc.getId()));
         try {
             notifyCancelled(gc, listener);
@@ -479,11 +479,15 @@ public class GroupHitlCoordinator {
         // degrading a bounded policy to WAIT_INDEFINITELY.
         var token = discussionControls.get(conversationId);
         if (token != null) {
+            // The running leg audits a cancel that lands mid-pause on its own thread,
+            // which carries no identity of this caller: record it on the token.
+            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+            String signalledBy = caller != null ? caller.userId() : null;
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
-                token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                token.setSignal(ControlSignal.CANCEL_IMMEDIATE, signalledBy);
                 token.cancelActiveFuture();
             } else {
-                token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+                token.setSignal(ControlSignal.CANCEL_GRACEFUL, signalledBy);
             }
             // Do NOT delete the schedule here: a running leg has no armed schedule,
             // and if the leg is mid-pause-commit it converts the pause to CANCELLED
@@ -1616,12 +1620,24 @@ public class GroupHitlCoordinator {
      * timeout ABORT, crash recovery).
      */
     public void auditHitlCancellation(GroupConversation gc, ControlSignal mode, Instant pausedAt) {
+        auditHitlCancellation(gc, mode, pausedAt, null);
+    }
+
+    /**
+     * As above; {@code signalledBy}, when not null, is the caller that signalled a
+     * cancel the running leg now audits on its own thread, and wins over the
+     * thread's identity.
+     */
+    void auditHitlCancellation(GroupConversation gc, ControlSignal mode, Instant pausedAt, String signalledBy) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
             return;
         }
         try {
-            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
-            String cancelledBy = caller != null && caller.userId() != null ? caller.userId() : "system:unattributed";
+            String cancelledBy = signalledBy;
+            if (cancelledBy == null) {
+                CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+                cancelledBy = caller != null && caller.userId() != null ? caller.userId() : "system:unattributed";
+            }
             AgentGroupConfiguration.HitlConfig hitlConfig = null;
             try {
                 IResourceStore.IResourceId resId = groupStore.getCurrentResourceId(gc.getGroupId());

@@ -158,17 +158,25 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
      * F6: a change to {@code teamBudget} needs the admin role while
      * {@code eddi.groups.team-budget.admin-only-edits} is on (the default). The
      * stored block is read so an editor can neither raise nor remove a cap; an
-     * unreadable one counts as "had none", the stricter reading.
+     * unreadable one counts as changed, so the save needs the admin role (fail
+     * closed) -- treating it as "had none" would let {@code teamBudget: null}
+     * through as unchanged. A group that does not exist is the exception: it has no
+     * cap to raise or remove, so it is checked as "had none" and the update itself
+     * reports the missing resource.
      */
     private void requireTeamBudgetChangeAllowed(String id, Integer version, AgentGroupConfiguration neu) {
-        TeamBudgetConfig before = null;
+        TeamBudgetConfig after = neu == null ? null : neu.getTeamBudget();
+        AgentGroupConfiguration old;
         try {
-            AgentGroupConfiguration old = groupStore.read(id, version);
-            before = old != null ? old.getTeamBudget() : null;
+            old = groupStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            old = null;
         } catch (Exception e) {
             LOG.debugf("Could not read group %s v%s for the teamBudget edit check: %s", sanitize(id), version, e.getMessage());
+            TeamBudgetEditPolicy.checkAgainstUnreadable(after, teamBudgetAdminOnlyEdits, resourceAccessGuard);
+            return;
         }
-        TeamBudgetEditPolicy.check(before, neu == null ? null : neu.getTeamBudget(), teamBudgetAdminOnlyEdits, resourceAccessGuard);
+        TeamBudgetEditPolicy.check(old != null ? old.getTeamBudget() : null, after, teamBudgetAdminOnlyEdits, resourceAccessGuard);
     }
 
     private void requireUse(String agentId) {

@@ -96,6 +96,24 @@ class AuditSampleServiceTest {
     }
 
     @Test
+    @DisplayName("a sample past its review deadline answers 409 and never reaches the store or earned autonomy; one due exactly now is reviewable")
+    void pastDeadline() {
+        AuditSample open = sample("s1");
+        AuditSample late = new AuditSample(open.id(), open.agentId(), open.agentVersion(), open.conversationId(), open.userId(), open.callId(),
+                open.toolName(), open.source(), open.endpoint(), open.category(), open.rulePattern(), open.exemptPattern(),
+                open.argumentsRedacted(), open.argsDigest(), open.resultRedacted(), open.sampledAt(), NOW.minusSeconds(1), open.status(),
+                open.reasonCode(), open.note(), open.reviewedBy(), open.reviewedAt(), open.version());
+
+        var e = assertThrows(WebApplicationException.class,
+                () -> service.review(late, new AuditSampleService.Verdict("FLAGGED", "WRONG_RECIPIENT", null, 1L), "erin"));
+
+        assertEquals(409, e.getResponse().getStatus());
+        assertEquals("SAMPLE_ALREADY_REVIEWED", code(e));
+        verify(store, never()).review(any(), anyLong());
+        verify(autonomy, never()).onSampleFlagged(any());
+    }
+
+    @Test
     @DisplayName("a sample reviewed meanwhile answers 409 SAMPLE_ALREADY_REVIEWED")
     void conflict() {
         doReturn(Optional.empty()).when(store).review(any(), anyLong());

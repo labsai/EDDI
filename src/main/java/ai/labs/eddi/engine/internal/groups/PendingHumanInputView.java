@@ -40,8 +40,15 @@ public final class PendingHumanInputView {
     /**
      * Adds the kind-specific fields to {@code summary}; a no-op when nothing is
      * pending.
+     *
+     * @param mayReadContent
+     *            whether the caller may read discussion-derived pending content
+     *            (the same decision as for {@code pendingHumanPrompt}, see
+     *            {@code HitlAccessGuard.mayReadPendingHumanPrompt}). The tie-break
+     *            options are vote content, so without it the kind and task id still
+     *            show and the options do not
      */
-    public static void addTo(Map<String, Object> summary, GroupConversation gc) {
+    public static void addTo(Map<String, Object> summary, GroupConversation gc, boolean mayReadContent) {
         String kind = kindOf(gc);
         if (kind == null) {
             return;
@@ -51,7 +58,7 @@ public final class PendingHumanInputView {
         if (detail == null) {
             return;
         }
-        if (detail.isTieBreak()) {
+        if (detail.isTieBreak() && mayReadContent) {
             summary.put("pendingOptions", detail.options());
         }
         if (detail.taskId() != null) {

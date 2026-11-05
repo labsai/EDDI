@@ -132,21 +132,34 @@ class HitlAutonomyMaintenanceBranchesTest {
     }
 
     @Test
-    @DisplayName("a marker already present, a lost claim, or a rebuild that is already running mean no rebuild now")
+    @DisplayName("a marker already present, or a rebuild that is already running, mean no rebuild now")
     void backfillSkipped() throws Exception {
         when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
 
         stateStore.save(AutonomyState.initial(AutonomyState.SYSTEM_AGENT_ID, HitlAutonomyMaintenanceService.BACKFILL_MARKER), 0);
         assertFalse(service(Duration.ofDays(90), 10, stateStore).run().backfilled(), "marker present");
 
-        IAutonomyStateStore lostClaim = mock(IAutonomyStateStore.class);
-        when(lostClaim.read(any(), any())).thenReturn(Optional.empty());
-        when(lostClaim.save(any(), anyLong())).thenReturn(Optional.empty());
-        assertFalse(service(Duration.ofDays(90), 10, lostClaim).run().backfilled(), "another node claimed it first");
-
         when(backfill.rebuild(any(), any())).thenReturn(null);
         assertFalse(service(Duration.ofDays(90), 10, new InMemoryAutonomyStateStore()).run().backfilled(), "a rebuild is already running");
         verify(backfill, times(1)).rebuild(any(), any());
+    }
+
+    @Test
+    @DisplayName("a truncated initial backfill leaves no marker and is retried; a complete one writes it")
+    void truncatedBackfillIsRetried() throws Exception {
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        var store = new InMemoryAutonomyStateStore();
+        when(backfill.rebuild(any(), any())).thenReturn(new ApprovalBackfillService.Result(500, 20, true));
+
+        assertTrue(service(Duration.ofDays(90), 10, store).run().backfilled());
+        assertTrue(store.read(AutonomyState.SYSTEM_AGENT_ID, HitlAutonomyMaintenanceService.BACKFILL_MARKER).isEmpty(),
+                "an incomplete rebuild must not be marked complete");
+
+        when(backfill.rebuild(any(), any())).thenReturn(new ApprovalBackfillService.Result(40, 20, false));
+        assertTrue(service(Duration.ofDays(90), 10, store).run().backfilled(), "retried on the next run");
+        assertTrue(store.read(AutonomyState.SYSTEM_AGENT_ID, HitlAutonomyMaintenanceService.BACKFILL_MARKER).isPresent());
+        verify(backfill, times(2)).rebuild(any(), any());
+        assertFalse(service(Duration.ofDays(90), 10, store).run().backfilled(), "marked complete: no third rebuild");
     }
 
     @Test

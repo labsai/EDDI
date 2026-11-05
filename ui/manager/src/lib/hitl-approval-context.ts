@@ -27,7 +27,8 @@ export type ApprovalContextBlockError =
 
 /** Namespaces that would put a secret's or connection's NAME on a card. */
 const REFUSED_NAMESPACE = /\{[^{}]*\b(?:vault|eddivault|connection|caller):/i;
-const CALL_ROOT = /\{[^{}]*\bcall\./;
+// The root of an expression, as the backend reads it: `call.` directly after the brace, not `properties.call.`.
+const CALL_ROOT = /\{\s*call\./;
 
 /** What is wrong with one block, or `null`. First problem wins. */
 export function validateApprovalContextBlock(

@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -143,6 +144,20 @@ class ConversationHitlAnswerEditTest {
         AuditEntry entry = audited.stream().filter(e -> HitlApprovalAudit.EDIT_REFUSED_TASK_ID.equals(e.taskId())).findFirst().orElseThrow();
         assertEquals("decision-1", entry.output().get("decisionId"));
         assertNull(memory.getCurrentStep().getConversationOutput().get(ReviewerEditStep.EDITED_OUTPUT_KEY));
+    }
+
+    @Test
+    @DisplayName("an edit carrying the redaction placeholder is refused before it is applied, and the turn pauses again")
+    void redactedContentIsRefused() throws Exception {
+        pausedWithDraft(Instant.now());
+
+        conversation().resume(approveWith("The key is sk-" + SecretRedactionFilter.REDACTED + " today."));
+
+        verify(lifecycleManager, never()).replaceAnswerAt(any(), anyInt(), any());
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        @SuppressWarnings("unchecked")
+        var refused = (Map<String, Object>) memory.getCurrentStep().getData(HitlReviewDetails.LAST_EDIT_REFUSED_KEY).getResult();
+        assertEquals(HitlApprovalAudit.REFUSED_REDACTED_CONTENT, refused.get("reason"));
     }
 
     @Test

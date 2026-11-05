@@ -30,10 +30,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -80,6 +83,30 @@ class GroupConversationServiceHandoffHookTest {
         order.verify(conversationStore).updateIfState(any(), any());
         order.verify(decisionHandoffs).afterCompleted(eq(gc), eq(config), eq(listener));
         order.verify(listener).onGroupComplete(any());
+    }
+
+    @Test
+    void filedHandoffRecordsArePersistedAfterTheCompletionWrite() throws Exception {
+        var gc = running();
+        doAnswer(inv -> {
+            gc.handoffStateOrCreate();
+            return null;
+        }).when(decisionHandoffs).afterCompleted(any(), any(), any());
+
+        service.executeDiscussion(gc, new AgentGroupConfiguration(), List.of(), "question", null, 0);
+
+        verify(conversationStore, times(1)).updateIfState(any(), eq(GroupConversationState.COMPLETED));
+        // the running-state completion CAS plus the post-handoff write
+        verify(conversationStore, atLeast(2)).updateIfState(any(), any());
+    }
+
+    @Test
+    void noHandoffStateMeansNoSecondWrite() throws Exception {
+        var gc = running();
+
+        service.executeDiscussion(gc, new AgentGroupConfiguration(), List.of(), "question", null, 0);
+
+        verify(conversationStore, times(1)).updateIfState(any(), any());
     }
 
     @Test

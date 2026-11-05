@@ -70,6 +70,12 @@ public final class HitlApprovalAudit {
      * {@code reason} of a refused edit: the configuration changed since the pause.
      */
     public static final String REFUSED_CONFIG_DRIFT = "CONFIG_DRIFT";
+    /**
+     * {@code reason} of a refused edit: the draft holds content the approver was
+     * shown redacted, and the submitted text carries the redaction placeholder, so
+     * applying it would replace the concealed content with the placeholder.
+     */
+    public static final String REFUSED_REDACTED_CONTENT = "REDACTED_CONTENT";
 
     private final AuditLedgerService ledger;
     private final Consumer<HitlDecisionRecorded> publisher;
@@ -115,7 +121,8 @@ public final class HitlApprovalAudit {
             }
             return id;
         } catch (RuntimeException e) {
-            LOGGER.warnf("Failed to submit HITL decision audit entry for %s: %s", record.conversationId, e.getMessage());
+            LOGGER.warnf("Failed to submit HITL decision audit entry for %s: %s", LogSanitizer.sanitize(record.conversationId),
+                    LogSanitizer.sanitize(e.getMessage()));
             return null;
         }
     }

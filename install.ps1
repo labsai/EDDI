@@ -270,6 +270,9 @@ $GrafanaAdminUser = $env:GRAFANA_ADMIN_USER
 $GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
 # The PostgreSQL password docker-compose.postgres-only.yml requires (no default).
 $PostgresSecret = $env:POSTGRES_PASSWORD
+# EDDI's MongoDB user password. An exported value wins (Compose reads the environment
+# before .env), so it is also what Resolve-StackCredential persists to .env.
+$MongoAppSecret = $env:MONGO_APP_PASSWORD
 # One entry per realm account this run looked at: Account, and Secret (empty
 # when the account already had a password and was left alone).
 $FirstLogins = @()
@@ -639,7 +642,13 @@ function Get-EnvFileValue([string]$Key) {
     if (-not (Test-Path $envFile)) { return "" }
     $line = Get-Content $envFile | Where-Object { $_ -match "^$([regex]::Escape($Key))=(.*)$" } | Select-Object -First 1
     if (-not $line) { return "" }
-    return ($line -replace "^$([regex]::Escape($Key))=", "").Trim().Trim('"', "'")
+    $value = ($line -replace "^$([regex]::Escape($Key))=", "").Trim()
+    # Only one matching outer quote pair is the .env delimiter; Trim('"', "'") would also eat
+    # quote characters that belong to the value.
+    if ($value.Length -ge 2 -and ($value[0] -eq '"' -or $value[0] -eq "'") -and $value[$value.Length - 1] -eq $value[0]) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
 }
 
 # Resolves the overlay credentials BEFORE .env is written. Keeping a stored value
@@ -673,10 +682,19 @@ function Resolve-StackCredential {
     if ($Database -eq "postgres" -and -not $script:PostgresSecret) {
         $script:PostgresSecret = Get-StackPassword
     }
+    # EDDI's own MongoDB user. docker-compose.yml falls back to the ROOT password when
+    # MONGO_APP_PASSWORD is unset, which hands the app root's credential under another
+    # name. A fresh install (no .env yet) gets its own; an existing one never does: its
+    # app user already exists with the old password, so a stored value is carried
+    # forward and an absent one stays absent (the compose fallback keeps it working).
+    if (-not $script:MongoAppSecret) { $script:MongoAppSecret = Get-EnvFileValue "MONGO_APP_PASSWORD" }
+    if ($Database -ne "postgres" -and -not $script:MongoAppSecret -and -not (Test-Path (Join-Path -Path $EddiDir -ChildPath ".env"))) {
+        $script:MongoAppSecret = Get-StackPassword
+    }
     # Written single-quoted into .env, where compose reads the value literally.
-    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
+    foreach ($value in @($script:MongoAppSecret, $script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
         if ($value -and $value.Contains("'")) {
-            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
+            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD, MONGO_APP_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
         }
     }
 }
@@ -1150,6 +1168,11 @@ EDDI_VERSION=$EddiVersion
     # so a later switch back to PostgreSQL finds the volume's password.
     if ($script:PostgresSecret) {
         $publishedPorts["POSTGRES_PASSWORD"] = "'$($script:PostgresSecret)'"
+    }
+    # EDDI's MongoDB user password (see Resolve-StackCredential): written only when
+    # one is known, so an existing install without one keeps its root-password fallback.
+    if ($script:MongoAppSecret) {
+        $publishedPorts["MONGO_APP_PASSWORD"] = "'$($script:MongoAppSecret)'"
     }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort

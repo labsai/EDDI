@@ -119,6 +119,16 @@ class SlackHitlEditModalTest {
         }
 
         @Test
+        void argumentsThatAreNotAJsonObjectAreNot() {
+            var malformed = toolSnapshot(call("c1", "{\"body\":", "{\"body\":"));
+            var edits = SlackHitlEditModal.forCard("TOOL_CALL", malformed.getHitlPendingToolCalls(), malformed, Map.of());
+            assertFalse(edits.edit(), "the merge would refuse every submission");
+            assertTrue(edits.rejectWithReason());
+            var array = toolSnapshot(call("c1", "[1,2]", "[1,2]"));
+            assertFalse(SlackHitlEditModal.forCard("TOOL_CALL", array.getHitlPendingToolCalls(), array, Map.of()).edit());
+        }
+
+        @Test
         void ruleDraftNeedsTheOptInAndEditsAllowed() {
             var snapshot = ruleSnapshot("The release is Friday.", true);
             var withoutOptIn = SlackHitlEditModal.forCard("RULE", null, snapshot, Map.of());
@@ -151,6 +161,17 @@ class SlackHitlEditModalTest {
     @Nested
     @DisplayName("redaction-aware merge of edited arguments")
     class Merge {
+
+        @Test
+        @DisplayName("an object or array cannot be submitted in place of a redacted text value")
+        void containerInPlaceOfRedactedLeaf() {
+            String raw = "{\"token\":\"real-secret\",\"body\":\"hi\"}";
+            String shown = "{\"token\":\"<REDACTED>\",\"body\":\"hi\"}";
+            assertThrows(SlackRedactedArgumentsMerge.MergeException.class,
+                    () -> SlackRedactedArgumentsMerge.merge(raw, shown, "{\"token\":{\"a\":1},\"body\":\"hi\"}"));
+            assertThrows(SlackRedactedArgumentsMerge.MergeException.class,
+                    () -> SlackRedactedArgumentsMerge.merge(raw, shown, "{\"token\":[\"x\"],\"body\":\"hi\"}"));
+        }
 
         @Test
         void unchangedRedactedLeafKeepsTheRawValue() throws Exception {
