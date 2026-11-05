@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import java.util.List;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -13,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.Bet;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -135,6 +137,12 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                             + " characters"))
                     .build();
         }
+        Bet bet;
+        try {
+            bet = Bet.of(request.hypothesis(), request.metric(), request.target(), request.reviewDate());
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
         try {
             requireGroupAccess(groupId, AccessLevel.EDIT);
             String subject = request.subject().trim();
@@ -160,7 +168,7 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                 TaskItem task = workspace.getBacklog().addTask(new TaskItem(
                         subject,
                         request.description() != null ? request.description() : "",
-                        request.priority()));
+                        request.priority(), bet));
                 if (workspaceStore.casRevision(workspace)) {
                     return Response.status(Response.Status.CREATED).entity(task).build();
                 }
@@ -175,6 +183,69 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to add backlog task for group %s", sanitize(groupId));
+            return Response.serverError().build();
+        }
+    }
+
+    @Override
+    public Response readDueBetReviews(String groupId, String asOf) {
+        Instant at;
+        try {
+            at = asOf == null || asOf.isBlank() ? Instant.now() : Bet.parseReviewDate(asOf);
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "asOf must be an ISO date or instant")).build();
+        }
+        try {
+            requireGroupAccess(groupId, AccessLevel.VIEW);
+            GroupWorkspace workspace = workspaceStore.find(groupId);
+            return Response.ok(workspace != null ? workspace.getBacklog().findDueReviews(at) : List.of()).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard's denial is a 403, not a failure of this endpoint
+            throw e;
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to read due bet reviews for group %s", sanitize(groupId));
+            return Response.serverError().build();
+        }
+    }
+
+    @Override
+    public Response reviewBet(String groupId, String taskId, BetReviewRequest request) {
+        Instant reschedule = null;
+        if (request != null && request.rescheduleTo() != null && !request.rescheduleTo().isBlank()) {
+            try {
+                reschedule = Bet.parseReviewDate(request.rescheduleTo());
+            } catch (IllegalArgumentException e) {
+                return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            }
+        }
+        try {
+            requireGroupAccess(groupId, AccessLevel.EDIT);
+            for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
+                GroupWorkspace workspace = workspaceStore.readOrCreate(groupId);
+                TaskItem task = workspace.getBacklog().getTasks().stream().filter(t -> taskId.equals(t.id())).findFirst().orElse(null);
+                if (task == null) {
+                    return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "No such backlog task")).build();
+                }
+                if (task.bet() == null) {
+                    return Response.status(Response.Status.CONFLICT).entity(Map.of("error", "That task is not a bet")).build();
+                }
+                TaskItem updated = task.withBet(reschedule != null ? task.bet().rescheduled(reschedule) : task.bet().reviewed(Instant.now()));
+                workspace.getBacklog().updateTask(updated);
+                if (workspaceStore.casRevision(workspace)) {
+                    return Response.ok(updated).build();
+                }
+            }
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "The workspace is being modified concurrently — retry the request")).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard's denial is a 403, not a failure of this endpoint
+            throw e;
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to review bet %s for group %s", sanitize(taskId), sanitize(groupId));
             return Response.serverError().build();
         }
     }

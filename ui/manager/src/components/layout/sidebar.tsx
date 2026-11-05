@@ -85,8 +85,14 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
   const versionLabel = isLoading
     ? t("nav.checkingVersion", "Checking version...")
     : serverVersion && serverVersion !== UNKNOWN_VERSION
-      ? `${brand.productName} ${serverVersion}`
-      : `${brand.productName} Demo ${__APP_VERSION__}`;
+      ? t("nav.versionLabel", "{{productName}} {{version}}", {
+          productName: brand.productName,
+          version: serverVersion,
+        })
+      : t("nav.versionLabelDemo", "{{productName}} Demo {{version}}", {
+          productName: brand.productName,
+          version: __APP_VERSION__,
+        });
 
   // Shares its query key with the approvals page, so mounting this in the
   // sidebar adds an observer rather than a second poll. The endpoint allows
@@ -709,6 +715,9 @@ function HelpMenu({ collapsed, onAbout }: { collapsed: boolean; onAbout: () => v
             <button
               onClick={() => {
                 setOpen(false);
+                // Closing the menu unmounts this button, so the dialog would
+                // have nothing to hand focus back to; park it on the trigger.
+                triggerRef.current?.focus();
                 onAbout();
               }}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/10 focus:bg-sidebar-accent/10"

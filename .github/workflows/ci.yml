@@ -263,7 +263,7 @@ jobs:
           # Register rows (Decision Log / Regression Notes) carry links that
           # DocumentationLinksTest grades only once they sit in docs/changelog.md,
           # so a collation that adds any keeps the Java suite.
-          ROWS=$(git diff --no-renames -U0 "origin/${BASE_REF}" HEAD -- docs/changelog.md             | grep -E '^\+\| [0-9]{4}-[0-9]{2}-[0-9]{2} \|' || true)
+          ROWS=$(git diff --no-renames -U0 "origin/${BASE_REF}" HEAD -- docs/changelog.md             | grep -E '^\+\|[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*\|' || true)
           if [ -n "$CHANGED" ] && [ -z "$OTHER" ] && [ -z "$ROWS" ]; then
             echo "only=true" >> "$GITHUB_OUTPUT"
           fi

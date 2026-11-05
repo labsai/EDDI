@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetRefusedException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
@@ -227,6 +228,23 @@ public class RestGroupConversation implements IRestGroupConversation {
                 : "Attachment refused: the discussion's attachment quota would be exceeded.";
     }
 
+    /**
+     * A spent team budget: 409 with the refusal's own text (docs/team-budgets.md).
+     * Unlike the curated bodies elsewhere in this class, this message is written
+     * for the caller by {@code TeamBudgetService} (team name, spend, cap, reset
+     * instant and what an administrator can do) and carries no caller-supplied id.
+     * Caught before {@link IGroupConversationService.GroupDiscussionException}, its
+     * parent, whose canned "must be COMPLETED" text would name the wrong cause.
+     */
+    private static Response budgetRefused(TeamBudgetRefusedException e) {
+        return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(budgetRefusalText(e)).build();
+    }
+
+    private static String budgetRefusalText(TeamBudgetRefusedException e) {
+        String message = e.getMessage();
+        return message == null || message.isBlank() ? "The team's budget does not allow new work right now." : message;
+    }
+
     private static Response badRequest(String reason) {
         return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN).entity(reason).build();
     }
@@ -258,6 +276,9 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
             LOGGER.infof("Group discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
             return badRequest(quotaRejection(e));
+        } catch (TeamBudgetRefusedException e) {
+            LOGGER.infof("Group discussion refused (team budget, %s) for group %s", e.reason(), sanitize(groupId));
+            return budgetRefused(e);
         } catch (IGroupConversationService.GroupDepthExceededException e) {
             // Curated bodies throughout this class: the raw exception text is never
             // returned to the caller (CodeQL: information exposure / reflected value —
@@ -335,6 +356,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
             LOGGER.infof("Group streaming discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
             sendErrorEvent(eventSink, sse, quotaRejection(e));
+            closeQuietly(eventSink);
+        } catch (TeamBudgetRefusedException e) {
+            LOGGER.infof("Group streaming discussion refused (team budget, %s) for group %s", e.reason(), sanitize(groupId));
+            sendErrorEvent(eventSink, sse, budgetRefusalText(e));
             closeQuietly(eventSink);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Curated event text: the SSE body is rendered by the chat UI, so never push
@@ -512,6 +537,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("The follow-up was refused: this discussion has already reached its cost ceiling "
                             + "(protocol.maxCostPerDiscussion).")
                     .build();
+        } catch (TeamBudgetRefusedException e) {
+            LOGGER.infof("Follow-up on %s refused (team budget, %s)", sanitize(gcId), e.reason());
+            return budgetRefused(e);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // Base type now means only a state / concurrency conflict.
             LOGGER.infof("Follow-up on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
@@ -761,6 +789,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("The continuation round could not be completed: a member agent or a required "
                             + "dependency could not be reached, or the group is misconfigured.")
                     .build();
+        } catch (TeamBudgetRefusedException e) {
+            LOGGER.infof("Continue on %s refused (team budget, %s)", sanitize(gcId), e.reason());
+            return budgetRefused(e);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // Base type now means only a state / concurrency conflict.
             LOGGER.infof("Continue on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
@@ -810,6 +841,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             executorService.submit(() -> {
                 try {
                     groupConversationService.continueDiscussion(gcId, request.question(), listener);
+                } catch (TeamBudgetRefusedException e) {
+                    LOGGER.infof("Continue streaming on %s refused (team budget, %s)", sanitize(gcId), e.reason());
+                    listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(budgetRefusalText(e)));
                 } catch (Exception e) {
                     // Curated event text — never forward the raw message over SSE.
                     LOGGER.errorf("Continue discussion streaming failed: %s", e.getMessage());

@@ -109,6 +109,22 @@ export interface TaskModelPricing {
   } | null;
 }
 
+/** Slugs of the agent-operations tools; off unless named in `builtInToolsWhitelist`. */
+export const AGENT_OPS_SLUGS = ["team_scorecard", "propose_team_budget", "schedule_followup"] as const;
+export type AgentOpsSlug = (typeof AGENT_OPS_SLUGS)[number];
+
+/** Limits of the agent-operations tools (`task.agentOps`); every field is optional. */
+export interface AgentOpsConfig {
+  scorecard?: { groupIds?: string[]; weeks?: number; maxLessons?: number };
+  budgetProposal?: { maxPerTurn?: number; maxPerDay?: number; maxAmountUsd?: number };
+  followUp?: {
+    maxPending?: number;
+    maxPerTurn?: number;
+    maxHorizonDays?: number;
+    maxCostPerFireUsd?: number;
+  };
+}
+
 export interface LlmTask {
   actions?: string[];
   id?: string;
@@ -125,6 +141,7 @@ export interface LlmTask {
   enableHttpCallTools?: boolean;
   enableMcpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
+  agentOps?: AgentOpsConfig;
   conversationHistoryLimit?: number;
   // Token-aware context window (Strategy 1)
   maxContextTokens?: number;
@@ -160,6 +177,15 @@ export interface LlmTask {
   enableRateLimiting?: boolean;
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
+  /**
+   * Per-subject / per-run caps on tool calls. Absent = none; never sent unless
+   * set, because an older backend's strict config parser refuses an unknown
+   * field. `window` is an ISO-8601 duration (`PT1M`..`P31D`) or `RUN`.
+   */
+  toolQuotas?: {
+    subject?: string;
+    tools: Record<string, { limit?: number; window?: string; pool?: string }>;
+  };
   maxToolIterations?: number;
   /**
    * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).

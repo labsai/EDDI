@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal.handoff;
 
+import ai.labs.eddi.configs.groups.model.SharedTaskList.Bet;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.SourceKind;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.Trigger;
 
@@ -60,14 +61,26 @@ import java.util.List;
  * @param runQuota
  *            the per-run cap of the source (conversation or discussion), or
  *            {@code null} when the trigger has none
+ * @param bet
+ *            optional bet the filed task becomes (hypothesis, metric, review
+ *            date); {@code null} files an ordinary task
  */
 public record HandoffRequest(SourceKind sourceKind, String sourceId, Integer sourceVersion, String sourceConversationId,
         String sourceMemberAgentId, String userId, String targetGroupId, String subject, String description, Integer priority, Trigger trigger,
         String decisionRef, String artifactId, String reference, int hop, List<String> lineage, String dedupeKey, int maxDescriptionChars,
-        RunQuota runQuota) {
+        RunQuota runQuota, Bet bet) {
 
     public HandoffRequest {
         lineage = lineage == null ? List.of() : List.copyOf(lineage);
+    }
+
+    /** The form that predates {@code bet}: an ordinary task. */
+    public HandoffRequest(SourceKind sourceKind, String sourceId, Integer sourceVersion, String sourceConversationId,
+            String sourceMemberAgentId, String userId, String targetGroupId, String subject, String description, Integer priority,
+            Trigger trigger, String decisionRef, String artifactId, String reference, int hop, List<String> lineage, String dedupeKey,
+            int maxDescriptionChars, RunQuota runQuota) {
+        this(sourceKind, sourceId, sourceVersion, sourceConversationId, sourceMemberAgentId, userId, targetGroupId, subject, description,
+                priority, trigger, decisionRef, artifactId, reference, hop, lineage, dedupeKey, maxDescriptionChars, runQuota, null);
     }
 
     /** The {@code accept.from[].source} spelling of the source. */

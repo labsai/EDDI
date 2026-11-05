@@ -185,6 +185,205 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Real-world outcomes a team accepts against its work (webhook / REST), and how
+     * many of them its RETRO phase reads. <b>{@code null} is off</b>: the outcome
+     * endpoint answers 409 and nothing is stored or shown, so a config written
+     * before 6.8 behaves exactly as it did.
+     */
+    private OutcomeConfig outcomeConfig;
+
+    public OutcomeConfig getOutcomeConfig() {
+        return outcomeConfig;
+    }
+
+    public void setOutcomeConfig(OutcomeConfig outcomeConfig) {
+        this.outcomeConfig = outcomeConfig;
+    }
+
+    /**
+     * Bounds for team outcome events. Every cap has a hard ceiling no config can
+     * exceed: the endpoint is open to whatever system the operator wires to it.
+     *
+     * @param maxPerSubject
+     *            events one task or decision may carry (default 50, ceiling
+     *            {@value #CEILING_MAX_PER_SUBJECT}); further posts answer 409
+     * @param maxStored
+     *            events the team holds in total (default 2000, ceiling
+     *            {@value #CEILING_MAX_STORED}); the oldest are dropped past it
+     * @param retentionDays
+     *            events older than this are dropped on the next write (default 180,
+     *            ceiling {@value #CEILING_RETENTION_DAYS})
+     * @param retroDigestSize
+     *            recent events quoted into a RETRO phase's input (default 10,
+     *            ceiling {@value #CEILING_RETRO_DIGEST}); absent uses the default,
+     *            <b>{@code 0} keeps outcomes out of the retro</b>
+     */
+    public record OutcomeConfig(int maxPerSubject, int maxStored, int retentionDays, Integer retroDigestSize) {
+
+        public static final int DEFAULT_MAX_PER_SUBJECT = 50;
+        public static final int DEFAULT_MAX_STORED = 2000;
+        public static final int DEFAULT_RETENTION_DAYS = 180;
+        public static final int DEFAULT_RETRO_DIGEST = 10;
+        public static final int CEILING_MAX_PER_SUBJECT = 200;
+        public static final int CEILING_MAX_STORED = 10_000;
+        public static final int CEILING_RETENTION_DAYS = 730;
+        public static final int CEILING_RETRO_DIGEST = 50;
+
+        /**
+         * Non-positive falls back to the default (digest: absent or negative only); all
+         * clamped.
+         */
+        public OutcomeConfig {
+            maxPerSubject = Math.min(maxPerSubject <= 0 ? DEFAULT_MAX_PER_SUBJECT : maxPerSubject, CEILING_MAX_PER_SUBJECT);
+            maxStored = Math.min(maxStored <= 0 ? DEFAULT_MAX_STORED : maxStored, CEILING_MAX_STORED);
+            retentionDays = Math.min(retentionDays <= 0 ? DEFAULT_RETENTION_DAYS : retentionDays, CEILING_RETENTION_DAYS);
+            retroDigestSize = Math.min(retroDigestSize == null || retroDigestSize < 0 ? DEFAULT_RETRO_DIGEST : retroDigestSize, CEILING_RETRO_DIGEST);
+        }
+
+        /** Every cap at its default. */
+        public OutcomeConfig() {
+            this(DEFAULT_MAX_PER_SUBJECT, DEFAULT_MAX_STORED, DEFAULT_RETENTION_DAYS, DEFAULT_RETRO_DIGEST);
+        }
+    }
+
+    /**
+     * Sharing and consolidating the team's retro lessons. <b>{@code null} is
+     * off</b>: the team's lessons stay visible only to its own members, are never
+     * offered to another team and are never rewritten, so a config written before
+     * 6.8 behaves as it did.
+     */
+    private LessonConfig lessonConfig;
+
+    public LessonConfig getLessonConfig() {
+        return lessonConfig;
+    }
+
+    public void setLessonConfig(LessonConfig lessonConfig) {
+        this.lessonConfig = lessonConfig;
+    }
+
+    /**
+     * Cross-team lesson sharing, and the consolidation of a team's own lessons.
+     * <p>
+     * Sharing is consented to on <em>both</em> sides, like a handoff: the owning
+     * team lists the teams that may read its lessons in {@code shareWith}, and the
+     * reading team lists the teams it wants to read from in {@code readFrom}. A
+     * lesson crosses only where the two lists meet, and the reader sees the
+     * refusals so it can tell "not shared with me" from "has no lessons".
+     *
+     * @param shareWith
+     *            group ids allowed to read this team's lessons (at most
+     *            {@value #MAX_GROUPS})
+     * @param readFrom
+     *            group ids this team reads lessons from (at most
+     *            {@value #MAX_GROUPS})
+     * @param maxSharedLessons
+     *            lessons read from other teams in total, newest first (default 10,
+     *            ceiling {@value #CEILING_MAX_SHARED})
+     * @param consolidation
+     *            the scheduled merge/retire job, or {@code null} for none
+     */
+    public record LessonConfig(List<String> shareWith, List<String> readFrom, Integer maxSharedLessons,
+            LessonConsolidationConfig consolidation) {
+
+        public static final int MAX_GROUPS = 20;
+        public static final int DEFAULT_MAX_SHARED = 10;
+        public static final int CEILING_MAX_SHARED = 50;
+
+        /**
+         * Lists are copied, de-duplicated and bounded; the count is defaulted and
+         * clamped.
+         */
+        public LessonConfig {
+            shareWith = bounded(shareWith);
+            readFrom = bounded(readFrom);
+            maxSharedLessons = Math.min(maxSharedLessons == null || maxSharedLessons <= 0 ? DEFAULT_MAX_SHARED : maxSharedLessons,
+                    CEILING_MAX_SHARED);
+        }
+
+        /** Nothing shared, nothing read, no consolidation. */
+        public LessonConfig() {
+            this(null, null, null, null);
+        }
+
+        private static List<String> bounded(List<String> ids) {
+            if (ids == null) {
+                return List.of();
+            }
+            return ids.stream().filter(id -> id != null && !id.isBlank()).map(String::trim).distinct().limit(MAX_GROUPS).toList();
+        }
+    }
+
+    /**
+     * The scheduled job that merges duplicate lessons and retires lessons a later
+     * outcome contradicted. It needs a model; without {@code llmProvider} and
+     * {@code llmModel} a run is refused with a message saying so. Every number is
+     * clamped to a ceiling.
+     * <p>
+     * {@code maxCostPerRun} is a dollar ceiling checked <em>before</em> the call
+     * against a conservative estimate of what the call can cost, so a run that
+     * could exceed it makes no call (it first drops lessons until the estimate
+     * fits).
+     *
+     * @param llmProvider
+     *            model provider, e.g. {@code anthropic}
+     * @param llmModel
+     *            model name
+     * @param parameters
+     *            provider parameters such as {@code apiKey: ${vault:...}} (a
+     *            background job has no parent task to inherit credentials from)
+     * @param maxCostPerRun
+     *            dollars one run may spend (default 0.10, ceiling 5.0)
+     * @param inputPricePer1M
+     *            the model's input price per million tokens, or {@code null}
+     * @param outputPricePer1M
+     *            the model's output price per million tokens, or {@code null}
+     * @param minLessons
+     *            below this many lessons nothing runs (default 6)
+     * @param maxLessonsPerRun
+     *            lessons sent to the model per run, oldest first (default 40,
+     *            ceiling 100)
+     * @param outcomeLookbackDays
+     *            outcomes older than this are not shown to the model (default 30,
+     *            ceiling 365)
+     * @param maxOutcomesPerRun
+     *            outcomes shown to the model (default 20, ceiling 100)
+     */
+    public record LessonConsolidationConfig(String llmProvider, String llmModel, Map<String, String> parameters, Double maxCostPerRun,
+            Double inputPricePer1M, Double outputPricePer1M, Integer minLessons, Integer maxLessonsPerRun, Integer outcomeLookbackDays,
+            Integer maxOutcomesPerRun) {
+
+        public static final double DEFAULT_MAX_COST = 0.10;
+        public static final double CEILING_MAX_COST = 5.0;
+        public static final int DEFAULT_MIN_LESSONS = 6;
+        public static final int DEFAULT_MAX_LESSONS = 40;
+        public static final int CEILING_MAX_LESSONS = 100;
+        public static final int DEFAULT_LOOKBACK_DAYS = 30;
+        public static final int CEILING_LOOKBACK_DAYS = 365;
+        public static final int DEFAULT_MAX_OUTCOMES = 20;
+        public static final int CEILING_MAX_OUTCOMES = 100;
+
+        public LessonConsolidationConfig {
+            parameters = parameters == null ? Map.of() : Map.copyOf(parameters);
+            maxCostPerRun = maxCostPerRun == null || !(maxCostPerRun > 0) || maxCostPerRun.isNaN()
+                    ? DEFAULT_MAX_COST
+                    : Math.min(maxCostPerRun, CEILING_MAX_COST);
+            minLessons = minLessons == null || minLessons <= 1 ? DEFAULT_MIN_LESSONS : minLessons;
+            maxLessonsPerRun = Math.min(maxLessonsPerRun == null || maxLessonsPerRun <= 0 ? DEFAULT_MAX_LESSONS : maxLessonsPerRun,
+                    CEILING_MAX_LESSONS);
+            outcomeLookbackDays = Math.min(outcomeLookbackDays == null || outcomeLookbackDays <= 0 ? DEFAULT_LOOKBACK_DAYS : outcomeLookbackDays,
+                    CEILING_LOOKBACK_DAYS);
+            maxOutcomesPerRun = Math.min(maxOutcomesPerRun == null || maxOutcomesPerRun <= 0 ? DEFAULT_MAX_OUTCOMES : maxOutcomesPerRun,
+                    CEILING_MAX_OUTCOMES);
+        }
+
+        /** Whether a model is named. */
+        public boolean hasModel() {
+            return llmProvider != null && !llmProvider.isBlank() && llmModel != null && !llmModel.isBlank();
+        }
+    }
+
+    /**
      * Bounds for the NEGOTIATION concession ledger (M-G1). {@code null} runs with
      * the defaults — like {@link #retroConfig}, a default, not a switch: the caps
      * apply either way, because the ledger is an LLM write surface quoted into

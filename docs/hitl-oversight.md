@@ -215,9 +215,11 @@ approvers see every agent; anyone else must pass an `agentId` they hold `EDIT` o
 | POST | `/hitl/autonomy/{agentId}/suspend?category=` | `{note}` |
 | POST | `/hitl/autonomy/{agentId}/lift?category=` | `{note}` |
 
-Categories contain `:` and `/`, so they are always a query parameter. There are no MCP tools for these endpoints yet;
-the read tools are planned, and there will never be an MCP tool for a verdict, apply, dismiss, suspend or lift — an MCP
-client is often a model, and those actions are evidence or ungating.
+Categories contain `:` and `/`, so they are always a query parameter. Over MCP the reads are `summarize_approvals`,
+`list_autonomy_recommendations`, `get_autonomy_state` and `count_pending_audit_samples` (see
+[MCP Server](mcp-server.md#hitl-oversight-tools-4)), and the Platform Operator holds the same four reads. There will
+never be an MCP tool for a verdict, apply, dismiss, suspend or lift — an MCP client is often a model, and those actions
+are evidence or ungating.
 
 ## Security
 

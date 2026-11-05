@@ -217,10 +217,12 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 > rolled forward to the next cadence.
 >
 > A manual fire is **synchronous**: the request holds open until the turn
-> finishes or `eddi.schedule.fire-timeout` (default 5 minutes) elapses, so a
-> proxy or client with a shorter read timeout may give up before the fire log
-> comes back. The fire itself continues, and the schedule stays claimed until it
-> ends — a retry in the meantime answers `409`.
+> finishes or the fire's bound (`eddi.schedule.fire-timeout`, default 5 minutes,
+> plus a 30 s grace) elapses, so a proxy or client with a shorter read timeout
+> may give up before the fire log comes back. At the bound the worker is
+> interrupted and the request answers `504`; the fire may still be winding down.
+> The schedule stays claimed until its lease expires, when the poller counts a
+> failed attempt — a retry in the meantime answers `409`.
 
 ### Enabling and disabling
 

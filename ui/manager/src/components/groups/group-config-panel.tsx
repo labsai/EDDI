@@ -116,6 +116,8 @@ export function GroupConfigPanel({
   const hasAdvanced =
     !!config.humanMemberConfig ||
     !!config.retroConfig ||
+    !!config.outcomeConfig ||
+    !!config.lessonConfig ||
     !!config.contextWindow?.enabled ||
     !!config.facilitator?.enabled ||
     !!config.artifactConfig?.allowArtifactTools ||
@@ -753,6 +755,26 @@ export function GroupConfigPanel({
                 value={t("groups.retroConfigValue", "{{perRun}}/run, {{stored}} stored max", {
                   perRun: config.retroConfig.maxLessonsPerRun,
                   stored: config.retroConfig.maxStoredLessons,
+                })}
+              />
+            )}
+            {config.outcomeConfig && (
+              <InfoRow
+                label={t("groupLearning.configLabel", "Team outcomes")}
+                value={t("groupLearning.configValue", "{{perSubject}}/item, {{stored}} stored, {{digest}} in the retro", {
+                  perSubject: config.outcomeConfig.maxPerSubject,
+                  stored: config.outcomeConfig.maxStored,
+                  digest: config.outcomeConfig.retroDigestSize,
+                })}
+              />
+            )}
+            {config.lessonConfig && (
+              <InfoRow
+                label={t("groupLessons.configLabel", "Team lessons")}
+                value={t("groupLessons.configValue", "shares with {{share}}, reads from {{read}}{{consolidation}}", {
+                  share: config.lessonConfig.shareWith.length,
+                  read: config.lessonConfig.readFrom.length,
+                  consolidation: config.lessonConfig.consolidation ? t("groupLessons.configConsolidation", ", consolidates") : "",
                 })}
               />
             )}

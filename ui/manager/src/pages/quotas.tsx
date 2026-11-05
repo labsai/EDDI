@@ -258,10 +258,13 @@ export function QuotasPage() {
                     step={0.01}
                     integer={false}
                     dimmed={!form.enabled}
-                    note={t(
+                    note={`${t(
                       "quotas.costPricedOnly",
                       "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration adds $0 to the total, but is refused like any other once the budget is spent.",
-                    )}
+                    )} ${t(
+                      "quotas.costHardCeiling",
+                      "By default the call that crosses the budget still finishes. To refuse it instead, the server can reserve each call's maximum cost first: set eddi.tenant.quota.cost-reservation.enabled=true (a startup property).",
+                    )}`}
                   />
                 </div>
               ) : null}
@@ -327,6 +330,10 @@ export function QuotasPage() {
                     value={usage.monthlyCostUsd}
                     limit={form?.maxMonthlyCostUsd ?? -1}
                     format={formatUsd}
+                    held={usage.reservedUsd}
+                    heldLabel={t("quotas.heldByTurns", "{{amount}} held by running turns", {
+                      amount: formatUsd(usage.reservedUsd ?? 0),
+                    })}
                     testId="usage-cost"
                   />
                   <div className="flex flex-col justify-center rounded-lg border border-border/50 bg-muted/30 p-3">
@@ -343,7 +350,12 @@ export function QuotasPage() {
               {/* The saved policy, not the form: this says what the backend is doing now,
                   and an unsaved edit is not applied until it is saved. */}
               {usage && quota && (
-                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={quota.maxMonthlyCostUsd} enforced={quota.enabled} />
+                <CostBudgetStatus
+                  spent={usage.monthlyCostUsd}
+                  held={usage.reservedUsd ?? 0}
+                  limit={quota.maxMonthlyCostUsd}
+                  enforced={quota.enabled}
+                />
               )}
             </div>
           </div>
@@ -512,7 +524,18 @@ function formatUsd(n: number): string {
  * budget (nothing metered), enforcement off with a budget, no budget, budget
  * reached, or spend versus remaining.
  */
-function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
+function CostBudgetStatus({
+  spent,
+  held = 0,
+  limit,
+  enforced,
+}: {
+  spent: number;
+  /** Budget held by running turns (hard-ceiling mode): not spent, but not free for a new call either. */
+  held?: number;
+  limit: number;
+  enforced: boolean;
+}) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
   const reached = !unlimited && spent >= limit;
@@ -534,6 +557,12 @@ function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: nu
       "quotas.budgetReached",
       "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
       { spent: money(spent), limit: money(limit) },
+    );
+  } else if (held > 0) {
+    state = t(
+      "quotas.budgetRemainingHeld",
+      "{{spent}} of {{limit}} used this month and {{held}} held by running turns. {{remaining}} left for new calls.",
+      { spent: money(spent), limit: money(limit), held: money(held), remaining: money(Math.max(0, limit - spent - held)) },
     );
   } else {
     state = t("quotas.budgetRemaining", "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.", {
@@ -563,6 +592,8 @@ function UsageCard({
   limit,
   prefix = "",
   format,
+  held,
+  heldLabel,
   testId,
 }: {
   label: string;
@@ -571,10 +602,14 @@ function UsageCard({
   prefix?: string;
   /** Renders value and limit; replaces `prefix` and the two-decimal rounding. */
   format?: (n: number) => string;
+  /** Budget set aside for turns still running (hard-ceiling mode); shown only when above zero. */
+  held?: number;
+  heldLabel?: string;
   testId: string;
 }) {
   const isUnlimited = limit < 0;
   const ratio = !isUnlimited && limit > 0 ? value / limit : 0;
+  const heldRatio = !isUnlimited && limit > 0 && held && held > 0 ? held / limit : 0;
   const barColor =
     ratio >= 0.9 ? "bg-red-500" : ratio >= 0.7 ? "bg-warn-500" : "bg-emerald-500";
 
@@ -590,12 +625,24 @@ function UsageCard({
         </span>
       </div>
       {!isUnlimited && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full rounded-full transition-all ${barColor}`}
+            className={`h-full transition-all ${barColor}`}
             style={{ width: `${Math.min(ratio * 100, 100)}%` }}
           />
+          {heldRatio > 0 && (
+            <div
+              className="h-full bg-primary/40"
+              style={{ width: `${Math.min(heldRatio * 100, 100 - Math.min(ratio * 100, 100))}%` }}
+              data-testid={`${testId}-held-bar`}
+            />
+          )}
         </div>
+      )}
+      {held !== undefined && held > 0 && (
+        <p className="mt-1 text-[10px] text-muted-foreground" data-testid={`${testId}-held`}>
+          {heldLabel}
+        </p>
       )}
     </div>
   );

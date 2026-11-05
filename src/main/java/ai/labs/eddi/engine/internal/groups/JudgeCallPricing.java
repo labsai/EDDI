@@ -4,23 +4,23 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
-import ai.labs.eddi.modules.llm.impl.TokenPricing;
+import ai.labs.eddi.modules.llm.pricing.MeteredTokenUsage;
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Prices one SERVICE convergence-judge call.
+ * Prices one SERVICE convergence-judge call through the one price resolution
+ * every model call uses ({@link ModelPriceResolver}): the judge's own
+ * {@code inputPricePer1M}/{@code outputPricePer1M} win, and a price the
+ * configuration leaves out comes from the deployment's price catalog entry for
+ * {@code provider}/{@code model}. A judge priced by neither is unpriced and
+ * costs $0, as every other unpriced call does.
  * <p>
- * A deliberate one-method seam. Today it applies the configured per-1M prices
- * through {@link TokenPricing}, the formula every other group summarizer uses.
- * When a central price resolver lands (provider/model catalog, explicit
- * overrides winning), only this method body changes — the judge and its tests
- * keep calling the same signature, so the two changes can merge in either
- * order. That is also why {@code provider} and {@code model} are parameters
- * although the current body does not read them: they are reserved for the
- * catalog resolver ({@code ModelPriceResolver}) that the cost-accounting change
- * (https://github.com/labsai/EDDI/pull/1222) introduces, which prices a call by
- * provider and model. Do not remove them as unused.
+ * A deliberate one-method seam: the judge and its tests call this signature
+ * only, so a change to how prices resolve stays in this body.
  */
 public final class JudgeCallPricing {
 
@@ -28,12 +28,23 @@ public final class JudgeCallPricing {
     }
 
     /**
-     * Dollar cost of one judge call. Null prices mean unpriced and contribute 0, so
-     * an unpriced judge is free on the ledger — the same semantics as the other
-     * group summarizers.
+     * Dollar cost of one judge call.
+     *
+     * @param provider
+     *            the judge's model type ({@code llmProvider}), used for the catalog
+     *            lookup; {@code null} or blank skips the catalog
+     * @param model
+     *            the judge's model name ({@code llmModel}); {@code null} or blank
+     *            skips the catalog
      */
     public static double cost(String provider, String model, Double inputPricePer1M, Double outputPricePer1M, int inputTokens,
                               int outputTokens) {
-        return TokenPricing.cost(inputPricePer1M, outputPricePer1M, Map.of("inputTokens", inputTokens, "outputTokens", outputTokens));
+        Map<String, Object> usage = new HashMap<>();
+        usage.put("inputTokens", inputTokens);
+        usage.put("outputTokens", outputTokens);
+        if (provider != null && !provider.isBlank() && model != null && !model.isBlank()) {
+            usage.put(MeteredTokenUsage.PRICING_MODEL, provider.trim() + "/" + model.trim());
+        }
+        return ModelPriceResolver.price(PriceOverride.of(inputPricePer1M, outputPricePer1M), usage).usd();
     }
 }

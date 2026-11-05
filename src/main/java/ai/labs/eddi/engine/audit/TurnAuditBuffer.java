@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
+import ai.labs.eddi.engine.memory.model.Data;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -123,8 +124,8 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      * Restore the original collector and submit every buffered entry to it, in
      * order. A failing submit is logged and does not stop the rest.
      *
-     * @return true when the ledger accepted every entry (see
-     *         {@link #releaseLedgerOwnedEvidence})
+     * @return true when the ledger accepted every entry and none of them records a
+     *         failed task (see {@link #releaseLedgerOwnedEvidence})
      */
     public boolean flush(IConversationMemory memory) {
         return flush(memory, List.of());
@@ -162,8 +163,20 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
             recordedInputs.clear();
         }
         boolean secretInput = inputWasScrubbed(memory);
+        // A turn that failed a task and then paused resumes in a NEW buffer with no
+        // entries; the
+        // step carries the fact across, or the resume would hand over what the ledger
+        // never got.
+        boolean retainedEarlier = evidenceRetained(memory);
         boolean allAccepted = true;
+        // A failed task's entry is built without llmDetail, so a task that wrote the
+        // compiled
+        // prompt and the model response and then failed leaves them in the step and
+        // nowhere
+        // else: acceptance of that entry does not mean the ledger holds them.
+        boolean recordsFailure = false;
         for (AuditEntry entry : pending) {
+            recordsFailure |= isFailureEntry(entry);
             try {
                 AuditEntry submitted = secretInput ? redact(entry, inputs) : entry;
                 if (secretContextValues != null && !secretContextValues.isEmpty()) {
@@ -183,7 +196,35 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
             }
         }
-        return allAccepted;
+        if (recordsFailure || !allAccepted) {
+            // A refused entry means the ledger never got this turn's prompt and response
+            // either
+            retainEvidence(memory);
+        }
+        return allAccepted && !recordsFailure && !retainedEarlier;
+    }
+
+    /**
+     * Step marker: this step's prompt and model response are in no audit entry (a
+     * task failed after writing them), so no later flush may hand them over.
+     * {@code audit:} keys are not part of any client projection.
+     */
+    static final String EVIDENCE_RETAINED_KEY = "audit:evidence_retained";
+
+    private static boolean evidenceRetained(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        return step != null && step.getLatestData(EVIDENCE_RETAINED_KEY) != null;
+    }
+
+    private static void retainEvidence(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        if (step != null) {
+            step.storeData(new Data<>(EVIDENCE_RETAINED_KEY, Boolean.TRUE));
+        }
+    }
+
+    private static boolean isFailureEntry(AuditEntry entry) {
+        return entry.output() != null && "TASK_FAILED".equals(entry.output().get("status"));
     }
 
     /**

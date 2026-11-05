@@ -1259,3 +1259,85 @@ describe("alerts", () => {
     expect(buildOperatorPromptBody(endpoints)).not.toContain("Alerts (rules that tell people");
   });
 });
+
+/** Each 6.7 section: taught with its reads, absent without one of them, never claiming a write. */
+describe.each([
+  {
+    heading: "Cost and model prices:",
+    read: "GET /administration/model-prices/unpriced",
+    markers: ["[unpriced-model]", "unpriced_model", "REFUSE_WHEN_BUDGETED", "You cannot change a price"],
+  },
+  {
+    heading: "Cross-team handoff (one team or agent",
+    read: "GET /groupstore/groups/{groupId}/workspace/handoffs",
+    markers: ["team:handoff_to_team", "handoffConfig.accept.from", "eddi.groups.handoff.max-hops", "You cannot accept, decline"],
+  },
+  {
+    heading: "Team budgets (a monthly dollar cap",
+    read: "GET /administration/team-budgets",
+    markers: ["monthlyBudgetUsd", "limitedBy", "SYNTHESIZE_NOW", "only an eddi-admin can"],
+  },
+  {
+    heading: "Approval oversight (how human decisions",
+    read: "GET /hitl/autonomy/{agentId}/category",
+    markers: ["groupBy=category", "SUSPENDED", "AGENT_ORIGINATED", "/manage/oversight"],
+  },
+])("prompt section $heading", ({ heading, read, markers }) => {
+  const sectionOf = (body: string) => {
+    const start = body.indexOf(heading);
+    const end = body.indexOf("\n\n", start);
+    return body.slice(start, end < 0 ? undefined : end);
+  };
+
+  it("is taught in both scopes when its reads are granted", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain(heading);
+      for (const marker of markers) expect(sectionOf(body)).toContain(marker);
+    }
+  });
+
+  it("is absent when one of its reads is missing", () => {
+    expect(buildOperatorPromptBody(READ_ENDPOINTS.filter((e) => e !== read))).not.toContain(heading);
+  });
+
+  it("contains no braces, which the runtime Qute templating would parse as expressions", () => {
+    expect(sectionOf(buildOperatorPromptBody(READ_ENDPOINTS))).not.toMatch(/[{}]/);
+  });
+});
+
+describe("6.7 feature knowledge in the quick reference (no endpoint needed)", () => {
+  const body = buildOperatorPromptBody(READ_ENDPOINTS);
+
+  it("teaches the SERVICE judge, human tie-breaks and humans in task forces", () => {
+    expect(body).toContain('convergence.judge "SERVICE"');
+    expect(body).toContain('voteConfig.tiePolicy "HUMAN_DECIDES"');
+    expect(body).toContain("pendingKind TASK");
+  });
+
+  it("says the operator never answers a tie-break or a human task", () => {
+    expect(body).toContain("You never answer a tie-break or");
+  });
+
+  it("teaches tool-call guardrails, edit-on-approve and approval card context, and that it writes none of them", () => {
+    expect(body).toContain("You cannot write\n  toolCallGuardrails");
+    expect(body).toContain("You still never\n  approve, reject or edit.");
+    expect(body).toContain("pauseDetails.lastEditRefused");
+    expect(body).toContain("platformConfig.hitlApprovalContext");
+  });
+
+  it("maps the new documentation pages", () => {
+    for (const page of [
+      '"model-pricing"',
+      '"team-budgets"',
+      '"team-handoff"',
+      '"group-service-judge"',
+      '"group-human-decisions"',
+      '"tool-call-guardrails"',
+      '"hitl-review-and-audit"',
+      '"hitl-approval-context"',
+      '"hitl-oversight"',
+    ]) {
+      expect(body).toContain(page);
+    }
+  });
+});

@@ -93,6 +93,30 @@ public class TurnCostMeter {
      */
     public double meterSettledStep(IConversationMemory memory) {
         try {
+            return meterAndRecord(memory);
+        } finally {
+            releaseHolds(memory);
+        }
+    }
+
+    /**
+     * Gives back what the turn held against the budget (the hard ceiling), after
+     * the charge: charging first means the money is counted as spent before it
+     * stops being counted as held, never in neither.
+     */
+    private void releaseHolds(IConversationMemory memory) {
+        try {
+            if (memory != null && memory.getTenantCostHolds() != null) {
+                tenantQuotaService.releaseHolds(tenantQuotaService.getDefaultTenantId(), memory.getTenantCostHolds());
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Releasing the cost holds of conversation %s failed — they expire on their own",
+                    sanitize(memory.getConversationId()));
+        }
+    }
+
+    private double meterAndRecord(IConversationMemory memory) {
+        try {
             var step = memory != null ? memory.getCurrentStep() : null;
             if (step == null) {
                 return 0.0;

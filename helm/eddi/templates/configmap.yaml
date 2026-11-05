@@ -134,6 +134,10 @@
   for tls:// there too. nats.externalAllowPlaintext is the explicit opt-out, for a
   transport that is encrypted underneath EDDI (e.g. a service mesh with mTLS).
 */}}
+{{- /* A string is truthy in Helm: "false" from --set-string would switch the guard off. */}}
+{{- if and (not (kindIs "invalid" .Values.nats.externalAllowPlaintext)) (not (kindIs "bool" .Values.nats.externalAllowPlaintext)) }}
+{{- fail "nats.externalAllowPlaintext must be the boolean true or false, not a string (use --set, not --set-string, and no quotes in a values file): a non-empty string is truthy and would switch the plaintext-credentials guard off." }}
+{{- end }}
 {{- if and (not .Values.nats.enabled) .Values.nats.externalUrl (or .Values.nats.externalUsername .Values.nats.externalPassword) (not .Values.nats.externalAllowPlaintext) }}
 {{- range $server := splitList "," .Values.nats.externalUrl }}
 {{- $s := trim $server | lower }}
