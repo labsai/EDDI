@@ -29,8 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -58,6 +60,7 @@ class McpTeamBudgetToolsTest {
         service = mock(TeamBudgetService.class);
         guard = mock(ResourceAccessGuard.class);
         when(service.config(GROUP)).thenReturn(new AgentGroupConfiguration());
+        when(service.readConfig(GROUP)).thenReturn(new AgentGroupConfiguration());
     }
 
     private McpTeamBudgetTools tools(Set<String> roles) {
@@ -85,7 +88,7 @@ class McpTeamBudgetToolsTest {
     @Test
     @DisplayName("read: an eddi-viewer may read (REST admits it), VIEW on the group is checked, the snapshot comes back")
     void viewerReadsWithViewAccess() throws Exception {
-        when(service.snapshot(GROUP)).thenReturn(snapshot(35.0, 12.5));
+        when(service.snapshot(eq(GROUP), any())).thenReturn(snapshot(35.0, 12.5));
 
         JsonNode result = mapper.readTree(tools(Set.of("eddi-viewer")).readTeamBudget(GROUP, null));
 
@@ -98,7 +101,7 @@ class McpTeamBudgetToolsTest {
     @Test
     @DisplayName("read with historyMonths adds the past months; out-of-range values are refused before any read")
     void historyIsOptionalAndBounded() throws Exception {
-        when(service.snapshot(GROUP)).thenReturn(snapshot(35.0, 1.0));
+        when(service.snapshot(eq(GROUP), any())).thenReturn(snapshot(35.0, 1.0));
         when(service.history(GROUP, 3)).thenReturn(List.of());
         var tools = tools(Set.of("eddi-editor"));
 
