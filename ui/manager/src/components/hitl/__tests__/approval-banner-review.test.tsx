@@ -52,6 +52,50 @@ describe("ApprovalBanner — edit on approve and reason codes", () => {
     expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined);
   });
 
+  it("an unchanged draft shows the plain-approval button and confirmation, an edited one the edit wording", () => {
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={rulePause()} onDecide={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("edit-answer-toggle"));
+    expect(screen.getByTestId("approve-button").textContent).not.toMatch(/with edits/i);
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(screen.getByRole("dialog").textContent).not.toMatch(/replaces the agent's answer/i);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /go back/i }));
+
+    fireEvent.change(screen.getByTestId("edited-answer"), { target: { value: "The release is Monday." } });
+    expect(screen.getByTestId("approve-button").textContent).toMatch(/with edits/i);
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(screen.getByRole("dialog").textContent).toMatch(/replaces the agent's answer/i);
+  });
+
+  it("blocks an edit that still carries the redaction marker, before any request", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={rulePause({ editableAnswer: { draft: "The key is sk-<REDACTED> today.", format: "text", maxChars: 200 } })}
+        onDecide={onDecide}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("edit-answer-toggle"));
+    fireEvent.change(screen.getByTestId("edited-answer"), { target: { value: "The key is sk-<REDACTED> tomorrow." } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirm();
+
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(screen.getByTestId("approval-submit-error").textContent).toMatch(/redaction marker/i);
+  });
+
+  it("explains a refusal for redacted content", () => {
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={rulePause({ lastEditRefused: { reason: "REDACTED_CONTENT" } })}
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("last-edit-refused").textContent).toMatch(/redacted/i);
+  });
+
   it("an unchanged over-cap or blank draft is still a plain approval", () => {
     for (const draft of ["x".repeat(60), ""]) {
       const onDecide = vi.fn();

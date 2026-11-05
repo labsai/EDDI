@@ -30,13 +30,6 @@ public final class MimeValidator {
         // utility class
     }
 
-    /**
-     * Detect the MIME type from file magic bytes.
-     *
-     * @param bytes
-     *            the file content (at least 12 bytes for reliable detection)
-     * @return detected MIME type, or "application/octet-stream" if unknown
-     */
     private static final byte[] PDF_HEADER = {0x25, 0x50, 0x44, 0x46, 0x2D};
     private static final int PDF_HEADER_SEARCH_WINDOW = 1024;
 
@@ -164,6 +157,13 @@ public final class MimeValidator {
             "application/x-javascript",
             "application/sql");
 
+    /**
+     * Detect the MIME type from file magic bytes.
+     *
+     * @param bytes
+     *            the file content (at least 12 bytes for reliable detection)
+     * @return detected MIME type, or "application/octet-stream" if unknown
+     */
     public static String detectMime(byte[] bytes) {
         if (bytes == null || bytes.length < 4) {
             return "application/octet-stream";

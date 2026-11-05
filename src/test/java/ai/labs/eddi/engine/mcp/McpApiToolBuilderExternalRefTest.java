@@ -93,6 +93,46 @@ class McpApiToolBuilderExternalRefTest {
     }
 
     @Test
+    @DisplayName("a DOWNLOADED spec may not name a file: or classpath: reference, but its relative references stay")
+    void downloadedSpecRefusesSchemeRefsOnly() {
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("file:///etc/passwd"), true));
+        assertThrows(IllegalArgumentException.class,
+                () -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("classpath:application.properties"), true));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("C:\\secret.yaml"), true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("./pet.yaml"), true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("/schemas/pet.json#/Pet"), true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("https://example.com/pet.json"), true));
+        // the same relative ref is refused in an inline spec, which has no base URL
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(specReferencing("./pet.yaml"), false));
+    }
+
+    @Test
+    @DisplayName("a downloaded spec that only MENTIONS a file: ref in prose or a comment is not refused")
+    void downloadedSpecProseIsNotARef() {
+        String yaml = """
+                openapi: 3.0.0
+                # use $ref: file:///tmp/x for local testing
+                info: {title: 'Use $ref: file:///tmp/schema.yaml for local testing', version: '1'}
+                paths: {}
+                """;
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(yaml, true));
+        // an inline document keeps the stricter raw-text gate
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(yaml, false));
+    }
+
+    @Test
+    @DisplayName("a downloaded 3.1 schema whose $id is a file: base cannot turn relative refs into local reads")
+    void downloadedSchemaIdFileBaseRefused() {
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$id":"file:///etc/","$ref":"secret.yaml"}}}}
+                """;
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(spec, true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(spec.replace("file:///etc/", "https://example.com/s/"), true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(spec.replace("file:///etc/", "urn:example:s"), true));
+    }
+
+    @Test
     @DisplayName("a spec the scan cannot read is refused, not waved through")
     void unreadableSpecFailsClosed() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
@@ -101,7 +141,7 @@ class McpApiToolBuilderExternalRefTest {
     }
 
     @Test
-    @DisplayName("a REMOTE spec's file: references are not resolved by swagger-parser (pins the library's behaviour)")
+    @DisplayName("a REMOTE spec's file: references are refused, and the file is never read")
     void remoteSpecDoesNotResolveFileRefs(@TempDir Path dir) throws Exception {
         // Remote specs keep ref resolution (multi-file specs are legitimate there),
         // so this guards the assumption that makes that safe: swagger-parser
@@ -121,10 +161,12 @@ class McpApiToolBuilderExternalRefTest {
         server.start();
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/openapi.json";
-            // Must parse: a refusal for any other reason would pass a "does not
-            // contain" check without ever exercising the file reference.
-            String rendered = Yaml.pretty(McpApiToolBuilder.parseSpec(url));
-            assertFalse(rendered.contains("SERVER-FILE-CONTENT"), rendered);
+            // Refused before the parser sees it: the OpenAPI 3.1 resolver reads a file:
+            // reference through a stream no limit applies to, so the downloaded
+            // document is held to the inline rule for explicit non-http schemes.
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec(url));
+            assertTrue(refused.getMessage().contains("Downloaded OpenAPI spec contains an external $ref"), refused.getMessage());
+            assertFalse(String.valueOf(refused.getMessage()).contains("SERVER-FILE-CONTENT"));
         } finally {
             server.stop(0);
         }

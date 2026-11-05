@@ -48,6 +48,7 @@ class ReservedPrincipalsTest {
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),
             Map.entry("space:", "descriptor access token (Subjects.SPACE_TOKEN_PREFIX)"),
             Map.entry("conversation:", "attachment lock key"),
+            Map.entry("dead-letter-replay:", "Idempotency-Key prefix (ClusterAdminService), not a principal"),
             Map.entry("legacy:", "ChannelTargetRouter warn-once key for a legacy Slack connector's credentials"),
             Map.entry("agent:", "tool-cache scope tag"),
             Map.entry("context:", "cache/template key"),
@@ -57,6 +58,8 @@ class ReservedPrincipalsTest {
             Map.entry("ref:", "cache key"),
             Map.entry("name:", "cache key"),
             Map.entry("httpcall:", "cache key"),
+            Map.entry("http:",
+                    "tool-approval address of an httpcall tool (http:<toolName>, as ToolApprovalGate.addressesOf builds it; ApiAgentSyncService matches exemptions against it)"),
             Map.entry("openai:", "token-estimator cache key"),
             Map.entry("s:", "hash input tag"),
             Map.entry("c:", "hash input tag"),
@@ -101,7 +104,8 @@ class ReservedPrincipalsTest {
             Map.entry("loop:", "inbound mail refusal reason"),
             Map.entry("unauthenticated:", "inbound mail refusal reason"),
             Map.entry("failed:", "inbound mail refusal reason"),
-            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"));
+            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"),
+            Map.entry("p:", "in-memory route step into a named property (ArtifactSchemaComplexity's recursion check)"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")

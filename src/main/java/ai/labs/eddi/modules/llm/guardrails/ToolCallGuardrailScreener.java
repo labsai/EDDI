@@ -142,12 +142,12 @@ public final class ToolCallGuardrailScreener {
 
     /**
      * Whether this entry is a costly or non-deterministic check (a model call): the
-     * guardrails that do not re-screen history
-     * ({@link ContentGuardrail#screensHistory()}). An unknown type is not.
+     * guardrails that declare {@link ContentGuardrail#callsModel()}. An unknown
+     * type is not.
      */
     public boolean isModelBacked(GuardrailConfig config) {
         ContentGuardrail guardrail = service.resolve(config, GuardrailPhase.TOOL_CALL);
-        return guardrail != null && !guardrail.screensHistory();
+        return guardrail != null && guardrail.callsModel();
     }
 
     /**
@@ -191,7 +191,7 @@ public final class ToolCallGuardrailScreener {
         }
         GuardrailAction action = GuardrailAction.parse(config.getAction());
         GuardrailService.Evaluation evaluation;
-        if (!guardrail.screensHistory() && budget != null && !budget.tryAcquire()) {
+        if (guardrail.callsModel() && budget != null && !budget.tryAcquire()) {
             evaluation = new GuardrailService.Evaluation(null, REASON_MODEL_CAP, 0.0, null);
         } else {
             evaluation = service.evaluate(guardrail, text != null ? text : "",

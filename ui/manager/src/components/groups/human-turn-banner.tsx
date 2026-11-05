@@ -27,6 +27,12 @@ interface HumanTurnBannerProps {
   task?: { subject: string; description?: string | null };
   onSubmit: (content: string, choice?: string) => void;
   isSubmitting?: boolean;
+  /**
+   * Identifies the pause being answered (conversation id + pause). When it
+   * changes the banner starts over: a choice or rationale typed for one pause
+   * must never be submitted for another.
+   */
+  pauseKey?: string;
 }
 
 function isValidDate(iso?: string | null): boolean {
@@ -40,7 +46,11 @@ function isValidDate(iso?: string | null): boolean {
  * OWN contribution, so the interaction (compose + submit) has nothing in common
  * with approve/reject/amend.
  */
-export function HumanTurnBanner({
+export function HumanTurnBanner({ pauseKey, ...props }: HumanTurnBannerProps) {
+  return <HumanTurnBannerBody key={pauseKey ?? ""} {...props} />;
+}
+
+function HumanTurnBannerBody({
   displayName,
   renderedPrompt,
   pausedPhaseName,
@@ -50,7 +60,7 @@ export function HumanTurnBanner({
   task,
   onSubmit,
   isSubmitting,
-}: HumanTurnBannerProps) {
+}: Omit<HumanTurnBannerProps, "pauseKey">) {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [choice, setChoice] = useState<string | null>(null);
@@ -94,7 +104,7 @@ export function HumanTurnBanner({
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-foreground">
             {tieBreak
-              ? t("groupTieBreak.bannerTitle", "The vote is tied — {{name}}, you decide", { name: displayName })
+              ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
               : task
                 ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
                 : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}

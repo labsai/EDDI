@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -153,6 +154,19 @@ class HitlDecisionValidatorTest {
     }
 
     @Test
+    void anEditIdenticalToTheDraftTakesNoReasonCode() {
+        var snapshot = ruleSnapshot("the draft", "TEXT");
+        var same = approveWith("the draft");
+        same.setReasonCode("TONE");
+        assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(same, snapshot, editsAllowed(100)),
+                "an unchanged edit is a plain approval, which takes no reason code");
+
+        var changed = approveWith("the draft, corrected");
+        changed.setReasonCode("TONE");
+        assertDoesNotThrow(() -> HitlDecisionValidator.validate(changed, snapshot, editsAllowed(100)));
+    }
+
+    @Test
     void perCallReasonCodes() {
         var snapshot = ruleSnapshot(null, null);
         snapshot.setHitlPauseType("TOOL_CALL");
@@ -172,6 +186,41 @@ class HitlDecisionValidatorTest {
         assertDoesNotThrow(() -> HitlDecisionValidator.validate(decision, snapshot, null));
         decision.setReasonCode("OFF_POLICY");
         assertDoesNotThrow(() -> HitlDecisionValidator.validate(decision, snapshot, null), "top-level code explains the per-call rejection");
+    }
+
+    @Test
+    void amendedArgumentsIdenticalToTheOriginalTakeNoReasonCode() {
+        var snapshot = ruleSnapshot(null, null);
+        snapshot.setHitlPauseType("TOOL_CALL");
+        var stored = new PendingToolCallBatch.PendingToolCall();
+        stored.setCallId("c1");
+        stored.setArgumentsRaw("{\"text\":\"hi\"}");
+        var batch = new PendingToolCallBatch();
+        batch.setCalls(List.of(stored));
+        snapshot.setHitlPendingToolCalls(batch);
+
+        var call = new ToolCallDecision();
+        call.setVerdict(HitlVerdict.APPROVED);
+        call.setAmendedArguments("{\"text\":\"hi\"}");
+        call.setReasonCode("TONE");
+        var perCall = new HitlDecision();
+        perCall.setVerdict(HitlVerdict.APPROVED);
+        perCall.setToolDecisions(Map.of("c1", call));
+        assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(perCall, snapshot, null),
+                "identical arguments are a plain approval: no per-call reason code");
+
+        call.setReasonCode(null);
+        var decisionLevel = new HitlDecision();
+        decisionLevel.setVerdict(HitlVerdict.APPROVED);
+        decisionLevel.setReasonCode("TONE");
+        decisionLevel.setToolDecisions(Map.of("c1", call));
+        assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(decisionLevel, snapshot, null),
+                "nor a decision-level one");
+
+        call.setAmendedArguments("{\"text\":\"hello\"}");
+        call.setReasonCode("TONE");
+        assertDoesNotThrow(() -> HitlDecisionValidator.validate(perCall, snapshot, null), "a real amendment may carry a code");
+        assertDoesNotThrow(() -> HitlDecisionValidator.validate(decisionLevel, snapshot, null));
     }
 
     @Test

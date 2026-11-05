@@ -66,7 +66,11 @@ class MetricsHttpPolicyConfigTest {
     void apiDocsPolicyIsRoleGatedByDefault() throws Exception {
         var properties = applicationProperties();
 
-        assertEquals(List.of("/openapi", "/openapi/*", "/q/openapi", "/q/openapi/*", "/q/swagger-ui", "/q/swagger-ui/*"),
+        // The suffix forms by name: neither /openapi nor /openapi/* matches
+        // /openapi.json,
+        // which the document handler serves too.
+        assertEquals(List.of("/openapi", "/openapi/*", "/openapi.json", "/openapi.yaml", "/openapi.yml", "/q/openapi", "/q/openapi/*",
+                "/q/openapi.json", "/q/openapi.yaml", "/q/openapi.yml", "/q/swagger-ui", "/q/swagger-ui/*"),
                 List.of(properties.getProperty("quarkus.http.auth.permission.api-docs.paths").split(",")));
         assertEquals("${eddi.api-docs.http-policy:eddi-api-docs-reader}",
                 properties.getProperty("quarkus.http.auth.permission.api-docs.policy"));

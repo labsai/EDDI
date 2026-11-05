@@ -115,6 +115,28 @@ class TurnCostMeterSpendSinkTest {
     }
 
     @Test
+    void aCarriedChargeBringsItsTokensAndUnpricedCallsWhenItIsFinallyRecorded() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("down"), QuotaCheckResult.OK);
+        IConversationMemory paused = memoryWithCost(0.30);
+        paused.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_TOKEN_USAGE, Map.of("inputTokens", 100, "outputTokens", 40)));
+        paused.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PRICING, Map.of("unpricedCalls", 1)));
+        meter.meterSettledStep(paused);
+        assertEquals(0, events.size());
+        IConversationMemory resumed = ConversationMemoryUtilities
+                .convertConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(paused));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.45));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_TOKEN_USAGE, Map.of("inputTokens", 150, "outputTokens", 70)));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PRICING, Map.of("unpricedCalls", 3)));
+        meter.meterSettledStep(resumed);
+
+        assertEquals(1, events.size());
+        assertEquals(0.45, events.getFirst().usd(), 1e-12, "the carried $0.30 plus the new $0.15");
+        assertEquals(150, events.getFirst().inputTokens(), "all of the step's tokens, not only the second settle's");
+        assertEquals(70, events.getFirst().outputTokens());
+        assertEquals(3, events.getFirst().unpricedCalls());
+    }
+
+    @Test
     void aChargeTheStoreCouldNotRecordIsNotDelivered() {
         when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("down"));
         meter.meterSettledStep(memoryWithCost(0.10));

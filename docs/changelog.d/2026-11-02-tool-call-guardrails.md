@@ -65,6 +65,15 @@ disclosure label enforced before an approver ever saw the call.
   `toolCallGuardrails` (v1 refuses bodies that carry the field).
 - Platform Operator prompt and gate-guard, and MCP tools — see `planning/operator-followups/tool-call-guardrails.md`.
 
+### Review follow-ups
+
+- `SelfUngatingGuard`: a patch `add` or `remove` at an array index at or before a stored task's gate or guardrails,
+  under the same parent, is now refused for both gates and guardrails. Two `remove /tasks/0` operations could
+  otherwise drop a gated `/tasks/1` unseen. Appends (`/-`) and later indexes still pass.
+- [Tool-Call Guardrails](../tool-call-guardrails.md) and the dashboard panel no longer read `live/blocked` as
+  "approvals never asked for" or `resume/blocked` as "edits refused". The labels do not separate gated from
+  ungated calls, or edited from unchanged ones.
+
 ```decision-log
 | 2026-11-02 | Tool-call arguments are screened before the approval gate, and again block-only after approval; `disclosure` is a guardrail type, not a transform; result rules deferred | A call certain to be refused must not reach a human, and an approver must see what will run; approval binds to a request, so nothing may be rewritten after it | Screening after the gate (approvers see unredacted text, approvals spent on refused calls); rewriting approved calls (sends text nobody approved); a new `GuardrailAction` for labels (unknown actions block) |
 ```

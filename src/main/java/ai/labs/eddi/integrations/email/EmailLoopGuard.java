@@ -29,8 +29,8 @@ import java.util.Set;
  * <li>Mail whose {@code In-Reply-To} or {@code References} names a message the
  * ledger records as sent by <em>another</em> integration (or the system mailer)
  * — a reply to, or a forward of, EDDI's own mail. Replies to this integration's
- * own outbound mail are conversation mode's business (Phase 3) and are not
- * refused here.</li>
+ * own outbound mail are conversation mode's business and are not refused
+ * here.</li>
  * </ul>
  * The sender's headers can only make the guard refuse more, never less.
  */

@@ -74,10 +74,8 @@ export function ModelPriceEntrySheet({ entry, others, knownProviders, readOnly, 
 
   const body = (
     <>
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} aria-hidden="true" data-testid="mp-sheet-backdrop" />
       <div
         role="dialog"
-        aria-modal="true"
         aria-label={t("modelPrices.sheetTitle", "Model price")}
         className="fixed bottom-0 end-0 top-0 z-50 flex w-[440px] max-w-full flex-col border-s border-border bg-card shadow-2xl"
         data-testid="mp-sheet"

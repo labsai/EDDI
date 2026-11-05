@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
 import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -202,7 +204,14 @@ public class McpHitlTools {
                 // only the fingerprint, so argumentsRaw, the frozen LLM transcript
                 // and the running trace (all carrying raw tool arguments) reached
                 // every MCP caller the gate above admits.
-                return jsonSerialization.serialize(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot));
+                var sanitized = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot);
+                // As REST: the compiled system prompt is the agent's configuration, so a
+                // caller without VIEW on the agent gets the snapshot without it.
+                if (resourceAccessGuard != null
+                        && (snapshot.getAgentId() == null || !resourceAccessGuard.hasAccess(snapshot.getAgentId(), AccessLevel.VIEW))) {
+                    ConversationMemoryUtilities.stripAuditData(sanitized);
+                }
+                return jsonSerialization.serialize(sanitized);
             }
             Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);
@@ -294,7 +303,8 @@ public class McpHitlTools {
                     "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireConversationHitlAccess(conversationId);
+            // As REST: an owner must still be allowed to USE the agent to resume.
+            hitlAccessGuard.requireConversationResumeAccess(conversationId);
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(parsed);
             decision.setNote(note);
@@ -481,10 +491,11 @@ public class McpHitlTools {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
                 // Same rule as the REST summary — see HitlAccessGuard.
-                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                boolean mayReadPrompt = hitlAccessGuard.mayReadPendingHumanPrompt(gc);
+                if (mayReadPrompt) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
-                PendingHumanInputView.addTo(summary, gc);
+                PendingHumanInputView.addTo(summary, gc, mayReadPrompt);
             }
             // Same view and audience as the REST summary.
             summary.put("approvalContext",
@@ -611,7 +622,7 @@ public class McpHitlTools {
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
             McpReviewArguments.applyReview(decision, editedAnswer, reasonCode);
-            request.setTaskDecisions(McpReviewArguments.taskDecisions(jsonSerialization, taskDecisionsJson));
+            request.setTaskDecisions(McpReviewArguments.taskDecisions(taskDecisionsJson));
             GroupConversation result = groupConversationService.resumeDiscussion(conversationId, request, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", parsed.name()).increment();
             return readableGroupResult(result);
@@ -632,8 +643,15 @@ public class McpHitlTools {
                     + "or already approved", "WRONG_STATE", null);
         } catch (McpReviewArguments.BadArgument e) {
             return errorJson(e.getMessage(), "BAD_REQUEST", null);
-        } catch (IllegalArgumentException e) {
+        } catch (ReviewRefusalException e) {
+            // the review validation's own message, written for the caller
             return errorJson("Invalid approval request: " + e.getMessage(), "BAD_REQUEST", null);
+        } catch (IllegalArgumentException e) {
+            // other validation in the coordinator names internal state (member ids, task
+            // statuses): fixed text
+            LOGGER.debugf("MCP approve_group_phase rejected the request: %s", e.getMessage());
+            return errorJson("Invalid approval request: check taskApprovals and the pause state with get_group_approval_status", "BAD_REQUEST",
+                    null);
         } catch (Exception e) {
             LOGGER.warn("MCP approve_group_phase failed", e);
             return errorJson("Failed to approve group phase", "INTERNAL", null);

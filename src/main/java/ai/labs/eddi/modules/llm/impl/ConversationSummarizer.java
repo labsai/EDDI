@@ -69,6 +69,9 @@ public class ConversationSummarizer {
             4. Important corrections or clarifications the user made
             5. Any agreements, action items, or commitments
             6. The conversational tone and rapport established
+            7. Every opaque identifier exactly as written, character for character: IDs, UUIDs,
+               hashes, order and ticket numbers, URLs, hostnames, IP addresses, ports, file names
+               and paths. Never shorten, round, paraphrase or reformat them.
 
             %s
 

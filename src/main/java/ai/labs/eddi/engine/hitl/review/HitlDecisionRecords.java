@@ -200,7 +200,10 @@ public final class HitlDecisionRecords {
             var category = ApprovalCategories.forGroupTask(hitlConfig, groupId, phaseName);
             record.category(category);
             Map<String, TaskOutcome> decided = new LinkedHashMap<>(taskOutcomes != null ? taskOutcomes : Map.of());
-            if (pause.awaitingTaskIds() != null) {
+            // Explicit per-task decisions (taskApprovals) leave the other awaiting tasks
+            // undecided: only an
+            // approve-all or reject-all (no per-task outcomes) decides every awaiting task.
+            if (decided.isEmpty() && pause.awaitingTaskIds() != null) {
                 for (String taskId : pause.awaitingTaskIds()) {
                     decided.putIfAbsent(taskId, new TaskOutcome(verdict, null, null));
                 }

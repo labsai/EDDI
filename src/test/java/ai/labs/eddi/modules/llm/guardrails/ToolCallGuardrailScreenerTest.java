@@ -35,13 +35,29 @@ class ToolCallGuardrailScreenerTest {
         private final Set<GuardrailPhase> phases;
         private final Function<String, GuardrailVerdict> verdict;
         private final boolean screensHistory;
+        private final boolean callsModel;
         final AtomicInteger calls = new AtomicInteger();
 
+        /**
+         * By this suite's convention a guardrail that skips the history window is a
+         * model call.
+         */
         Scripted(String type, Set<GuardrailPhase> phases, boolean screensHistory, Function<String, GuardrailVerdict> verdict) {
+            this(type, phases, screensHistory, !screensHistory, verdict);
+        }
+
+        Scripted(String type, Set<GuardrailPhase> phases, boolean screensHistory, boolean callsModel,
+                Function<String, GuardrailVerdict> verdict) {
             this.type = type;
             this.phases = phases;
             this.verdict = verdict;
             this.screensHistory = screensHistory;
+            this.callsModel = callsModel;
+        }
+
+        @Override
+        public boolean callsModel() {
+            return callsModel;
         }
 
         @Override
@@ -250,6 +266,30 @@ class ToolCallGuardrailScreenerTest {
             assertEquals(0, model.calls.get());
             assertEquals(Decision.BLOCK, s.screen(config("regex", "block"), "x", CONTEXT, 0, Mode.LIVE, () -> false, outcomes::add).decision());
             assertEquals(1, regex.calls.get());
+        }
+    }
+
+    @Nested
+    @DisplayName("what counts as a model call")
+    class ModelCalls {
+
+        @Test
+        @DisplayName("a deterministic guardrail that skips the history window (expression) is not model-backed and ignores the budget")
+        void expressionLikeIsNotModelBacked() {
+            var expression = new Scripted("expression", TOOL, false, false, t -> GuardrailVerdict.allow());
+            var s = screener(expression);
+
+            assertFalse(s.isModelBacked(config("expression", "block")));
+            var result = s.screen(config("expression", "block"), "ok", CONTEXT, 0, Mode.LIVE, () -> false, outcomes::add);
+
+            assertEquals(Decision.ALLOW, result.decision());
+            assertEquals(1, expression.calls.get(), "an exhausted model budget does not stop a deterministic check");
+        }
+
+        @Test
+        @DisplayName("a guardrail that calls a model is model-backed")
+        void modelIsModelBacked() {
+            assertTrue(screener(new Scripted("judge", TOOL, false, true, t -> GuardrailVerdict.allow())).isModelBacked(config("judge", "block")));
         }
     }
 

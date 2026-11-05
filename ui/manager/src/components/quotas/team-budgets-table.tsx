@@ -28,8 +28,31 @@ export function TeamBudgetsTable() {
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
 
   const teams = (budgets.data?.teams ?? []).filter((s) => s.capUsd !== null);
-  if (groups.isError || budgets.isError) {
+  // Only a failure with nothing loaded replaces the table. A failed background poll
+  // keeps the cached table — and with it an open TransferBudgetDialog, whose
+  // Idempotency-Key and completion callback would be lost on unmount, inviting a
+  // repeat of a transfer that already succeeded.
+  if (groups.isError && !groups.data) {
     return null;
+  }
+  const staleRead = budgets.isError && budgets.data !== undefined;
+  if (budgets.isError && !staleRead) {
+    // A failed budget read (503) is shown, not hidden: an empty page would read as
+    // "no team has a budget".
+    return (
+      <section className="space-y-2 rounded-xl border border-border bg-card p-4" data-testid="team-budgets-error" aria-labelledby="team-budgets-heading">
+        <h2 id="team-budgets-heading" className="flex items-center gap-1.5 text-base font-semibold text-foreground">
+          <Wallet className="h-4 w-4" aria-hidden="true" />
+          {t("teamBudget.tableTitle", "Team budgets")}
+        </h2>
+        <p role="alert" className="text-sm text-destructive">
+          {t("teamBudget.unavailable", "The budget could not be read right now.")}
+        </p>
+        <Button size="sm" variant="outline" onClick={() => void budgets.refetch()} disabled={budgets.isFetching} data-testid="team-budgets-retry">
+          {t("common.retry", "Retry")}
+        </Button>
+      </section>
+    );
   }
 
   return (
@@ -50,6 +73,17 @@ export function TeamBudgetsTable() {
           </Button>
         )}
       </div>
+
+      {staleRead && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="team-budgets-stale">
+          <p role="alert" className="text-sm text-destructive">
+            {t("teamBudget.staleRead", "The budget could not be refreshed; these numbers may be out of date.")}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => void budgets.refetch()} disabled={budgets.isFetching} data-testid="team-budgets-retry">
+            {t("common.retry", "Retry")}
+          </Button>
+        </div>
+      )}
 
       {teams.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="team-budgets-empty">

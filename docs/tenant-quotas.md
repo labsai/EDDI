@@ -5,10 +5,16 @@ themselves are stored per tenant and are editable at runtime through the admin A
 not need a restart to raise one tenant's ceiling.
 
 The deployment-wide defaults that seed a new tenant live in
-[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. A tenant row
-is created from those defaults the first time the tenant is seen; editing the properties afterwards
-does not rewrite rows that already exist, and a mismatch between a stored row and the configured
-default is reported in a startup WARN.
+[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. Only the
+**default tenant** (`eddi.tenant.default-id`) gets a row created from those defaults, once, on the
+first start against an empty database; editing the properties afterwards does not rewrite a row that
+already exists, and a mismatch between a stored row and the configured default is reported in a
+startup WARN. **Any other tenant has no row and is treated as unlimited (unmetered)** until an
+administrator creates one with `PUT /administration/quotas/{tenantId}`.
+
+Quotas are **off by default**: `eddi.tenant.quota.enabled=false`, and that value seeds the default
+tenant's per-tenant `enabled` flag. Nothing is enforced for a tenant until its row has
+`enabled: true`.
 
 ## What is metered
 
@@ -71,7 +77,10 @@ Bedrock cache tokens and Gemini thinking tokens are counted — see
 [What the providers report](model-pricing.md#what-the-providers-report).
 
 Group transcript window summaries and stance summaries are charged to the tenant too, and are
-skipped (plain truncation, an extracted stance) once the budget is spent.
+skipped (plain truncation, an extracted stance) once the budget is spent. If the quota store is
+unreadable when one is charged, the amount is carried to the next group system charge on that node
+and its spend event is withheld until the tenant counter takes it; a carried amount is held in memory,
+so a node that restarts before the store recovers loses it.
 
 These calls are **not** metered today, priced or not:
 
@@ -156,8 +165,9 @@ curl -X PUT "http://localhost:7070/administration/quotas/acme" \
   }'
 ```
 
-The write takes effect immediately: the service caches quotas but drops the tenant's entry on
-every write, so the next check reads the new row.
+The write takes effect immediately on the node that took it: the service caches quotas but drops
+the tenant's entry on every write, so the next check there reads the new row. Other cluster nodes
+pick it up within the 5-second cache TTL.
 
 ### Usage shape
 

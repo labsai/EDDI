@@ -351,7 +351,9 @@ function LogLine({ entry }: { entry: LogEntry }) {
         {level.padEnd(5)}
       </span>
       <span className="shrink-0 text-primary/60 w-24 truncate">[{loggerShort}]</span>
-      <span className="text-foreground/80 break-all">{entry.message}</span>
+      <span data-log-content="" className="text-foreground/80 break-all">
+        {entry.message}
+      </span>
     </div>
   );
 }

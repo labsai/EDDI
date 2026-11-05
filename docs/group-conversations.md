@@ -61,6 +61,8 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
+**Save-time limits** (a config over any of them is rejected with `400`): at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5.
+
 **One agent, one seat.** A member is addressed everywhere by its `agentId` —
 its member conversation, display name, vote weight, `participants` lists and
 the facilitator all key on it — so listing the same agent twice does not give
@@ -1226,7 +1228,10 @@ bounds *dollars*, which is what actually differs between a cheap 40-turn round
 table and an expensive 8-turn one with large contexts. Hitting the cost ceiling
 under `SYNTHESIZE_NOW` skips the remaining discussion phases and jumps straight
 to synthesis, so the caller still gets an answer for what was already spent;
-`ABORT` fails the discussion instead. Every LLM call in the discussion is
+`ABORT` fails the discussion instead. The skipped phases' `requiresApproval`
+gates are skipped with them — and so is that of the phase in which the ceiling
+tripped — but a synthesis phase that runs keeps its own: its answer is paused for
+approval as usual. Every LLM call in the discussion is
 attributed, including the facilitator's, the convergence judge's, and the
 summarizer's.
 
@@ -1290,7 +1295,7 @@ speaker and phase pairs.
 | `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
 | `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
 | `artifact_updated` | A shared artifact was created or revised (I17) |
-| `team_handoff` | A handoff attempt to another team, from a member's `handoff_to_team` call or an `onDecision` rule: `{handoffId, targetAlias, targetGroupId, outcome, mode, trigger, subject}`. Refusals are announced too (`outcome` is e.g. `NOT_ACCEPTED`). Never carries the description. See [Cross-Team Handoff](team-handoff.md) |
+| `team_handoff` | A handoff attempt to another team, from a member's `handoff_to_team` call or an `onDecision` rule: `{handoffId, targetAlias, targetGroupId, outcome, mode, trigger, subject}`. Refusals that reach the filing service are announced too (`outcome` is e.g. `NOT_ACCEPTED`); a call rejected earlier by the tool itself (unknown alias, per-turn limit exceeded) emits no event. Never carries the description. See [Cross-Team Handoff](team-handoff.md) |
 | `member_tool_call` | A member's tool loop is about to run a tool: `{agentId, displayName, tool}`. Name only, never arguments (the same rule as the 1:1 `tool_call`). A best-effort liveness signal while the member's non-streamed turn is running; the engine skips it for a speaker the orchestrator has cancelled, but cancellation or a timeout can race with the notification, so it may trail `speaker_complete` of a turn already closed |
 | `cost_updated` | A cost attribution landed in the discussion ledger: `{attributionKey, displayName, attributedCost, totalCost}`. `attributedCost` is that key's cumulative cost, so a consumer overwrites per key rather than adding. Also fires for system spend (`system:...` keys that name no member) |
 | `stance_updated` | A member's one-line stance was recomputed at a phase boundary: `{agentId, displayName, stance, llmGenerated, coveredContributions}`. Fires only when the text changed |

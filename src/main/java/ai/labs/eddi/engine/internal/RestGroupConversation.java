@@ -1008,10 +1008,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                boolean mayReadPrompt = hitlAccessGuard.mayReadPendingHumanPrompt(gc);
+                if (mayReadPrompt) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
-                PendingHumanInputView.addTo(summary, gc);
+                PendingHumanInputView.addTo(summary, gc, mayReadPrompt);
             }
             // The designer's approvalContext, rendered once at pause commit and
             // re-redacted here — same audience as the prompt above (owner, admin, an

@@ -131,11 +131,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         IConversationMemory memory = mock(IConversationMemory.class);
         IConversationStep previousConversationStep1 = mock(IConversationStep.class);
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
-        when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS)))
-                .thenAnswer(invocation -> new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));
-        when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation -> new Data<>(KEY_ACTIONS, inputActions));
-        when(memory.getAllSteps()).thenAnswer(
-                invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
+        setupIConversationMemoryGetAllStepsAndGetLatestDataStubs(previousConversationStep1, previousConversationStep2, memory);
 
         // test
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
@@ -159,11 +155,7 @@ public class ActionMatcherTest extends BaseMatcherTest {
         IConversationStep previousConversationStep2 = mock(IConversationStep.class);
         matcher.setConfigs(values);
 
-        when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS)))
-                .thenAnswer(invocation -> new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));
-        when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation -> new Data<>(KEY_ACTIONS, inputActions));
-        when(memory.getAllSteps()).thenAnswer(
-                invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
+        setupIConversationMemoryGetAllStepsAndGetLatestDataStubs(previousConversationStep1, previousConversationStep2, memory);
 
         // test
         ExecutionState actualExecutionState = matcher.execute(memory, new LinkedList<>());
@@ -173,5 +165,15 @@ public class ActionMatcherTest extends BaseMatcherTest {
         verify(memory).getAllSteps();
         verify(previousConversationStep1).getLatestData(KEY_ACTIONS);
         verify(previousConversationStep2).getLatestData(KEY_ACTIONS);
+    }
+
+    private void setupIConversationMemoryGetAllStepsAndGetLatestDataStubs(final IConversationMemory.IConversationStep previousConversationStep1,
+                                                                          final IConversationMemory.IConversationStep previousConversationStep2,
+                                                                          final IConversationMemory memory) {
+        when(previousConversationStep1.getLatestData(eq(KEY_ACTIONS)))
+                .thenAnswer(invocation -> new Data<>(KEY_ACTIONS, Collections.singletonList("someNonMatchingAction")));
+        when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation -> new Data<>(KEY_ACTIONS, inputActions));
+        when(memory.getAllSteps()).thenAnswer(
+                invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
     }
 }

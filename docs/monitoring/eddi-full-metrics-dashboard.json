@@ -2462,6 +2462,82 @@
           }
         },
         {
+          "id": 324,
+          "type": "timeseries",
+          "title": "Tool calls refused by argument schema",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Tool calls whose arguments violated the tool's argumentSchema, refused before the approval gate and never executed (eddi.tool.arguments.refused, by source).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 51
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (source) (rate(eddi_tool_arguments_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{source}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 18,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "normal",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
           "id": 24,
           "type": "timeseries",
           "title": "Tool calls by tool",
@@ -5289,6 +5365,93 @@
           }
         },
         {
+          "id": 323,
+          "type": "timeseries",
+          "title": "LAZY tool loading: activated and refused",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_lazy_tools_activated_total` - tools discover_tools loaded into the request (toolLoadingStrategy LAZY, lazySources). `eddi_llm_lazy_tools_refused_total` - calls to a lazily-loaded tool the model had not loaded, refused NOT_EXECUTED before the approval gate, by source. A steady refused rate means the model guesses tool names instead of discovering them.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 82
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum(rate(eddi_llm_lazy_tools_activated_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "activated",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (source) (rate(eddi_llm_lazy_tools_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "refused {{source}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
           "id": 179,
           "type": "timeseries",
           "title": "Cancelled LLM attempts and steps",
@@ -5710,6 +5873,82 @@
           "fieldConfig": {
             "defaults": {
               "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 325,
+          "type": "timeseries",
+          "title": "Answer-tool outcomes (answerMode tool)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_answer_tool_total` by outcome: reply, text (answered in plain text, handled by onInvalidJson), duplicate, discarded_by_pause, no_reply, collision_dropped.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 82
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_llm_answer_tool_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
               "color": {
                 "mode": "palette-classic"
               },
@@ -7153,7 +7392,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_decision_total{surface,outcome,channel}` — one per decided unit (answer, tool call, phase, task): `APPROVED`, `APPROVED_EDITED`, `REJECTED`, `AUTO_APPROVED`, `AUTO_REJECTED`, `ABORTED`. A rising `APPROVED_EDITED` share means approvers keep correcting what the agent proposes. `eddi_hitl_answer_edit_total{outcome}` shows edits the engine refused (`screened_out`, `config_drift`).",
+          "description": "`eddi_hitl_decision_total{surface,outcome,channel}` — one per decided unit (answer, tool call, phase, task): `APPROVED`, `APPROVED_EDITED`, `REJECTED`, `AUTO_APPROVED`, `AUTO_REJECTED`, `ABORTED`. A rising `APPROVED_EDITED` share means approvers keep correcting what the agent proposes. `eddi_hitl_answer_edit_total{outcome}` shows edits the engine refused (`screened_out`, `config_drift`, `redacted_content`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -7263,6 +7502,7 @@
           "fieldConfig": {
             "defaults": {
               "unit": "short",
+              "noValue": "no samples yet",
               "color": {
                 "mode": "palette-classic"
               },
@@ -9134,158 +9374,6 @@
           }
         },
         {
-          "id": 444,
-          "type": "timeseries",
-          "title": "Team outcomes by result",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_group_outcomes_total` by `outcome` (recorded, duplicate, disabled, invalid, not_found, subject_full) — real-world outcomes reported against a team's tasks and approvals. Flat is normal without `outcomeConfig`. A steady `disabled` means a system posts outcomes to a group that has not enabled them.",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 64
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_group_outcomes_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{outcome}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 2,
-                "fillOpacity": 0,
-                "showPoints": "never",
-                "spanNulls": false,
-                "axisSoftMin": 0,
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "gradientMode": "none",
-                "scaleDistribution": {
-                  "type": "linear"
-                }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "text",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true,
-              "calcs": []
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
-          "id": 445,
-          "type": "timeseries",
-          "title": "Team lesson consolidation by result",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "description": "`eddi_group_lessons_total` by `outcome` (merged, retired, rejected, skipped_changed, run_completed, run_skipped, run_failed) — the scheduled merge/retire job over a team's retro lessons. Flat is normal without `lessonConfig.consolidation`. A steady `run_failed` means no model is configured or the model call fails permanently; a steady `rejected` means the model proposes changes that fail validation (a retirement without evidence).",
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 71
-          },
-          "targets": [
-            {
-              "refId": "A",
-              "expr": "sum by (outcome) (rate(eddi_group_lessons_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "{{outcome}}"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "linear",
-                "lineWidth": 2,
-                "fillOpacity": 0,
-                "showPoints": "never",
-                "spanNulls": false,
-                "axisSoftMin": 0,
-                "stacking": {
-                  "mode": "none",
-                  "group": "A"
-                },
-                "gradientMode": "none",
-                "scaleDistribution": {
-                  "type": "linear"
-                }
-              },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "text",
-                    "value": null
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
-          "options": {
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true,
-              "calcs": []
-            },
-            "tooltip": {
-              "mode": "multi",
-              "sort": "desc"
-            }
-          }
-        },
-        {
           "id": 290,
           "type": "timeseries",
           "title": "Team handoff intake decisions & store failures",
@@ -9445,6 +9533,95 @@
               },
               "noValue": "no samples yet"
             },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "reqps"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 444,
+          "type": "timeseries",
+          "title": "Team outcomes by result",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_group_outcomes_total` by `outcome` (recorded, duplicate, disabled, invalid, not_found, subject_full) — real-world outcomes reported against a team's tasks and approvals. Flat is normal without `outcomeConfig`. A steady `disabled` means a system posts outcomes to a group that has not enabled them.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 71
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_group_outcomes_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
             "overrides": []
           },
           "options": {
@@ -9521,6 +9698,82 @@
                 ]
               },
               "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 445,
+          "type": "timeseries",
+          "title": "Team lesson consolidation by result",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_group_lessons_total` by `outcome` (merged, retired, rejected, skipped_changed, run_completed, run_skipped, run_failed) — the scheduled merge/retire job over a team's retro lessons. Flat is normal without `lessonConfig.consolidation`. A steady `run_failed` means no model is configured or the model call fails permanently; a steady `rejected` means the model proposes changes that fail validation (a retirement without evidence).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 78
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_group_lessons_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
             },
             "overrides": []
           },
@@ -13532,6 +13785,158 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 326,
+          "type": "timeseries",
+          "title": "Secret context references by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_httpcalls_context_reference_total` by `outcome`. Context-reference headers (`context:<key>`) resolved from a turn's secret context. A rising `cross_origin`, `not_configured` or `not_secret` is a config sending a user token where it may not go; `expired` is a client not re-supplying the value on a HITL resume.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 61
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_httpcalls_context_reference_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 294,
+          "type": "timeseries",
+          "title": "setup-api dry runs and syncs",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_setup_api_total` by `operation` and `outcome`: setup-api dry runs, and re-syncs that synced, changed nothing, were dry runs, or were refused (`dangling_reference`, `unmarked`).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 61
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (operation, outcome) (rate(eddi_setup_api_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{operation}} {{outcome}}"
             }
           ],
           "fieldConfig": {
@@ -17814,7 +18219,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_guardrail_toolcall_decisions_total` — one per tool call screened by `toolCallGuardrails`, by `stage` (live: before the approval gate; resume: an approved or edited call, block-only) and `outcome` (allowed, rewritten, blocked, reprompted, undecided). live/blocked is approvals never asked for; resume/blocked is edits refused. Flat is normal when no task configures toolCallGuardrails.",
+          "description": "`eddi_guardrail_toolcall_decisions_total` — one per tool call screened by `toolCallGuardrails`, by `stage` (live: before the approval gate; resume: an approved or edited call, block-only) and `outcome` (allowed, rewritten, blocked, reprompted, undecided). live/blocked includes calls that would not need approval, and resume/blocked can include an unchanged approved call; the labels do not separate those cases. Flat is normal when no task configures toolCallGuardrails.",
           "gridPos": {
             "h": 7,
             "w": 12,

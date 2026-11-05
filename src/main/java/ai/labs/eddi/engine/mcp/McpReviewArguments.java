@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -28,6 +30,8 @@ final class McpReviewArguments {
 
     /** Upper bound of a decisions JSON argument. */
     static final int MAX_DECISIONS_JSON_CHARS = 256 * 1024;
+
+    private static final ObjectMapper STRICT_READER = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private McpReviewArguments() {
     }
@@ -57,7 +61,7 @@ final class McpReviewArguments {
      * "{…}", "reasonCode": "TONE"}}}.
      */
     static Map<String, ToolCallDecision> toolDecisions(IJsonSerialization json, String raw) throws BadArgument {
-        Map<?, ?> parsed = parseObject(json, raw, "toolDecisionsJson");
+        Map<?, ?> parsed = parseObject(raw, "toolDecisionsJson");
         if (parsed == null) {
             return null;
         }
@@ -89,8 +93,8 @@ final class McpReviewArguments {
      * {@code {"<taskId>": {"verdict": "APPROVED", "note": "…", "editedResult": "…",
      * "reasonCode": "SCOPE"}}}.
      */
-    static Map<String, TaskDecision> taskDecisions(IJsonSerialization json, String raw) throws BadArgument {
-        Map<?, ?> parsed = parseObject(json, raw, "taskDecisionsJson");
+    static Map<String, TaskDecision> taskDecisions(String raw) throws BadArgument {
+        Map<?, ?> parsed = parseObject(raw, "taskDecisionsJson");
         if (parsed == null) {
             return null;
         }
@@ -109,7 +113,7 @@ final class McpReviewArguments {
         return decisions;
     }
 
-    private static Map<?, ?> parseObject(IJsonSerialization json, String raw, String name) throws BadArgument {
+    private static Map<?, ?> parseObject(String raw, String name) throws BadArgument {
         if (raw == null || raw.isBlank()) {
             return null;
         }
@@ -117,7 +121,9 @@ final class McpReviewArguments {
             throw new BadArgument(name + " exceeds " + MAX_DECISIONS_JSON_CHARS + " characters");
         }
         try {
-            return json.deserialize(raw, Map.class);
+            // A second JSON value after the first would be dropped silently, taking its
+            // decisions with it.
+            return STRICT_READER.readValue(raw, Map.class);
         } catch (Exception e) {
             throw new BadArgument("Malformed " + name + " (expected a JSON object keyed by id)");
         }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely } from "@/components/groups/group-utils";
+import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely, parseStructuredItems } from "@/components/groups/group-utils";
 
 describe("emoji verification: a long detail is still a verdict", () => {
   it("parses a header whose detail after the colon is very long", () => {
@@ -479,6 +479,30 @@ describe("group-utils — bounded work on hostile input", () => {
   it("keeps indented code after a blank line as code", () => {
     const text = "intro\n\n    foo(a,B);\n\n    bar(c,D);\n";
     expect(formatMarkdownText(text)).toContain("    bar(c,D);");
+  });
+
+  it("formats a long run of unclosed autolink candidates in linear-ish time", () => {
+    // Each `<a:` ran to the end of the text looking for `>`, from every opener.
+    const hostile = "<a:".repeat(60_000);
+    const start = performance.now();
+    formatMarkdownText(hostile);
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  it("still protects a real autolink from rewriting", () => {
+    expect(formatMarkdownText("go <https://example.com/a,B> now")).toContain("<https://example.com/a,B>");
+  });
+
+  it("repairs a raw newline inside a string of a malformed task array", () => {
+    const content = '[{"subject":"Write","passed":true,"feedback":"line one' + "\n" + 'line two"}]';
+    expect(parseStructuredItems(content)).toEqual([{ subject: "Write", passed: true, feedback: "line one\nline two" }]);
+  });
+
+  it("gives up on an unterminated string full of escaped quotes without quadratic work", () => {
+    const hostile = '["' + '\\"'.repeat(60_000) + "]";
+    const start = performance.now();
+    expect(parseStructuredItems(hostile)).toBeNull();
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 
   it("parses a verification header with a very long whitespace line quickly", () => {

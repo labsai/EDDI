@@ -105,10 +105,13 @@ class GroupGapsValidationTest {
     @DisplayName("humans in task forces")
     class TaskForce {
 
+        // as the TASK_FORCE preset writes them: the moderator plans and verifies
         private final List<AgentGroupConfiguration.DiscussionPhase> planAndVerify = List.of(
-                new AgentGroupConfiguration.DiscussionPhase("Plan", AgentGroupConfiguration.PhaseType.PLAN),
+                new AgentGroupConfiguration.DiscussionPhase("Plan", AgentGroupConfiguration.PhaseType.PLAN, "MODERATOR",
+                        AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1),
                 new AgentGroupConfiguration.DiscussionPhase("Execute", AgentGroupConfiguration.PhaseType.EXECUTE),
-                new AgentGroupConfiguration.DiscussionPhase("Verify", AgentGroupConfiguration.PhaseType.VERIFY));
+                new AgentGroupConfiguration.DiscussionPhase("Verify", AgentGroupConfiguration.PhaseType.VERIFY, "MODERATOR",
+                        AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1));
 
         @Test
         @DisplayName("a human executor with an agent moderator is fine")
@@ -133,6 +136,23 @@ class GroupGapsValidationTest {
             var agentFirst = group(new GroupMember("a1", "A", 0, null), new GroupMember("h1", "H", 1, null, MemberType.HUMAN));
             assertTrue(!GroupGapsValidation.humanTaskForceProblems(humanFirst, planAndVerify).isEmpty());
             assertTrue(GroupGapsValidation.humanTaskForceProblems(agentFirst, planAndVerify).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a PLAN phase whose participants are ALL or a ROLE reaches a human even when the moderator is an agent")
+        void participantsDecideNotTheModerator() {
+            var config = group(new GroupMember("h1", "H", 0, "lead", MemberType.HUMAN), new GroupMember("a1", "A", 1, null));
+            config.setModeratorAgentId("a1");
+            var all = new AgentGroupConfiguration.DiscussionPhase("Plan", AgentGroupConfiguration.PhaseType.PLAN, "ALL",
+                    AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1, false, null);
+            var role = new AgentGroupConfiguration.DiscussionPhase("Verify", AgentGroupConfiguration.PhaseType.VERIFY, "ROLE:lead",
+                    AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1, false, null);
+            var moderator = new AgentGroupConfiguration.DiscussionPhase("Plan", AgentGroupConfiguration.PhaseType.PLAN, "MODERATOR",
+                    AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1, false, null);
+
+            assertTrue(!GroupGapsValidation.humanTaskForceProblems(config, List.of(all)).isEmpty());
+            assertTrue(!GroupGapsValidation.humanTaskForceProblems(config, List.of(role)).isEmpty());
+            assertTrue(GroupGapsValidation.humanTaskForceProblems(config, List.of(moderator)).isEmpty(), "the agent moderator plans here");
         }
 
         @Test

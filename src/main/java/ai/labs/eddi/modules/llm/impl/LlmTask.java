@@ -44,6 +44,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -600,7 +601,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // exact shape.
         if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             String schema = processedParams.get(KEY_RESPONSE_SCHEMA);
-            if (!isNullOrEmpty(schema)) {
+            if (AnswerTool.enabled(task)) {
+                // answerMode "tool": the schema is the reply tool's parameters, so the
+                // instruction is to call it — repeating the schema here would invite the
+                // model to write the JSON as text instead.
+                systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n" + "Give your final answer by calling the `"
+                        + AnswerToolConfigValidator.toolName(task) + "` tool exactly once, as your last step. Its arguments are the "
+                        + "complete answer. Never answer in plain text.";
+            } else if (!isNullOrEmpty(schema)) {
                 systemMessage += "\n\n## RESPONSE FORMAT (MANDATORY)\n"
                         + "You MUST respond with a single valid JSON object matching this exact schema:\n" + "```json\n" + schema + "\n```\n"
                         + "Do NOT include ANY text before or after the JSON. " + "Do NOT wrap in markdown code fences. "
@@ -725,7 +733,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()), reaskSpend);
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId(), RescueOptions.of(task)), reaskSpend);
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -738,7 +746,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // already streamed cannot be taken back. A warn-only guardrail streams.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean guardrailBuffering = outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || guardrailBuffering;
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps() || guardrailBuffering;
         // How an output guardrail's reprompt asks the model again — set by the branch
         // that produced the answer, so the reprompt runs on the same model and never
         // re-runs a tool. Null leaves a reprompt nothing to do but block.
@@ -1007,8 +1015,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
-                } else if (eventSink != null) {
-                    // Legacy mode with streaming — try to get a streaming model
+                } else if (eventSink != null && !addToOutputExplicitlyFalse) {
+                    // Legacy mode with streaming — try to get a streaming model.
+                    // Not with addToOutput=false: the postResponse decides what the
+                    // caller sees, and a streamed token of the raw answer cannot be
+                    // taken back — that task takes the plain path below.
                     // R5: a task that may re-ask its model is buffered, never streamed — the
                     // tokens of an attempt that is then retried cannot be taken back. The same
                     // holds for an output guardrail that can change the answer (WS4).
@@ -1024,7 +1035,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                                 currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse && !bufferOutput) {
+                        if (!bufferOutput) {
                             eventSink.onToken(responseContent);
                         }
                     }
@@ -1165,7 +1176,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1290,8 +1301,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
                         historicInputScreen(memory, task), summaryAdmission(memory));
-                recordSpend(currentStep, summaryUsage, ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
-                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel()).cost(summaryUsage));
+                ModelPrices summaryPrices = ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
+                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel());
+                recordSpend(currentStep, summaryUsage, summaryPrices.cost(summaryUsage), summaryPrices);
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1379,7 +1391,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
         var detection = convertObject
                 ? formatRetryRunner.classifyJsonReply(responseContent, processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(),
-                        task.getId())
+                        task.getId(), RescueOptions.of(task))
                 : null;
         if (detection != null) {
             ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
@@ -1932,7 +1944,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             }
             responseContent = step.content();
         } else if (convertObject && responseContent != null && !responseContent.isBlank()) {
-            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
+            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId(),
+                    RescueOptions.of(task));
             if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
                 var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",
                         "LLM response does not match the response shape (" + parsed.reason() + ")", responseContent, task, currentStep,
@@ -2028,6 +2041,31 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
                 throw new LifecycleException("Response validation failed [" + validationType + "]: " + message);
 
+            case "wrap" :
+                // Only onInvalidJson can say "wrap", and the parser already wrapped every
+                // reply it could. A reply that reaches this point is broken JSON (it starts
+                // with { or [), is over wrapMaxChars, or a policy other than onInvalidJson
+                // was set to "wrap" by mistake: nothing is left to rescue it with, so the
+                // exhausted-recovery action applies, exactly as after spent retries.
+                if (!"invalid_json".equals(validationType)) {
+                    LOGGER.warnf("[ResponseValidation] 'wrap' is only available for onInvalidJson, not %s (task=%s), treating as 'warn'",
+                            validationType, task.getId());
+                    currentStep.storeData(dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message));
+                    break;
+                }
+                String unwrappable = task.getResponseValidation() != null ? task.getResponseValidation().getFallbackAction() : null;
+                if (unwrappable == null || "retry".equalsIgnoreCase(unwrappable) || "wrap".equalsIgnoreCase(unwrappable)) {
+                    unwrappable = "fallback";
+                }
+                LOGGER.warnf("[ResponseValidation] %s — the reply cannot be wrapped, applying fallbackAction '%s' (task=%s)", validationType,
+                        unwrappable, task.getId());
+                if (meterRegistry != null) {
+                    meterRegistry.counter("eddi.llm.recovery", "action", LlmRecoveryLog.WRAP, "outcome", "not_wrappable", "trigger", validationType)
+                            .increment();
+                }
+                return applyValidationAction(unwrappable, validationType, message, responseContent, task, currentStep, templateDataObjects, memory,
+                        convertObject);
+
             case "retry" :
                 // The re-asks happened (or were skipped) before validation ran; a reply
                 // still failing here is out of recoveries. Only the policies that are
@@ -2101,9 +2139,27 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      */
     Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
                                    List<String> nonBlankFields, IConversationMemory memory) {
+        return convertResponseToObject(responseContent, taskId, currentStep, responseSchema, nonBlankFields, memory, RescueOptions.NONE);
+    }
+
+    /**
+     * As above with the task's local rescue options ({@link RescueOptions#of}): the
+     * double-escape repair, {@code fieldAliases} and the plain-text {@code wrap}. A
+     * wrapped reply is outcome {@code wrapped}, counted in
+     * {@code eddi.llm.output{outcome=wrapped}} and
+     * {@code eddi.llm.recovery{action=wrap}}, and leaves the one recovery log line.
+     * This is the single place a non-JSON reply is turned into the stored object,
+     * so every caller that routes a reply through here gets the rescue.
+     */
+    Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
+                                   List<String> nonBlankFields, IConversationMemory memory, RescueOptions rescue) {
         long started = System.nanoTime();
-        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId);
+        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId, rescue);
         String label = outcome.label();
+        // a wrapped reply that then breaks the shape was not recovered
+        if (outcome.wrapped() && outcome.kind() == ModelOutputParser.Kind.VALID) {
+            recordRecovery(memory, LlmRecoveryLog.WRAP, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
+        }
         switch (outcome.kind()) {
             case SCHEMA_MISMATCH -> LOGGER.warnf("convertToObject=true but the response of task '%s' does not match the expected shape (%s)",
                     taskId, outcome.reason());
@@ -2111,7 +2167,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     outcome.reason());
             case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
             default -> {
-                if (outcome.repaired()) {
+                if (outcome.repaired() && !outcome.wrapped()) {
                     recordRecovery(memory, LlmRecoveryLog.REPAIR, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
                 }
             }
@@ -2224,7 +2280,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
         FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()),
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId(), RescueOptions.of(task)),
                 FormatRetryRunner.ReaskSpend.of(spendGate, memory));
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
@@ -2252,7 +2308,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // tokens of an attempt that is then retried cannot be taken back.
         // WS4: an output guardrail that can change the answer buffers it the same way.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
+                || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
         var resumeBridge = bufferOutput
                 ? null
                 : createToolLoopStreamingBridge(memory.getEventSink(),
@@ -2394,7 +2451,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (convertObject) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -2801,7 +2858,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), content));
         if (revision.convertObject()) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(content, task.getId(), currentStep,
-                    revision.processedParams().get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    revision.processedParams().get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, content);
         }
@@ -2878,6 +2935,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
+     * The namespaces of {@link #CONFIG_REF_MENTION}, each with its colon, for the
+     * forward scan in {@link #escapeConfigReferenceMentions}. Kept in the pattern's
+     * order; {@code LlmTaskVaultMentionTest} derives the namespaces from the
+     * pattern and fails if one is not escaped.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
      * against — the cheap pre-check, so the common no-reference value never pays
      * for a regex.
@@ -2929,12 +2994,58 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * Known limit: a mention already inside a {@code {|raw|}} section would be
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
+     * <p>
+     * A forward scan, not {@code CONFIG_REF_MENTION.replaceAll}: the regex retried
+     * {@code [^}]*} to the end of the value from every opener that has no closing
+     * brace, so an editor-written prompt full of unclosed {@code {vault:} openers
+     * cost quadratic CPU on every turn, before any template limit applies. Here an
+     * opener without a later {@code }} ends the scan — no later opener can close
+     * either. Same matches as the pattern, and a mention is copied literally (the
+     * regex replacement also read {@code $} and {@code \} inside one as group
+     * references).
      */
     static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        StringBuilder escaped = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = openerEnd(value, open + 1);
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (escaped == null) {
+                escaped = new StringBuilder(value.length() + 16);
+            }
+            escaped.append(value, copied, open).append("{|").append(value, open, close + 1).append("|}");
+            copied = close + 1;
+            from = close + 1;
+        }
+        return escaped == null ? value : escaped.append(value, copied, value.length()).toString();
+    }
+
+    /**
+     * Where a mention's body starts when a namespace opener begins at
+     * {@code start}, else -1.
+     */
+    private static int openerEnd(String value, int start) {
+        for (String opener : CONFIG_REF_OPENERS) {
+            if (value.startsWith(opener, start)) {
+                return start + opener.length();
+            }
+        }
+        return -1;
     }
 
     /**
@@ -3757,6 +3868,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 validateGuardrails(llmConfiguration);
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
+                validateAnswerMode(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
@@ -3766,6 +3878,25 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on an {@code answerMode} the store would refuse today (a
+     * configuration imported or stored before the check), and notes at INFO a
+     * forced tool call a provider cannot honour.
+     */
+    static void validateAnswerMode(LlmConfiguration llmConfiguration) throws WorkflowConfigurationException {
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (int i = 0; i < llmConfiguration.tasks().size(); i++) {
+            try {
+                AnswerToolConfigValidator.validate(llmConfiguration.tasks().get(i), "langchain.task[" + i + "]");
+            } catch (IllegalArgumentException e) {
+                throw new WorkflowConfigurationException("Invalid answerMode configuration: " + e.getMessage(), e);
+            }
+        }
+        AnswerTool.reportAtConfigure(llmConfiguration);
     }
 
     /**

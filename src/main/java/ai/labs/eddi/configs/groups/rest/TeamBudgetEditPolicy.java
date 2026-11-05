@@ -31,6 +31,20 @@ final class TeamBudgetEditPolicy {
         if (Objects.equals(before, after)) {
             return;
         }
+        checkChange(after, adminOnly, guard);
+    }
+
+    /**
+     * For an update whose stored version could not be read: nothing shows that the
+     * block is unchanged, so it is treated as changed (fail closed). Otherwise an
+     * editor could send {@code teamBudget: null} while the read fails and remove
+     * the cap, since null-to-null compares equal.
+     */
+    static void checkAgainstUnreadable(TeamBudgetConfig after, boolean adminOnly, ResourceAccessGuard guard) {
+        checkChange(after, adminOnly, guard);
+    }
+
+    private static void checkChange(TeamBudgetConfig after, boolean adminOnly, ResourceAccessGuard guard) {
         if (adminOnly && !guard.isAdmin()) {
             throw new ForbiddenException("Changing a group's teamBudget requires the eddi-admin role "
                     + "(eddi.groups.team-budget.admin-only-edits=true)");

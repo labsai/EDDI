@@ -66,9 +66,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * </ul>
  * <h3>What a refused call returns</h3> A {@code NOT_EXECUTED} result built only
  * from configuration and EDDI vocabulary — the author's block message or fix
- * text, author-declared issue codes, EDDI reason codes passed through an
- * allow-list. The screened arguments are never echoed: not to the model, the
- * audit ledger, the SSE stream or the log.
+ * text, author-declared issue codes, EDDI reason codes passed through a
+ * token-shape filter. The screened arguments are never echoed: not to the
+ * model, the audit ledger, the SSE stream or the log.
  * <h3>What is recorded</h3> Per finding: an audit record under
  * {@code audit:guardrail:tool_call:<type>} (with {@code tool}, {@code field}
  * and {@code stage}), a {@code guardrail_triggered} SSE event, the

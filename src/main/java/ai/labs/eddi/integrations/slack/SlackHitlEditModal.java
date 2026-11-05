@@ -27,8 +27,8 @@ import java.util.Map;
  * <ul>
  * <li>{@link #forCard} decides which extra buttons a card gets. A TOOL_CALL
  * pause offers Edit when the batch holds exactly one call whose redacted
- * arguments fit Slack's 3000-character input; a RULE pause only when the agent
- * allows answer edits, the integration opted in with
+ * arguments are a JSON object and fit Slack's 3000-character input; a RULE
+ * pause only when the agent allows answer edits, the integration opted in with
  * {@code platformConfig.hitlShareRuleDrafts=true} (drafts reach Slack only with
  * this flag) and the draft fits and holds no secret.</li>
  * <li>{@link #editView} / {@link #rejectView} build the modals, opened with
@@ -97,8 +97,11 @@ public final class SlackHitlEditModal {
             if (calls.size() == 1 && calls.get(0) != null && !calls.get(0).isArgsTruncated()) {
                 // the same pretty-printed text the modal will show, so the button never
                 // appears for a modal that would not open
-                String shown = pretty(shownArguments(calls.get(0)));
-                if (shown != null && shown.length() <= SLACK_INPUT_MAX) {
+                String raw = shownArguments(calls.get(0));
+                String shown = pretty(raw);
+                // arguments that are not a JSON object (a model's malformed call) would open
+                // a modal whose every submission the merge refuses
+                if (shown != null && shown.length() <= SLACK_INPUT_MAX && isJsonObjectOrBlank(raw)) {
                     return new CardEdits(true, true, null);
                 }
             }
@@ -257,6 +260,22 @@ public final class SlackHitlEditModal {
             return JSON.writerWithDefaultPrettyPrinter().writeValueAsString(JSON.readTree(json));
         } catch (Exception e) {
             return json;
+        }
+    }
+
+    /**
+     * Whether {@link SlackRedactedArgumentsMerge} can take these shown arguments: a
+     * JSON object, or blank (read as {@code {}}).
+     */
+    private static boolean isJsonObjectOrBlank(String json) {
+        if (json == null || json.isBlank()) {
+            return true;
+        }
+        try {
+            JsonNode node = JSON.readTree(json);
+            return node != null && node.isObject();
+        } catch (Exception e) {
+            return false;
         }
     }
 

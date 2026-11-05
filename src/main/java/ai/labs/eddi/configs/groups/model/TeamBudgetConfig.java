@@ -10,8 +10,9 @@ import java.util.List;
 
 /**
  * A group's monthly dollar budget (F6). {@code null} on the group means no team
- * cap: the tenant budget still applies and spend is still metered, so a cap
- * added mid-month sees the month-to-date.
+ * cap and no team metering: the tenant budget still applies, but nothing is
+ * charged to the team. A cap added mid-month therefore counts only the spend
+ * made after it was added; earlier spend is not back-filled.
  * <p>
  * The window is the UTC calendar month, like the tenant's. The base cap lives
  * here (versioned and exported with the group); a mid-month raise or a transfer

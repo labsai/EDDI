@@ -52,6 +52,14 @@ class ServiceJudgeValidationTest {
     }
 
     @Test
+    @DisplayName("an empty reference names nothing and is refused as a credential")
+    void emptyReferencesRefused() {
+        assertFalse(problems(service(Map.of("apiKey", "${vault:}"))).isEmpty());
+        assertFalse(problems(service(Map.of("apiKey", "${vars:}"))).isEmpty());
+        assertFalse(problems(service(Map.of("apiKey", "${vault:  }"))).isEmpty());
+    }
+
+    @Test
     @DisplayName("vault and vars references, and non-secret parameters, are accepted")
     void referencesAccepted() {
         assertTrue(problems(service(Map.of("apiKey", "${vault:openai-key}"))).isEmpty());

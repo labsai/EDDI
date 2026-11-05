@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -43,6 +44,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -381,6 +383,50 @@ class ConversationHitlService {
                                    Boolean returnCurrentStepOnly,
                                    List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException {
+        doResume(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields, null);
+    }
+
+    /**
+     * The streamed resume: the same validation, commit and turn as
+     * {@link #resumeConversation(String, HitlDecision, ConversationResponseHandler, Boolean, Boolean, List)},
+     * with the resumed turn's events routed to {@code streaming}. Refusals throw
+     * before {@code streaming} has been touched.
+     */
+    public void resumeConversationStreaming(String conversationId,
+                                            HitlDecision decision,
+                                            IConversationService.StreamingResponseHandler streaming,
+                                            Boolean returnDetailed,
+                                            Boolean returnCurrentStepOnly,
+                                            List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        if (streaming == null) {
+            throw new IllegalArgumentException("a streaming resume needs a handler");
+        }
+        // The turn's completion reaches the stream through the same delivery points a
+        // plain reply handler uses (settled, re-paused after persist, skipped); only
+        // the failure paths differ and are routed to onError below.
+        ConversationResponseHandler adapter = new ConversationResponseHandler() {
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onComplete(snapshot);
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onSkipped(snapshot);
+            }
+        };
+        doResume(conversationId, decision, adapter, returnDetailed, returnCurrentStepOnly, returningFields, streaming);
+    }
+
+    private void doResume(String conversationId,
+                          HitlDecision decision,
+                          ConversationResponseHandler handler,
+                          Boolean returnDetailed,
+                          Boolean returnCurrentStepOnly,
+                          List<String> returningFields,
+                          IConversationService.StreamingResponseHandler streaming)
+            throws ResourceStoreException, ResourceNotFoundException {
         // See resumeConversation's @throws IllegalArgumentException javadoc
         // (IConversationService) for why this is checked here rather than trusted
         // from each caller.
@@ -468,6 +514,8 @@ class ConversationHitlService {
         // The pending batch the DECISION applies to — captured here so the audit reads
         // it deterministically even though the async resume may mutate the live memory.
         final PendingToolCallBatch prePauseBatch;
+        // The id of the pause this decision settles - what a resume stream announces.
+        final String settledPauseId;
         // The pause as it was, for the decision's audit entry: when it began, its
         // timeout policy and, for a RULE pause, the draft an edit replaces.
         final HitlDecisionRecords.RegularPause prePauseFacts;
@@ -506,6 +554,7 @@ class ConversationHitlService {
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
+            settledPauseId = HitlDecision.pauseIdOf(snapshot.getHitlPausedAt());
             prePauseWasToolCall = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
@@ -564,6 +613,12 @@ class ConversationHitlService {
             // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
             populateToolApprovalsConfig(memory);
 
+            // A streamed resume reports the continued turn through the same sink a
+            // streamed say installs, so task, tool and token events reach the client.
+            if (streaming != null) {
+                memory.setEventSink(ConversationService.eventSinkFor(streaming));
+            }
+
             // Ordering contract (same as the say path, see ConversationService
             // .completeTurn): a resume that RE-PAUSES tells its client only after the
             // re-pause is persisted by resumeFinished below, with the state the store
@@ -575,9 +630,24 @@ class ConversationHitlService {
             // Whether the caller's handler has been given (or is holding) its answer, so a
             // failure path can tell "nothing delivered yet" from "already answered".
             final AtomicBoolean replyDelivered = new AtomicBoolean(false);
+            // Cluster mode: set when the lease this resume runs under is lost (A5).
+            final AtomicBoolean resumeLeaseLost = new AtomicBoolean(false);
+            // Cluster mode: the resume's commit was refused by the fence (A5/A6).
+            final AtomicReference<ConversationFencedException> resumeFenced = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     returnMemory -> {
+                        // A streamed turn that lost the cluster lease stored nothing: the
+                        // stream ends with an error, not with a done event for a turn that
+                        // is not stored (as a streamed say does). Checked BEFORE meterTurnCost,
+                        // as the say path does: a turn stopped by lease loss stores nothing, and
+                        // the node that took the conversation over runs (and meters) it again.
+                        if (streaming != null && conversationService.stoppedByLeaseLoss(conversationId, returnMemory,
+                                new SimpleConversationMemorySnapshot())) {
+                            replyDelivered.set(true);
+                            streaming.onError(new ConversationStepRunner.TurnLeaseLostException(conversationId, returnMemory.getFenceToken()));
+                            return;
+                        }
                         // Settle point of a resumed turn: charge what the resume added
                         // to the step's priced spend (the pre-pause part was charged
                         // when the pause settled — audit:metered_cost says how much).
@@ -585,6 +655,17 @@ class ConversationHitlService {
                         // resume (timeout policy) spends just the same.
                         conversationService.meterTurnCost(returnMemory);
                         if (handler == null) {
+                            return;
+                        }
+                        if (resumeLeaseLost.get() || returnMemory.isLeaseLost()) {
+                            // Cluster mode (A1/A5): this node lost the lease while the resume
+                            // ran. It is not stored and is dead-lettered, so its caller is told
+                            // it was not applied (409) instead of getting the reply of a resume
+                            // that will not exist.
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly,
+                                        returningFields);
+                            }
                             return;
                         }
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, returnDetailed, returnCurrentStepOnly,
@@ -632,6 +713,22 @@ class ConversationHitlService {
             final CallerIdentity resumeCallerIdentity = approverOwnsConversation ? approverIdentity : null;
             final CallerIdentity approvedCallsIdentity = approverOwnsConversation ? null : approverIdentity;
 
+            // The decision is committed and the resumed turn is about to run: a streamed
+            // client hears so exactly once, before any event of the continued turn. Called
+            // from the resume callable, after its cancelled/ended check, rather than at
+            // submit - so a resume the coordinator drops, or one cancelled before it ran,
+            // never announces itself (those end in onSkipped, the pause restored).
+            final Runnable announceResumeAccepted = () -> {
+                if (streaming == null) {
+                    return;
+                }
+                try {
+                    streaming.onResumeAccepted(settledPauseId, decision.getVerdict());
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Could not announce the accepted resume of %s", sanitize(conversationId));
+                }
+            };
+
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
                 // and this execution (flag on the registered memory, or DB-only in
@@ -652,6 +749,7 @@ class ConversationHitlService {
                     }
                     return null;
                 }
+                announceResumeAccepted.run();
                 try {
                     conversation.resume(decision);
                 } catch (Exception e) {
@@ -660,7 +758,11 @@ class ConversationHitlService {
                     // The resume threw: when its output was never rendered the client is
                     // still waiting, so answer with the ERROR snapshot and its reason.
                     if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                        deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        if (streaming != null) {
+                            streaming.onError(e);
+                        } else {
+                            deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        }
                     }
                 }
                 return null;
@@ -728,7 +830,18 @@ class ConversationHitlService {
                         if (!rePaused) {
                             conversationService.decideContinuation(memory);
                         }
-                        boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        boolean persisted;
+                        try {
+                            persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        } catch (ConversationFencedException e) {
+                            // A6: another node holds the conversation now and has started on
+                            // it. Not an ERROR (the document is the newer holder's): the resume
+                            // is dead-lettered by its task (see call()).
+                            conversationService.counterFenceRejected();
+                            resumeFenced.set(e);
+                            LOGGER.errorf("Resume of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
+                            return;
+                        }
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
                                     + "IN_PROGRESS or rewrote the document — discarding the resumed outcome so the "
@@ -779,7 +892,11 @@ class ConversationHitlService {
                         // timeout. Once only: if the REST timeout answered first, this
                         // second answer is simply ignored.
                         if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                            deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            if (streaming != null) {
+                                streaming.onError(t);
+                            } else {
+                                deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
                         }
                     }
                 }
@@ -815,17 +932,27 @@ class ConversationHitlService {
 
                 public Void call() {
                     LeaseHandle held = lease;
-                    if (held != null && held.fence() != null) {
-                        // Same fencing as a say turn: the resumed turn's write is refused if
-                        // another node took the conversation over, and losing the lease
-                        // cancels it at the next task boundary.
-                        memory.setFenceToken(held.fence());
-                        try {
-                            conversationMemoryStore.raiseFence(conversationId, held.fence());
-                        } catch (Exception e) {
-                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                    boolean fenced = held != null && held.fence() != null;
+                    if (fenced) {
+                        // Same fencing as a say turn: the fence goes up before the resume runs
+                        // (A3), the resumed turn's write is refused if another node took the
+                        // conversation over, and losing the lease cancels it at the next task
+                        // boundary. A resume that cannot raise the fence does not run: the pause
+                        // is restored, so the approval can be given again.
+                        if (!conversationService.fenceRaised(conversationId, held)) {
+                            inFlightConversations.remove(conversationId, memory);
+                            restorePauseAfterFailedResume(conversationId, memory, true);
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
+                            return null;
                         }
-                        held.onLost(() -> memory.setCancelled(true));
+                        memory.setFenceToken(held.fence());
+                        memory.setLeaseLostCheck(held::isLost);
+                        held.onLost(() -> {
+                            resumeLeaseLost.set(true);
+                            memory.setCancelled(true);
+                        });
                     }
                     try {
                         // The identities were captured on the REST request thread
@@ -851,7 +978,51 @@ class ConversationHitlService {
                         // value-conditional: never evict a newer execution's registration
                         inFlightConversations.remove(conversationId, memory);
                     }
+                    if (fenced) {
+                        settleLostResume(held.fence());
+                    }
                     return null;
+                }
+
+                /**
+                 * Cluster mode (A5): a resume that lost its lease, or whose commit the fence
+                 * refused, stored nothing. Before, only the cancel flag went up and the
+                 * conversation stayed IN_PROGRESS (the resume's own CAS) with nothing to move
+                 * it: say, undo and redo were refused and crash recovery restored the pause
+                 * only minutes later, with no trace of the decision. Now the pause is restored
+                 * at once, with a fenced CAS, so it stands only while no node that took the
+                 * conversation over has started on it; and the resume is thrown to the
+                 * coordinator, which dead-letters it with its fencing token.
+                 */
+                private void settleLostResume(long fence) {
+                    ConversationFencedException refused = resumeFenced.get();
+                    boolean lost = resumeLeaseLost.get() || memory.isLeaseLost();
+                    if (refused == null && (!lost || committedResumeState.get() != null)) {
+                        return; // committed, or never lost: nothing to settle
+                    }
+                    try {
+                        if (conversationMemoryStore.compareAndSetStateFenced(conversationId, ConversationState.IN_PROGRESS,
+                                ConversationState.AWAITING_HUMAN, fence)) {
+                            conversationService.cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
+                            // Re-arm from the STORED bookmark: the resumed pipeline already
+                            // cleared the live memory's (Conversation.resume), and the original
+                            // schedule was deleted before it ran. The store still holds the
+                            // pause, since the lost resume stored nothing.
+                            scheduleHitlTimeout(conversationId,
+                                    convertConversationMemorySnapshot(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)));
+                            LOGGER.warnf("Resume of conversation %s lost its lease — the pause is restored (AWAITING_HUMAN) and the "
+                                    + "resume is dead-lettered; the decision has to be given again", sanitize(conversationId));
+                        } else {
+                            conversationService.refreshCachedState(conversationId);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.errorf(e, "Could not restore the pause of conversation %s after its resume lost the lease",
+                                sanitize(conversationId));
+                    }
+                    if (refused != null) {
+                        throw new IllegalStateException(refused.getMessage(), refused);
+                    }
+                    throw new ConversationStepRunner.TurnLeaseLostException(conversationId, fence);
                 }
 
                 /**
@@ -1717,10 +1888,11 @@ class ConversationHitlService {
             }
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
-            if (hitlConfig == null) {
-                return;
-            }
-            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig.getApprovalContext(), hitlConfig.getToolApprovals()));
+            // An agent without hitlConfig can still pause on a task-level toolApprovals
+            // rule: the renderer then
+            // takes the blocks of the effective configuration stored on the pending batch.
+            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
+                    hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
             LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
         }
@@ -1874,9 +2046,14 @@ class ConversationHitlService {
             if (matched == null) {
                 return true;
             }
+            // The rule a call selected is the FIRST one with its match string: rules of
+            // equal match sort stably (ToolApprovalRules), and the strict merge puts a
+            // task's rules before the agent's. A later rule with the same match is
+            // shadowed, so its policy says nothing about this call.
             boolean statesPolicy = matched.equals(governing.getMatch())
                     || toolApprovals != null && toolApprovals.getRules() != null && toolApprovals.getRules().stream()
-                            .anyMatch(r -> r != null && matched.equals(r.getMatch()) && r.getTimeoutPolicy() != null);
+                            .filter(r -> r != null && matched.equals(r.getMatch())).findFirst()
+                            .map(r -> r.getTimeoutPolicy() != null).orElse(false);
             if (!statesPolicy) {
                 return true;
             }

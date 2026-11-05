@@ -1064,6 +1064,20 @@ export function tieBreakOptions(pending?: PendingHumanInput | null): string[] | 
   return pending?.detail?.kind === "TIE_BREAK" ? (pending.detail.options ?? []) : undefined;
 }
 
+/**
+ * The timeout to show on a pending HUMAN input. A tie-break runs on the timeout
+ * the engine resolved when it paused (`humanTieBreak.timeout`, else the group's
+ * `humanMemberConfig.turnTimeout`) and stored as `hitlApprovalTimeout`; any other
+ * human turn uses the group's `humanMemberConfig.turnTimeout`.
+ */
+export function pendingTurnTimeout(
+  pending: PendingHumanInput | null | undefined,
+  hitlApprovalTimeout: string | null | undefined,
+  humanMemberTurnTimeout: string | null | undefined,
+): string | null | undefined {
+  return tieBreakOptions(pending) !== undefined ? (hitlApprovalTimeout ?? null) : humanMemberTurnTimeout;
+}
+
 /** How consumers should read a `SharedArtifact.content` string (I17). */
 export type ArtifactType = "TEXT" | "MARKDOWN" | "JSON";
 

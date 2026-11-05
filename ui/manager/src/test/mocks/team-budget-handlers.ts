@@ -71,6 +71,9 @@ export const teamBudgetHandlers = [
     const body = (await request.json()) as { fromGroupId: string; toGroupId: string; amountUsd: number; reason: string };
     const from = teams[body.fromGroupId];
     const to = teams[body.toGroupId];
+    if (body.fromGroupId === body.toGroupId) {
+      return HttpResponse.json({ error: "A transfer needs two different teams" }, { status: 400 });
+    }
     if (!from || !to || from.capUsd === null || to.capUsd === null || !body.reason?.trim() || !(body.amountUsd > 0)) {
       return HttpResponse.json({ error: "A transfer needs two budgeted teams, an amount and a reason." }, { status: 400 });
     }

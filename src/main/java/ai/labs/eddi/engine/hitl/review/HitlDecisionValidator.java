@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.hitl.review;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
+import ai.labs.eddi.engine.hitl.audit.EditMetrics;
+import ai.labs.eddi.engine.hitl.audit.EditSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
@@ -65,12 +67,18 @@ public final class HitlDecisionValidator {
             validateEditedAnswer(decision, snapshot, review, toolPause);
         }
 
-        boolean anyAmended = decision.getToolDecisions() != null
-                && decision.getToolDecisions().values().stream().anyMatch(d -> d != null && d.getAmendedArguments() != null);
+        boolean anyAmended = decision.getToolDecisions() != null && decision.getToolDecisions().entrySet().stream()
+                .anyMatch(e -> e.getValue() != null && amendmentChanges(snapshot, e.getKey(), e.getValue().getAmendedArguments()));
         if (decision.getReasonCode() != null) {
             ReasonCodes.require(decision.getReasonCode(), vocabulary, "reasonCode");
-            boolean explainsAChange = verdict == HitlVerdict.REJECTED || decision.getEditedAnswer() != null || anyAmended
-                    || anyCallRejected(decision);
+            // An edit identical to the draft changes nothing (the audit classifies it as a
+            // plain
+            // approval), so it cannot carry a reason code either.
+            HitlRevisionCandidate candidate = candidateOf(snapshot);
+            boolean answerEdited = decision.getEditedAnswer() != null
+                    && EditMetrics.ofText(EditSummary.Kind.ANSWER, candidate != null ? candidate.getDraft() : null, decision.getEditedAnswer())
+                            .changed();
+            boolean explainsAChange = verdict == HitlVerdict.REJECTED || answerEdited || anyAmended || anyCallRejected(decision);
             if (!explainsAChange) {
                 throw new IllegalArgumentException("reasonCode explains a rejection or an edit; a plain approval takes none");
             }
@@ -84,11 +92,33 @@ public final class HitlDecisionValidator {
                 String field = "toolDecisions['" + entry.getKey() + "'].reasonCode";
                 ReasonCodes.require(call.getReasonCode(), vocabulary, field);
                 HitlVerdict callVerdict = call.getVerdict() != null ? call.getVerdict() : verdict;
-                if (callVerdict != HitlVerdict.REJECTED && call.getAmendedArguments() == null) {
+                if (callVerdict != HitlVerdict.REJECTED && !amendmentChanges(snapshot, entry.getKey(), call.getAmendedArguments())) {
                     throw new IllegalArgumentException(field + " explains a rejection or an amendment; a plain approval takes none");
                 }
             }
         }
+    }
+
+    /**
+     * Whether {@code amended} changes the stored arguments of the pending call
+     * {@code callId}. Arguments identical to the original are a plain approval, as
+     * the audit classifies them. A call the batch does not hold counts as changed:
+     * the caller's other checks refuse an unknown call id.
+     */
+    private static boolean amendmentChanges(ConversationMemorySnapshot snapshot, String callId, String amended) {
+        if (amended == null) {
+            return false;
+        }
+        var batch = snapshot != null ? snapshot.getHitlPendingToolCalls() : null;
+        if (batch == null || batch.getCalls() == null) {
+            return true;
+        }
+        for (var call : batch.getCalls()) {
+            if (call != null && callId != null && callId.equals(call.getCallId())) {
+                return EditMetrics.ofArguments(call.getArgumentsRaw(), amended).changed();
+            }
+        }
+        return true;
     }
 
     private static boolean anyCallRejected(HitlDecision decision) {

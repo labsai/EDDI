@@ -567,8 +567,18 @@ public class PhaseExecutionEngine {
                 case HUMAN_DECIDES -> {
                     // The NONE record stands until the decider answers; the caller
                     // pauses on the returned tie-break after persisting it.
-                    pendingTieBreak = HumanTieBreakEngine.onTie(gc, config, phase, voteConfig, outcome,
-                            Math.max(0, transcriptSnapshot.size() - repeatEntries.size()));
+                    // The repeat's start by identity: a CONVERGENCE or FACILITATION entry appended
+                    // after the slice was taken would make a size difference point one too high.
+                    int repeatStart = transcriptSnapshot.size() - repeatEntries.size();
+                    if (!repeatEntries.isEmpty()) {
+                        for (int i = 0; i < transcriptSnapshot.size(); i++) {
+                            if (transcriptSnapshot.get(i) == repeatEntries.get(0)) {
+                                repeatStart = i;
+                                break;
+                            }
+                        }
+                    }
+                    pendingTieBreak = HumanTieBreakEngine.onTie(gc, config, phase, voteConfig, outcome, Math.max(0, repeatStart));
                     yield outcome.decision();
                 }
                 case NO_DECISION -> outcome.decision();

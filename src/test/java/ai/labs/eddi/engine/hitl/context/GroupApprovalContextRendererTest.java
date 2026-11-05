@@ -182,6 +182,18 @@ class GroupApprovalContextRendererTest {
     }
 
     @Test
+    @DisplayName("a JSON artifact above the parse cap is not parsed: json is null while its capped text is still offered")
+    void oversizedJsonArtifactIsNotParsed() throws Exception {
+        String big = "[" + "1,".repeat(GroupApprovalContextRenderer.MAX_JSON_PARSE_CHARS / 2) + "1]";
+        when(artifactStore.listByGroupConversationId("gc-1")).thenReturn(List.of(artifact("huge", ArtifactType.JSON, big)));
+        blocks(block("Huge", "[{group.artifacts.huge.json}]"));
+
+        var ctx = renderer.render(gc, config, 1, "PHASE");
+
+        assertEquals("[]", ctx.getItems().get(0).getText());
+    }
+
+    @Test
     @DisplayName("an artifact name with a dash is reachable by key lookup")
     void dashedArtifactName() throws Exception {
         when(artifactStore.listByGroupConversationId("gc-1")).thenReturn(List.of(artifact("post-draft", ArtifactType.TEXT, "dashed content")));

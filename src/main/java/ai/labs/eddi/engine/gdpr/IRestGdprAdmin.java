@@ -36,8 +36,9 @@ public interface IRestGdprAdmin {
     @Operation(
                operationId = "deleteUserDataGdpr",
                summary = "Cascade-delete all user data (GDPR Art. 17)",
-               description = "Deletes user memories and conversations. "
-                       + "Pseudonymizes audit ledger and database log entries. "
+               description = "Deletes the user's memories, conversations and the other records keyed to them. "
+                       + "Audit ledger rows are kept with their content redacted and the user id pseudonymized; "
+                       + "database log entries are pseudonymized (log message text is kept). "
                        + "Returns a summary of affected records. "
                        + "Responds 200 when every step of the cascade succeeded and 207 Multi-Status when "
                        + "one or more failed — 'failedSteps' in the body names them, and the erasure must "

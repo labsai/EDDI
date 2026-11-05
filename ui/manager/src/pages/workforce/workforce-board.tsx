@@ -40,6 +40,7 @@ import {
   followupGroupMember,
   closeGroupConversation,
   getGroupConversation,
+  pendingTurnTimeout,
   tieBreakOptions,
   pendingHumanTask,
   type GroupAttachmentRef,
@@ -1132,8 +1133,13 @@ function WorkforceBoard() {
               displayName={selectedConversation.pendingHumanInput.displayName}
               renderedPrompt={selectedConversation.pendingHumanInput.renderedPrompt}
               pausedPhaseName={selectedConversation.pausedPhaseName}
+              pauseKey={`${selectedConversation.id}:${selectedConversation.pendingHumanInput.requestedAt ?? ""}:${selectedConversation.pendingHumanInput.memberId}`}
               requestedAt={selectedConversation.pendingHumanInput.requestedAt}
-              turnTimeout={groupConfig?.humanMemberConfig?.turnTimeout}
+              turnTimeout={pendingTurnTimeout(
+                selectedConversation.pendingHumanInput,
+                selectedConversation.hitlApprovalTimeout,
+                groupConfig?.humanMemberConfig?.turnTimeout,
+              )}
               isSubmitting={submitHumanInputMutation.isPending}
               options={tieBreakOptions(selectedConversation.pendingHumanInput)}
               task={pendingHumanTask(selectedConversation)}

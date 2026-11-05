@@ -110,15 +110,16 @@ class ConversationHitlServiceApprovalContextTest {
     }
 
     @Test
-    @DisplayName("an agent without hitlConfig renders nothing")
-    void noHitlConfigNoContext() throws Exception {
+    @DisplayName("an agent without hitlConfig still lets the renderer use the pending batch's task-level toolApprovals")
+    void noHitlConfigStillRendersTaskLevelRules() throws Exception {
         when(agentStore.read("agent-1", 3)).thenReturn(new AgentConfiguration());
         memory.setHitlApprovalContext(context("stale"));
+        when(renderer.renderForConversation(any(), any(), any())).thenReturn(context("from the rule"));
 
         service.populateHitlTimeoutBookmark(memory);
 
-        assertNull(memory.getHitlApprovalContext());
-        verify(renderer, never()).renderForConversation(any(), any(), any());
+        assertEquals("from the rule", memory.getHitlApprovalContext().getItems().get(0).getText());
+        verify(renderer).renderForConversation(memory, null, null);
     }
 
     @Test

@@ -75,6 +75,28 @@ describe("ModelPricesPage", () => {
     expect(screen.getAllByTestId("model-prices-row")).toHaveLength(3);
   });
 
+  it("drops the reference preview when the server's data replaces the form (409 reload)", async () => {
+    server.use(
+      http.put("*/administration/model-prices", () => HttpResponse.json({ error: "changed", currentRevision: 5 }, { status: 409 })),
+    );
+    renderPage("/manage/model-prices", <ModelPricesPage />);
+    fireEvent.click(await screen.findByTestId("model-prices-load-reference"));
+    expect(await screen.findByTestId("model-prices-reference-preview")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("model-prices-policy-select"), { target: { value: "REFUSE" } });
+    fireEvent.click(screen.getByTestId("model-prices-save"));
+    fireEvent.click(await screen.findByTestId("model-prices-reload"));
+
+    await waitFor(() => expect(screen.queryByTestId("model-prices-reference-preview")).toBeNull());
+  });
+
+  it("shows a failed sightings request with a retry instead of 'None seen'", async () => {
+    server.use(http.get("*/administration/model-prices/unpriced", () => HttpResponse.json({ error: "down" }, { status: 500 })));
+    renderPage("/manage/model-prices", <ModelPricesPage />);
+    expect(await screen.findByTestId("model-prices-unpriced-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-prices-unpriced-empty")).toBeNull();
+    expect(screen.getByTestId("model-prices-unpriced-retry")).toBeInTheDocument();
+  });
+
   it("prefills the sheet from an unpriced sighting", async () => {
     renderPage("/manage/model-prices", <ModelPricesPage />);
     fireEvent.click(await screen.findByTestId("model-prices-sighting-add"));

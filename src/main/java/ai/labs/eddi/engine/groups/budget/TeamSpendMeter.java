@@ -71,13 +71,15 @@ public class TeamSpendMeter {
      */
     public void beginLeg(GroupConversation gc, AgentGroupConfiguration config) {
         try {
-            if (!meteringEnabled || gc == null || gc.getDepth() != 0) {
+            if (gc == null || gc.getDepth() != 0) {
                 return;
             }
             TeamBudgetConfig budget = config == null ? null : config.getTeamBudget();
-            if (budget == null || budget.monthlyBudgetUsd() == null) {
+            if (!meteringEnabled || budget == null || budget.monthlyBudgetUsd() == null) {
                 // Off when absent: a group with no teamBudget is neither metered nor
-                // gated. Dropping a state left by an earlier leg stops its charging.
+                // gated. Dropping a state left by an earlier leg stops its charging
+                // and removes its ceiling -- also when the kill switch is thrown
+                // while the run is paused, so the switch lifts every team ceiling.
                 gc.setTeamBudgetState(null);
                 return;
             }
@@ -201,10 +203,21 @@ public class TeamSpendMeter {
         }
     }
 
+    /**
+     * The run's state, created on first use with the spend the run had already
+     * accumulated as its baseline: a budget added while a discussion is under way
+     * is charged from that point on, never back-filled with what was spent before
+     * it existed. A fresh run starts at zero, so nothing changes there.
+     */
     private static TeamBudgetState stateOf(GroupConversation gc) {
         synchronized (gc) {
             if (gc.getTeamBudgetState() == null) {
-                gc.setTeamBudgetState(new TeamBudgetState());
+                TeamBudgetState state = new TeamBudgetState();
+                double baseline = gc.getTotalCost();
+                if (Double.isFinite(baseline) && baseline > 0.0) {
+                    state.setChargedUsd(baseline);
+                }
+                gc.setTeamBudgetState(state);
             }
             return gc.getTeamBudgetState();
         }

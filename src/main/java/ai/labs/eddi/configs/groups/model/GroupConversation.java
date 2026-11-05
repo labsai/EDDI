@@ -57,8 +57,15 @@ public class GroupConversation {
      * skew mis-indexes resume bookmarks — corruption, not conservatism. A version
      * bump signals "an old pod must not touch this document"; this field does not
      * earn that.
+     * <p>
+     * Version 5 — {@code teamBudgetState} (F6, team budgets). Unlike the tombstones
+     * it does not fail soft: an older pod re-saving a paused document drops what
+     * the run has already charged to its team, so the resume would meter the run
+     * from a fresh state. The bump makes such a pod refuse the document instead. No
+     * migration entry: a v4 document has no state and Jackson leaves it null, which
+     * is what an unbudgeted run carries (identity hop).
      */
-    // v4 (this release): the release shape — adds I11's negotiationState, I12's
+    // v4: the 2026-08 release shape — adds I11's negotiationState, I12's
     // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
     // (tornDownAgentIds), all resume-consumed. No migration entries needed:
     // Jackson defaults each on legacy documents to its pre-v4 behavior
@@ -68,11 +75,7 @@ public class GroupConversation {
     // human task-force tasks), both resume-consumed — an older pod resolving one
     // would re-run the vote's last repeat. Identity hop: a null detail is the
     // pre-v5 speaking turn.
-    // The same release's handoffState (cross-team handoff caps and lineage) and
-    // teamBudgetState (what a root run charged its team, and its ceiling) ride v5
-    // rather than a v6: they ship together with it, so no pod that predates them
-    // accepts a v5 document, and both default to null on older documents (hop 0,
-    // nothing charged yet) — identity hops, no migration entry.
+    // Also v5 (same release): teamBudgetState (team budgets). Identity hop as well.
     public static final int CURRENT_SCHEMA_VERSION = 5;
     /**
      * The version a stored document claims when its JSON carries no
@@ -510,6 +513,14 @@ public class GroupConversation {
      * cleared on successful completion.
      */
     private String hitlLastPauseFingerprint;
+    /**
+     * I1: the cost ceiling fired under {@code SYNTHESIZE_NOW} in this round, so
+     * only SYNTHESIS phases still run. Persisted because a synthesis phase that
+     * requires approval pauses the run: the resumed leg must keep skipping the
+     * remaining work phases (and their approval gates) instead of starting over
+     * with the skip-ahead off. Cleared on completion and at a round's start.
+     */
+    private boolean costCeilingSkipAhead;
     private Instant created;
     private Instant lastModified;
 
@@ -1674,5 +1685,13 @@ public class GroupConversation {
 
     public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
         this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
+    }
+
+    public boolean isCostCeilingSkipAhead() {
+        return costCeilingSkipAhead;
+    }
+
+    public void setCostCeilingSkipAhead(boolean costCeilingSkipAhead) {
+        this.costCeilingSkipAhead = costCeilingSkipAhead;
     }
 }

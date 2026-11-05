@@ -467,6 +467,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // only produce refusals.
             String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(event.pausedAt());
             boolean recorded = false;
+            String noButtonsNote = null;
+            if (includeButtons && ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
+                // A card that does not know its pause matches none (see matchesPause).
+                includeButtons = false;
+                noButtonsNote = SlackHitlSupport.UNKNOWN_GROUP_PAUSE_NOTE;
+            }
             if (includeButtons) {
                 if (approvalRecords == null || !SlackHitlSupport.isBindableIntegrationName(integrationName)) {
                     if (integrationName != null && integrationName.contains("|")) {
@@ -491,7 +497,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             var blocks = SlackHitlSupport.buildApprovalBlocks(
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
-                    actionValue, includeButtons);
+                    actionValue, includeButtons, null, null, SlackHitlEditModal.CardEdits.NONE, noButtonsNote);
             // The group's approvalContext (rendered at pause commit), between the facts and
             // the buttons.
             boolean contextShown = SlackApprovalContextBlocks.insertBeforeActions(blocks, event.approvalContext(), showApprovalContext);

@@ -120,6 +120,13 @@ public class AuditSampleService {
             throw OversightErrors.badRequest(OversightErrors.NOTE_TOO_LONG, "The note may be at most " + AuditSample.MAX_NOTE_LENGTH + " characters");
         }
         Instant now = clock.instant();
+        // The expiry sweep marks a sample EXPIRED once its deadline is past; until it
+        // runs, the same
+        // boundary applies here, so a late FLAGGED verdict cannot reach earned
+        // autonomy.
+        if (sample.reviewDueAt() != null && now.isAfter(sample.reviewDueAt())) {
+            throw OversightErrors.conflict(OversightErrors.SAMPLE_ALREADY_REVIEWED, "The sample is past its review deadline; reload it");
+        }
         AuditSample reviewed = sample.reviewed(status, reasonCode, note, reviewer, now);
         AuditSample stored = store.review(reviewed, verdict.expectedVersion())
                 .orElseThrow(() -> OversightErrors.conflict(OversightErrors.SAMPLE_ALREADY_REVIEWED,

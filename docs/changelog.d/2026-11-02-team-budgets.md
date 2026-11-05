@@ -51,6 +51,35 @@ leave the others nothing, and nothing said who had spent what. A group can now c
   entry carries it as its user id and is covered by the ledger's own erasure).
 - No oversubscription warning (sum of team caps above the tenant budget); `limitedBy` shows the tighter limit.
 
+### Review follow-ups (2026-11-05)
+
+CodeRabbit's full review of the merged-with-main head:
+
+- `TeamSpendMeter`: the kill switch now drops a persisted team state at the next leg, so it lifts every in-run
+  ceiling; a state created on a discussion that already spent takes that spend as its baseline (no back-fill).
+- `GroupConversation.CURRENT_SCHEMA_VERSION` 4 → 5 for `teamBudgetState`: an older pod re-saving a paused document
+  would drop it, so it must refuse the document instead (identity hop, no migration).
+- Follow-ups: `resolveEffectiveCostCeiling` starts a team leg and includes the team ceiling, and the follow-up
+  callback charges the team (`GroupLifecycleOps`).
+- Transfers: each step id carries a fingerprint of source, target and amount, so a reused `Idempotency-Key` with
+  another request is refused instead of crediting what was never debited; a retry checks the reversal and credit
+  ids in `appliedTransferIds` before the shorter adjustment history.
+- REST and the group-save check read the group with `readConfig`: a store failure is 503 (not 404, not a team
+  silently missing from the listing), and an unreadable stored version makes a `teamBudget` save need admin.
+- Manager: the Quotas table shows a read failure with a retry, polls like the card, and a transfer replaces its
+  key after a 4xx; the MSW mock refuses same-team transfers; the card test waits for each response.
+- Docs: kill-switch timing, the overshoot of `PARALLEL` phases and task-force waves, retries across a month
+  boundary, the 50-group table limit, and the corrected upgrade note and `TeamBudgetConfig` Javadoc.
+
+Second round of review follow-ups:
+
+- The `teamBudget` edit check treats a group that does not exist as having no cap, so a non-admin's update of a
+  missing id gets the store's 404 instead of a misleading admin-only 403; other store failures still fail closed.
+- Manager: a failed background poll of the Quotas table keeps the cached table and any open transfer dialog (and
+  its `Idempotency-Key`) mounted, with a "could not be refreshed" notice and a retry; only a failure with nothing
+  loaded replaces the table.
+- Docs: the synthesis-phase overshoot applies only under `SYNTHESIZE_NOW`; `ABORT` runs no synthesis phase.
+
 ```decision-log
 | 2026-11-02 | A team's monthly spend is charged from the root discussion's cost-ledger delta; the root group pays and a nested child charges nothing | The ledger already holds member, nested and group-system spend and records by replacement, so a delta cannot double-count; the per-call spend feed has no root and cannot express the in-run ceiling | Per-call `ISpendSink` events (attribute nested children to the child group, tenant-accepted charges only); reading the tenant counter (stays 0 with quotas disabled) |
 | 2026-11-02 | Gates fail closed on an unreadable team budget, metering never fails work | A budget nobody can read is not a budget with room; failing open would drop every cap during an outage | Fail-open at the gate |

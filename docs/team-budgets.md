@@ -93,7 +93,9 @@ ceiling = charged + max(0, min(cap - teamSpent, tenantRemaining))   (the boundar
 and refreshes it after every charge from the team total the store returns. The group's existing cost-ceiling
 machinery (`maxCostPerDiscussion`) enforces it unchanged, through the same checks and the same transcript
 entry, so every phase and task-force engine honours it without knowing teams exist. The binding ceiling is the
-tighter of the group's own and the team's; on a tie the group's own protocol wins.
+tighter of the group's own and the team's; on a tie the group's own protocol wins. A follow-up with one member
+is a leg too: it is refused when the run is already past the team ceiling, and its cost is charged to the team
+like a phase turn's.
 
 When the team ceiling is the one that binds, the policy is `teamBudget.onExhausted` (default: the group's
 `onCostExceeded`). `SYNTHESIZE_NOW` keeps its synthesis exemption, so the run still delivers an answer. The
@@ -103,9 +105,12 @@ combined remainder.
 
 Two bounds to know about:
 
-- **Overshoot** is one in-flight turn per concurrent discussion plus one synthesis phase, as for
-  `maxCostPerDiscussion`. Two discussions of the same team running at once each learn of the other's spend at
-  their next charge.
+- **Overshoot** is at least one in-flight turn per concurrent discussion, as for `maxCostPerDiscussion`. Under
+  `SYNTHESIZE_NOW` add one synthesis phase, which is exempt from the ceiling; under `ABORT` the discussion fails at
+  the ceiling and no synthesis phase runs. It is more where several turns are dispatched under one check: a `PARALLEL` phase checks
+  the ceiling once and then runs every speaker, and a task-force wave runs all its tasks before the next check. So
+  one discussion can overshoot by a whole parallel phase or wave; size the cap with that margin when a team uses
+  them. Two discussions of the same team running at once each learn of the other's spend at their next charge.
 - The cap and the tenant remainder are read at the start of a leg. An administrator raising the cap during a
   run takes effect from the next leg; the run's ceiling stays self-decrementing in between, so exposure is bounded.
 
@@ -140,9 +145,13 @@ and audited as `REVERSED`). If the reversal fails too, the audit entry says `PAR
 target never credited, so money has disappeared from caps and an administrator should reconcile it by raising the
 source's cap again. Money never appears. Retrying with the same `Idempotency-Key` moves nothing twice: a retry of a
 finished transfer returns the original result without a second audit entry; a retry of one that was reversed is
-refused (use a new key); a retry of one that stopped between debit and credit completes the credit. The key is
-remembered for the last 200 adjustments of a team-month, so a retry that arrives after more than 200 later
-adjustments of the same team and month is no longer recognised. A reason is
+refused (use a new key); a retry of one that stopped between debit and credit completes the credit. A key is
+bound to its request: reusing it with other teams or another amount is refused (400) instead of crediting what
+the first request never debited. The key is remembered for the last 200 adjustments of a team-month, so a retry
+that arrives after more than 200 later adjustments of the same team and month is no longer recognised. It is also
+looked up in the **current UTC month only**: a retry sent after the month has turned is a new transfer in the new
+month, even if the first one completed. Check the previous month's history before retrying across the boundary. A
+reason is
 required (at most 1000 characters). Both adjustments and transfers write an audit-ledger entry
 (`ai.labs.budget`, `TEAM_BUDGET_ADJUSTED` / `TEAM_BUDGET_TRANSFERRED`, with amount, month and reason), because the
 admin-action audit records only method, path and status.
@@ -180,8 +189,8 @@ Metrics Reference dashboard under **Team Budgets**.
 ## Limits worth knowing
 
 - **Only priced spend counts.** Unpriced models cost $0, so a team made only of unpriced agents never reaches its cap.
-- **Upgrade mid-month.** A discussion that was running when this feature arrived is charged its earlier spend at
-  its next charge, once.
+- **Upgrade mid-month.** Spend recorded before a group had a budget is not charged to that team: a discussion
+  that was running when the budget was set is charged only what it spends from its next leg on.
 - **A crash** between the store write and the save of the discussion can charge one amount again after a resume;
   the tenant meter has the same bound.
 - **Oversubscription is not checked.** Team caps may add up to more than the tenant's budget; the tenant gate
@@ -195,7 +204,11 @@ Metrics Reference dashboard under **Team Budgets**.
 - The group's workspace page shows a **team budget card** (cap, spent, remaining, reset date, a History table, and a
   badge when the budget is spent or the tenant is the tighter limit). It is absent for a group without a
   `teamBudget`.
-- **Quotas** lists every team that has a budget, with a bar per team.
+- **Quotas** lists the teams that have a budget, with a bar per team, among the first 50 groups of the group list
+  (the batch endpoint's limit). A budgeted team beyond those is not in the table; read it on its workspace page or
+  with `GET /groupstore/groups/{groupId}/budget`. If the budgets cannot be read, the table says so and offers a
+  retry.
 - An administrator gets **Adjust this month** (cap and a required reason; refused below the spend) and **Transfer
-  budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog). Other roles do not see the
+  budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog, replaced after a 4xx answer,
+  which applied nothing, and kept after a 5xx or network error, so the retry stays idempotent). Other roles do not see the
   buttons; the server enforces it regardless.

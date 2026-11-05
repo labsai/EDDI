@@ -49,15 +49,30 @@ describe("TeamBudgetCard", () => {
   });
 
   it("renders nothing for a group without a budget, an unknown group, or a forbidden one", async () => {
-    const free = renderPage("/x", <TeamBudgetCard groupId="free" />);
-    await waitFor(() => expect(free.container.querySelector("[data-testid='team-budget-card']")).toBeNull());
-    free.unmount();
-    server.use(http.get("*/groupstore/groups/:groupId/budget", () => HttpResponse.json({ error: "no" }, { status: 403 })));
-    const forbidden = renderPage("/x", <TeamBudgetCard groupId="studio" />);
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    expect(forbidden.container.querySelector("[data-testid='team-budget-card']")).toBeNull();
+    // Absence is only meaningful once the answer is in: count the mocked responses,
+    // wait for each, let React settle, then assert.
+    let answered = 0;
+    const onResponse = ({ request }: { request: Request }) => {
+      if (/\/groupstore\/groups\/[^/]+\/budget$/.test(new URL(request.url).pathname)) answered++;
+    };
+    server.events.on("response:mocked", onResponse);
+    try {
+      for (const [groupId, forbidden] of [["free", false], ["nope", false], ["studio", true]] as const) {
+        if (forbidden) {
+          server.use(http.get("*/groupstore/groups/:groupId/budget", () => HttpResponse.json({ error: "no" }, { status: 403 })));
+        }
+        const before = answered;
+        const view = renderPage("/x", <TeamBudgetCard groupId={groupId} />);
+        await waitFor(() => expect(answered).toBe(before + 1));
+        await act(async () => {
+          await new Promise((r) => setTimeout(r, 0));
+        });
+        expect(view.container.querySelector("[data-testid='team-budget-card']")).toBeNull();
+        view.unmount();
+      }
+    } finally {
+      server.events.removeListener("response:mocked", onResponse);
+    }
   });
 
   it("lists earlier months under History", async () => {
@@ -162,6 +177,66 @@ describe("TeamBudgetsTable", () => {
     await waitFor(() => expect(seen).toHaveLength(1));
     expect(seen[0]?.key).toMatch(/\S+/);
     expect(seen[0]?.body).toEqual({ fromGroupId: "studio", toGroupId: "radar", amountUsd: 5, reason: "radar needs it" });
+  });
+
+  it("starts a new Idempotency-Key after a 4xx, keeps it after a 5xx", async () => {
+    const keys: (string | null)[] = [];
+    const statuses = [503, 400, 200];
+    server.use(
+      http.post("*/administration/team-budgets/transfers", ({ request }) => {
+        keys.push(request.headers.get("Idempotency-Key"));
+        const status = statuses[keys.length - 1] ?? 200;
+        return status === 200
+          ? HttpResponse.json({ from: {}, to: {}, transferId: "t" })
+          : HttpResponse.json({ error: `failed ${status}` }, { status });
+      }),
+    );
+    renderPage("/manage/quotas", <TeamBudgetsTable />);
+    fireEvent.click(await screen.findByTestId("team-budget-open-transfer"));
+    const dialog = await screen.findByTestId("team-budget-transfer-dialog");
+    fireEvent.change(within(dialog).getByTestId("team-budget-from"), { target: { value: "studio" } });
+    fireEvent.change(within(dialog).getByTestId("team-budget-to"), { target: { value: "radar" } });
+    fireEvent.change(within(dialog).getByTestId("team-budget-amount"), { target: { value: "5" } });
+    fireEvent.change(within(dialog).getByTestId("team-budget-transfer-reason"), { target: { value: "radar needs it" } });
+    const save = within(dialog).getByTestId("team-budget-transfer-save");
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await waitFor(() => expect(save).toBeEnabled());
+      fireEvent.click(save);
+      await waitFor(() => expect(keys).toHaveLength(attempt));
+      if (attempt < 3) await within(dialog).findByTestId("team-budget-error");
+    }
+    expect(keys[1]).toBe(keys[0]); // after the 503: same key, the retry stays idempotent
+    expect(keys[2]).not.toBe(keys[1]); // after the 400: nothing was applied, a new transfer
+  });
+
+  it("shows a budget-read failure with a retry instead of hiding the table", async () => {
+    let calls = 0;
+    server.use(
+      http.get("*/administration/team-budgets", () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json({ error: "down" }, { status: 503 })
+          : HttpResponse.json({ month: "2026-11", tenantRemainingUsd: null, teams: [] });
+      }),
+    );
+    renderPage("/manage/quotas", <TeamBudgetsTable />);
+    expect(await screen.findByTestId("team-budgets-error")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("team-budgets-retry"));
+    expect(await screen.findByTestId("team-budgets-empty")).toBeInTheDocument();
+  });
+
+  it("keeps the cached table and an open transfer dialog when a background poll fails", async () => {
+    const { queryClient } = renderPage("/manage/quotas", <TeamBudgetsTable />);
+    fireEvent.click(await screen.findByTestId("team-budget-open-transfer"));
+    const dialog = await screen.findByTestId("team-budget-transfer-dialog");
+    server.use(http.get("*/administration/team-budgets", () => HttpResponse.json({ error: "down" }, { status: 503 })));
+    await act(async () => {
+      await queryClient.refetchQueries();
+    });
+    expect(await screen.findByTestId("team-budgets-stale")).toBeInTheDocument();
+    expect(screen.queryByTestId("team-budgets-error")).toBeNull();
+    expect(screen.getByTestId("team-budget-row-studio")).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
   });
 
   it("will not transfer a team to itself", async () => {

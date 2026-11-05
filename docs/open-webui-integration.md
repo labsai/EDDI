@@ -34,7 +34,7 @@ Brings up MongoDB, EDDI, Open WebUI on <http://localhost:3000>, and a one-shot s
 
 Two things worth knowing about it:
 
-- **EDDI is built from the working tree**, not pulled from Docker Hub, so the demo always runs the adapter as it is in your checkout, including changes that have not reached a published image. (The adapter itself has shipped since 6.4.0.) The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
+- **EDDI is built from the working tree**, not pulled from Docker Hub, so the demo always runs the adapter as it is in your checkout, including changes that have not reached a published image. The build happens inside the container, so no local JDK or Maven is needed. The first build takes a few minutes; later ones are cached.
 - **The demo agent has no LLM.** It needs no provider credentials and its replies are deterministic — but it also *cannot answer questions about anything*, including an uploaded PDF. To get an agent that actually thinks, set `EDDI_DEMO_LLM_API_KEY` and a second LLM-backed agent is deployed alongside it:
 
   ```bash
@@ -591,7 +591,10 @@ Every failure uses the OpenAI envelope:
 | `stateless:true` while stateless requests are disabled | 400 | `invalid_request_field` |
 | No `user` message | 400 | `no_user_message` |
 | Agent not deployed | 503 | `agent_not_ready` |
-| Conversation busy / concurrency cap | 429 | — |
+| Adapter concurrency cap (`max-concurrent-requests`) or a busy conversation | 429 | — |
+| Node at its in-flight turn limit, coordinator saturated, shutdown drain | 503 | `capacity_exceeded` (with `Retry-After`) |
+| Tenant quota store unavailable | 503 | `quota_accounting_unavailable` |
+| Authenticated caller without a permitted role | 403 | `insufficient_permissions` |
 | Turn timed out | 504 | `timeout` |
 | The agent's pipeline failed the turn (an LLM, HTTP or MCP task error) | 500 | `agent_error` |
 | Adapter disabled | 404 | `unknown_endpoint` |

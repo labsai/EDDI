@@ -305,6 +305,32 @@ class SlackEventHandlerTest {
     }
 
     /**
+     * A card whose pause could not be read yet does not know which pause it is for:
+     * with buttons it could approve a later pause it does not show. It is posted
+     * without buttons and not recorded, so the next card for the real pause is.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void notifyApprovers_unknownPause_postsCardWithoutButtonsAndRecordsNothing() {
+        var slackApi = mock(SlackWebApiClient.class);
+        var handler = newHandler(slackApi);
+        var resolved = resolvedWithApprovalChannel();
+
+        handler.notifyApprovers(resolved, "conv-1", "agent-1", bookmarkPausedAt(null));
+        handler.notifyApprovers(resolved, "conv-1", "agent-1", bookmarkPausedAt(Instant.ofEpochMilli(1_000L)));
+
+        ArgumentCaptor<List> blocks = ArgumentCaptor.forClass(List.class);
+        verify(slackApi, times(2)).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
+        List<Map<String, Object>> unknown = blocks.getAllValues().get(0);
+        List<Map<String, Object>> known = blocks.getAllValues().get(1);
+        assertFalse(unknown.stream().anyMatch(block -> "actions".equals(block.get("type"))), "no buttons without a known pause");
+        assertTrue(known.stream().anyMatch(block -> "actions".equals(block.get("type"))), "the real pause gets its buttons");
+        // It says why, and what to do - not that no approvers are configured.
+        assertTrue(unknown.toString().contains(SlackHitlSupport.UNKNOWN_PAUSE_NOTE), unknown.toString());
+        assertFalse(unknown.toString().contains(SlackHitlSupport.NO_APPROVERS_NOTE));
+    }
+
+    /**
      * When no approval channel is configured, the notification is a no-op (no card,
      * no marker) regardless of pause identity.
      */
@@ -563,5 +589,17 @@ class SlackEventHandlerTest {
             notAList.put("files", "nonsense");
             assertEquals(List.of(), SlackEventHandler.attachedMimeTypes(notAList));
         }
+    }
+
+    @Test
+    @DisplayName("the in-thread pause notice escapes the pause reason: no mention or link markup reaches Slack")
+    void pauseNoticeEscapesTheReason() {
+        var bookmark = new ConversationMemorySnapshot();
+        bookmark.setHitlPauseReason("Check <!channel> and <https://evil.example|the invoice> & co");
+
+        String notice = SlackEventHandler.buildPauseNotice(bookmark);
+
+        assertTrue(notice.endsWith("\n> Check &lt;!channel&gt; and &lt;https://evil.example|the invoice&gt; &amp; co"), notice);
+        assertFalse(notice.contains("<!channel>"));
     }
 }

@@ -64,7 +64,9 @@ public class RestTeamBudgets implements IRestTeamBudgets {
                 if (!accessGuard.hasAccess(id, AccessLevel.VIEW)) {
                     continue;
                 }
-                AgentGroupConfiguration config = service.config(id);
+                // readConfig: a failed read is a 503 for the whole listing, not a silently
+                // missing team.
+                AgentGroupConfiguration config = service.readConfig(id);
                 if (config != null) {
                     visible.add(id);
                     configs.put(id, config);

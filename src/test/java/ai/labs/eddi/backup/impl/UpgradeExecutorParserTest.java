@@ -15,6 +15,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
@@ -30,6 +31,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.core.Response;
@@ -93,6 +95,7 @@ class UpgradeExecutorParserTest {
     private IParserStore parserDocuments;
     private IDictionaryStore dictionaryDocuments;
     private UpgradeExecutor executor;
+    private ResourceAccessGuard guard;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -108,7 +111,7 @@ class UpgradeExecutorParserTest {
 
         executor = new UpgradeExecutor(agentStore, workflowStore, mock(IRestPromptSnippetStore.class),
                 jsonSerialization, structuralMatcher, descriptorStore, mock(BackupMetrics.class),
-                mock(ResourceAccessGuard.class));
+                guard = mock(ResourceAccessGuard.class));
 
         lenient().when(jsonSerialization.deserialize(anyString(), eq(ParserConfiguration.class)))
                 .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), ParserConfiguration.class));
@@ -268,6 +271,20 @@ class UpgradeExecutorParserTest {
         assertEquals(PARSER + "0123456789abcdef01234567?version=1", step.getConfig().get("uri"));
         assertTrue(String.valueOf(step.getExtensions()).contains(DICT + DICT_T + "?version=2"),
                 "the adopted step must name the target's own dictionary, was: " + step.getExtensions());
+    }
+
+    @Test
+    @DisplayName("a parser created from the source needs VIEW on every dictionary it names, as on the REST create")
+    void createdParserReferencesAreChecked() throws Exception {
+        givenPreviewWithDanglingParser();
+        when(parserDocuments.read(PARSER_T, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        when(parserDocuments.create(any())).thenReturn(resourceId("0123456789abcdef01234567", 1));
+        when(guard.requireAccess(eq(DICT_T), eq(AccessLevel.VIEW), anyString())).thenThrow(new ForbiddenException("no"));
+
+        UpgradeResult result = withStoresInCdi(() -> executor.executeUpgrade(source(), AGENT_ID, null, null));
+
+        assertFalse(result.failures().isEmpty(), "got: " + result);
+        verify(parserDocuments, never()).create(any());
     }
 
     @Test
