@@ -1,10 +1,13 @@
 import {
   useState,
   useEffect,
+  useMemo,
   useRef,
   useCallback,
   type KeyboardEvent,
+  type MutableRefObject,
 } from "react";
+import type { TFunction } from "i18next";
 import { useParams, useLocation, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { agentKeys } from "@/lib/query-keys";
@@ -34,24 +37,31 @@ import {
   startConversation,
   sendMessageStreaming,
   readConversation,
-  type InputData,
+  undoConversation,
+  redoConversation,
+  rerunLastStep,
 } from "@/lib/api/chat";
+import { cancelConversation } from "@/lib/api/hitl";
+import {
+  AgentConversation,
+  useAgentConversation,
+  type ConversationMessage,
+} from "@eddi/conversation";
+import { extractOutputTexts, type ContextMap, type ConversationSnapshot } from "@eddi/core";
 import { translateStreamError } from "@/hooks/use-chat";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   uploadAttachment,
   deleteAttachment,
-  buildAttachmentContext,
   isImageMime,
   formatBytes,
   MAX_ATTACHMENTS_PER_TURN,
   MAX_ATTACHMENT_BYTES,
   type AttachmentResult,
-  type AttachmentRef,
 } from "@/lib/api/attachments";
 import { getAgentDescriptors } from "@/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
-import type { SimpleConversationStep } from "@/lib/api/conversations";
+import { extractOutputParts, type ConversationOutput, type SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
 import { PauseNotice } from "@/components/hitl/pause-notice";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
@@ -74,14 +84,11 @@ interface SentAttachment {
   previewUrl?: string;
 }
 
-interface ThreadMessage {
-  role: "user" | "agent";
-  content: string;
-  timestamp: number;
-  attachments?: SentAttachment[];
-  /** True while tokens are still arriving for this message. */
-  streaming?: boolean;
-}
+/**
+ * One message of the thread: @eddi/conversation's message (the thread runs on
+ * its controller). `isStreaming` while tokens arrive; `attachments` on a sent one.
+ */
+type ThreadMessage = ConversationMessage;
 
 /**
  * A turn that did not produce an answer.
@@ -105,14 +112,14 @@ interface ThreadSendError {
    *
    * A retry re-sends through `handleSend`, which appends its own optimistic
    * message — so without withdrawing this one first, a successful retry leaves
-   * the same text on screen twice. Kept by identity rather than by text so two
+   * the same text on screen twice. Kept by id rather than by text so two
    * genuinely identical messages are never confused for each other.
    *
    * Null when the turn was already withdrawn, which is what the 409 path does:
    * there the backend never received the message at all, so leaving it on
    * screen would show it as sent.
    */
-  pendingUserMessage: ThreadMessage | null;
+  pendingUserMessageId: string | null;
   /**
    * The backend rejected the send because the conversation is paused awaiting
    * a human decision (409). Nothing is wrong and retrying will not help — the
@@ -182,7 +189,7 @@ function parseConversationSteps(
           ? inputEntry.value
           : String(inputEntry.value);
       if (content.trim()) {
-        messages.push({ role: "user", content, timestamp });
+        messages.push({ id: `step-user-${messages.length}`, role: "user", content, timestamp });
       }
     }
 
@@ -207,6 +214,7 @@ function parseConversationSteps(
 
     if (outputTexts.length > 0) {
       messages.push({
+        id: `step-agent-${messages.length}`,
         role: "agent",
         content: outputTexts.join("\n"),
         timestamp,
@@ -643,6 +651,135 @@ function isGroupContext(state: unknown): state is GroupContext {
   );
 }
 
+// ─── The thread's conversation ───────────────────────────────────
+
+/** What the page needs to know about the turn in flight. */
+interface ThreadTurn {
+  text: string;
+  attachments?: SentAttachment[];
+  /** Which events the stream delivered. A stream can also just stop. */
+  tokens: boolean;
+  done: boolean;
+  error: boolean;
+  /** The reader pressed Stop: what arrived is kept, and nothing is reported. */
+  stopped: boolean;
+}
+
+/** The page's handlers, read by the controller's hooks at call time. */
+interface ThreadHooks {
+  t: TFunction;
+  /** The turn did not produce an answer; `userMessageId` is the question to withdraw on retry. */
+  failed: (message: string, paused: boolean, userMessageId: string | null) => void;
+}
+
+/** The first attachment's name, as the input of a turn that sends only files. */
+function firstAttachmentName(context: ContextMap | undefined): string | undefined {
+  const value = context?.attachment_0?.value as { fileName?: unknown } | undefined;
+  return typeof value?.fileName === "string" ? value.fileName : undefined;
+}
+
+/**
+ * The member thread on @eddi/conversation's controller (phase 3c): the turn —
+ * streaming, the reconcile, dropped vs paused turns — is the controller's, the
+ * thread keeps its own error banner and Retry (`presentFailure`) and its pause
+ * notice (`onTurnSnapshot`). One per advisor.
+ */
+function createThreadConversation(
+  memberId: string,
+  hooksRef: MutableRefObject<ThreadHooks | null>,
+  turnRef: MutableRefObject<ThreadTurn | null>,
+): AgentConversation {
+  const controller: AgentConversation = new AgentConversation({
+    transport: {
+      mode: "conversation",
+      // A turn of files only names the first file as its input; the backend
+      // reads the files from the context.
+      stream: (conversationId, text, { context, signal }) =>
+        sendMessageStreaming(
+          "production",
+          memberId,
+          conversationId ?? "",
+          context ? { input: text || firstAttachmentName(context) || "attachment", context } : { input: text },
+          signal,
+        ),
+      read: (conversationId, currentStepOnly) =>
+        readConversation("production", memberId, conversationId, currentStepOnly ?? false) as unknown as Promise<
+          ConversationSnapshot
+        >,
+      undo: (conversationId) => undoConversation("production", memberId, conversationId),
+      redo: (conversationId) => redoConversation("production", memberId, conversationId),
+      rerun: (conversationId) => rerunLastStep(conversationId),
+      cancel: (conversationId) => cancelConversation(conversationId),
+    },
+    refreshAfterStream: false,
+    attachmentDisplay: "chips",
+    outputTexts: (output) => {
+      const texts = extractOutputTexts(output.output);
+      return texts.length > 0 ? texts : extractOutputParts(output as ConversationOutput);
+    },
+    onStreamEvent: (event) => {
+      const turn = turnRef.current;
+      if (!turn) return;
+      if (event.type === "token") turn.tokens = true;
+      else if (event.type === "done") turn.done = true;
+      else if (event.type === "error") turn.error = true;
+    },
+    onTurnSnapshot: (snapshot) => {
+      const hooks = hooksRef.current;
+      if (!hooks || snapshot.conversationState !== "AWAITING_HUMAN") return;
+      hooks.failed(
+        hooks.t(
+          "Workforce.thread.pausedForApproval",
+          "This turn is paused waiting for a human decision. It resumes once the request is approved.",
+        ),
+        true,
+        turnRef.current?.tokens ? null : lastUserMessageId(controller),
+      );
+    },
+    presentFailure: (failure, ctx) => {
+      const hooks = hooksRef.current;
+      if (!hooks) return true;
+      if (failure.status === 409) {
+        // Refused WITHOUT being consumed because the conversation is paused:
+        // the backend never received the message, so it leaves the transcript.
+        // A paused error links to the approvals queue rather than a Retry.
+        ctx.withdraw();
+        hooks.failed(
+          hooks.t(
+            "Workforce.thread.pausedRejected",
+            "This conversation is paused waiting for a human decision, so the message was not sent.",
+          ),
+          true,
+          null,
+        );
+        return true;
+      }
+      // The question stays on screen next to the error, so the reader sees
+      // what they sent; Retry withdraws it just before re-sending. Not once
+      // tokens arrived: the partial reply stays under the question it answers.
+      controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      // A known stream code has a sentence in the reader's language; the
+      // backend's own text is the fallback rather than something discarded.
+      const message =
+        failure.error !== undefined
+          ? getErrorMessage(failure.error)
+          : (translateStreamError(failure.code ?? undefined, hooks.t) ?? failure.message);
+      hooks.failed(message, false, failure.partial ? null : ctx.userMessageId);
+      return true;
+    },
+  });
+  return controller;
+}
+
+/** The id of the latest question in the transcript. */
+function lastUserMessageId(controller: AgentConversation): string | null {
+  const messages = controller.getSnapshot().messages;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "user") return messages[i]!.id;
+  }
+  return null;
+}
+
 // ─── Component ───────────────────────────────────────────────────
 
 function WorkforceThread() {
@@ -692,9 +829,22 @@ function WorkforceThread() {
   memberNameRef.current = memberName;
 
   // Local state
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  // The thread's conversation runs on the controller; these read it.
+  const hooksRef = useRef<ThreadHooks | null>(null);
+  const turnRef = useRef<ThreadTurn | null>(null);
+  const controller = useMemo(() => createThreadConversation(memberId, hooksRef, turnRef), [memberId]);
+  const conversation = useAgentConversation(controller);
+  const conversationId = conversation.conversationId;
+  const messages = conversation.messages;
+  const isLoading = conversation.isProcessing;
+  const setConversationId = useCallback(
+    (id: string | null) => controller.dispatch({ type: "SET_CONVERSATION_ID", id }),
+    [controller],
+  );
+  const setMessages = useCallback(
+    (next: ThreadMessage[]) => controller.dispatch({ type: "REPLACE_MESSAGES", messages: next }),
+    [controller],
+  );
   const [sendError, setSendError] = useState<ThreadSendError | null>(null);
   const [isStarting, setIsStarting] = useState(true);
   /** Why the thread could not be opened, when it could not. */
@@ -711,11 +861,23 @@ function WorkforceThread() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   /** Which (board, member, attempt) the thread was last initialised for. */
   const initKeyRef = useRef<string | null>(null);
-  const sendingRef = useRef(false);
-  /** Aborts the in-flight stream — for the Stop button and for unmount. */
-  const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  // Leaving the advisor (or the page) abandons the turn in flight.
+  useEffect(() => () => controller.reset(), [controller]);
+
+  hooksRef.current = {
+    t,
+    failed: (message, paused, userMessageId) => {
+      const turn = turnRef.current;
+      setSendError({
+        message,
+        retryText: turn?.text ?? "",
+        retryAttachments: turn?.attachments,
+        paused,
+        pendingUserMessageId: userMessageId,
+      });
+    },
+  };
 
   // Track latest messages for unmount cleanup of sent-message preview URLs
   const messagesRef = useRef(messages);
@@ -765,8 +927,11 @@ function WorkforceThread() {
       boardId,
     });
     if (!isCurrent()) return;
+    // Abandons anything of the old conversation and empties the transcript —
+    // only now that the new one exists: a failed start keeps the old thread.
+    controller.reset();
+    turnRef.current = null;
     setConversationId(newConvId);
-    setMessages([]);
 
     // Read any welcome message the agent might have
     try {
@@ -778,7 +943,7 @@ function WorkforceThread() {
     } catch {
       // No welcome message — that's fine
     }
-  }, [boardId, memberId]);
+  }, [boardId, memberId, setConversationId, setMessages, controller]);
 
   const startFreshRef = useRef(startFreshConversation);
   startFreshRef.current = startFreshConversation;
@@ -798,11 +963,8 @@ function WorkforceThread() {
     initKeyRef.current = key;
     const isCurrent = () => initKeyRef.current === key;
 
-    abortRef.current?.abort();
-    abortRef.current = null;
-    sendingRef.current = false;
-    setMessages([]);
-    setConversationId(null);
+    controller.reset();
+    turnRef.current = null;
     setSendError(null);
     setInitError(null);
     setIsStarting(true);
@@ -847,7 +1009,7 @@ function WorkforceThread() {
     }
 
     init();
-  }, [boardId, memberId, initAttempt]);
+  }, [boardId, memberId, initAttempt, controller, setConversationId, setMessages]);
 
   /**
    * "New Conversation" — every other chat surface in the Manager has one
@@ -859,9 +1021,6 @@ function WorkforceThread() {
   const handleNewConversation = useCallback(async () => {
     if (isRestarting || isLoading) return;
     setIsRestarting(true);
-    abortRef.current?.abort();
-    abortRef.current = null;
-    sendingRef.current = false;
     setSendError(null);
     setInputPrefill("");
     // Bound to the thread it was pressed on: if the reader moves to another
@@ -898,261 +1057,50 @@ function WorkforceThread() {
   const handleSend = useCallback(
     async (text: string, attachments?: SentAttachment[]) => {
       if (!conversationId || (!text.trim() && !attachments?.length) || isLoading) return;
-      if (sendingRef.current) return;
-      sendingRef.current = true;
 
       // Clear prefill after first send
       if (inputPrefill) setInputPrefill("");
-
-      const messageText = text.trim();
-
-      // Optimistically add user message
-      const userMsg: ThreadMessage = {
-        role: "user",
-        content: messageText || (attachments?.length ? `📎 ${attachments.map((a) => a.fileName).join(", ")}` : ""),
-        timestamp: Date.now(),
-        attachments: attachments?.length ? attachments : undefined,
-      };
-      // The placeholder the tokens stream into. Present from the start so the
-      // reply appears where it will finally sit, rather than jumping in at the
-      // end from under a separate typing indicator.
-      const placeholder: ThreadMessage = {
-        role: "agent",
-        content: "",
-        timestamp: Date.now(),
-        streaming: true,
-      };
-      setMessages((prev) => [...prev, userMsg, placeholder]);
-      setIsLoading(true);
       setSendError(null);
 
-      const abort = new AbortController();
-      abortRef.current = abort;
-
-      /** Append streamed text to the placeholder, which is always last. */
-      const appendToken = (chunk: string) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.role === "agent" && last.streaming) {
-            next[next.length - 1] = { ...last, content: last.content + chunk };
-          }
-          return next;
-        });
+      const turn: ThreadTurn = {
+        text: text.trim(),
+        attachments,
+        tokens: false,
+        done: false,
+        error: false,
+        stopped: false,
       };
+      turnRef.current = turn;
+      const generation = controller.currentGeneration;
+      // ALL attachments travel, including the ones too large to inline: the
+      // backend logs the storageRef and decides what to inline from
+      // `forwardableInline`.
+      const result = await controller.send(turn.text, false, { attachments: attachments ?? [] });
+      if (turnRef.current !== turn || !controller.isCurrent(generation)) return;
 
-      /** Settle the placeholder: keep it if it has content, drop it if not. */
-      const settle = (finalContent?: string) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.role !== "agent" || !last.streaming) return prev;
-          const content = finalContent ?? last.content;
-          if (!content.trim()) {
-            next.pop();
-            return next;
-          }
-          next[next.length - 1] = { ...last, content, streaming: false };
-          return next;
-        });
-      };
-
-      /** Drop the placeholder AND the optimistic user message. */
-      const dropTurn = () => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.role === "agent" && last.streaming) next.pop();
-          if (next[next.length - 1] === userMsg) next.pop();
-          return next;
-        });
-      };
-
-      /**
-       * The failure state for a turn whose user message is still on screen.
-       *
-       * It stays there deliberately: the reader should be able to see what they
-       * sent while the error is in front of them. `handleRetry` withdraws it
-       * just before re-sending, so exactly one copy survives a retry.
-       *
-       * Not withdrawn once tokens have arrived. `settle` keeps a partial reply,
-       * and a retry that took the question away would leave that half-answer
-       * stranded above the NEXT question rather than below the one it belongs
-       * to. Decided here rather than at each call site: four sites were spelling
-       * out the same rule, and the one that did not — the pause after `done` --
-       * was the one that got it wrong.
-       */
-      const failed = (message: string, paused: boolean): ThreadSendError => ({
-        message,
-        retryText: messageText,
-        retryAttachments: attachments,
-        paused,
-        pendingUserMessage: streamedAnything ? null : userMsg,
-      });
-
-      let streamedAnything = false;
-
-      const inputData: InputData = attachments?.length
-        ? {
-            // Send ALL attachments (including non-forwardable ones) so the
-            // backend can log the storageRef; it decides what to inline from
-            // `forwardableInline`.
-            input: messageText || attachments[0]?.fileName || "attachment",
-            context: buildAttachmentContext(
-              attachments.map(
-                (a): AttachmentRef => ({
-                  storageRef: a.storageRef,
-                  fileName: a.fileName,
-                  mimeType: a.mimeType,
-                  sizeBytes: a.sizeBytes,
-                  forwardableInline: a.forwardableInline,
-                }),
-              ),
-            ),
-          }
-        : { input: messageText };
-
-      try {
-        // Which terminal event actually arrived. A stream can also just stop —
-        // a dropped connection, a proxy timing out — and that is neither.
-        let sawDone = false;
-        let sawError = false;
-
-        for await (const event of sendMessageStreaming(
-          "production",
-          memberId,
-          conversationId,
-          inputData,
-          abort.signal,
-        )) {
-          if (event.type === "token") {
-            streamedAnything = true;
-            appendToken(event.data);
-            continue;
-          }
-          if (event.type === "error") {
-            sawError = true;
-            // The backend sends `{"message","code"}`; a known code has a
-            // sentence in the reader's language, and the backend's own text is
-            // the fallback rather than something discarded.
-            let message = event.data;
-            let code: string | undefined;
-            try {
-              const parsed = JSON.parse(event.data);
-              if (typeof parsed?.message === "string") message = parsed.message;
-              if (typeof parsed?.code === "string") code = parsed.code;
-            } catch {
-              /* non-JSON payload — the raw text is what there is */
-            }
-            settle();
-            setSendError(failed(translateStreamError(code, t) ?? message, false));
-            break;
-          }
-          if (event.type === "done") {
-            sawDone = true;
-            // A turn that produced no tokens still has its answer in the
-            // snapshot, and a turn that paused for approval says so there.
-            let finalContent: string | undefined;
-            let paused = false;
-            if (event.data) {
-              try {
-                const snapshot = JSON.parse(event.data);
-                paused = snapshot?.conversationState === "AWAITING_HUMAN";
-                if (!streamedAnything && Array.isArray(snapshot?.conversationSteps)) {
-                  // The LAST agent message, never a join across steps.
-                  // `sendMessageStreaming` posts to `/agents/{id}/stream` with no
-                  // query params, so unlike the `returnCurrentStepOnly=true`
-                  // calls this replaced, the `done` snapshot carries the whole
-                  // conversation. Joining it filled the new bubble with every
-                  // reply in the thread — the entire history rendered a second
-                  // time, and on a paused turn directly above the pause banner.
-                  // `use-chat` and `use-operator-chat` both take only the last
-                  // output for the same reason.
-                  const agentSteps = parseConversationSteps(snapshot.conversationSteps).filter(
-                    (m) => m.role === "agent",
-                  );
-                  finalContent = agentSteps[agentSteps.length - 1]?.content;
-                }
-              } catch {
-                /* an unreadable snapshot costs the fallback text, not the turn */
-              }
-            }
-            settle(finalContent);
-            if (paused) {
-              setSendError(
-                failed(
-                  t(
-                    "Workforce.thread.pausedForApproval",
-                    "This turn is paused waiting for a human decision. It resumes once the request is approved.",
-                  ),
-                  true,
-                ),
-              );
-            }
-            // The stream is logically over; abort so the reader resolves now
-            // instead of waiting for the server to close.
-            abort.abort();
-            break;
-          }
-        }
-
-        // A stream that ended without `done` still has to settle, or the
-        // placeholder streams forever — but settling silently was wrong: it
-        // presented a truncated reply as a finished one, with no way to tell
-        // and nothing to do about it.
-        settle();
-        if (!sawDone && !sawError && !abort.signal.aborted) {
-          setSendError(
-            failed(
-              t(
-                "Workforce.thread.streamEnded",
-                "The connection ended before the reply finished. What arrived is above — send again to retry.",
-              ),
-              false,
-            ),
-          );
-        }
-        updateActivityRef.current(boardId, memberId);
-      } catch (err) {
-        // Expected once `done` has already aborted the reader.
-        if (err instanceof DOMException && err.name === "AbortError") {
-          settle();
-        } else if (isApiError(err) && err.status === 409) {
-          // The send was rejected WITHOUT being consumed because the
-          // conversation is paused. Both the placeholder and the optimistic
-          // user message have to go: the backend never received it, and
-          // leaving it in the transcript shows a message as sent that was not.
-          // `dropTurn` already removed the message: the backend never received
-          // it, so whatever `failed` records here has nothing left to withdraw.
-          // A paused error offers a link to the approvals queue rather than a
-          // Retry, so it is never read either way.
-          dropTurn();
-          setSendError(
-            failed(
-              t(
-                "Workforce.thread.pausedRejected",
-                "This conversation is paused waiting for a human decision, so the message was not sent.",
-              ),
-              true,
-            ),
-          );
-        } else {
-          settle();
-          setSendError(failed(getErrorMessage(err), false));
-        }
-      } finally {
-        abortRef.current = null;
-        sendingRef.current = false;
-        setIsLoading(false);
+      // A stream that ended without `done` or `error` — a dropped connection,
+      // a proxy timing out — presented a truncated reply as a finished one.
+      // Say so; what arrived stays.
+      if (result.outcome === "sent" && !turn.done && !turn.error && !turn.stopped) {
+        hooksRef.current?.failed(
+          t(
+            "Workforce.thread.streamEnded",
+            "The connection ended before the reply finished. What arrived is above — send again to retry.",
+          ),
+          false,
+          turn.tokens ? null : lastUserMessageId(controller),
+        );
       }
+      if (result.outcome !== "ignored") updateActivityRef.current(boardId, memberId);
     },
-    [conversationId, isLoading, inputPrefill, memberId, boardId, t],
+    [conversationId, isLoading, inputPrefill, memberId, boardId, t, controller],
   );
 
-  /** Stop generating — the stream is abandoned, what arrived is kept. */
+  /** Stop generating — the stream ends, what arrived is kept, the server stops the turn. */
   const handleStop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+    if (turnRef.current) turnRef.current.stopped = true;
+    void controller.stop();
+  }, [controller]);
 
   /**
    * Re-send the turn that failed.
@@ -1164,11 +1112,11 @@ function WorkforceThread() {
     const previous = sendError;
     if (!previous) return;
     setSendError(null);
-    if (previous.pendingUserMessage) {
-      setMessages((prev) => prev.filter((msg) => msg !== previous.pendingUserMessage));
+    if (previous.pendingUserMessageId) {
+      setMessages(messages.filter((msg) => msg.id !== previous.pendingUserMessageId));
     }
     void handleSend(previous.retryText, previous.retryAttachments);
-  }, [sendError, handleSend]);
+  }, [sendError, handleSend, messages, setMessages]);
 
   // ─── Starting state ──────────────────────────────────────────
   if (isStarting) {
@@ -1365,8 +1313,8 @@ function WorkforceThread() {
                   {/* Attachment rendering on messages */}
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="mb-1.5 space-y-1.5">
-                      {msg.attachments.map((att) => (
-                        <div key={att.storageRef}>
+                      {msg.attachments.map((att, attIndex) => (
+                        <div key={`${att.fileName}-${attIndex}`}>
                           {/* Image preview */}
                           {isImageMime(att.mimeType) && att.previewUrl ? (
                             <img
@@ -1417,7 +1365,26 @@ function WorkforceThread() {
                   {msg.role === "agent" ? (() => {
                     // A placeholder with nothing in it yet is the reply on its
                     // way, not an empty answer.
-                    if (msg.streaming && !msg.content) return <TypingDots />;
+                    if (msg.isStreaming && !msg.content) return <TypingDots />;
+                    // Images the agent designer put in the output (the
+                    // controller keeps only safe URIs; a model's image in text
+                    // is a link, via the renderer).
+                    if (msg.images?.length && !msg.content) {
+                      return (
+                        <div className="flex flex-wrap gap-2" data-testid="message-images">
+                          {msg.images.map((image, i) => (
+                            <img
+                              key={`${image.uri}-${i}`}
+                              src={image.uri}
+                              alt={image.alt ?? ""}
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="max-h-80 max-w-full rounded-lg"
+                            />
+                          ))}
+                        </div>
+                      );
+                    }
                     const parsed = parseTranscriptContent(msg.content);
                     if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
                     return (

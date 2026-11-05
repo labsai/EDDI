@@ -948,3 +948,36 @@ describe("WorkforceThread – Attachment Features", () => {
     });
   });
 });
+
+describe("WorkforceThread – on the shared controller (phase 3c)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the image output items the agent designer configured", async () => {
+    setupMocks({
+      sendMessageStreaming: (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(
+        async function* () {
+          yield {
+            type: "done",
+            data: JSON.stringify({
+              conversationState: "READY",
+              conversationOutputs: [
+                { output: [{ type: "image", uri: "https://cdn.example/chart.png", alt: "Chart" }] },
+              ],
+            }),
+          };
+        },
+      ),
+    });
+    renderThread();
+    await waitForInit();
+    const user = userEvent.setup();
+    await user.type(screen.getByPlaceholderText(/Message Test Agent/i), "Show me");
+    await user.click(screen.getByRole("button", { name: /Send/i }));
+
+    const image = await screen.findByRole("img", { name: "Chart" });
+    expect(image).toHaveAttribute("src", "https://cdn.example/chart.png");
+    expect(screen.queryByText(/No response/i)).not.toBeInTheDocument();
+  });
+});

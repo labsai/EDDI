@@ -167,8 +167,13 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
     },
     operator: { status: "no", reason: "the operator chat renders text replies only (its own loop until phase 6)" },
     "workforce-thread": {
-      status: "no",
-      reason: "the member thread keeps text replies only; image items need its move onto AgentConversation",
+      status: "yes",
+      check: async (page) => {
+        const input = page.getByTestId("thread-input");
+        await input.fill(`Please ${IMAGE_OUTPUT_TRIGGER}`);
+        await input.press("Enter");
+        await expect(page.getByTestId("message-images").locator("img")).toBeVisible({ timeout: 15_000 });
+      },
     },
   },
   "quick-replies": {
@@ -181,7 +186,10 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
       },
     },
     operator: { status: "no", reason: "the operator chat renders no quick replies" },
-    "workforce-thread": { status: "no", reason: "the member thread renders no quick replies" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks quick replies, but it renders none yet",
+    },
   },
   "input-field": {
     "chat-panel": {
@@ -189,7 +197,10 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
       reason: "partial support; no MSW agent sends inputField — see components/chat/__tests__ (secret-input-field)",
     },
     operator: { status: "no", reason: "the operator chat ignores inputField" },
-    "workforce-thread": { status: "no", reason: "the member thread ignores inputField" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks the requested field, but it renders no field yet",
+    },
   },
   "secret-input": {
     "chat-panel": {
