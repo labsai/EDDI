@@ -2778,7 +2778,10 @@ format is sent on these requests.
 
 A task in `tool` mode **without any other tool** still works — every turn is a tool loop that only
 offers `reply` — but where the provider supports native JSON mode, `text` is the cheaper choice (logged
-at INFO the first time). Providers without a forced tool mode (Ollama, jlama, Hugging Face,
+at INFO the first time). Every `tool`-mode turn is a tool loop, and a tool loop adds its answer —
+here the reply tool's JSON — to the output unless `parameters.addToOutput` is `"false"`, even for a task
+that has no other tool and so added nothing before. When a `postResponse` template renders the visible
+answer, set `addToOutput` to `"false"`. Providers without a forced tool mode (Ollama, jlama, Hugging Face,
 Vertex Gemini, Bedrock, Oracle GenAI, OpenAI-compatible servers) get `auto`; the deploy logs it at
 INFO. Anthropic rejects a forced tool call together with extended thinking — use `auto` there.
 `eddi_llm_answer_tool_total{outcome}` counts `reply`, `text`, `duplicate`, `discarded_by_pause`,

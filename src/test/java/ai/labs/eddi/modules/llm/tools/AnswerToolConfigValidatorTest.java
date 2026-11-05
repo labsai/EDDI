@@ -78,6 +78,20 @@ class AnswerToolConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("a blank answerToolName saves as the default reply, as the runtime reads it; collisions still use reply")
+    void blankNameIsTheDefault() {
+        var task = toolTask("true", SCHEMA);
+        task.setAnswerToolName("");
+        assertDoesNotThrow(() -> AnswerToolConfigValidator.validate(task, "t"));
+        task.setAnswerToolName("   ");
+        assertDoesNotThrow(() -> AnswerToolConfigValidator.validate(task, "t"));
+        assertEquals("reply", AnswerToolConfigValidator.toolName(task));
+
+        task.setToolRateLimits(Map.of("reply", 5));
+        assertTrue(refusal(task).contains("toolRateLimits"));
+    }
+
+    @Test
     @DisplayName("tool mode without convertToObject, without a schema, or with a non-object root is refused")
     void needsConvertToObjectAndObjectSchema() {
         assertTrue(refusal(toolTask(null, SCHEMA)).contains("convertToObject"));

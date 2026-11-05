@@ -56,3 +56,12 @@ answers by calling it.
 [`LlmStore.java`](../../src/main/java/ai/labs/eddi/configs/llm/mongo/LlmStore.java),
 [`langchain.md`](../langchain.md#answering-through-a-reply-tool-answermode-tool),
 [`llm-resilience.md`](../llm-resilience.md).
+
+**Review follow-ups.** A `modelCascade` on a `tool`-mode task with no other tool ran every step on the
+legacy text path, because the cascade's tool-loop gate was `task.isAgentMode()` alone, so the reply tool
+was never offered. `CascadingModelExecutor` now also enters the tool loop when `answerMode` is `tool`.
+`enableInAgentMode` still gates a task with other tools, because `LlmTask` skips the cascade for those
+before this point. A blank `answerToolName` is now saved as the default `reply`, which is how the runtime
+already read it; before, it was refused with a 400. `langchain.md` now warns that a tool-mode turn adds the
+reply JSON to the output unless `addToOutput` is `"false"`, and tells authors to set that when a
+`postResponse` template renders the answer.

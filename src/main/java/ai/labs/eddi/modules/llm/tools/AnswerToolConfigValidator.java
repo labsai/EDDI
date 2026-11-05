@@ -138,7 +138,9 @@ public final class AnswerToolConfigValidator {
             throw new IllegalArgumentException(
                     fieldPath + ".answerToolChoice must be \"required\" or \"auto\", was \"" + task.getAnswerToolChoice() + "\"");
         }
-        if (task.getAnswerToolName() != null && !TOOL_NAME.matcher(task.getAnswerToolName().trim()).matches()) {
+        // Blank is the default, exactly as toolName() reads it at runtime.
+        if (task.getAnswerToolName() != null && !task.getAnswerToolName().isBlank()
+                && !TOOL_NAME.matcher(task.getAnswerToolName().trim()).matches()) {
             throw new IllegalArgumentException(fieldPath + ".answerToolName must be 1-64 letters, digits, '_' or '-'");
         }
         if (!MODE_TOOL.equals(mode)) {
