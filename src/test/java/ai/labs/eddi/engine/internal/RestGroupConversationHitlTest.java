@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -645,6 +646,67 @@ class RestGroupConversationHitlTest {
                     .findFirst().orElseThrow();
             assertTrue(error.error().contains("re-read approval-status"), error.error());
             verify(eventSink).close();
+        }
+    }
+
+    @Nested
+    @DisplayName("Invalid review fields — the 400 names the refused field on both approve paths")
+    class InvalidApprovalDetail {
+
+        private GroupApprovalRequest refusedRequest() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any()))
+                    .thenThrow(new ReviewRefusalException("editedAnswer is only valid with verdict APPROVED"));
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.REJECTED);
+            request.setDecision(decision);
+            return request;
+        }
+
+        @Test
+        @DisplayName("approve → 400 carrying the refusal message")
+        void approveReturnsTheDetail() throws Exception {
+            Response response = restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, refusedRequest());
+
+            assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+            assertEquals("Invalid approval request: editedAnswer is only valid with verdict APPROVED", String.valueOf(response.getEntity()));
+        }
+
+        @Test
+        @DisplayName("approve (streaming) → the same detail in the error event, not the old fixed 'unknown task id' text")
+        void streamingApproveReturnsTheSameDetail() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), any())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(mock(OutboundSseEvent.class));
+
+            restGroupConversation.approveGroupPhaseStreaming(GROUP_ID, GC_ID, refusedRequest(), eventSink, sse);
+
+            var errorEvent = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization, atLeastOnce()).serialize(errorEvent.capture());
+            var error = errorEvent.getAllValues().stream()
+                    .filter(GroupConversationEventSink.GroupErrorEvent.class::isInstance)
+                    .map(GroupConversationEventSink.GroupErrorEvent.class::cast)
+                    .findFirst().orElseThrow();
+            assertEquals("Invalid approval request: editedAnswer is only valid with verdict APPROVED", error.error());
+            verify(eventSink).close();
+        }
+
+        @Test
+        @DisplayName("only the review validation's own refusal is shown: capped and control-stripped; any other IllegalArgumentException gets the fixed hint")
+        void curatedOnly() {
+            String capped = RestGroupConversation.invalidApprovalDetail(new ReviewRefusalException("x".repeat(500)));
+            assertEquals("Invalid approval request: ".length() + 300, capped.length());
+            assertEquals("Invalid approval request: a b",
+                    RestGroupConversation.invalidApprovalDetail(new ReviewRefusalException("a" + (char) 10 + "b")));
+            String fixed = RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException("db host 10.0.0.5 refused"));
+            assertTrue(fixed.contains("unknown task id"), fixed);
+            assertFalse(fixed.contains("10.0.0.5"), fixed);
         }
     }
 

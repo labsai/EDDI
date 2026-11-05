@@ -485,5 +485,6 @@ class GroupLifecycleOpsTest {
         assertEquals(0.25, gc.getTotalCost());
         assertEquals(List.of("sub-1"), List.copyOf(gc.getCreatedAgentIds()),
                 "a sub-agent created in a follow-up must be in the cleanup registry");
+        verify(followUpFacade).chargeTeamBudget(gc); // F6: the follow-up's spend goes to the team
     }
 }

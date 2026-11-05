@@ -18,6 +18,8 @@ import type {
 } from "@/lib/api/groups";
 import { DEFAULT_VOTE_QUORUM } from "@/lib/api/groups";
 import { getStylePhases } from "@/lib/hitl-config";
+import { HumanTieBreakFields } from "@/components/groups/human-tie-break-fields";
+import { ServiceJudgeFields } from "@/components/groups/service-judge-fields";
 import {
   CONVERGENCE_MIN_REPEATS_FLOOR,
   DEFAULT_CONVERGENCE_THRESHOLD,
@@ -36,6 +38,9 @@ function defaultVoteConfig(existing?: VoteConfig | null): VoteConfig {
     weights: existing?.weights ?? {},
     weightByConfidence: existing?.weightByConfidence ?? false,
     tiePolicy: existing?.tiePolicy ?? "NO_DECISION",
+    // Carried, not rebuilt: dropping it would send a HUMAN_DECIDES vote back to
+    // the single-human default on every save.
+    ...(existing?.humanTieBreak ? { humanTieBreak: existing.humanTieBreak } : {}),
   };
 }
 
@@ -459,16 +464,12 @@ export function GroupPhaseEditor({
             )}
 
             {canConverge && convergence?.enabled && convergence.judge === "SERVICE" && (
-              <p
-                className="mt-1.5 flex items-start gap-1 text-[10px] text-muted-foreground"
-                data-testid={`phase-convergence-service-note-${idx}`}
-              >
-                <Info className="mt-0.5 h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-                {t(
-                  "groups.judgeServiceNote",
-                  "Accepted but not yet wired — the engine falls back to the moderator and logs a warning.",
-                )}
-              </p>
+              <ServiceJudgeFields
+                idx={idx}
+                service={convergence.service}
+                onChange={(service) => patchConvergence(idx, { service })}
+                inputCls={inputCls}
+              />
             )}
 
             {/* Ballot configuration (I14) — every VOTE phase needs one. */}
@@ -575,14 +576,7 @@ export function GroupPhaseEditor({
                     >
                       <option value="NO_DECISION">{t("groups.voteTieNoDecision", "No decision")}</option>
                       <option value="MODERATOR_DECIDES">{t("groups.voteTieModerator", "Moderator decides")}</option>
-                      {/* Still save-time rejected by the backend pending its resume
-                          machinery — offered disabled rather than omitted, so a
-                          config that already carries it (impossible today, but not
-                          worth a crash if one ever does) is visibly explained
-                          rather than silently reset by this dropdown. */}
-                      <option value="HUMAN_DECIDES" disabled>
-                        {t("groups.voteTieHuman", "Human decides (not yet available)")}
-                      </option>
+                      <option value="HUMAN_DECIDES">{t("groupTieBreak.policyOption", "A human decides")}</option>
                     </select>
                   </div>
                   <label className="flex items-end gap-1.5 pb-1.5 text-[11px] text-foreground">
@@ -596,6 +590,16 @@ export function GroupPhaseEditor({
                     <span>{t("groups.voteWeightByConfidence", "Weight by confidence")}</span>
                   </label>
                 </div>
+                {phase.voteConfig?.tiePolicy === "HUMAN_DECIDES" && (
+                  <HumanTieBreakFields
+                    idx={idx}
+                    tieBreak={phase.voteConfig.humanTieBreak}
+                    members={config.members}
+                    hasModerator={!!config.moderatorAgentId}
+                    onChange={(humanTieBreak) => patchVoteConfig(idx, { humanTieBreak })}
+                    inputCls={inputCls}
+                  />
+                )}
               </div>
             )}
           </div>

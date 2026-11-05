@@ -234,6 +234,7 @@ async function snapshot(page: Page): Promise<PageSnapshot> {
     const ATTRS = ["alt", "aria-label", "title", "placeholder", "aria-description", "aria-roledescription"];
     const attributes: { attr: string; value: string; tag: string }[] = [];
     for (const el of Array.from(document.querySelectorAll("*"))) {
+      if (el.closest("[data-log-content]")) continue;
       for (const attr of ATTRS) {
         const value = el.getAttribute(attr);
         if (value) attributes.push({ attr, value, tag: el.tagName.toLowerCase() });
@@ -247,7 +248,19 @@ async function snapshot(page: Page): Promise<PageSnapshot> {
     return {
       url: location.pathname,
       title: document.title,
-      text: document.body.innerText,
+      // Log messages are the server's own output shown verbatim (they honestly
+      // identify the engine), not product chrome, so the text of elements marked
+      // data-log-content is left out of the scan; the rest of the page is not.
+      text: (() => {
+        const logs = Array.from(document.querySelectorAll<HTMLElement>("[data-log-content]"));
+        const previous = logs.map((el) => el.style.display);
+        logs.forEach((el) => (el.style.display = "none"));
+        try {
+          return document.body.innerText;
+        } finally {
+          logs.forEach((el, i) => (el.style.display = previous[i] ?? ""));
+        }
+      })(),
       attributes,
       headMeta,
       images: Array.from(document.images).map((i) => i.currentSrc || i.src),
@@ -292,6 +305,24 @@ async function resetBrand(request: APIRequestContext) {
   const res = await request.delete(`${API_BASE}/administration/branding`);
   expect([200, 204], `DELETE /administration/branding answered ${res.status()}`).toContain(res.status());
 }
+
+// Outside the full-stack block so it needs no server: the Logs route is walked
+// without waiting for a log line to render, so without this the exclusion could
+// be removed and the walk would still pass on a page that had no log yet.
+test("snapshot leaves marked log text out of the scan and keeps unmarked labels", async ({ page }) => {
+  await page.setContent(`
+    <main>
+      <div data-log-content><span title="EDDI log title">EDDI started at boot</span></div>
+      <label aria-label="EDDI Settings label">EDDI Settings</label>
+    </main>`);
+  const { text, attributes } = await snapshot(page);
+  expect(text).not.toContain("EDDI started at boot");
+  expect(text).toContain("EDDI Settings");
+  expect(attributes.map((a) => a.value)).not.toContain("EDDI log title");
+  expect(attributes.map((a) => a.value)).toContain("EDDI Settings label");
+  // The hidden log element is restored after the scan.
+  await expect(page.getByText("EDDI started at boot")).toBeVisible();
+});
 
 test.describe("Brand leak — Full Stack", () => {
   test.describe.configure({ mode: "serial", timeout: 900_000 });

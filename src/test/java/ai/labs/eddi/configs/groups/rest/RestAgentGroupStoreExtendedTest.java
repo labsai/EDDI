@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import io.quarkus.security.ForbiddenException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -75,6 +76,29 @@ class RestAgentGroupStoreExtendedTest {
             restStore.updateGroup("group1", 2, config);
 
             verify(documentDescriptorStore).setDescriptor(eq("group1"), eq(2), any(DocumentDescriptor.class));
+        }
+
+        @Test
+        @DisplayName("an unreadable stored version cannot be used to drop a teamBudget without admin")
+        void unreadableStoredVersionNeedsAdminForTheTeamBudgetCheck() throws Exception {
+            var config = new AgentGroupConfiguration(); // teamBudget: null
+            config.setName("Group");
+            when(groupStore.read("group1", 1)).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+            assertThrows(ForbiddenException.class, () -> restStore.updateGroup("group1", 1, config));
+            verify(groupStore, never()).update(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("a group that does not exist is reported as missing, not as an admin-only teamBudget edit")
+        void missingStoredGroupIsNotTreatedAsATeamBudgetChange() throws Exception {
+            var config = new AgentGroupConfiguration(); // teamBudget: null
+            config.setName("Group");
+            when(groupStore.read("missing", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+            when(groupStore.update("missing", 1, config)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> restStore.updateGroup("missing", 1, config));
+            verify(groupStore).update("missing", 1, config);
         }
 
         @Test

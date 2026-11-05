@@ -14,6 +14,7 @@ import { HandoffInbox } from "@/components/groups/handoff-inbox";
 import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
+import { TeamBudgetCard } from "@/components/workforce/team-budget-card";
 import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
@@ -282,6 +283,8 @@ export function GroupWorkspacePage() {
           value={workspace.metrics.lastRunAt ? new Date(workspace.metrics.lastRunAt).toLocaleString() : t("groupWorkspace.never", "Never")}
         />
       </div>
+
+      {groupId && <TeamBudgetCard groupId={groupId} />}
 
       {Object.keys(workspace.metrics.perMemberStats).length > 0 && (
         <div className="rounded-xl border border-border bg-card p-4">

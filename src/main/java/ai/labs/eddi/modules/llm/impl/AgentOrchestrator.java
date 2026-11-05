@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -305,6 +307,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile ISharedArtifactStore sharedArtifactStore;
 
     /**
+     * The sampled audit, told about every allowed tool call. Field-injected for the
+     * same reason as the stores above; null under direct construction, where no
+     * call is sampled.
+     */
+    @Inject
+    volatile SampledAuditRecorder sampledAuditRecorder;
+
+    /**
      * M-A1: the USE check {@code recruit_agent} applies on behalf of the
      * discussion's owner. Field-injected for the same reason as the stores above;
      * null under direct construction, where recruitment is unchecked as before.
@@ -463,6 +473,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.mcpToolsProvider = new McpToolsProvider(agentStore, workflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
+        this.toolLoopRunner.setAllowedCallObserver(AllowedToolCallObserver.deferred(() -> sampledAuditRecorder));
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
@@ -739,8 +750,12 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * @param toolSources
      *            dispatch name → provenance tag for gate qualified matching
      * @param builtInSpecs
-     *            built-in specs only (copy taken before external merge — LAZY needs
-     *            it to activate discovered built-ins)
+     *            the specs LAZY keeps behind {@code discover_tools} and activates
+     *            from: by default the built-in specs (copy taken before external
+     *            merge); with {@code lazySources} naming http/mcp/a2a, every
+     *            lazily-managed spec of those sources too (see
+     *            {@link LazyToolCatalog#complete}). A call to one of them that is
+     *            not active is refused, not run
      * @param toolCanonicalNames
      *            dispatch name → configuration slug, for built-ins only. Lets the
      *            executor boundary price a call and pick its cache TTL under the
@@ -817,8 +832,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // different request shape and a different cost, from a refactor billed as a
         // pure move.
         Boolean builtInsEnabled = task.getEnableBuiltInTools();
-        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
-                && builtInsEnabled != null && builtInsEnabled) {
+        // lazySources naming http/mcp/a2a: the meta-tool's catalog is only known
+        // once phase 2 has merged, so the name is reserved here (a remote tool still
+        // cannot take it) and LazyToolCatalog.complete fills it in. Without such a
+        // source this is the unchanged built-in-only path below.
+        boolean externalLazy = LazyToolCatalog.externalLazy(task);
+        boolean lazyBuiltins = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
+                && builtInsEnabled != null && builtInsEnabled
+                && LazyToolCatalog.lazySources(task).contains(LazyToolCatalog.SOURCE_BUILTIN);
+        Set<String> phaseOneNames = new HashSet<>();
+        if (externalLazy) {
+            merger.specsSoFar().forEach(spec -> phaseOneNames.add(spec.name()));
+            merger.addContribution("builtin", LazyToolCatalog.placeholder());
+        } else if (lazyBuiltins) {
             merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 
@@ -831,6 +857,9 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
+        if (externalLazy) {
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+        }
         var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
                 assembled.toolEndpoints(), assembled.toolRequestResolvers());
@@ -1137,15 +1166,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /**
-     * The turn's {@link ToolAssemblyContext}, built once and shared by every
-     * provider so they all read one consistent snapshot.
-     * <p>
-     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
-     * each provider: it can come from a group-injected context variable, and two
-     * providers resolving it independently could disagree if the step data changed
-     * between reads.
-     */
-    /**
      * What an approved tool call of this conversation must not write to: the acting
      * agent, its workflows and their extension resources, resolved from the stores
      * now (L13). See {@link ActingAgentResources}.
@@ -1154,6 +1174,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return ActingAgentResources.resolve(agentStore, workflowStore, resourceClientLibrary, memory.getAgentId(), memory.getAgentVersion());
     }
 
+    /**
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
+     * <p>
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
+     */
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
         return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
                 DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),
