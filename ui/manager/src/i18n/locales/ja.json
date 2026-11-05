@@ -4203,7 +4203,7 @@
     "chooseOne": "選択肢を 1 つ選んでください",
     "rationalePlaceholder": "理由 (任意)",
     "inboxBadge": "決選",
-    "inboxReason": "{{member}} さんが同数の投票を決めるのを待っています",
+    "inboxReason": "{{member}} さんが投票の結論を決めるのを待っています",
     "policyOption": "人が決める",
     "decider": "決定者",
     "timeout": "タイムアウト (ISO-8601)",

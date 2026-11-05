@@ -395,7 +395,8 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * groups;</li>
      * <li>a group containing HUMAN members may not be USED as a nested GROUP member
      * (one level deep here; {@code MemberTurnExecutor} carries the runtime backstop
-     * for configs edited afterwards);</li>
+     * for configs edited afterwards) — nor may a group whose VOTE phase uses
+     * {@code tiePolicy: HUMAN_DECIDES}, which pauses the same way;</li>
      * <li>{@code humanMemberConfig.turnTimeout} must parse as an ISO-8601
      * duration;</li>
      * <li>a HUMAN moderator is allowed but warned about — every synthesis then
@@ -419,6 +420,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                             "members['" + member.agentId() + "'] is a nested group that contains HUMAN members — "
                                     + "human turns cannot pause a nested discussion (I6 v1); remove the human from the "
                                     + "child group or flatten the hierarchy");
+                }
+                if (child != null && hasHumanDecidesVote(child)) {
+                    throw new IllegalArgumentException(
+                            "members['" + member.agentId() + "'] is a nested group with a VOTE phase using tiePolicy "
+                                    + "HUMAN_DECIDES — a tie-break pause cannot pause a nested discussion; use "
+                                    + "MODERATOR_DECIDES or NO_DECISION in the child group or flatten the hierarchy");
                 }
             }
         }
@@ -489,6 +496,17 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
         }
         return problems;
+    }
+
+    /**
+     * True if one of the config's explicit phases is a VOTE whose tie policy is
+     * {@code HUMAN_DECIDES}. Preset styles never expand to that policy, so only
+     * explicit phases are read.
+     */
+    static boolean hasHumanDecidesVote(AgentGroupConfiguration config) {
+        return config.getPhases() != null && config.getPhases().stream()
+                .anyMatch(p -> p != null && p.voteConfig() != null
+                        && p.voteConfig().tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES);
     }
 
     /** True if the config lists at least one HUMAN member. */

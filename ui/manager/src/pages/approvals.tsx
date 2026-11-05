@@ -267,7 +267,8 @@ function ApprovalQueueRow({
             ? item.toolNames.join(", ")
             : isHumanTurn
               ? isTieBreak
-                ? t("groupTieBreak.inboxReason", "Waiting on {{member}} to break a tied vote", {
+                ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
+                  t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
                     member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
                   })
                 : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {

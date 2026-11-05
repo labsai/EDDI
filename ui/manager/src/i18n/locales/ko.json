@@ -4203,7 +4203,7 @@
     "chooseOne": "옵션을 하나 선택하세요",
     "rationalePlaceholder": "이유 (선택)",
     "inboxBadge": "동률 결정",
-    "inboxReason": "{{member}}님이 동률 투표를 결정하기를 기다리는 중",
+    "inboxReason": "{{member}}님이 투표를 결정하기를 기다리는 중",
     "policyOption": "사람이 결정",
     "decider": "결정자",
     "timeout": "제한 시간 (ISO-8601)",

@@ -4391,7 +4391,7 @@
     "chooseOne": "اختر خيارًا واحدًا",
     "rationalePlaceholder": "السبب (اختياري)",
     "inboxBadge": "حسم التعادل",
-    "inboxReason": "بانتظار {{member}} لحسم تعادل التصويت",
+    "inboxReason": "بانتظار {{member}} لحسم التصويت",
     "policyOption": "يقرر إنسان",
     "decider": "صاحب القرار",
     "timeout": "المهلة (ISO-8601)",

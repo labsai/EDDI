@@ -4250,7 +4250,7 @@
     "chooseOne": "Choisissez une option",
     "rationalePlaceholder": "Pourquoi (facultatif)",
     "inboxBadge": "Départage",
-    "inboxReason": "En attente de {{member}} pour départager le vote",
+    "inboxReason": "En attente de {{member}} pour trancher le vote",
     "policyOption": "Une personne décide",
     "decider": "Décideur",
     "timeout": "Délai (ISO-8601)",

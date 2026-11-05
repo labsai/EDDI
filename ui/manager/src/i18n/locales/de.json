@@ -3975,7 +3975,7 @@
     "chooseOne": "Wähle eine Option",
     "rationalePlaceholder": "Begründung (optional)",
     "inboxBadge": "Stichentscheid",
-    "inboxReason": "Wartet auf {{member}}, um ein Unentschieden aufzulösen",
+    "inboxReason": "Wartet auf {{member}}, um die Abstimmung zu entscheiden",
     "policyOption": "Ein Mensch entscheidet",
     "decider": "Entscheider",
     "timeout": "Zeitlimit (ISO-8601)",

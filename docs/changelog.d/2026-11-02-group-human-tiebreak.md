@@ -65,6 +65,18 @@ whichever merges second renumbers.
 Humans as task-force executors (`feat/group-human-task-executors`) reuse `HumanRequestDetail` (`kind TASK`).
 Operator/MCP follow-up: [`planning/operator-followups/group-human-tiebreak.md`](../../planning/operator-followups/group-human-tiebreak.md).
 
+### Review follow-ups (2026-11-05)
+
+- `AgentGroupStore.validateHumanMembers` now also refuses a nested GROUP member whose VOTE phase uses
+  `tiePolicy: HUMAN_DECIDES`. The parent's turn cancels a nested pause and records `SKIPPED`, so such a tie
+  could never be decided; it now fails at save time, like a nested HUMAN member.
+- The Manager inbox reason for a tie-break row is cause-neutral ("Waiting on … to decide the vote", 11 locales):
+  a vote that misses quorum pauses with the same `pendingKind`.
+- [Group Human Decisions](../group-human-decisions.md) separates the role check (`eddi-viewer` cannot answer)
+  from the principal check, says the principal check needs authentication, says every new discussion is
+  stamped v5 (an older pod refuses any resume during a rolling upgrade), and that `choice` is required for a
+  tie-break; [MCP Server](../mcp-server.md) says the same for `submit_group_human_input`.
+
 ```decision-log
 | 2026-11-02 | A HUMAN_DECIDES tie-break pauses through the I6 AWAITING_HUMAN_INPUT path, not the approval path | Approval endpoints are binary and carry no content, and any eddi-approver could then set the outcome of a vote; the I6 path already has the decider-or-admin guard, timeouts, crash recovery, CAS and the inbox | A PHASE approval with the choice in the note; letting approvers break ties |
 | 2026-11-02 | GroupConversation schema v5 for PendingHumanInput.detail and RESUME_KIND_TIE_BREAK | Both are resume-consumed: an older pod resolving a tie-break would re-run the vote's last repeat | Riding v4 because the fields are additive |

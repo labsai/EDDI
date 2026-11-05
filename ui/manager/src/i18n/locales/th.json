@@ -4203,7 +4203,7 @@
     "chooseOne": "เลือกหนึ่งตัวเลือก",
     "rationalePlaceholder": "เหตุผล (ไม่บังคับ)",
     "inboxBadge": "ตัดสินผลเสมอ",
-    "inboxReason": "รอ {{member}} ตัดสินผลโหวตที่เสมอกัน",
+    "inboxReason": "รอ {{member}} ตัดสินผลโหวต",
     "policyOption": "ให้คนตัดสิน",
     "decider": "ผู้ตัดสิน",
     "timeout": "หมดเวลา (ISO-8601)",

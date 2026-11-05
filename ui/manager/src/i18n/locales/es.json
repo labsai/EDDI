@@ -4250,7 +4250,7 @@
     "chooseOne": "Elige una opción",
     "rationalePlaceholder": "Motivo (opcional)",
     "inboxBadge": "Desempate",
-    "inboxReason": "Esperando a que {{member}} desempate la votación",
+    "inboxReason": "Esperando a que {{member}} decida la votación",
     "policyOption": "Decide una persona",
     "decider": "Quien decide",
     "timeout": "Tiempo límite (ISO-8601)",

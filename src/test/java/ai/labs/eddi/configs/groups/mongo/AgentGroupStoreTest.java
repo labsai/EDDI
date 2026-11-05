@@ -508,6 +508,34 @@ class AgentGroupStoreTest {
         assertTrue(ex.getMessage().contains("humanTieBreak.decider"), ex.getMessage());
     }
 
+    /**
+     * A nested group's tie-break pause would be cancelled by the parent's turn
+     * (nested pauses are unsupported), so the tie would never be decided — refuse
+     * it at save time, like a nested HUMAN member.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesVote_isRejected() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var child = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null))));
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> store.validateHumanMembers(parent));
+        assertTrue(ex.getMessage().contains("members['g2']") && ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
+
+        var moderatorChild = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.MODERATOR_DECIDES)));
+        doReturn(moderatorChild).when(store).readChildConfig("g2");
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
+    }
+
     @Test
     void votePhase_negativeWeight_isRejected() {
         var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(

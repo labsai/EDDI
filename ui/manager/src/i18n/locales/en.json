@@ -4029,7 +4029,7 @@
     "chooseOne": "Choose one option",
     "rationalePlaceholder": "Why (optional)",
     "inboxBadge": "Tie-break",
-    "inboxReason": "Waiting on {{member}} to break a tied vote",
+    "inboxReason": "Waiting on {{member}} to decide the vote",
     "policyOption": "A human decides",
     "decider": "Decider",
     "timeout": "Timeout (ISO-8601)",

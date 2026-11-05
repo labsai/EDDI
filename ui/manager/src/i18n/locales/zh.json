@@ -4203,7 +4203,7 @@
     "chooseOne": "选择一个选项",
     "rationalePlaceholder": "理由（可选）",
     "inboxBadge": "平局裁决",
-    "inboxReason": "等待 {{member}} 裁决平局投票",
+    "inboxReason": "等待 {{member}} 裁决投票",
     "policyOption": "由人决定",
     "decider": "决定者",
     "timeout": "超时 (ISO-8601)",

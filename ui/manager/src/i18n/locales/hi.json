@@ -4203,7 +4203,7 @@
     "chooseOne": "एक विकल्प चुनें",
     "rationalePlaceholder": "कारण (वैकल्पिक)",
     "inboxBadge": "टाई-ब्रेक",
-    "inboxReason": "बराबरी तोड़ने के लिए {{member}} की प्रतीक्षा",
+    "inboxReason": "मतदान का फ़ैसला करने के लिए {{member}} की प्रतीक्षा",
     "policyOption": "एक व्यक्ति तय करे",
     "decider": "निर्णायक",
     "timeout": "समय-सीमा (ISO-8601)",

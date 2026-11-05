@@ -103,6 +103,34 @@ describe("ApprovalsPage — which agent or group is this?", () => {
     expect(await screen.findByText(/Waiting on Ana Alvarez to speak/)).toBeInTheDocument();
   });
 
+  it("words a tie-break row so it also fits a vote that missed quorum", async () => {
+    serve({
+      groups: [
+        {
+          ...base,
+          conversationId: "gc-tie",
+          groupId: "grp1",
+          pauseType: "HUMAN_TURN",
+          pendingKind: "TIE_BREAK",
+          pendingMemberId: "member-ana",
+          pauseReason: "Vote did not reach quorum — waiting for Ana Alvarez to decide",
+        },
+      ],
+    });
+    server.use(
+      http.get("*/groupstore/groups/grp1", () =>
+        HttpResponse.json({
+          name: "Launch Council",
+          style: "CUSTOM",
+          members: [{ agentId: "member-ana", displayName: "Ana Alvarez", memberType: "HUMAN" }],
+        }),
+      ),
+    );
+    renderWithProviders(<ApprovalsPage />);
+    expect(await screen.findByText(/Waiting on Ana Alvarez to decide the vote/)).toBeInTheDocument();
+    expect(screen.queryByText(/tied vote/)).not.toBeInTheDocument();
+  });
+
   it("lays the table out as cards on a phone, so the actions sit with their row", async () => {
     serve({ regular: [{ ...base, conversationId: "conv-1", agentId: "agent-a" }] });
     renderWithProviders(<ApprovalsPage />);
