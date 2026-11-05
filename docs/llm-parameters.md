@@ -4,8 +4,13 @@
 > by `python scripts/gen-llm-parameters-doc.py`. Do not edit by hand.
 
 Every LLM task takes a flat `parameters` map of **strings**. This page lists, per provider, every
-parameter EDDI reads, what it does, and which model versions reject it or ignore it. The Manager shows
+tunable parameter EDDI reads, what it does, and which model versions reject it or ignore it. The Manager shows
 the same information as typed controls under **Model settings** in the LLM task editor.
+
+The connection keys every provider takes (the model id, credentials, `baseUrl`, `timeout`, request logging)
+are not tunables and are not repeated per provider below. They are listed in
+[langchain.md](langchain.md#configuration-parameters). The model id is `modelName` for most providers, `model` for
+`ollama`, `modelId` for `bedrock`, `huggingface` and `gemini-vertex`, and `deploymentName` for `azure-openai`.
 
 ```json
 {

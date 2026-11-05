@@ -998,6 +998,10 @@ public class Conversation implements IConversation {
         return prop;
     }
 
+    /** Spend and usage records the secret-context scrub leaves alone. */
+    private static final Set<String> ACCOUNTING_KEYS = Set.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_METERED_COST,
+            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
+
     private boolean isSecretContextKey(String dataKey) {
         return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));
     }
@@ -1089,6 +1093,13 @@ public class Conversation implements IConversation {
             if (isSecretContextKey(datum.getKey())) {
                 writable.setResult(secretContextPlaceholder());
                 writable.setPossibleResults(null);
+                continue;
+            }
+            if (ACCOUNTING_KEYS.contains(datum.getKey())) {
+                // Numbers EDDI computed, never text a caller supplied — and the secret
+                // values are the caller's: a secret "0.0042" equal to the turn's cost
+                // turned audit:cost into a placeholder string, which metering and the
+                // budget checks then read as no spend at all.
                 continue;
             }
             Object cleaned = scrubSecretsFrom(datum.getResult(), needles, exact);
@@ -1362,9 +1373,22 @@ public class Conversation implements IConversation {
 
     private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException, ConversationPauseException {
+        boolean first = true;
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
-            conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
-            data.stream().filter(Objects::nonNull).forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
+            var step = conversationMemory.getCurrentStep();
+            step.setCurrentWorkflowId(executableWorkflow.getWorkflowId());
+            // The first workflow gets the supplied data as given — a rerun's step still
+            // holds the previous run's context, which a new value must replace. After
+            // that, a datum an earlier workflow's task replaced stays replaced:
+            // re-storing the original put back the plaintext input a scope:secret
+            // instruction had just vaulted and scrubbed, and the step was persisted
+            // with it.
+            boolean keepReplacements = !first;
+            data.stream().filter(Objects::nonNull).forEach(datum -> {
+                IData<?> current = keepReplacements ? step.getData(datum.getKey()) : null;
+                step.storeData(current != null ? current : datum);
+            });
+            first = false;
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }

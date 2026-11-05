@@ -22,7 +22,7 @@ import java.util.List;
  * <li>{@code ${vars:<key>}} — late-binding, default tenant (works
  * everywhere)</li>
  * <li>{@code ${vars:tenantId/<key>}} — late-binding, explicit tenant</li>
- * <li>{@code {{vars.<key>}}} — template layer (LlmTask system prompts)</li>
+ * <li>{@code {vars.<key>}} — template layer (default tenant only)</li>
  * </ul>
  *
  * @author ginccc

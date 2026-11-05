@@ -11,8 +11,8 @@ leaving a trail of half-wired versions.
 
 1. `list_agent_resources` with the `agentId` — note the agent version, and the type, id,
    version and URI of every resource you will touch.
-2. `read_resource` with `type`, `id` and `version` for each one. Keep the JSON as read:
-   `update_resource` takes the **full** document, not a patch. The `type` names are the
+2. `read_resource` with `resourceType`, `resourceId` and `version` for each one. Keep the JSON as read:
+   `update_resource` takes the **full** document, not a patch. The `resourceType` names are the
    tools' own, not the URI's: `behavior` (rules), `langchain` (LLM tasks), `httpcalls`,
    `mcpcalls`, `output`, `propertysetter`, `dictionaries`, and `rag` (read only).
 
@@ -27,7 +27,7 @@ confirm before writing.
 
 ## 2. Write each changed resource
 
-`update_resource` with `type`, `id`, the **current** `version` and the full edited
+`update_resource` with `resourceType`, `resourceId`, the **current** `version` and the full edited
 `config`. Each call returns the new version URI. Record `old URI → new URI` for each.
 
 - Only the latest version of a document can be updated. A refusal saying "Resource

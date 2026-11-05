@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -199,6 +200,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     @Inject
     GuardrailService guardrailService;
 
+    /**
+     * Re-gates suspended earned-autonomy categories (a runtime overlay on the
+     * tool-approval config). Field-injected for the same reason as
+     * {@link #attachmentForwarder}; null leaves the config as configured.
+     */
+    @Inject
+    AutonomyOverlayService autonomyOverlay;
+
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
     private final IAgentStore agentStore;
@@ -335,6 +344,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             // executeResume, which replays the frozen transcript and applies the
             // verdict; tasks BEFORE it already ran pre-pause, tasks AFTER it run the
             // normal path so the turn completes fully.
+            AutonomyOverlayService.applyToCarrier(autonomyOverlay, memory);
             PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
             HitlDecision resumeDecision = memory.getHitlResumeDecision();
             boolean resumeMode = batch != null && resumeDecision != null;
@@ -474,6 +484,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         if (toolHitlEnabled) {
             effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
                     memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
+            effectiveToolApprovals = AutonomyOverlayService.applyTo(autonomyOverlay, memory, effectiveToolApprovals);
         }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);

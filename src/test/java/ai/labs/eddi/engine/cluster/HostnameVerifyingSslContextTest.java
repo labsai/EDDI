@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.cluster;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -51,6 +52,22 @@ class HostnameVerifyingSslContextTest {
         try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
                 Socket tcp = new Socket(InetAddress.getLoopbackAddress(), server.getLocalPort());
                 SSLSocket layered = (SSLSocket) verifying.getSocketFactory().createSocket(tcp, "nats.example", 4222, true)) {
+            assertEquals("HTTPS", layered.getSSLParameters().getEndpointIdentificationAlgorithm());
+        }
+    }
+
+    /**
+     * The {@code createSocket(Socket, InputStream, autoClose)} overload must not be
+     * the one path that hands back an unverified socket.
+     */
+    @Test
+    void theConsumedInputOverloadVerifiesTheHostNameToo() throws Exception {
+        SSLContext plain = SSLContext.getInstance("TLS");
+        plain.init(null, null, null);
+        SSLContext verifying = new HostnameVerifyingSslContext(plain);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                Socket tcp = new Socket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+                SSLSocket layered = (SSLSocket) verifying.getSocketFactory().createSocket(tcp, (InputStream) null, true)) {
             assertEquals("HTTPS", layered.getSSLParameters().getEndpointIdentificationAlgorithm());
         }
     }

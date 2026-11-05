@@ -16,10 +16,12 @@ Deployment management provides:
 
 ### EDDI Environments
 
-| Environment      | Purpose                            | Access Control             |
-| ---------------- | ---------------------------------- | -------------------------- |
-| **`test`**       | Development and testing            | Same as production         |
-| **`production`** | Live deployments (default)         | Optional OAuth (Keycloak)  |
+| Environment      | Purpose                            |
+| ---------------- | ---------------------------------- |
+| **`test`**       | Development and testing            |
+| **`production`** | Live deployments (default)         |
+
+Authentication is deployment-wide and the same for both environments.
 
 ### Deployment Lifecycle
 
@@ -83,6 +85,10 @@ The deployment of a specific agent is done through a **`POST`** to **`/administr
 | API endpoint  | `/administration/{environment}/deploy/{agentId}`                                         |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **deploy**.                 |
+| `version`     | (`Query parameter`) agent version to deploy (required).                                  |
+| `autoDeploy`  | (`Query parameter`) default `true`.                                                      |
+| `waitForCompletion` | (`Query parameter`) default `false`. `true` waits up to 30 s and returns the final status; otherwise `202` is returned immediately. |
+| Refusals      | `404` agent not found; `429` when the tenant's `maxAgentsPerTenant` quota (distinct agent ids) is exceeded. `GET /administration/{environment}/deploy/{agentId}/preflight?version=N` runs the vault-grant check without deploying, see [Secrets Vault](secrets-vault.md#preflight-before-deploying). |
 
 ### Example _:_
 
@@ -204,8 +210,7 @@ and `mappingsApplied` counts) and requires `eddi-admin`.
 
 ## Running conversations and new agent versions
 
-A conversation used to run on the agent version it started on for its whole life. It can now
-**follow** newer versions of its agent — but only versions its author declared **compatible**.
+A conversation can **follow** newer versions of its agent — but only versions its author declared **compatible**.
 Every save is a **breaking change** unless the save says otherwise, so nothing changes for anyone
 who does not opt in.
 
@@ -459,7 +464,7 @@ Deployment status of an Agent REST API Endpoint
 | Api endpoint  | `/administration/{environment}/deploymentstatus/{agentId}`                                        |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
-| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated). |
+| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated), or `?format=detailed` to add a `failure` object (code, message, and for a missing vault grant the fix) for a deployment in `ERROR`, to a caller who may edit the agent. |
 
 ### Example*:*
 
@@ -714,7 +719,7 @@ orphans. A failed scan is shown as an error with the server's message (it never 
 empty "Scan your platform" state), and a refused purge shows the server's reason, such as the 409
 above.
 
-> **Changed in 6.1.x:** `includeDeleted` was previously an *equality* filter — `true` matched only
+> **Note:** `includeDeleted` is not an *equality* filter — `true` matched only
 > soft-deleted resources instead of adding them to the live ones — and this endpoint defaulted to
 > `true` while the scan defaulted to `false`, so a scan followed by a purge operated on **disjoint**
 > sets. `true` now means "live and soft-deleted", and the default is `false`. A client relying on the

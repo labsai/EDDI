@@ -11,8 +11,8 @@ import java.util.Locale;
  * The machine-readable part of a {@code multipart/report} delivery status
  * notification (RFC 3464), as far as bounce handling needs it.
  * <p>
- * Parsed so that a later phase can mark the outbound ledger row the bounce
- * refers to ({@link #originalMessageId()}) and suppress addresses that fail
+ * Parsed so that the inbound processor marks the outbound ledger row the bounce
+ * refers to ({@link #originalMessageId()}) and suppresses addresses that fail
  * permanently ({@link Recipient#isPermanentFailure()}). It is untrusted input
  * like any other mail: anyone can send something shaped like a bounce, so a
  * caller acts on it only for a message id it actually sent.

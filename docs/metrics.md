@@ -4,13 +4,15 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 ## Quick Start — Grafana Dashboards
 
-E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
-`docker-compose.monitoring.yml`:
+E.D.D.I ships three dashboards that the Kubernetes monitoring component and
+`docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+[Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 166 panels, 22 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -82,9 +84,10 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Persistent Memory — Dream & Summarization` ·
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
-`Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
-`Runtime context (Quarkus / JVM built-ins)`
+`Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
+`Conversation Ratings` · `Alerts`
 
 ---
 
@@ -719,6 +722,23 @@ lists the oldest pauses first, so the cap drops the newest). They read `NaN` unt
 after a failed one. Pauses minus resumes, the old way of estimating the backlog,
 reset with every restart and never saw pauses taken before it; alert on
 `eddi_hitl_pending_oldest_age_seconds` instead (`EddiApprovalWaitingLong`).
+
+**Oversight — approval analytics, sampled audit, earned autonomy** ([hitl-oversight.md](hitl-oversight.md)). No meter carries
+an agent or category tag; the per-category numbers are in `GET /hitl/analytics/summary`.
+
+```text
+eddi_hitl_decision_latency_seconds          # Timer: how long a pause waited for its decision; tags: surface, pause_type
+eddi_hitl_decision_projection_failures_total # Decision units that could not be stored for analytics (a rebuild repairs them)
+eddi_audit_sample_total                     # Allowed calls considered by the sampled audit; tag: outcome (sampled|capped|dropped|skipped)
+eddi_audit_sample_review_total              # Sample verdicts; tag: verdict (OK|FLAGGED)
+eddi_audit_sample_expired_total             # Samples that expired unreviewed — an oversight-capacity signal
+eddi_audit_sample_pending                   # Samples waiting for review, store-wide (gauge)
+eddi_autonomy_recommendation_total          # Recommendations opened; tag: kind (PROMOTE|REVERT)
+eddi_autonomy_promotion_applied_total       # Recommendations a human applied
+eddi_autonomy_demotion_total                # Categories suspended; tag: trigger (REASON_CODE|SAMPLE_FLAGGED|MANUAL)
+eddi_autonomy_suspension_active             # Categories suspended right now, store-wide (gauge)
+eddi_autonomy_suspension_gated_total        # Calls the suspension overlay gated
+```
 
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 

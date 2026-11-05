@@ -1,6 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
+import { oversightHandlers } from "./oversight-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { teamHandoffHandlers } from "./team-handoff-handlers";
@@ -917,6 +918,8 @@ export const handlers = [
 
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
+  // HITL oversight: /hitl/analytics, /hitl/samples, /hitl/autonomy.
+  ...oversightHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).

@@ -141,6 +141,9 @@ public final class TaskToolApprovalsResolver {
         merged.setPendingMessage(firstNonBlank(taskLevel.getPendingMessage(), agent.getPendingMessage()));
         merged.setInGroupTurns(firstNonBlank(taskLevel.getInGroupTurns(), agent.getInGroupTurns()));
         merged.setRules(mergeRules(agent.getRules(), taskLevel.getRules(), merged.getTimeoutPolicy()));
+        // Earned-autonomy suspensions are an agent-level runtime overlay; a task only
+        // strengthens.
+        merged.setSuspendedPatterns(agent.getSuspendedPatterns());
         return merged;
     }
 

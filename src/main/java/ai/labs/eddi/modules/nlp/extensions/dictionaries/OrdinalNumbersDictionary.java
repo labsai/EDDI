@@ -18,7 +18,7 @@ import java.util.List;
  * @author ginccc
  */
 public class OrdinalNumbersDictionary implements IDictionary {
-    private static final String ID = "punctuation";
+    private static final String ID = "ordinal_number";
     private final IExpressionProvider expressionProvider;
 
     public OrdinalNumbersDictionary(IExpressionProvider expressionProvider) {

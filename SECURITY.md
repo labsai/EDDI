@@ -4,9 +4,8 @@
 
 | Version | Supported              |
 | ------- | ---------------------- |
-| 6.0.x   | ✅ Active development  |
-| 5.6.x   | 🔒 Security fixes only |
-| < 5.6   | ❌ End of life         |
+| Latest release (6.6.x; 6.7 in development) | ✅ Supported |
+| Older versions | ❌ Not supported. Security fixes ship only in new versions, so upgrade to the latest release |
 
 ## Reporting a Vulnerability
 
@@ -59,7 +58,7 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 
 - Third-party LLM API vulnerabilities (OpenAI, Anthropic, etc.)
 - User configuration errors (e.g., running without authentication)
-- Vulnerabilities in dependencies (report upstream; we monitor via Dependaagent)
+- Vulnerabilities in dependencies (report upstream; we monitor via Dependabot)
 - Social engineering attacks
 - Denial of service via expected API usage
 
@@ -67,7 +66,7 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 
 - Never commit API keys, tokens, or passwords
 - Use Vault references (`${vault:key-name}`) for sensitive configuration
-- All external URL access must use `UrlValidationUtils.validateUrl()`
+- All external URL access must go through `OutboundHttp` (SSRF-safe, validates every redirect hop)
 - No `eval()`, `ScriptEngine`, or dynamic code execution
 - No `@JsonTypeInfo(use=Id.CLASS)` for untrusted payloads
 - Read the [Security documentation](docs/security.md) before contributing security-sensitive code

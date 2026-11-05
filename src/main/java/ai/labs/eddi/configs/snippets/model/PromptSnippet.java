@@ -11,13 +11,13 @@ import java.util.List;
 /**
  * Reusable prompt building block for system prompts.
  * <p>
- * Snippets are named prompt text fragments stored in MongoDB as versioned
- * config documents. Agent designers compose them into system prompts via
- * template variables: {@code {{snippets.cautious_mode}}}.
+ * Snippets are named prompt text fragments stored in the configured datastore
+ * as versioned config documents. Agent designers compose them into system
+ * prompts via template variables: {@code {snippets.cautious_mode}}.
  * <p>
- * All snippets are auto-loaded into the template data map at LLM task execution
- * time. Designers have full control over ordering and placement within their
- * system prompt templates.
+ * The snippets an agent may use are auto-loaded into the template data map of
+ * every template render. Designers have full control over ordering and
+ * placement within their system prompt templates.
  *
  * @author ginccc
  * @since 6.0.0
@@ -27,7 +27,7 @@ public class PromptSnippet {
 
     /**
      * Unique identifier, underscore-delimited. Must match {@code [a-z0-9_]+}. Used
-     * as the template variable name: {@code {{snippets.<name>}}}.
+     * as the template variable name: {@code {snippets.<name>}}.
      */
     private String name;
 
