@@ -21,6 +21,9 @@ import {
   resolveOperatorApiBaseUrl,
   verifyGateInstalled,
   gateLooksInstalled,
+  servedOperatorVersion,
+  readOperatorStatus,
+  gateDryRun,
   OPERATOR_VARIABLE_KEY,
   CALLER_TOKEN_API_AUTH,
   type OperatorConfig,
@@ -1407,5 +1410,71 @@ describe("operatorAgentName", () => {
     setBrand({ branded: true, productName: "Acme Assist" });
     expect(operatorAgentName()).toBe("Acme Assist Platform Operator");
     expect(operatorAgentName()).toMatch(/operator/i);
+  });
+});
+
+describe("the version that serves the operator", () => {
+  // Activation records v1; the admin edits the operator in place and deploys v2.
+  const edited = () => config({ enabled: true, agentId: "op-1", version: 1 });
+
+  function deployedAt(version: number | null, current = 2) {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus", () =>
+        HttpResponse.json(
+          version == null
+            ? [{ environment: "production", agentId: "other", agentVersion: 7, status: "READY" }]
+            : [
+                { environment: "production", agentId: "other", agentVersion: 7, status: "READY" },
+                { environment: "production", agentId: "op-1", agentVersion: version, status: "READY" },
+              ],
+        ),
+      ),
+      http.get("*/agentstore/agents/op-1/currentversion", () => HttpResponse.json(current)),
+    );
+  }
+
+  it("is the version deployed in the environment, not the recorded one", async () => {
+    deployedAt(2);
+    expect(await servedOperatorVersion(edited())).toBe(2);
+  });
+
+  it("is the newest stored version when the operator is deployed nowhere", async () => {
+    deployedAt(null, 3);
+    expect(await servedOperatorVersion(edited())).toBe(3);
+  });
+
+  it("falls back to the recorded version when nothing can be looked up", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus", () => new HttpResponse(null, { status: 500 })),
+      http.get("*/agentstore/agents/op-1/currentversion", () => new HttpResponse(null, { status: 500 })),
+    );
+    expect(await servedOperatorVersion(edited())).toBe(1);
+  });
+
+  it("reads the deployment status at the served version and says which", async () => {
+    deployedAt(2);
+    const asked: string[] = [];
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get("version") ?? "");
+        return HttpResponse.json({ status: "READY" });
+      }),
+    );
+    const status = await readOperatorStatus(edited());
+    expect(asked).toEqual(["2"]);
+    expect(status).toMatchObject({ status: "READY", version: 2 });
+  });
+
+  it("dry-runs the gate of the served version", async () => {
+    deployedAt(2);
+    let body: { version?: number } | undefined;
+    server.use(
+      http.post("*/administration/operator/gate-dry-run", async ({ request }) => {
+        body = (await request.json()) as { version?: number };
+        return HttpResponse.json({ gated: true });
+      }),
+    );
+    await gateDryRun(edited(), "createAgent", "POST /agentstore/agents");
+    expect(body?.version).toBe(2);
   });
 });
