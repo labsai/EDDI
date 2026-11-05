@@ -116,6 +116,7 @@ export function GroupConfigPanel({
     !!config.humanMemberConfig ||
     !!config.retroConfig ||
     !!config.outcomeConfig ||
+    !!config.lessonConfig ||
     !!config.contextWindow?.enabled ||
     !!config.facilitator?.enabled ||
     !!config.artifactConfig?.allowArtifactTools ||
@@ -728,6 +729,16 @@ export function GroupConfigPanel({
                   perSubject: config.outcomeConfig.maxPerSubject,
                   stored: config.outcomeConfig.maxStored,
                   digest: config.outcomeConfig.retroDigestSize,
+                })}
+              />
+            )}
+            {config.lessonConfig && (
+              <InfoRow
+                label={t("groupLessons.configLabel", "Team lessons")}
+                value={t("groupLessons.configValue", "shares with {{share}}, reads from {{read}}{{consolidation}}", {
+                  share: config.lessonConfig.shareWith.length,
+                  read: config.lessonConfig.readFrom.length,
+                  consolidation: config.lessonConfig.consolidation ? t("groupLessons.configConsolidation", ", consolidates") : "",
                 })}
               />
             )}

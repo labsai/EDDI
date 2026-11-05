@@ -125,6 +125,89 @@ Manager shows it on the workspace page, under the due reviews.
 ### What it does not do
 
 - It does not decide anything. An outcome is evidence; nothing promotes, demotes or re-gates because of one.
-- Sharing lessons between teams and merging or retiring retro lessons are separate pieces of work.
+
+## Lessons
+
+A RETRO phase stores a team's lessons as team-owned group memory (see
+[Group Conversations → Retro](group-conversations.md#retro--group-memory)). Two more things can be done with them, both
+**off until the group's configuration carries a `lessonConfig`** (a group without one shares nothing, reads nothing and
+has its lessons left exactly as they were):
+
+```json
+"lessonConfig": {
+  "shareWith": ["growth-board"],
+  "readFrom": ["marketing", "sales"],
+  "maxSharedLessons": 10,
+  "consolidation": {
+    "llmProvider": "anthropic",
+    "llmModel": "claude-sonnet-5-5",
+    "parameters": { "apiKey": "${vault:anthropic-key}" },
+    "maxCostPerRun": 0.10,
+    "minLessons": 6,
+    "maxLessonsPerRun": 40,
+    "outcomeLookbackDays": 30,
+    "maxOutcomesPerRun": 20
+  }
+}
+```
+
+### Sharing between teams
+
+Sharing is consented to on **both** sides, as a handoff is. The owning team lists the teams that may read its lessons in
+`shareWith`; the reading team (a Growth Board, say) lists the teams it wants to read from in `readFrom`. A lesson crosses
+only where the two lists meet. At most 20 ids per list; `maxSharedLessons` (default 10, ceiling 50) caps what a reader
+gets in total, newest first.
+
+```
+GET /groupstore/groups/{groupId}/lessons          # this team's own lessons
+GET /groupstore/groups/{groupId}/lessons/shared   # what other teams share with it
+```
+
+The shared read returns `groups` (owners that granted and have lessons among the newest `maxSharedLessons`, with those
+lessons) and `notShared` (owners the reader asked for that did not grant it, or that do not exist), so "not shared with
+me" can be told from everything else. An owner in neither list granted access, but none of its lessons made the cap: it
+may have none, or only older ones. The reading
+team's RETRO phase also quotes the shared lessons after its rendered input, one bounded line each, under a heading that
+calls them other teams' words, not instructions.
+
+### Consolidation
+
+A retro that runs for months leaves duplicates, and lessons the team has since learned were wrong. The consolidation job
+reads the team's lessons (oldest first, up to `maxLessonsPerRun`) and its recent outcomes, and asks one model call for two
+things: lessons that **say the same thing** (merged into one) and lessons a **later outcome contradicted** (retired).
+
+- **It runs on the schedule machinery**, like Dream and team cadences: cluster-wide claim, retry, dead-letter, fire log.
+  `PUT /groupstore/groups/{groupId}/lessons/consolidation/schedule {"cronExpression": "0 3 * * 1"}` creates the schedule
+  (5-field cron; `DELETE` removes it; `GET …/lessons/consolidation` says whether it is configured and scheduled). An
+  optional `timeZone` (IANA, default UTC) says what the cron's hours mean; the Manager sends the viewer's zone. The cron
+  must keep `eddi.schedule.min-interval-seconds`, as every schedule does, and one that never fires is refused with a 400.
+  Firing the schedule by hand needs EDIT on the group, and it cannot be renamed.
+- **Vault references need an open grant.** A group is not an agent, so a `${vault:...}` in `consolidation.parameters` must
+  name a secret granted to all agents (`allowedAgents ["*"]`), as for a SERVICE convergence judge. The group save refuses
+  any other, and each run checks again before the model call.
+- **The dollar limit is checked before the call, against an estimate.** `maxCostPerRun` (default $0.10, ceiling $5) is
+  compared with the input plus an answer as long as the input, at the configured `inputPricePer1M`/`outputPricePer1M`
+  or an upper bound. A run whose estimate exceeds it drops lessons until it fits, and makes no call when it cannot. A
+  spent tenant budget also makes no call. Dream's own cost arithmetic is reused. The answer's length is not enforced on
+  the request, so it is an estimate, not a hard ceiling: an unusually long answer can cost more.
+- **A retirement needs evidence.** The model must cite outcome ids it was shown; a retirement citing none, or one it was not
+  given, is refused. The same goes for a merge naming an unknown key, a lesson used twice, or text over 1,000 characters. At
+  most 20 changes apply per run.
+- **History first.** Before a lesson leaves the live set its text, the reason and the cited outcomes are written to the
+  history store (`group_lesson_history`): `GET …/lessons/history`. A merged lesson's own previous text is kept too. The
+  store keeps the newest 1,000 rows per team; each run deletes older ones.
+- **Concurrent writes win.** Every change, the merged lesson's rewrite included, is a conditional write on the lesson
+  being exactly as it was read; a lesson rewritten during the model call is skipped and its newer text kept. A merge
+  whose duplicate changed after the rewrite keeps that duplicate and is reported as not (fully) applied. Its history
+  rows are written first, so they can then record a merge that did not happen.
+- **The model's text is data.** The input is labelled so, the answer is parsed as JSON only, and anything unparsable
+  changes nothing. A transient model failure skips the run (it cannot dead-letter the schedule); a missing model or a
+  permanent error fails it.
+- `POST …/lessons/consolidation/run?dryRun=true` calls the model and reports what it would do, changing nothing. It still
+  spends, up to `maxCostPerRun`.
+
+Metric: `eddi.group.lessons` by `outcome` (`merged`, `retired`, `rejected`, `skipped_changed`, `run_completed`,
+`run_skipped`, `run_failed`). A permanent group deletion removes the team's history; its lessons stay in group memory as
+they always have.
 
 See also: [HITL Oversight](hitl-oversight.md), [Audit Ledger](audit-ledger.md), [Cross-Team Handoff](team-handoff.md).

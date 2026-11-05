@@ -109,6 +109,9 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    LessonConsolidationService lessonConsolidationService;
+
+    @Inject
     AlertMaintenanceService alertMaintenanceService;
 
     @Inject
@@ -284,6 +287,13 @@ public class ScheduleFireExecutor {
             // discussion, not a conversation turn. Same reasoning and machinery
             // as the Dream fast-path above.
             return fireTeamCadence(schedule, instanceId, attemptNumber);
+        }
+
+        if (LessonConsolidationService.isLessonConsolidationSchedule(md)) {
+            // Team lesson consolidation fast-path — a maintenance job over a team's
+            // retro lessons, not a conversation turn. Same machinery as the Dream and
+            // team cadence fast-paths above.
+            return fireLessonConsolidation(schedule, instanceId, attemptNumber);
         }
 
         Instant startedAt = Instant.now();
@@ -955,6 +965,45 @@ public class ScheduleFireExecutor {
         }
 
         return recordFire(null, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, 0.0, "team-cadence",
+                interrupted);
+    }
+
+    /**
+     * Run one team lesson consolidation and record the fire. A deliberate skip (too
+     * few lessons, cost cap, a transient model failure) is COMPLETED with the
+     * reason in the log; a real failure (no model configured, a permanent model
+     * error) is FAILED so it retries with backoff and eventually dead-letters
+     * instead of appearing to run while doing nothing.
+     */
+    private ScheduleFireLog fireLessonConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        double cost = 0.0;
+        boolean interrupted = false;
+
+        try {
+            LessonConsolidationService.Result result = lessonConsolidationService.processScheduledFire(schedule.getMetadata());
+            cost = result.estimatedCost();
+            if (result.isSuccess()) {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                LOGGER.infof("[SCHEDULE] Lesson consolidation '%s' (id=%s): %s", schedule.getName(), schedule.getId(), result.message());
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = result.message();
+                LOGGER.errorf("[SCHEDULE] Lesson consolidation failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(),
+                        errorMessage);
+            }
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            LOGGER.errorf(e, "[SCHEDULE] Lesson consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
+        }
+
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, cost, "lesson-consolidation",
                 interrupted);
     }
 

@@ -3173,6 +3173,15 @@ export const handlers = [
   // Team learning loop: nothing due, no outcomes, no approvals analytics by default.
   http.get("*/groupstore/groups/:groupId/workspace/backlog/due-reviews", () => HttpResponse.json([])),
   http.get("*/groupstore/groups/:groupId/outcomes", () => HttpResponse.json([])),
+  // Team lessons: none, nothing shared, consolidation unconfigured by default.
+  http.get("*/groupstore/groups/:groupId/lessons", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/shared", ({ params }) =>
+    HttpResponse.json({ readerGroupId: params.groupId, groups: [], notShared: [] }),
+  ),
+  http.get("*/groupstore/groups/:groupId/lessons/history", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/consolidation", () =>
+    HttpResponse.json({ configured: false, hasModel: false, scheduled: false }),
+  ),
   http.get("*/hitl/analytics/outcomes", ({ request }) =>
     HttpResponse.json({ groupId: new URL(request.url).searchParams.get("groupId"), decisions: 0, outcomes: 0, truncated: false, categories: [] }),
   ),

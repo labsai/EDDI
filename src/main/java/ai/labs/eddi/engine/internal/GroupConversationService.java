@@ -61,6 +61,7 @@ import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
 import ai.labs.eddi.engine.internal.groups.GroupTieBreakPauses;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
+import ai.labs.eddi.engine.groups.lessons.LessonService;
 import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
@@ -2839,8 +2840,10 @@ public class GroupConversationService implements IGroupConversationService, User
      * service only afterwards; builds made with {@code new} in tests quote nothing.
      */
     @Inject
-    void wireOutcomeDigest(OutcomeEventService outcomeEventService) {
-        contextBuilder.setOutcomeDigestProvider(outcomeEventService.retroDigestProvider());
+    void wireOutcomeDigest(OutcomeEventService outcomeEventService, LessonService lessonService) {
+        // What the RETRO phase quotes: the team's own reported outcomes, then the
+        // lessons other teams chose to share with it. Each is empty when off.
+        contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
     }
 
     @Inject

@@ -1,3 +1,4 @@
+import type { LessonConfig } from "./group-lessons";
 import type { OutcomeConfig } from "./group-outcomes";
 import { api } from "../api-client";
 import { HITL_CLIENT_HEADERS } from "./hitl";
@@ -621,6 +622,8 @@ export interface AgentGroupConfiguration {
   retroConfig?: RetroConfig | null;
   /** Off (absent) unless set: the group then accepts outcome reports and its RETRO phase quotes them. */
   outcomeConfig?: OutcomeConfig | null;
+  /** Off (absent) unless set: lesson sharing between teams and the scheduled consolidation of retro lessons. */
+  lessonConfig?: LessonConfig | null;
   /** Transcript windowing for long-running discussions (I9). `null` = windowing off entirely. */
   contextWindow?: ContextWindowConfig | null;
   /**

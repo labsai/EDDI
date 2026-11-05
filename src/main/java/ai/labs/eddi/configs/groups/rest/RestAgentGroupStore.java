@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
+import ai.labs.eddi.engine.groups.lessons.ILessonHistoryStore;
 import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -59,6 +60,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     /** Field-injected; {@code null} in tests built with {@code new}. */
     @Inject
     OutcomeEventService outcomeEventService;
+
+    /** Field-injected; {@code null} in tests built with {@code new}. */
+    @Inject
+    ILessonHistoryStore lessonHistoryStore;
 
     /** Field-injected so direct construction in tests keeps the secure default. */
     @ConfigProperty(name = "eddi.groups.team-budget.admin-only-edits", defaultValue = "true")
@@ -269,6 +274,20 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                     outcomeEventService.deleteForGroup(id);
                 } catch (Exception e) {
                     LOG.errorf(e, "Failed to cascade outcome deletion for group %s", sanitize(id));
+                }
+            }
+            // The consolidation schedule names this group; left behind it would fire
+            // on every tick, find no config and skip, forever.
+            try {
+                scheduleStore.deleteSchedulesByName(RestGroupLessons.SCHEDULE_NAME_PREFIX + id);
+            } catch (Exception e) {
+                LOG.errorf(e, "Failed to cascade lesson-consolidation schedule deletion for group %s", sanitize(id));
+            }
+            if (lessonHistoryStore != null) {
+                try {
+                    lessonHistoryStore.deleteByGroup(id);
+                } catch (Exception e) {
+                    LOG.errorf(e, "Failed to cascade lesson-history deletion for group %s", sanitize(id));
                 }
             }
         }

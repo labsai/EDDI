@@ -15,7 +15,7 @@ import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
 import { TeamBudgetCard } from "@/components/workforce/team-budget-card";
-import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
+import { useGroup, useGroupDescriptors, useResolvedGroupVersion } from "@/hooks/use-groups";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { useSchedules } from "@/hooks/use-schedules";
@@ -23,6 +23,7 @@ import { useAgentNames } from "@/hooks/use-agent-names";
 import { useDeleteWorkspaceBacklogTask } from "@/hooks/use-team-handoffs";
 import { BetDetails } from "@/components/groups/bet-details";
 import { DueBetReviews } from "@/components/groups/due-bet-reviews";
+import { LessonsPanel } from "@/components/groups/lessons-panel";
 import { OutcomeAnalyticsPanel } from "@/components/groups/outcome-analytics";
 import { TaskOutcomes } from "@/components/groups/task-outcomes";
 import { useReviewBet } from "@/hooks/use-group-workspace";
@@ -105,6 +106,12 @@ export function GroupWorkspacePage() {
   // its original name in this page's header and back-link.
   const version = Number(searchParams.get("version")) || 1;
   const { data: groupConfig } = useGroup(groupId || "", version);
+  // Lessons are read and configured from the group's CURRENT version on the
+  // backend, so whether to show them is too: a version-less link (read as
+  // version 1) or a link to an older version hid the panel of a group that
+  // added lessonConfig later. Same query as above when the URL is current.
+  const currentVersion = useResolvedGroupVersion(groupId, null);
+  const { data: currentGroupConfig } = useGroup(currentVersion !== undefined ? groupId || "" : "", currentVersion);
   const { data: workspace, isLoading, isError, error, refetch } = useGroupWorkspace(groupId);
   // The handoff inbox decisions and the backlog delete need EDIT on the group; hide them when
   // the caller is known to lack it. While the answer is not in (access.known false) the
@@ -352,6 +359,7 @@ export function GroupWorkspacePage() {
 
       <DueBetReviews groupId={groupId!} readOnly={readOnly} />
       {groupConfig?.outcomeConfig && <OutcomeAnalyticsPanel groupId={groupId!} />}
+      {currentGroupConfig?.lessonConfig && <LessonsPanel groupId={groupId!} readOnly={readOnly} />}
 
       {/* Backlog */}
       <div className="rounded-xl border border-border bg-card p-4" data-testid="workspace-backlog">
