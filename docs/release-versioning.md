@@ -135,7 +135,7 @@ commit you are about to tag — not main in general — against the running imag
    test in the Manager runs against a mocked backend, so this is the only check
    of the real `setup-api` call. 6.7.0 skipped it and shipped an Operator prompt
    the backend refuses: no deployment could activate or upgrade its Operator
-   until 6.7.1. `operator-prompt-size.test.ts` now guards that particular cause;
+   until the next release. `operator-prompt-size.test.ts` now guards that particular cause;
    this step catches the next one.
 3. **The release-notes draft's claims are true of the image**, not of the plan
    — in particular anything it says about external services (the docs site,

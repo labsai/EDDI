@@ -1,6 +1,6 @@
 ## Operator screen follows the version that serves it; the default favicon is the current icon again (2026-11-05)
 
-**Repo:** EDDI, branch `fix/operator-prompt-setup-cap` (the 6.7.1 fixes)
+**Repo:** EDDI, branch `fix/operator-setup-and-default-favicon`
 
 ### Operator screen pinned to the activated version
 

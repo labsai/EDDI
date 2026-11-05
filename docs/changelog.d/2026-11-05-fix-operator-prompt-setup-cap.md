@@ -1,6 +1,6 @@
 ## The Platform Operator could not be activated or upgraded on 6.7.0 (2026-11-05)
 
-**Repo:** EDDI, branch `fix/operator-prompt-setup-cap`
+**Repo:** EDDI, branch `fix/operator-setup-and-default-favicon`
 
 **What broke:** the Manager provisions the Platform Operator through `POST /administration/agents/setup-api`, which refuses a `systemPrompt` longer than `AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH`. That cap was 100,000 characters. The Operator prompt grew from ~80 KB of source in 6.6.0 to ~136 KB in 6.7.0 (the Operator follow-ups for team budgets, guardrails, model prices, HITL review and oversight, handoff and lessons all landed on release day), and the prompt the Manager sends reached ~110,000 characters. Activation answered "System prompt is too long (… characters, maximum 100000) (HTTP 400)", and so did Upgrade, which provisions a replacement. An Operator provisioned before the upgrade kept working on its old instructions.
 
@@ -16,8 +16,8 @@
 - Raise the cap rather than trim the prompt on release day: the cap guards LLM-authored input, not admin-provisioned prompts, and trimming ~10,000 characters of reviewed safety and tool instructions under time pressure is the riskier change. Shortening the prompt is still worth doing: it is sent on every Operator call.
 - No operator revision bump: the prompt, allow-list and gate are unchanged.
 
-**Next:** ship as 6.7.1 from a release branch cut at the `6.7.0` tag (`docs/release-versioning.md` → patch release).
+**Next:** ship in the next release; for a patch release, from a branch cut at the `6.7.0` tag (`docs/release-versioning.md` → patch release).
 
 ```regression-note
-| 2026-11-05 | Platform Operator activation and upgrade fail with "System prompt is too long (HTTP 400)" on 6.7.0 | The Operator prompt (~110,000 characters) exceeded `setup-api`'s 100,000-character cap; Operator tests only ran against MSW | Cap raised to 250,000, Manager mirror plus `SetupPromptCapMirrorTest`, `operator-prompt-size.test.ts` holds the prompt to 80% of the cap, pre-tag Operator activation step in `docs/release-versioning.md` | fix/operator-prompt-setup-cap |
+| 2026-11-05 | Platform Operator activation and upgrade fail with "System prompt is too long (HTTP 400)" on 6.7.0 | The Operator prompt (~110,000 characters) exceeded `setup-api`'s 100,000-character cap; Operator tests only ran against MSW | Cap raised to 250,000, Manager mirror plus `SetupPromptCapMirrorTest`, `operator-prompt-size.test.ts` holds the prompt to 80% of the cap, pre-tag Operator activation step in `docs/release-versioning.md` | fix/operator-setup-and-default-favicon |
 ```
