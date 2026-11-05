@@ -38,6 +38,7 @@ public class ConversationDescriptor extends ResourceDescriptor {
     public static final String FIELD_TITLE = "title";
     public static final String FIELD_TITLE_SOURCE = "titleSource";
     public static final String FIELD_PINNED = "pinned";
+    public static final String FIELD_CONVERSATION_STATE = "conversationState";
 
     private String agentName;
     private String userId;

@@ -80,6 +80,23 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a vault reference whose key name looks like a credential is not rewritten by the shape rules")
+    void scrubJson_vaultReferenceSurvivesShapeScan() throws Exception {
+        String json = """
+                {
+                    "modelName": "${vault:sk-prod-support-model-name}",
+                    "description": "routes through ${vault:sk-prod-support-model-name} for support"
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("\"modelName\" : \"${vault:sk-prod-support-model-name}\"")
+                || scrubbed.contains("\"modelName\":\"${vault:sk-prod-support-model-name}\""), scrubbed);
+        assertTrue(scrubbed.contains("routes through ${vault:sk-prod-support-model-name} for support"), "prose keeps its reference: " + scrubbed);
+    }
+
+    @Test
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {

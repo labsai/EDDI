@@ -136,7 +136,8 @@ public final class ConversationTitles {
     /**
      * Collapses every run of whitespace (line breaks included) into one space,
      * drops control and format characters (bidi overrides among them, which could
-     * make a list entry read as something else), and trims. Never null.
+     * make a list entry read as something else) except ZWNJ and ZWJ, and trims.
+     * Never null.
      */
     public static String normalize(String text) {
         if (text == null) {
@@ -152,8 +153,9 @@ public final class ConversationTitles {
                 continue;
             }
             int type = Character.getType(cp);
-            if (type == Character.CONTROL || type == Character.FORMAT || type == Character.UNASSIGNED || type == Character.PRIVATE_USE
-                    || type == Character.SURROGATE) {
+            // ZWNJ and ZWJ stay: Persian, the Indic scripts and emoji sequences need them.
+            if (type == Character.CONTROL || (type == Character.FORMAT && cp != 0x200C && cp != 0x200D) || type == Character.UNASSIGNED
+                    || type == Character.PRIVATE_USE || type == Character.SURROGATE) {
                 continue;
             }
             if (space) {

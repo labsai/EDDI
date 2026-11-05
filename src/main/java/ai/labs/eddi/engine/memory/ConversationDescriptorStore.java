@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor.TitleSource;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -192,6 +193,12 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
         return setFields(conversationId, fields, null, List.of());
     }
 
+    @Override
+    public boolean markEnded(String conversationId) {
+        return setFields(conversationId, Map.of(ConversationDescriptor.FIELD_CONVERSATION_STATE, ConversationState.ENDED.name()), null,
+                List.of());
+    }
+
     private boolean setFields(String conversationId, Map<String, Object> fields, String guardField, Collection<String> replaceable) {
         ConversationDescriptorMemo.forget(descriptorMemoInstance, conversationId);
         try {
@@ -219,6 +226,9 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
             }
             if (fields.get(ConversationDescriptor.FIELD_PINNED) instanceof Boolean pinned) {
                 descriptor.setPinned(pinned);
+            }
+            if (fields.get(ConversationDescriptor.FIELD_CONVERSATION_STATE) instanceof String state) {
+                descriptor.setConversationState(ConversationState.valueOf(state));
             }
             descriptorStore.setDescriptor(conversationId, resourceId.getVersion(), descriptor);
             return true;

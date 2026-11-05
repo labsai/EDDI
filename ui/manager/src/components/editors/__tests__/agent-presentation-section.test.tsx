@@ -53,16 +53,27 @@ describe("AgentPresentationSection — conversation starters", () => {
     expect(onEdit.mock.lastCall?.[0].appearance.starters).toEqual(["A", "B"]);
   });
 
-  it("shows only what will be saved: six starters, each cut at 200 characters", () => {
+  it("shows only what will be saved: each starter cut at 200 characters", () => {
     const onEdit = vi.fn();
     render(<Harness initial={baseAgent} onEdit={onEdit} />);
 
-    const long = "x".repeat(250);
-    fireEvent.change(starters(), { target: { value: `${long}\n2\n\n3\n4\n5\n6\n7` } });
+    fireEvent.change(starters(), { target: { value: `${"x".repeat(250)}\n2\n\n3` } });
 
-    const saved = onEdit.mock.lastCall?.[0].appearance.starters;
-    expect(saved).toEqual(["x".repeat(200), "2", "3", "4", "5", "6"]);
-    expect(starters().value).toBe(`${"x".repeat(200)}\n2\n\n3\n4\n5\n6`);
+    expect(onEdit.mock.lastCall?.[0].appearance.starters).toEqual(["x".repeat(200), "2", "3"]);
+    expect(starters().value).toBe(`${"x".repeat(200)}\n2\n\n3`);
+  });
+
+  it("refuses a seventh starter without deleting one that is there", () => {
+    const six = ["1", "2", "3", "4", "5", "6"];
+    const initial = { ...baseAgent, appearance: { starters: six } } as Agent;
+    const onEdit = vi.fn();
+    render(<Harness initial={initial} onEdit={onEdit} />);
+
+    // A new line inserted before the last starter.
+    fireEvent.change(starters(), { target: { value: "1\n2\n3\n4\n5\nnew\n6" } });
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(starters().value).toBe(six.join("\n"));
   });
 
   it("follows the stored starters when the draft is discarded", () => {

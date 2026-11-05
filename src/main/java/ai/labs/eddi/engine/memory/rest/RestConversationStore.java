@@ -911,16 +911,10 @@ public class RestConversationStore implements IRestConversationStore {
      * descriptor was already retired (soft-deleted) or never written is ended on
      * its snapshot alone — that is not an error for a bulk end.
      */
-    private void markDescriptorEnded(String conversationId) throws ResourceStoreException {
-        try {
-            ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
-                    CONVERSATION_DESCRIPTOR_VERSION);
-            if (conversationDescriptor == null) {
-                return;
-            }
-            conversationDescriptor.setConversationState(ConversationState.ENDED);
-            conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
-        } catch (ResourceNotFoundException e) {
+    private void markDescriptorEnded(String conversationId) {
+        // A single field update: a whole-descriptor rewrite here could undo an owner's
+        // rename or pin made between its read and its write.
+        if (!conversationDescriptorStore.markEnded(conversationId)) {
             log.debug(format("No live descriptor to mark ENDED for conversation %s", sanitize(conversationId)));
         }
     }
@@ -1340,7 +1334,7 @@ public class RestConversationStore implements IRestConversationStore {
                 ended.add(conversationId);
                 try {
                     markDescriptorEnded(conversationId);
-                } catch (ResourceStoreException | RuntimeException e) {
+                } catch (RuntimeException e) {
                     log.warn(format("Conversation %s was ended but its descriptor could not be marked ENDED: %s",
                             sanitize(conversationId), sanitize(e.getMessage())));
                 }

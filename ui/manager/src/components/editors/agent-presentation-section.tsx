@@ -23,19 +23,13 @@ function parseStarters(text: string): string[] {
 
 /**
  * The text with the caps applied, so the textarea never shows what would not be saved:
- * each line cut at MAX_STARTER_LENGTH, and nothing kept after the MAX_STARTERS-th starter.
- * Blank lines before that stay, so a new line can still be started.
+ * each line cut at MAX_STARTER_LENGTH. An edit that would make more than MAX_STARTERS
+ * starters returns null and is refused as a whole, so typing or pasting a seventh never
+ * deletes one that is already there. Blank lines stay, so a new line can be started.
  */
-function capStartersText(text: string): string {
-  const kept: string[] = [];
-  let starters = 0;
-  for (const raw of text.split("\n")) {
-    if (starters === MAX_STARTERS) break;
-    const line = raw.slice(0, MAX_STARTER_LENGTH);
-    if (line.trim()) starters++;
-    kept.push(line);
-  }
-  return kept.join("\n");
+function capStartersText(text: string): string | null {
+  const lines = text.split("\n").map((raw) => raw.slice(0, MAX_STARTER_LENGTH));
+  return lines.filter((line) => line.trim()).length > MAX_STARTERS ? null : lines.join("\n");
 }
 
 /**
@@ -153,6 +147,7 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
             value={startersText}
             onChange={(e) => {
               const text = capStartersText(e.target.value);
+              if (text === null) return; // a seventh starter: the edit is refused
               setStartersText(text);
               patchAppearance({ starters: parseStarters(text) });
             }}

@@ -482,12 +482,21 @@ public class SecretScrubber {
         if (text == null || text.isEmpty()) {
             return null;
         }
-        String redacted = SecretRedactionFilter.redactCredentialShapes(text);
+        // Vault references are masked first: they are pointers, kept legible, and a
+        // key NAME can itself look like a credential ("${vault:sk-prod-support-key}"),
+        // which the shape rules would otherwise rewrite into a pointer to another key.
+        // The text around them is still scanned.
+        List<String> masked = new ArrayList<>();
+        String input = VAULT_REFERENCE.replaceAll(text, reference -> {
+            masked.add(reference.text());
+            return MASK_OPEN + Integer.toString(masked.size() - 1) + MASK_CLOSE;
+        });
+        String redacted = SecretRedactionFilter.redactCredentialShapes(input);
         for (Pattern shape : EXPORT_CREDENTIAL_SHAPES) {
             redacted = shape.matcher(redacted).replaceAll(Matcher.quoteReplacement(SecretRedactionFilter.REDACTED));
         }
         redacted = MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
-        return redacted.equals(text) ? null : redacted;
+        return redacted.equals(input) ? null : restoreMasks(redacted, masked);
     }
 
     /**
@@ -617,6 +626,14 @@ public class SecretScrubber {
         String redacted = SecretRedactionFilter.redact(input);
         if (redacted.equals(input)) {
             return null;
+        }
+        return restoreMasks(redacted, masked);
+    }
+
+    /** Puts every masked original back into {@code redacted}, in one pass. */
+    private static String restoreMasks(String redacted, List<String> masked) {
+        if (masked.isEmpty()) {
+            return redacted;
         }
         // Every mask restored in ONE pass. A String.replace per expression was
         // O(expressions x length), and a three-character {a} is an expression.

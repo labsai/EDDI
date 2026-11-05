@@ -52,4 +52,13 @@ public interface IConversationDescriptorStore extends IDescriptorStore<Conversat
      *         written)
      */
     boolean writeOwnerEdit(String conversationId, String title, Boolean pinned);
+
+    /**
+     * Sets {@code conversationState} to ENDED on the live descriptor, as a single
+     * field update, so it cannot undo a concurrent rename or pin.
+     *
+     * @return {@code false} when there is no live descriptor (deleted, or never
+     *         written)
+     */
+    boolean markEnded(String conversationId);
 }

@@ -1136,9 +1136,12 @@ your tool schemas do not cover it, not as a routine first step:
   small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
   6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
   quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
-  false = HTML in replies is shown as TEXT, true renders it). The rawHtml
-  default is a change: the Chat UI used to render HTML for every agent, so an
-  agent whose replies contain HTML needs \`rawHtml: true\` (docs page
+  false = HTML in replies is meant to show as TEXT, true renders it). Say
+  carefully what rawHtml does today: the chat widget applies it only from the
+  release whose widget reads conversationControls. Until then the widget renders
+  HTML for every agent and the setting has no visible effect. Either way, an
+  agent whose replies contain HTML should get \`rawHtml: true\` now, so nothing
+  changes for it when the widget starts honouring the default (docs page
   "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
   400 naming the field. Clients read both from the agent profile
   (/agents/{agentId}/profile, deployed version). You do not edit agent
