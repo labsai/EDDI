@@ -501,6 +501,33 @@ Results are newest first. A non-admin sees only their own conversations.
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
 
+## Calling an API as the user: secret context
+
+A context entry marked `"secret": true` lives for the request that carried it: the
+pipeline reads the live value, and it is replaced by `<secret context>` in
+everything stored when the turn ends. Send it with every message, and again in the
+`context` of `POST /agents/{conversationId}/resume` when a paused turn is approved:
+
+```json
+{ "input": "Show my open invoices",
+  "context": { "userToken": { "type": "string", "value": "eyJ…", "secret": true } } }
+```
+
+An httpcall header written as `Bearer ${context:userToken}` sends it to the
+API — only from a secret entry, only in a header, only to the configuration's
+own host, and failing the call when it is missing. See
+[Per-turn credentials from secret context](httpcalls.md#per-turn-credentials-from-secret-context).
+
+An agent whose tools are generated from an OpenAPI spec is managed with three
+admin endpoints, described under
+[the Platform Operator case study](architecture.md#building-an-operator-agent-for-your-own-api):
+
+| Method & path | Purpose | Success |
+| --- | --- | --- |
+| `POST /administration/agents/setup-api` | Create the agent (`apiAuth` may be `Bearer ${context:userToken}`) | `201` |
+| `POST /administration/agents/setup-api` with `"dryRun": true` | Return what would be created; write nothing | `200` |
+| `POST /administration/agents/{agentId}/setup-api/sync` | Regenerate the tools from a new spec as a compatible agent version; `"dryRun": true` reports the diff only | `200`; `400` naming each reference when a removed tool is still referenced |
+
 ## Errors
 
 | Status | Body (examples) | Cause |

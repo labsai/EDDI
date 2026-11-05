@@ -197,6 +197,7 @@ eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
 eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
+eddi_tool_arguments_refused_total          # Calls refused before the approval gate because their arguments violate the tool's argumentSchema (tag: source)
 eddi_tool_quota_decisions_total            # toolQuotas decisions per call (tags: tool, outcome = allowed | refused | precheck_refused | unavailable | released)
 eddi_tool_quota_store_failures_total      # toolQuotas counter-store operations that failed, calls refused fail closed (tag: operation = reserve | precheck | release)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
@@ -300,6 +301,7 @@ eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
+eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
 
 ### Standing Team (Cadence) Metrics
@@ -309,6 +311,9 @@ eddi_team_cadence_runs_started_total        # Cadence fires that started a discu
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
+eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
+eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
 
 ### Scheduled Trigger Metrics
@@ -690,6 +695,10 @@ eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdic
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
 eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
+eddi_hitl_decision_total                    # Decided HITL units (answer, tool call, phase, task); tags: surface, outcome, channel
+eddi_hitl_edit_chars                        # Summary: characters an approver changed per edit; tag: kind
+eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift, redacted_content)
+eddi_hitl_approval_context_render_total     # approvalContext blocks rendered at pause commit; tags: outcome (ok, empty, failed, too_large), surface (regular, group)
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
@@ -922,6 +931,8 @@ eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
+eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```

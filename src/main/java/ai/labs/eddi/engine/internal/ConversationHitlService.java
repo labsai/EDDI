@@ -16,9 +16,14 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
+import ai.labs.eddi.engine.hitl.review.HitlDecisionRecords;
+import ai.labs.eddi.engine.hitl.review.HitlDecisionValidator;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -123,6 +128,10 @@ class ConversationHitlService {
     private final Counter counterHitlResume;
     private final MeterRegistry meterRegistry;
     private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations;
+    /**
+     * The {@code hitl.approval} audit contract (schema 2) — see HitlApprovalAudit.
+     */
+    private final HitlApprovalAudit approvalAudit;
 
     ConversationHitlService(ConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore, IConversationCoordinator conversationCoordinator,
@@ -146,6 +155,7 @@ class ConversationHitlService {
         this.counterHitlResume = counterHitlResume;
         this.meterRegistry = meterRegistry;
         this.inFlightConversations = inFlightConversations;
+        this.approvalAudit = new HitlApprovalAudit(auditLedgerService);
     }
 
     // --- HITL lifecycle ---
@@ -445,7 +455,8 @@ class ConversationHitlService {
         boolean hasToolDecisions = decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty();
         boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
         boolean hasResumeContext = decision.getContext() != null && !decision.getContext().isEmpty();
-        if (hasToolDecisions || namesPause || hasResumeContext) {
+        boolean hasReviewFields = HitlDecisionValidator.hasReviewFields(decision);
+        if (hasToolDecisions || namesPause || hasResumeContext || hasReviewFields) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
                 // A decision made for an earlier pause must not consume this one.
@@ -464,6 +475,9 @@ class ConversationHitlService {
                 }
                 if (hasResumeContext && preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                     validateResumeContext(decision, preCasSnapshot);
+                }
+                if (hasReviewFields && preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    validateReviewFields(decision, preCasSnapshot);
                 }
             }
         }
@@ -501,6 +515,9 @@ class ConversationHitlService {
         final PendingToolCallBatch prePauseBatch;
         // The id of the pause this decision settles - what a resume stream announces.
         final String settledPauseId;
+        // The pause as it was, for the decision's audit entry: when it began, its
+        // timeout policy and, for a RULE pause, the draft an edit replaces.
+        final HitlDecisionRecords.RegularPause prePauseFacts;
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (snapshot == null) {
@@ -541,6 +558,8 @@ class ConversationHitlService {
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
+            prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
+                    snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
         } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
@@ -671,6 +690,9 @@ class ConversationHitlService {
             // a scheduled turn), and the approver is bound only around the tool calls
             // they explicitly approved — see ToolLoopResumer.
             final CallerIdentity approverIdentity = callerIdentityContext.captureOrCurrent();
+            // The audit entry is written after the enqueue, while the resumed turn may
+            // already run: its id is fixed now, so the turn can refer to it.
+            decision.setDecisionId(HitlApprovalAudit.newDecisionId());
             final boolean approverOwnsConversation = CallerIdentityContext.isSameUser(approverIdentity, memory.getUserId());
             final CallerIdentity resumeCallerIdentity = approverOwnsConversation ? approverIdentity : null;
             final CallerIdentity approvedCallsIdentity = approverOwnsConversation ? null : approverIdentity;
@@ -956,7 +978,7 @@ class ConversationHitlService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
-                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy());
+                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy(), prePauseFacts);
             // Task 10 — tool-resume metric, tagged by aggregate verdict.
             if (prePauseWasToolCall) {
                 recordToolResumeMetric(decision, prePauseBatch);
@@ -1095,6 +1117,54 @@ class ConversationHitlService {
                 throw new IllegalArgumentException("context['" + sanitize(key) + "'] was not a secret context value in the paused turn — "
                         + "a resume can only re-supply a secret the paused turn carried");
             }
+        }
+    }
+
+    /**
+     * Validates {@code editedAnswer} / {@code reasonCode} against the paused
+     * snapshot and the agent's PINNED review config, before the CAS (see
+     * {@link HitlDecisionValidator}). A config that cannot be read fails closed: an
+     * edit is refused rather than applied under an unknown policy.
+     */
+    void validateReviewFields(HitlDecision decision, ConversationMemorySnapshot snapshot) throws ResourceStoreException {
+        var lookup = lookupAgentConfigPinned(snapshot.getAgentId(), snapshot.getAgentVersion());
+        if (lookup.readFailed()) {
+            throw new ResourceStoreException("Could not read the review policy of agent " + snapshot.getAgentId()
+                    + " — the pause is untouched; retry", null);
+        }
+        HitlDecisionValidator.validate(decision, snapshot, lookup.config() != null ? lookup.config().getHitlConfig() : null);
+    }
+
+    /**
+     * Side-effect-free dry run of a decision for a paused conversation: the same
+     * pause, tool-decision and review checks the resume runs before the CAS,
+     * without consuming anything. For surfaces that must answer synchronously
+     * (Slack's {@code view_submission}).
+     *
+     * @throws IllegalArgumentException
+     *             on an invalid decision (with the message the resume would give)
+     * @throws IConversationService.PauseMismatchException
+     *             when the decision names a pause that is no longer current
+     * @throws IllegalStateException
+     *             when the conversation is not awaiting a decision
+     */
+    public void validateDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        if (decision == null || decision.getVerdict() == null) {
+            throw new IllegalArgumentException("decision.verdict is required (APPROVED or REJECTED)");
+        }
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        if (snapshot.getConversationState() != ConversationState.AWAITING_HUMAN) {
+            throw new IllegalStateException("Conversation is not awaiting a decision (current: " + snapshot.getConversationState() + ")");
+        }
+        requireDecisionMatchesPause(conversationId, decision, snapshot.getHitlPausedAt());
+        if (decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty()) {
+            validateToolDecisions(decision, snapshot);
+        }
+        if (HitlDecisionValidator.hasReviewFields(decision)) {
+            validateReviewFields(decision, snapshot);
         }
     }
 
@@ -1449,36 +1519,49 @@ class ConversationHitlService {
                            HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch,
                            HitlRevisionPolicy revisionPolicy) {
+        auditHitlDecision(conversationId, agentId, agentVersion, userId, environment, decision, toolCallPause, pendingBatch, revisionPolicy,
+                HitlDecisionRecords.RegularPause.UNKNOWN);
+    }
+
+    /**
+     * As above, with what the pause looked like before the decision consumed it —
+     * the schema-2 fields (pause id, latency, timeout policy, edit metrics). The
+     * entry keeps every pre-6.7 field; see {@link HitlApprovalAudit}.
+     */
+    void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                           String userId, Environment environment,
+                           HitlDecision decision,
+                           boolean toolCallPause, PendingToolCallBatch pendingBatch,
+                           HitlRevisionPolicy revisionPolicy, HitlDecisionRecords.RegularPause pause) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
-            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
-            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
-            if (decision.getNote() != null) {
-                detail.put("note", decision.getNote());
-            }
-            // Task 10 — TOOL_CALL pauses carry a per-call decision summary. Each entry
-            // records the callId, resolved verdict, whether the args were amended, and
-            // the tool name — plus a SHA-256 argsDigest so the ledger can prove WHICH
-            // arguments were approved WITHOUT ever storing the raw (possibly sensitive)
-            // arguments.
-            if (toolCallPause) {
-                detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
-                detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
-            } else if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null && revisionPolicy.revise()) {
-                detail.put("onRejection", revisionPolicy.onRejection().name());
-            }
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
-                    environment != null ? environment.toString() : null, -1,
-                    "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            String onRejection = !toolCallPause && decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null
+                    && revisionPolicy.revise() ? revisionPolicy.onRejection().name() : null;
+            AgentConfiguration agentConfig = toolCallPause ? null : readAgentConfigPinned(agentId, agentVersion);
+            var record = HitlDecisionRecords.regularDecision(conversationId, agentId, agentVersion, userId,
+                    environment != null ? environment.toString() : null, decision, toolCallPause, pendingBatch,
+                    agentConfig != null ? agentConfig.getHitlConfig() : null, pause,
+                    toolCallPause ? buildToolDecisionSummary(decision, pendingBatch) : null, onRejection);
+            approvalAudit.write(record, decision.getDecisionId());
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * The answer a RULE pause kept for review (its revision candidate's draft), or
+     * null — read before the resume takes the candidate off the step.
+     */
+    static String ruleDraftOf(IConversationMemory memory) {
+        try {
+            var step = memory.getCurrentStep();
+            var stored = step != null ? step.getLatestData(HitlRevisionCandidate.STEP_KEY) : null;
+            HitlRevisionCandidate candidate = stored != null ? HitlRevisionCandidate.fromMap(stored.getResult()) : null;
+            return candidate != null ? candidate.getDraft() : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -1642,16 +1725,25 @@ class ConversationHitlService {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", "CANCELLED");
-            detail.put("mode", mode != null ? mode.name() : "CANCEL_GRACEFUL");
-            detail.put("decidedBy", cancelledBy != null ? cancelledBy : "unknown");
-            detail.put("automated", cancelledBy != null && cancelledBy.startsWith("system:"));
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), conversationId, null, null, null,
-                    null, -1, "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            // The bookmark is still in place (it is cleared after this call): the entry
+            // names the agent, the owner and the pause that was cancelled.
+            ConversationMemorySnapshot snapshot = null;
+            try {
+                snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            } catch (Exception e) {
+                LOGGER.debugf("Cancelled pause of %s not readable for the audit entry: %s", sanitize(conversationId), e.getMessage());
+            }
+            String agentId = snapshot != null ? snapshot.getAgentId() : null;
+            Integer agentVersion = snapshot != null ? snapshot.getAgentVersion() : null;
+            AgentConfiguration agentConfig = agentId != null ? readAgentConfigPinned(agentId, agentVersion) : null;
+            var record = HitlDecisionRecords.regularCancellation(conversationId, agentId, agentVersion,
+                    snapshot != null ? snapshot.getUserId() : null,
+                    snapshot != null && snapshot.getEnvironment() != null ? snapshot.getEnvironment().toString() : null,
+                    snapshot != null ? snapshot.getHitlPauseType() : null, snapshot != null ? snapshot.getHitlPendingToolCalls() : null,
+                    agentConfig != null ? agentConfig.getHitlConfig() : null, snapshot != null ? snapshot.getHitlPausedAt() : null,
+                    snapshot != null && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null,
+                    mode != null ? mode.name() : ControlSignal.CANCEL_GRACEFUL.name(), cancelledBy);
+            approvalAudit.write(record);
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL cancel audit entry for %s: %s", conversationId, e.getMessage());
         }
@@ -1696,6 +1788,36 @@ class ConversationHitlService {
      * WAIT_INDEFINITELY (the default).
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
+        populateTimeoutBookmark(memory);
+        renderApprovalContext(memory);
+    }
+
+    /**
+     * Renders the agent's {@code approvalContext} blocks (and the matched tool
+     * rules' {@code context}) once, for this pause, onto the memory — persisted
+     * with the pause by the caller. Overwrites the previous pause's context; a
+     * failure leaves none and never fails the pause.
+     */
+    private void renderApprovalContext(IConversationMemory memory) {
+        try {
+            memory.setHitlApprovalContext(null);
+            ApprovalContextRenderer renderer = conversationService.approvalContextRenderer();
+            if (renderer == null) {
+                return;
+            }
+            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
+            // An agent without hitlConfig can still pause on a task-level toolApprovals
+            // rule: the renderer then
+            // takes the blocks of the effective configuration stored on the pending batch.
+            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
+                    hitlConfig != null ? hitlConfig.getToolApprovals() : null));
+        } catch (Exception e) {
+            LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+        }
+    }
+
+    private void populateTimeoutBookmark(IConversationMemory memory) {
         try {
             memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
@@ -1843,9 +1965,14 @@ class ConversationHitlService {
             if (matched == null) {
                 return true;
             }
+            // The rule a call selected is the FIRST one with its match string: rules of
+            // equal match sort stably (ToolApprovalRules), and the strict merge puts a
+            // task's rules before the agent's. A later rule with the same match is
+            // shadowed, so its policy says nothing about this call.
             boolean statesPolicy = matched.equals(governing.getMatch())
                     || toolApprovals != null && toolApprovals.getRules() != null && toolApprovals.getRules().stream()
-                            .anyMatch(r -> r != null && matched.equals(r.getMatch()) && r.getTimeoutPolicy() != null);
+                            .filter(r -> r != null && matched.equals(r.getMatch())).findFirst()
+                            .map(r -> r.getTimeoutPolicy() != null).orElse(false);
             if (!statesPolicy) {
                 return true;
             }

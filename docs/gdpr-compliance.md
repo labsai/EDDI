@@ -112,7 +112,11 @@ principal, not a user: erasing or exporting it is refused with 400.
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
-6. Conversation snapshots — **permanently deleted**
+6. Conversation snapshots — **permanently deleted**, unless an earlier step that finds
+   its records by conversation id (attachments, dead letters, journal entries,
+   descriptors, checkpoints, auto-vaulted secrets) failed: the snapshots are then
+   **kept** (reported as `conversations`, "kept until … erased"), because they are what
+   lists the conversations under the user, and a re-run needs them to reach what is left
 7. Managed conversation mappings — **permanently deleted** (and evicted from their cache)
 8. Group conversation transcripts — **permanently deleted** (kept for a re-run when
    step 2 could not finish with their blobs, see there)

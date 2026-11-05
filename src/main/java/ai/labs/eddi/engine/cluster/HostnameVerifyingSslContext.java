@@ -139,7 +139,7 @@ final class HostnameVerifyingSslContext extends SSLContext {
 
         @Override
         public Socket createSocket(Socket socket, InputStream consumed, boolean autoClose) throws IOException {
-            return delegate.createSocket(socket, consumed, autoClose);
+            return verifying(delegate.createSocket(socket, consumed, autoClose));
         }
 
         @Override

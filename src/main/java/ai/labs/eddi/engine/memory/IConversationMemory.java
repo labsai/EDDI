@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -325,6 +326,16 @@ public interface IConversationMemory extends Serializable {
         return null;
     }
     default void setHitlPendingToolCalls(PendingToolCallBatch batch) {
+    }
+
+    /**
+     * The approval-card context rendered when the current pause was committed; null
+     * unless the agent configures {@code hitlConfig.approvalContext}.
+     */
+    default RenderedApprovalContext getHitlApprovalContext() {
+        return null;
+    }
+    default void setHitlApprovalContext(RenderedApprovalContext context) {
     }
 
     /**

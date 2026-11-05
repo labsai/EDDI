@@ -212,7 +212,9 @@ public final class TaskToolApprovalsResolver {
                 demoted.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
                 demoted.setApprovalTimeout(rule.getApprovalTimeout());
                 demoted.setPauseReason(rule.getPauseReason());
+                demoted.setApprovalCategory(rule.getApprovalCategory());
                 demoted.setPendingMessage(rule.getPendingMessage());
+                demoted.setContext(rule.getContext());
                 merged.add(demoted);
             } else {
                 merged.add(rule);
