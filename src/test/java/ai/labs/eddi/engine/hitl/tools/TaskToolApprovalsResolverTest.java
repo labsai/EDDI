@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.hitl.tools;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig.ApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver.Mode;
@@ -199,6 +200,21 @@ class TaskToolApprovalsResolverTest {
         assertEquals(1, merged.getRules().size());
         assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, merged.getRules().get(0).getTimeoutPolicy());
         assertEquals("http.post:/administration/*", merged.getRules().get(0).getMatch());
+    }
+
+    @Test
+    void strictDemotionKeepsTheRulesApprovalContext() {
+        var rule = new ApprovalRule();
+        rule.setMatch("http.post:/administration/*");
+        rule.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+        var block = new ApprovalContextBlock("Body", "{call.args.body}", null);
+        rule.setContext(List.of(block));
+        var task = new ToolApprovalsConfig();
+        task.setRules(List.of(rule));
+
+        var merged = TaskToolApprovalsResolver.resolve(agentGate(), task, Mode.STRICT);
+
+        assertEquals(List.of(block), merged.getRules().get(0).getContext());
     }
 
     @Test

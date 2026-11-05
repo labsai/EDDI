@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -279,6 +280,31 @@ public interface IConversationService {
         }
 
         /**
+         * As {@link #onToolCall(String)}, with the call id and the designer's optional
+         * display. Defaults to the name-only form.
+         */
+        default void onToolCall(String toolName, String callId, ToolDisplay display) {
+            onToolCall(toolName);
+        }
+
+        /** One tool call finished — see ConversationEventSink#onToolResult. */
+        default void onToolResult(String toolName, String callId, String status, long durationMs) {
+        }
+
+        /**
+         * A resume stream only: the human decision was committed (the conversation left
+         * AWAITING_HUMAN) and the continued turn is about to run. Sent once, before any
+         * other event of the resumed turn.
+         *
+         * @param pauseId
+         *            the id of the pause the decision settled
+         * @param verdict
+         *            the decision's top-level verdict
+         */
+        default void onResumeAccepted(String pauseId, HitlDecision.HitlVerdict verdict) {
+        }
+
+        /**
          * The turn was dropped without consuming the input (see
          * {@link ConversationResponseHandler#onSkipped}). Defaults to
          * {@link #onComplete} so the stream always terminates.
@@ -481,6 +507,47 @@ public interface IConversationService {
                             Boolean returnCurrentStepOnly,
                             List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * As
+     * {@link #resumeConversation(String, HitlDecision, ConversationResponseHandler, Boolean, Boolean, List)}
+     * for a client that watches the resumed turn live: the turn's task, tool and
+     * token events go to {@code handler}, followed by exactly one terminal call.
+     * <p>
+     * Every refusal the plain resume reports (the {@code @throws} list of that
+     * method) is thrown HERE, before {@code handler} has been called, so a REST
+     * layer can still answer with a plain HTTP error. Once this method returns
+     * normally the decision is committed and the handler is the only channel:
+     * {@link StreamingResponseHandler#onResumeAccepted} first, then the turn's
+     * events, then {@code onComplete} (settled, or paused again - only after the
+     * new pause is persisted), {@code onSkipped} (the resume was dropped after it
+     * was accepted) or {@code onError} (it failed, or the cluster lease was lost).
+     */
+    void resumeConversationStreaming(String conversationId,
+                                     HitlDecision decision,
+                                     StreamingResponseHandler handler,
+                                     Boolean returnDetailed,
+                                     Boolean returnCurrentStepOnly,
+                                     List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * Dry run of a HITL decision: the checks {@code resumeConversation} runs before
+     * it consumes the pause (pause id, tool decisions, edited answer, reason
+     * codes), without consuming anything. For surfaces that must answer
+     * synchronously (Slack's {@code view_submission}).
+     *
+     * @throws IllegalArgumentException
+     *             on an invalid decision
+     * @throws PauseMismatchException
+     *             when the decision names a pause that is no longer current
+     * @throws IllegalStateException
+     *             when the conversation is not awaiting a decision
+     * @since 6.7.0
+     */
+    default void validateHitlDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        throw new UnsupportedOperationException("validateHitlDecision");
+    }
 
     /**
      * Load the full conversation memory snapshot for a given conversationId.

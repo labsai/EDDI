@@ -590,6 +590,11 @@ public class GdprComplianceService {
         // the snapshot is what lists it under the user, so deleting it would leave a
         // retry with no id to find the orphaned blobs by — and a clean report.
         boolean attachmentCleanupIncomplete = false;
+        // The same for every other per-conversation record the sweeps below reach by
+        // conversation id — dead letters, journal, descriptors, checkpoints: one that
+        // failed to delete keeps the snapshots (4c), or a retry finds no id to reach
+        // it by and reports a clean erasure.
+        boolean dependentCleanupIncomplete = false;
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
@@ -627,6 +632,7 @@ public class GdprComplianceService {
                 try {
                     deadLettersPurged += conversationCoordinator.purgeDeadLetters(convId);
                 } catch (Exception e) {
+                    dependentCleanupIncomplete = true;
                     recordFailure(failedSteps, "deadLetters", e, pseudonym);
                 }
             }
@@ -643,6 +649,7 @@ public class GdprComplianceService {
             try {
                 journalEntriesDeleted += hitlToolJournalStore.deleteByConversationId(convId);
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "hitlToolJournal", e, pseudonym);
             }
         }
@@ -659,6 +666,7 @@ public class GdprComplianceService {
                 conversationDescriptorStore.deleteAllDescriptor(convId);
                 descriptorsDeleted++;
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "conversationDescriptors", e, pseudonym);
             }
         }
@@ -676,6 +684,7 @@ public class GdprComplianceService {
             try {
                 checkpointsDeleted += checkpointStore.deleteByConversationId(convId);
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "conversationCheckpoints", e, pseudonym);
             }
         }
@@ -733,6 +742,9 @@ public class GdprComplianceService {
         } else if (attachmentCleanupIncomplete) {
             recordFailure(failedSteps, "conversations",
                     new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else if (dependentCleanupIncomplete) {
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until their dependent records are erased — retry the erasure"), pseudonym);
         } else if (conversationLookupFailed) {
             // The ids that the journal, descriptor, checkpoint and attachment sweeps above
             // work

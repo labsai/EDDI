@@ -136,7 +136,10 @@ public class RestResourceSharing implements IRestResourceSharing {
         }
         String trimmed = subject.trim();
         if (trimmed.startsWith(Subjects.USER_PREFIX)) {
-            String principal = trimmed.substring(Subjects.USER_PREFIX.length());
+            // Decoded first: the subject describe() returned is already canonical, and
+            // encoding it again turned 'user:a%7Cb' into 'user:a%257Cb', a subject no
+            // grant carries, so the revoke reported success and removed nothing.
+            String principal = Subjects.decode(trimmed.substring(Subjects.USER_PREFIX.length()));
             String normalized = Subjects.user(principal);
             if (normalized == null) {
                 throw new BadRequestException("subject 'user:' needs a principal name after the prefix");
@@ -144,7 +147,7 @@ public class RestResourceSharing implements IRestResourceSharing {
             return normalized;
         }
         if (trimmed.startsWith(Subjects.TEAM_PREFIX)) {
-            String group = trimmed.substring(Subjects.TEAM_PREFIX.length());
+            String group = Subjects.decode(trimmed.substring(Subjects.TEAM_PREFIX.length()));
             String normalized = Subjects.team(group);
             if (normalized == null) {
                 throw new BadRequestException("subject 'team:' needs a group name after the prefix");

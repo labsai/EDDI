@@ -1,6 +1,6 @@
 # RAG (Retrieval-Augmented Generation)
 
-> **Phase 8c** — Config-driven knowledge base retrieval integrated into the LLM pipeline.
+> **In short:** a knowledge base config (`RagConfiguration`) + an `eddi://ai.labs.rag` workflow step + the LLM task's `knowledgeBases` or `enableWorkflowRag`. Config-driven knowledge base retrieval integrated into the LLM pipeline.
 
 ## Overview
 
@@ -80,7 +80,7 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `storeType` | `in-memory` | Vector store (see Vector Stores table below) |
 | `storeParameters` | — | Store-specific connection params |
 | `storeNamespace` | `id` for every new KB | How the vector store is addressed: `id` (by this KB's id — its own store) or, for a KB created before 6.6, absent/`name` (the 6.5.0 layout, by name). Set by EDDI; see [Knowledge base isolation](#knowledge-base-isolation) |
-| `chunkStrategy` | `recursive` | Document chunking strategy |
+| `chunkStrategy` | `recursive` | Document chunking strategy. Only `recursive` is implemented; `paragraph` and `sentence` are accepted and rewritten to `recursive` on save, any other value is rejected |
 | `chunkSize` | `512` | Chunk size in characters, 1–32768 |
 | `chunkOverlap` | `64` | Chunk overlap in characters, at most half of `chunkSize`. Saving a larger value is refused; a stored configuration that predates the check is clamped when it is ingested or imported |
 | `maxResults` | `5` | Default top-K results |
@@ -130,12 +130,6 @@ retrieval happens inside the LLM task where the user's query is known. The step 
 the binding, and `RagTask.configure()` resolves the referenced KB so a broken URI fails when the
 workflow is deployed rather than silently returning no context on the first conversation.
 
-> **Requires EDDI with `ai.labs.rag` registered.** `WorkflowStoreClientLibrary` rejects any workflow
-> step whose type is not a registered lifecycle extension, so on a build without it a workflow
-> containing a RAG step cannot be deployed at all, and the Manager's step chooser never offers one.
-> Confirm with `GET /extensionstore/extensions` — if `eddi://ai.labs.rag` is absent, vector RAG
-> cannot be wired up on that deployment at all and only `httpCallRag` works end to end.
-
 ### 3. LLM Task RAG Configuration
 
 RAG is wired into LLM tasks via four fields on `LlmConfiguration.Task`. Three of them choose what
@@ -179,9 +173,9 @@ parameters. The `name` must match the `name` field of the `RagConfiguration`, no
 }
 ```
 
-When `enableWorkflowRag` is `true`, the system retrieves from every KB the workflow binds, with no per-KB list to maintain. It still discovers those KBs from the workflow's `eddi://ai.labs.rag` steps — an agent with no such step has nothing to auto-discover.
+When `enableWorkflowRag` is `true`, the system retrieves from every KB the workflow binds, with no per-KB list to maintain. **If `knowledgeBases` is non-empty, `enableWorkflowRag` and `ragDefaults` are ignored** and only the named KBs are searched. It still discovers those KBs from the workflow's `eddi://ai.labs.rag` steps — an agent with no such step has nothing to auto-discover.
 
-#### Option 3: httpCall RAG (Phase 8c-0)
+#### Option 3: httpCall RAG
 
 ```json
 {
@@ -197,7 +191,7 @@ Zero-infrastructure RAG: execute a named httpCall and inject its response as `##
 
 #### Context Injection
 
-Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM **system message** under a `## Relevant Context:` heading. `RagContextProvider` returns one formatted block covering every matched knowledge base, and `LlmTask` appends it. There is no per-knowledge-base or per-task switch for the injection point or for the formatting.
+Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM **system message** under a `## Relevant Context:` heading. `RagContextProvider` returns one formatted block covering every matched knowledge base, and `LlmTask` appends it. There is no per-knowledge-base or per-task switch for the injection point or for the formatting. By default the block is wrapped in a `[retrieved context - source ...]` provenance envelope (about 200 extra characters on top of `maxRagContextChars`); `markRagProvenance: false` on the LLM task turns that off, see [langchain.md](langchain.md). The `## Search Results:` block of `httpCallRag` is wrapped the same way.
 
 > **Note for existing configurations:** older `langchain.json` documents may still carry `injectionStrategy` (on `knowledgeBases[]` or `ragDefaults`) or `contextTemplate` (on `knowledgeBases[]`). Neither key was ever read by the engine — context has always gone to the system message — and both were removed from `LlmConfiguration`. Stored configurations remain valid: the leftover keys are ignored on load and dropped the next time the configuration is saved. No migration is required.
 
@@ -264,7 +258,7 @@ Response:
 }
 ```
 
-Status values: `pending` → `processing` → `completed` | `failed: <error message>`
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that is unknown, expired or held by another instance reports `unknown`: status is kept per instance for one hour, so in a cluster poll the instance that accepted the upload.
 
 **Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
 twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
@@ -568,7 +562,7 @@ died is reaped — for that source only, so a short-budget source cannot reap th
 configured for hours.
 
 **A run that loses its source stops.** If the source's state is cleared under a run — the source was
-removed, or the knowledge base renamed — or the run is reaped, it notices before its next embedding
+removed, or (in the 6.5.0 name layout) the knowledge base renamed — or the run is reaped, it notices before its next embedding
 and stops, instead of carrying on to the end of its crawl writing chunks and state rows for a source
 that has just been cleared. When it has stopped, what it wrote in the meantime is settled: a removed
 source's content is removed again, and a renamed knowledge base's state is cleared again. The rename
@@ -599,9 +593,9 @@ reap, so on a source with no cron a dead run read as `RUNNING`, and refused purg
 with a 409, until someone started another. Before that threshold a crashed run is indistinguishable
 from a live one on another instance, and still shows as `RUNNING`.
 
-**Renaming the knowledge base clears what its sources have ingested.** The vector store is addressed by
+**Renaming a knowledge base that is still in the 6.5.0 name layout clears what its sources have ingested.** In that layout the vector store is addressed by
 the knowledge base's name while ingestion state is keyed by its id, so a rename moves retrieval to a
-new, empty store. Clearing the state makes the next run repopulate it. The chunks under the old name
+new, empty store. A knowledge base in the `id` layout (every new one) is unaffected by a rename; see [Knowledge base isolation](#knowledge-base-isolation). Clearing the state makes the next run repopulate it. The chunks under the old name
 are left where they are.
 
 **Removing a source takes what the knowledge base learned from it.** Dropping a source from
@@ -905,15 +899,14 @@ all. Otherwise work through it in this order:
 | # | Check | How |
 |---|---|---|
 | 1 | Does the task request RAG at all? | Task config: `knowledgeBases` must be non-empty, or `enableWorkflowRag: true`. Neither means `RagContextProvider` returns immediately — no discovery, no trace, no log line at any level |
-| 2 | Is `ai.labs.rag` a registered extension? | `GET /extensionstore/extensions`. If absent, this build cannot deploy a RAG step at all — upgrade; only `httpCallRag` works until then |
-| 3 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
-| 4 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
-| 5 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
-| 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, check whether EDDI has restarted since, or the knowledge base changed its embedding model or moved to a new store (below): each empties it until the next run of each source re-embeds it (see [Vector Stores](#vector-stores)) |
-| 7 | Did ingestion write where retrieval reads? | Both address the store by the knowledge base's id, so they cannot diverge any more. If the KB was renamed while in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, it now has a new, empty store — re-ingest (see [Knowledge base isolation](#knowledge-base-isolation)) |
+| 2 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
+| 3 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
+| 4 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
+| 5 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, check whether EDDI has restarted since, or the knowledge base changed its embedding model or moved to a new store (below): each empties it until the next run of each source re-embeds it (see [Vector Stores](#vector-stores)) |
+| 6 | Did ingestion write where retrieval reads? | Both address the store by the knowledge base's id, so they cannot diverge any more. If the KB was renamed while in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, it now has a new, empty store — re-ingest (see [Knowledge base isolation](#knowledge-base-isolation)) |
 
 Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show
-the task-level or unmatched-name cases — rule those out with checks 1 and 4 above):
+the task-level or unmatched-name cases — rule those out with checks 1 and 3 above):
 
 ```properties
 quarkus.log.category."ai.labs.eddi.modules.llm.impl.RagContextProvider".level=DEBUG
@@ -1047,17 +1040,9 @@ parameter rather than ignoring it.
 > recommended choice, and — with `in-memory` — one of the two stores whose document-replacement
 > semantics are verified (see [Ingestion Sources](#ingestion-sources)).
 
-## Status
+## Capabilities
 
-- ✅ **Phase 8c**: RAG Foundation — config-driven knowledge base retrieval
-- ✅ **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
-- ✅ **Phase 8c-β**: Persistent vector stores (pgvector)
-- ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
-- ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
-- ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
-- ✅ **Workflow step registration**: `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step and the Manager offers it. On a build without it, [Options 1 and 2](#3-llm-task-rag-configuration) can be saved but not deployed, and only `httpCallRag` works end to end — check with `GET /extensionstore/extensions`
-- ✅ **Scheduled ingestion sources**: crawl a website, or upload PDF, Word, Excel, PowerPoint,
-  text, Markdown, CSV and HTML files
+Config-driven knowledge bases for LLM tasks, httpCall-based RAG, six vector stores and eight embedding providers, REST and scheduled ingestion (crawl a website, or upload PDF, Word, Excel, PowerPoint, text, Markdown, CSV and HTML files), and a RAG editor in the Manager. `eddi://ai.labs.rag` is a registered lifecycle extension, so a workflow can declare a knowledge-base step.
 
 ## Future Enhancements
 

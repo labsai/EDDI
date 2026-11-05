@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -28,6 +30,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffService;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -290,11 +293,26 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile IAgentGroupStore agentGroupStore;
 
     /**
+     * Cross-team handoff. Null in tests that build the orchestrator by hand, which
+     * {@code TeamHandoffToolsProvider} reads as "no handoff tool".
+     */
+    @Inject
+    volatile TeamHandoffService teamHandoffService;
+
+    /**
      * I17's store, field-injected for the same reason as the two above.
      * {@code ArtifactToolsProvider} treats null as "no artifact tools".
      */
     @Inject
     volatile ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * The sampled audit, told about every allowed tool call. Field-injected for the
+     * same reason as the stores above; null under direct construction, where no
+     * call is sampled.
+     */
+    @Inject
+    volatile SampledAuditRecorder sampledAuditRecorder;
 
     /**
      * M-A1: the USE check {@code recruit_agent} applies on behalf of the
@@ -455,6 +473,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.mcpToolsProvider = new McpToolsProvider(agentStore, workflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
+        this.toolLoopRunner.setAllowedCallObserver(AllowedToolCallObserver.deferred(() -> sampledAuditRecorder));
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
@@ -754,6 +773,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         var contextual = contextualToolsProvider();
         merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
                 new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
+                new TeamHandoffToolsProvider(liveDiscussionRegistry, agentGroupStore, teamHandoffService),
                 new ArtifactToolsProvider(liveDiscussionRegistry, agentGroupStore, sharedArtifactStore),
                 new AttachmentToolsProvider(contextual)), ctx);
 
@@ -1039,15 +1059,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /**
-     * The turn's {@link ToolAssemblyContext}, built once and shared by every
-     * provider so they all read one consistent snapshot.
-     * <p>
-     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
-     * each provider: it can come from a group-injected context variable, and two
-     * providers resolving it independently could disagree if the step data changed
-     * between reads.
-     */
-    /**
      * What an approved tool call of this conversation must not write to: the acting
      * agent, its workflows and their extension resources, resolved from the stores
      * now (L13). See {@link ActingAgentResources}.
@@ -1056,6 +1067,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return ActingAgentResources.resolve(agentStore, workflowStore, resourceClientLibrary, memory.getAgentId(), memory.getAgentVersion());
     }
 
+    /**
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
+     * <p>
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
+     */
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
         return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
                 DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),

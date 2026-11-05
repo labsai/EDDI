@@ -31,7 +31,7 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
 | `SecretScrubber`                       | `secrets.sanitize` | Removes plaintext secrets from export payloads (leaves `${vault:...}` references intact) |
 | `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys and tokens                |
-| `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
+| `ISecretPersistence`                   | `secrets.persistence` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
 ## Secret References
 
@@ -405,10 +405,10 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 - **A restricted secret travels encrypted.** An entry names a host, not a transport, so `api.openai.com` would otherwise admit `http://api.openai.com` and the key would cross the network in the clear — to the right host, but readable by everything on the path. A secret with an `allowedHosts` list is therefore **refused for `http://` or `ws://` to any host other than loopback** (`localhost`, `127.0.0.1`, `[::1]`), even when the host is on the list; the refusal names the destination and the opt-out. This is the same rule, with the same loopback exemption, as a connection's [`allowPlaintextRemoteOrigins`](connections.md#plaintext-origins). A deployment that does send restricted secrets to an internal service over plain http (`http://vllm.internal:8000`, an in-cluster Elasticsearch) sets **`eddi.vault.allow-plaintext-remote-hosts=true`** (env `EDDI_VAULT_ALLOW_PLAINTEXT_REMOTE_HOSTS`), which accepts plaintext to a listed host — never to an unlisted one. Destinations without an http-family scheme (pgvector and Qdrant `host:port`, `mongodb://`) are not judged by scheme; their transport is the client's own configuration. A secret without a list is unaffected.
 - **A `${connection:…}` is held to the secrets behind it.** A STATIC connection's `valueTemplate` and a BASIC connection's `passwordRef` name vault secrets with lists of their own; when the connection is resolved for a call, every one of them is checked against that call's target — after the connection's `baseUrlAllowlist`, and after `${vars:…}` expansion — before anything is decrypted. Both lists must admit the target; a refusal is a `TARGET_NOT_ALLOWED` connection failure naming the secret. (An OAuth connection's client secret goes to the token endpoint, which `credentialEndpointAllowlist` governs.)
 - **A Slack integration's `botToken` is held to `slack.com`.** The channel router checks a vaulted `botToken` against `https://slack.com/api/` before resolving it, for channel integrations and legacy agent channel connectors alike; a token whose list does not name `slack.com` is withheld — the integration cannot post, and a `[SECURITY]` WARN names the secret and the integration. Signing secrets are never sent anywhere and are not checked.
-- **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl`, `host` or Vertex's `apiEndpoint` in `langchain.json`; for an OpenAI-compatible preset without `baseUrl`, the preset URL its `region` selects), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
+- **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl`, `host` or Vertex's `apiEndpoint` in `langchain.json`; for an OpenAI-compatible preset without `baseUrl`, the preset URL its `region` selects), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string, its `proxyHost` included — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
 - **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing for those until an operator sets it. `[]` or `["*"]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use. A cached chat model whose parameters reach a secret through a `${vars:…}` variable cannot be matched to the secret, so every variable-bearing chat model is evicted along with it.
-- **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's. (An OpenAI-compatible preset is the exception: its `region` lets an editor pick among the vendor's hosts, so the URL it selects is checked.)
+- **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's. (An OpenAI-compatible preset is the exception: its `region` lets an editor pick among the vendor's hosts, so the URL it selects is checked — also when the configuration carries an `endpoint`-style key the preset does not read.)
 - **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
 - **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
 
@@ -526,6 +526,8 @@ bash install.sh --vault-key=your-strong-passphrase-here
 # PowerShell
 .\install.ps1 -VaultKey "your-strong-passphrase-here"
 ```
+
+**Master key requirements.** In production, startup is refused for a master key shorter than 16 characters, with too few distinct characters, or equal to a known demo value, unless `eddi.vault.allow-weak-master-key=true` is set. Dev and test profiles are not held to this, which is why a short `%dev.` passphrase boots.
 
 Re-running the installer preserves your existing key — it reads from `~/.eddi/.env` and never overwrites it.
 
@@ -688,7 +690,7 @@ Every editor can read the LLM configuration that holds the reference, so a key s
 | --- | --- |
 | a base URL (`baseUrl` on `/setup`, `llmBaseUrl` on `/setup-api`) | that URL's host, with its port when the URL spells one |
 | no base URL, a provider with a known endpoint | the provider's host: `api.openai.com`, `api.anthropic.com`, `generativelanguage.googleapis.com`, `api.mistral.ai`, `router.huggingface.co`, `huggingface.co` (jlama's model-download token), or the default and regional hosts of a named OpenAI-compatible provider |
-| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`) |
+| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`). A reference alone, optionally after a scheme — `${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}` or `${context:…}` (the user's own token, sent per turn as secret context; see [httpcalls](httpcalls.md#per-turn-credentials-from-secret-context)) — is written as given and nothing is vaulted |
 | `"allowedHosts": ["api.example.com", "proxy.example:8443"]` | exactly that list, for every secret the request vaults — validated as on the secrets API |
 | `"allowedHosts": ["*"]` | no list: the secret may go anywhere |
 
@@ -770,11 +772,11 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
-| `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
+| `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — send over TLS only (EDDI does not enforce this) |
 | `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination`, `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -812,6 +814,8 @@ It returns the vault reference:
 ]
 ```
 
+The real response also carries `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination` and `referencedBy` (see [Destination allow-list](#destination-allow-list-allowedhosts)); the example shows only the first fields.
+
 > The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response. A row written before the keyed form still carries a bare SHA-256; the next `POST /{tenantId}/rotate-dek` replaces it with the keyed form as it re-seals the row.
 
 **`GET /health`** — returns vault provider status:
@@ -823,6 +827,8 @@ It returns the vault reference:
   "available": true
 }
 ```
+
+When the vault is disabled or unavailable the endpoint answers `503` with the same body shape and `status: DOWN`.
 
 **`POST /{tenantId}/reset?confirm=true`** — deletes every secret and the DEK for the tenant (without `confirm=true`: `400`, `{"error": "confirm=true is required", …}`):
 
@@ -861,7 +867,7 @@ Request body:
 ```json
 {
   "oldMasterKey": "current-master-key",
-  "newMasterKey": "new-master-key-at-least-8-chars"
+  "newMasterKey": "a-new-master-key-16-chars-or-more"
 }
 ```
 
@@ -873,7 +879,7 @@ Response:
 }
 ```
 
-> **⚠️ Warning:** The `rotate-kek` endpoint transmits master keys in the request body. Ensure TLS is enabled. After rotation, update `EDDI_VAULT_MASTER_KEY` and restart.
+> **⚠️ Warning:** The `rotate-kek` endpoint transmits master keys in the request body. EDDI does not check that the request arrived over TLS, so make sure your ingress terminates TLS. The endpoint itself accepts a new key of 8 or more characters, but in production a key that fails the strength check (under 16 characters, or low-entropy) is refused. After rotation, update `EDDI_VAULT_MASTER_KEY` and restart.
 
 ### Key Rotation
 
@@ -1143,28 +1149,3 @@ Both MongoDB and PostgreSQL persistence implementations wrap all database except
 - Consistent error handling across database backends
 - No silent failures — all persistence errors surface to the caller
 - Clear error messages with context (tenant ID, key name, operation)
-
-## Testing
-
-~100 tests across backend and frontend:
-
-### Backend (~80 tests)
-
-| Test Class                    | Tests | Coverage                                                                                           |
-| ----------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
-| `SecretVaultIntegrationTest`  | 22    | Full round-trip, negative caching, DEK/KEK rotation, metrics, exceptions                          |
-| `VaultSecretProviderTest`     | 11    | Store, resolve, delete, metadata, list, unavailable states                                         |
-| `SecretResolverTest`          | 10    | Single/multiple/nested resolution, caching, passthrough, auto-vault keys                           |
-| `RestSecretStoreTest`         | 22    | All endpoints, validation, error codes, vault unavailable, rotation                                |
-| `EnvelopeCryptoTest`          | 9     | Encrypt/decrypt, key rotation, wrong key, tampering, large payloads                                |
-| `SecretRedactionFilterTest`   | 6     | All 5 regex patterns, null/empty, safe messages                                                    |
-| `SecretScrubberTest`          | 4     | Nested object scrubbing, preservation of non-secret fields                                         |
-| `SecretReferenceTest`         | 6+    | Parsing, equality, hash, invalid references                                                        |
-| `ConversationSecretInputTest` | 5     | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
-
-### Frontend (17 tests)
-
-| Test File                       | Tests | Coverage                                                                                                                |
-| ------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------- |
-| `secrets.test.tsx` (Manager)    | 12    | Page render, tenant inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation       |
-| `chat-store.test.tsx` (Chat UI) | 5     | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults                  |

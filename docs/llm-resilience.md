@@ -6,6 +6,8 @@ answer arrives. EDDI recovers from each of these in a fixed order, always tries 
 leaves a trail an operator can read afterwards. This page is the map: what can fail, what the engine does about
 it, which settings control it and where to look when a turn did not go as expected.
 
+**In short:** with no settings an LLM call is attempted up to 3 times on transient failures, there is no cascade and no fallback model, and the turn still ends with an answer or an error the caller can read.
+
 Everything here is **optional and off by default** unless stated otherwise. An agent with no resilience
 settings behaves as it did before, with two exceptions that are bug fixes: a reply that is not valid JSON no
 longer fails the turn under `convertToObject`, and an HTTP 500 from a provider is now retried.
@@ -310,7 +312,7 @@ All counters are Micrometer meters on `/q/metrics` (names below as Prometheus re
 | `eddi_llm_failure_total` | `class`, `model` | A failed model call by failure class: every failed cascade step, and every failed single-model task |
 | `eddi_llm_recovery_total` | `action`, `outcome`, `trigger` | One count per recovery action. `action` is `repair`, `wrap`, `retry`, `escalate`, `circuit_skip` or `fallback` (`wrap` with outcome `not_wrappable` counts a reply `onInvalidJson: "wrap"` could not rescue) |
 | `eddi_llm_output_total` | `outcome` | `convertToObject` replies by parse outcome (`valid`, `repaired`, `wrapped`, `invalid`, `empty`, `schema_mismatch`) |
-| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`) |
+| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`, `httpcall_foreach`) |
 | `eddi_llm_cancelled_total` | `scope` | An attempt or cascade step abandoned on timeout |
 | `eddi_llm_circuit_total`, `eddi_llm_circuit_skipped_total`, `eddi_llm_circuit_open` | | Circuit breaker transitions, skipped turns and the gauge of open circuits |
 
