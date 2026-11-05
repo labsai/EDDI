@@ -74,9 +74,10 @@ src/
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Nine SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
+- **Eleven SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
   `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
-  `done`, `error`. There is **no `thinking` event** — the backend never emits one.
+  `guardrail_triggered`, `llm_retry`, `done`, `error`. The widget does not handle
+  `guardrail_triggered` or `llm_retry` (the Manager's `use-chat.ts` does). There is **no `thinking` event** — the backend never emits one.
 - **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
   the name only; arguments reach the client later, redacted, in
   `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
@@ -181,7 +182,7 @@ no CI at all). Run all three before pushing, plus `npm run build`.
 ## 5. Mandatory Workflow
 
 1. **Before work**: `git status`, read this file + the top of the root `docs/changelog.md` and anything pending in the root `docs/changelog.d/`
-2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates below.
+2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates above.
 3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT

@@ -151,6 +151,19 @@ Content-Type: multipart/form-data
 }
 ```
 
+`forwardableInline` is `true` when `sizeBytes` is at most `eddi.attachments.max-forward-bytes` (default 10 MB): only then can the blob be sent inline to a model provider on a later turn; `eddi.attachments.max-forward-aggregate-bytes` caps the total forwarded with one message.
+
+**Other endpoints** (all under `/conversations/{conversationId}/attachments`):
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `` | List the conversation's attachments |
+| `GET` | `/{storageRef}` | Download one blob |
+| `DELETE` | `/{storageRef}` | Delete one blob |
+| `DELETE` | `` | Delete all of the conversation's attachments |
+
+An unknown `storageRef` answers `404` (`ATTACHMENT_NOT_FOUND`), and a blob the conversation may not access answers `403`.
+
 The returned `storageRef` can then be used in subsequent conversation turns by setting it as the `storageRef` field in an attachment context key. It takes precedence over `url` and `data`, and the authoritative `mimeType` and `sizeBytes` are resolved server-side from the store, so they need not be supplied:
 
 ```json

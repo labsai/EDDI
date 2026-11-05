@@ -61,7 +61,7 @@ LLMs are inherently probabilistic — they hallucinate, loop infinitely, and bur
 
 EDDI is middleware — it sits between user-facing channels and AI providers. It does not contain business logic; it contains the **machinery** to execute business logic defined as configuration. Adding a new capability means adding a new component type, not modifying existing ones.
 
-**Why this matters:** This architecture enables multi-tenancy (same engine, different agents), instant iteration (edit config, not code), and clean extensibility (auto-discovery, no registration).
+**Why this matters:** This architecture enables multi-tenancy (same engine, different agents), instant iteration (edit config, not code), and clean extensibility (tasks are CDI beans, each registered once by a small `@Startup` bootstrap module).
 
 **Anti-patterns:**
 

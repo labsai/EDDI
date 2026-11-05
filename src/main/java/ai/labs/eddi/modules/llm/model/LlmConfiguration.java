@@ -120,8 +120,9 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         // === Agent Mode Features (Optional - triggers agent mode when set) ===
 
         /**
-         * List of EDDI httpcall URIs to use as tools. Setting this enables agent mode
-         * with tool calling.
+         * Legacy. The entries are NOT resolved: HTTP call tools are discovered from the
+         * workflow ({@code enableHttpCallTools}). A non-empty list only switches the
+         * task into agent mode.
          */
         private List<String> tools;
 
@@ -152,9 +153,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Boolean enableMcpCallTools = true;
 
         /**
-         * Whitelist of specific built-in tools to enable. Options: "calculator",
+         * Whitelist of specific tools to enable. Built-in options: "calculator",
          * "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer",
-         * "pdfreader", "weather"
+         * "pdfreader", "weather", "fetch_page" (alias "fetch_tool_response_page").
+         * Context-bound keys: "usermemory", "conversationRecall", "artifacts",
+         * "group_tasks" and the dynamic-agent tools "create_sub_agent",
+         * "converse_with_agent", "find_agents_by_capability", "recruit_agent",
+         * "teardown_agent". See docs/langchain.md.
          */
         private List<String> builtInToolsWhitelist;
 
@@ -398,6 +403,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.5.0
          */
         private ToolQuotaConfig toolQuotas;
+
+        /**
+         * What a streaming client may be told about a call of each tool, keyed by tool
+         * name (like {@code toolQuotas}, the name the model invoked wins over the
+         * built-in slug): a static label and the values of a few allow-listed top-level
+         * arguments - see {@link ToolDisplayConfig}. Absent means a streamed tool call
+         * carries the tool name and call id only.
+         *
+         * @since 6.5.0
+         */
+        private Map<String, ToolDisplayConfig> toolDisplay;
 
         /**
          * Cross-team handoff: the teams this agent may file tasks into through the
@@ -1105,6 +1121,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public Map<String, ToolDisplayConfig> getToolDisplay() {
+            return toolDisplay;
+        }
+
+        public void setToolDisplay(Map<String, ToolDisplayConfig> toolDisplay) {
+            this.toolDisplay = toolDisplay;
         }
 
         public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {

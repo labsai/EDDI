@@ -210,6 +210,17 @@ public class SummarizationService {
     public SummarizationResult summarizeWithUsage(String content, String instructions,
                                                   String llmProvider, String llmModel,
                                                   Map<String, String> inheritedParameters) {
+        return summarizeWithUsage(content, instructions, llmProvider, llmModel, inheritedParameters, null);
+    }
+
+    /**
+     * As the five-argument overload, with an explicit retry policy for callers that
+     * run inside a time budget of their own (the SERVICE convergence judge allows a
+     * single attempt). {@code null} keeps the default policy.
+     */
+    public SummarizationResult summarizeWithUsage(String content, String instructions,
+                                                  String llmProvider, String llmModel,
+                                                  Map<String, String> inheritedParameters, RetryConfiguration retry) {
         long start = System.nanoTime();
         try {
             // An inherited model is kept when no summarizer model is given; otherwise
@@ -224,8 +235,8 @@ public class SummarizationService {
 
             List<ChatMessage> messages = List.of(SystemMessage.from(instructions), UserMessage.from(content));
 
-            var response = RetryConfiguration.executeWithDefaultRetry(() -> model.chat(ChatRequest.builder().messages(messages).build()),
-                    "Summarization");
+            var response = RetryConfiguration.executeWithRetryUnwrapped(() -> model.chat(ChatRequest.builder().messages(messages).build()),
+                    retry, "Summarization");
 
             callCounter.increment();
 

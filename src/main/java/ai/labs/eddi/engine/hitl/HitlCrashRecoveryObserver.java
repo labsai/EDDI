@@ -62,10 +62,15 @@ import java.util.function.Predicate;
  * active one on another pod.
  *
  * <p>
- * <b>Cluster caveat:</b> during a rolling restart, another pod may be actively
- * resuming a conversation this observer sees as stuck IN_PROGRESS. The restore
- * is CAS-guarded and the active resume's final store wins, but a brief window
- * exists in which a second resume could be accepted. Set
+ * <b>Cluster mode:</b> with {@code eddi.messaging.type=nats} this observer runs
+ * no startup pass; {@code ClusterHitlRecovery} sweeps periodically under leader
+ * election instead. The caveat below applies to a startup pass only.
+ *
+ * <p>
+ * <b>Rolling-restart caveat:</b> during a rolling restart, another pod may be
+ * actively resuming a conversation this observer sees as stuck IN_PROGRESS. The
+ * restore is CAS-guarded and the active resume's final store wins, but a brief
+ * window exists in which a second resume could be accepted. Set
  * {@code eddi.hitl.crash-recovery.recover-in-progress=false} in multi-pod
  * deployments if this risk is unacceptable.
  *
@@ -239,9 +244,12 @@ public class HitlCrashRecoveryObserver {
                 }
                 String groupConversationId = gc.getId();
                 try {
-                    // cancelDiscussion is CAS/terminal-guarded: it no-ops if the
-                    // discussion was resumed/cancelled between the scan and here.
-                    if (groupConversationService.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL)) {
+                    // Paused-only and bound to the pause this scan found expired: an
+                    // approval landing in between resumes the discussion, and a plain
+                    // cancelDiscussion would then stop the running work (or end a
+                    // later, fresh pause) instead of no-opping.
+                    if (groupConversationService.cancelPausedDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL,
+                            HitlDecision.pauseIdOf(pausedAt))) {
                         cancelledGroups++;
                     }
                 } catch (Exception e) {

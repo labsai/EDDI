@@ -61,6 +61,8 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
+**Save-time limits** (a config over any of them is rejected with `400`): at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5.
+
 **One agent, one seat.** A member is addressed everywhere by its `agentId` —
 its member conversation, display name, vote weight, `participants` lists and
 the facilitator all key on it — so listing the same agent twice does not give
@@ -344,9 +346,9 @@ peer-hidden until their phase completes (commit-reveal).
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
-  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is still rejected at save
-  time: humans can now be group *members* (I6), but a tie-break that waits on a
-  person needs its own resume machinery, which has not shipped.
+  `type: NONE` and the discussion continues. `HUMAN_DECIDES` pauses the
+  discussion until a named person picks one of the tied options (method
+  `vote+human-tiebreak`) — see [Group Human Decisions](group-human-decisions.md#tie-breaks).
 - The result fires the `decision_reached` SSE event (which this feature also
   wires for debate verdicts) and renders a tally block in Slack.
 
@@ -391,10 +393,14 @@ roster like any agent, but their turn **pauses the discussion**
 - **PARALLEL phases**: agents fan out first; humans are then prompted one at a
   time against the *pre-fan-out* snapshot, so an independent round stays
   independent — a human answering after the agents cannot read their answers.
-- **v1 bounds (save-time rejected)**: no HUMAN members in task-force groups
-  (PLAN/EXECUTE/VERIFY) or `targetEachPeer` phases, and a group containing
-  humans cannot be nested as a GROUP member. A human **moderator** is allowed —
-  every synthesis then waits on that person (the save warns about it).
+- **Task forces**: a HUMAN member may execute task-force tasks it is explicitly
+  assigned — one pause per task, after the agents' waves — but may not plan or
+  verify; see [Group Human Decisions](group-human-decisions.md#humans-as-task-force-executors).
+- **Bounds (save-time rejected)**: no HUMAN members in `targetEachPeer` phases, a
+  group containing humans cannot be nested as a GROUP member, and a HUMAN
+  planner/verifier is refused in a group with PLAN or VERIFY phases. A human
+  **moderator** is otherwise allowed — every synthesis then waits on that person
+  (the save warns about it).
 
 ## Facilitator with bounded moves (I12)
 
@@ -791,7 +797,7 @@ controls that shape *when it stops* and *what it costs*:
   "repeats": 3,
   "requiresApproval": false,
   "allowAbstention": true,
-  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "SERVICE" }
+  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "MODERATOR" }
 }
 ```
 
@@ -799,7 +805,7 @@ controls that shape *when it stops* and *what it costs*:
 mechanism behind DELPHI's rounds.
 
 **`requiresApproval`** pauses the discussion at the phase boundary until a human
-approves or rejects (see [HITL](hitl.md)). At `TASK` granularity on an `EXECUTE`
+approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
 **`convergence` (I2)** ends a repeating phase early once the round stopped
@@ -809,10 +815,11 @@ scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
 nothing to compare against) guards against calling convergence before there is
 evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
 the judge (in its own conversation, so the judge's JSON-only prompts never leak
-into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
-logs a warning and falls back to the same moderator-agent path, so it currently
-costs the same as `MODERATOR` rather than the cheaper dedicated call the name
-suggests. Either way, a group with no moderator skips the judge and the phase
+into a later SYNTHESIS turn). `SERVICE` with a `service` model makes one cheap
+direct model call instead, needs no moderator, and books its spend as
+`system:judge:*` — see [Group Convergence Judge: SERVICE](group-service-judge.md);
+without a `service` model it falls back to the moderator path with a warning.
+A `MODERATOR` judge in a group with no moderator is skipped and the phase
 simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
@@ -905,6 +912,9 @@ The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → 
    run without its output. Under `ABORT` the member's remaining tasks in that wave are not started.
 3. **VERIFY** — The moderator reviews each task result against the original goal
 4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
+
+A HUMAN member can execute tasks too, when a task is assigned to them explicitly — see
+[humans as task-force executors](group-human-decisions.md#humans-as-task-force-executors).
 
 #### Rework within a run (`maxReworks`)
 

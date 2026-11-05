@@ -14,7 +14,10 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.llm.capability.ResponseSchemaConverter;
+import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
+import ai.labs.eddi.modules.llm.tools.spi.ToolArgumentValidator;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
@@ -25,8 +28,10 @@ import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -41,6 +46,8 @@ import java.net.http.HttpConnectTimeoutException;
 import java.nio.channels.UnresolvedAddressException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,6 +55,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import dev.langchain4j.model.chat.request.json.JsonSchemaElement;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import com.fasterxml.jackson.core.JsonParseException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -234,7 +242,12 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     ToolSpecification.Builder specBuilder = ToolSpecification.builder().name(apiCall.getName())
                             .description(apiCall.getDescription() != null ? apiCall.getDescription() : "Execute " + apiCall.getName());
 
-                    if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
+                    if (hasArgumentSchema(apiCall)) {
+                        JsonObjectSchema typed = typedParameters(apiCall);
+                        if (typed != null) {
+                            specBuilder.parameters(typed);
+                        }
+                    } else if (apiCall.getParameters() != null && !apiCall.getParameters().isEmpty()) {
                         var schemaBuilder = JsonObjectSchema.builder();
                         for (var param : apiCall.getParameters().entrySet()) {
                             schemaBuilder.addStringProperty(param.getKey(), param.getValue() != null ? param.getValue() : param.getKey());
@@ -258,9 +271,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     // way: the fingerprint pinned at gate time is only meaningful if it
                     // describes the request execution will actually construct.
                     resolvers.put(apiCall.getName(),
-                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
+                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(apiCall, memory, toolRequest),
+                                    targetServerUrl));
 
-                    executors.put(apiCall.getName(), new MockAwareToolExecutor() {
+                    executors.put(apiCall.getName(), new HttpCallToolExecutor() {
+                        @Override
+                        public List<String> argumentViolations(ToolExecutionRequest toolRequest) {
+                            return argumentViolationsOf(apiCall, toolRequest);
+                        }
+
                         @Override
                         public String execute(ToolExecutionRequest toolRequest, Object memoryId) {
                             return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null);
@@ -315,7 +334,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     private String executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest, String targetServerUrl,
                                        ToolMockRegistry.MockResult mock) {
         try {
-            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
+            // Normally already refused before the gate (ToolLoopRunner). Checked again
+            // here because an approved call resumed after the configuration changed, or
+            // any other path straight to the executor, must not send what the schema
+            // now refuses.
+            List<String> violations = argumentViolationsOf(apiCall, toolRequest);
+            if (!violations.isEmpty()) {
+                return ToolArgumentSchemaValidator.refusal(violations);
+            }
+            Map<String, Object> templateData = templateDataFor(apiCall, memory, toolRequest);
             // ToolLoopRunner already ran the agent-test interception for this call;
             // tell the executor not to intercept (and count) it again as a rule call.
             templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
@@ -351,8 +378,20 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * use — two copies of this merge would eventually disagree, and the guard would
      * then reject correct calls (or, worse, pass altered ones).
      */
-    private Map<String, Object> templateDataFor(IConversationMemory memory, ToolExecutionRequest toolRequest) {
+    private Map<String, Object> templateDataFor(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest) {
         Map<String, Object> templateData = memoryItemConverter.convert(memory);
+        if (hasArgumentSchema(apiCall)) {
+            // A typed call: the arguments as the schema check normalised them
+            // (JSON-encoded containers decoded, undeclared fields dropped under
+            // unknownFields=drop), each rendered as text for the templates. The
+            // rendered text is substituted as DATA into the authored placeholder,
+            // exactly as a model-written string always was.
+            var checked = ToolArgumentSchemaValidator.check(apiCall.getArgumentSchema(), apiCall.getUnknownFields(), toolRequest.arguments());
+            if (checked.arguments() != null) {
+                safeTemplateMerge(templateData, renderArguments(checked.arguments()));
+            }
+            return templateData;
+        }
         if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
             try {
                 @SuppressWarnings("unchecked")
@@ -381,6 +420,127 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             }
         }
         return templateData;
+    }
+
+    /** An httpcall tool: mock-aware and able to judge its arguments up front. */
+    private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator {
+    }
+
+    /**
+     * Whether the call declares a non-empty {@code argumentSchema}. Every typed
+     * behaviour (typed parameters, the pre-gate check, JSON rendering) hangs on
+     * this; without it the call behaves exactly as before.
+     */
+    static boolean hasArgumentSchema(ApiCall apiCall) {
+        return apiCall.getArgumentSchema() != null && !apiCall.getArgumentSchema().isEmpty();
+    }
+
+    /** The call's schema violations; always empty for a call without a schema. */
+    static List<String> argumentViolationsOf(ApiCall apiCall, ToolExecutionRequest toolRequest) {
+        if (!hasArgumentSchema(apiCall)) {
+            return List.of();
+        }
+        return ToolArgumentSchemaValidator.check(apiCall.getArgumentSchema(), apiCall.getUnknownFields(), toolRequest.arguments())
+                .violations();
+    }
+
+    /**
+     * Each argument as the text a template substitutes: a string as itself (a path
+     * or query value is never quoted), anything else as its compact JSON — so an
+     * integer renders {@code 5}, a boolean {@code true}, and an object or array a
+     * JSON document, never a Java {@code toString} such as {@code {name=x}}.
+     */
+    static Map<String, Object> renderArguments(ObjectNode arguments) {
+        Map<String, Object> rendered = new LinkedHashMap<>();
+        arguments.fields().forEachRemaining(field -> {
+            JsonNode value = field.getValue();
+            rendered.put(field.getKey(), value == null || value.isNull() ? null : value.isTextual() ? value.asText() : value.toString());
+        });
+        return rendered;
+    }
+
+    /**
+     * The tool parameters typed from {@code argumentSchema}. Every parameter is
+     * converted on its own; one whose schema cannot be expressed as a tool
+     * parameter type is offered as a string, as every parameter was before. The
+     * descriptions stay those of {@code parameters} (they carry the allowed values
+     * and defaults); {@code required} is the schema's, or every parameter when the
+     * schema has none.
+     */
+    static JsonObjectSchema typedParameters(ApiCall apiCall) {
+        JsonNode root = STRICT_JSON.valueToTree(apiCall.getArgumentSchema());
+        JsonNode properties = root.path("properties");
+        Map<String, String> descriptions = apiCall.getParameters() != null ? apiCall.getParameters() : Map.of();
+        Set<String> names = new LinkedHashSet<>();
+        if (properties.isObject()) {
+            properties.fieldNames().forEachRemaining(names::add);
+        }
+        names.addAll(descriptions.keySet());
+        if (names.isEmpty()) {
+            return null;
+        }
+        var builder = JsonObjectSchema.builder();
+        for (String name : names) {
+            JsonNode propertySchema = properties.get(name);
+            String description = descriptions.get(name);
+            if (description == null && propertySchema != null && propertySchema.path("description").isTextual()) {
+                description = propertySchema.path("description").asText();
+            }
+            if (description == null) {
+                description = name;
+            }
+            JsonSchemaElement element = null;
+            if (propertySchema instanceof ObjectNode objectSchema && !hasPropertylessObject(objectSchema, 0)) {
+                ObjectNode described = objectSchema.deepCopy();
+                described.put("description", description);
+                element = ResponseSchemaConverter.toElement(described).orElse(null);
+            }
+            if (element != null) {
+                builder.addProperty(name, element);
+            } else {
+                builder.addStringProperty(name, description);
+            }
+        }
+        JsonNode required = root.get("required");
+        if (required != null && required.isArray()) {
+            List<String> requiredNames = new ArrayList<>();
+            required.forEach(name -> {
+                if (name.isTextual() && names.contains(name.asText())) {
+                    requiredNames.add(name.asText());
+                }
+            });
+            if (!requiredNames.isEmpty()) {
+                builder.required(requiredNames);
+            }
+        } else {
+            builder.required(new ArrayList<>(names));
+        }
+        return builder.build();
+    }
+
+    /**
+     * Whether the schema contains an {@code object} with no declared properties (a
+     * free-form map). Gemini rejects a function declaration holding one ("should be
+     * non-empty for OBJECT type"), which would fail every request of the turn, so
+     * such a parameter is offered as a JSON-encoded string instead; the schema
+     * check decodes and validates it all the same.
+     */
+    static boolean hasPropertylessObject(JsonNode schema, int depth) {
+        if (schema == null || !schema.isObject() || depth > 32) {
+            return false;
+        }
+        JsonNode properties = schema.get("properties");
+        if ("object".equals(schema.path("type").asText()) && (properties == null || !properties.isObject() || properties.isEmpty())) {
+            return true;
+        }
+        if (properties != null && properties.isObject()) {
+            for (JsonNode child : properties) {
+                if (hasPropertylessObject(child, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return hasPropertylessObject(schema.get("items"), depth + 1);
     }
 
     /**

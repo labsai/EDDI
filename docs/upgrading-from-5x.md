@@ -88,7 +88,7 @@ It ends every `READY` conversation whose last interaction is older than `inactiv
 `dryRun=true` ends nothing and returns what it would end: run it first. The role is `eddi-admin`,
 `inactiveForDays` must be at least 1, and every call is written to the audit ledger.
 
-**Ending conversations can make them eligible for deletion by the next retention run** (see the retention bullet below), so check `deleteEndedConversationsOnceOlderThanDays` before you run it for real.
+**Ending conversations can make them eligible for deletion by the next retention run** (see [retention](#3-retention-decide-before-the-first-boot) below), so check `deleteEndedConversationsOnceOlderThanDays` before you run it for real.
 
 - A conversation paused for human approval (`AWAITING_HUMAN`), one in the middle of a turn
   (`IN_PROGRESS`) and one with no timestamp at all are left alone.

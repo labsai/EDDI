@@ -317,9 +317,7 @@ Send a **`POST`** request to export. The response `Location` header contains the
 | API Endpoint | `/backup/export/{agentId}?agentVersion={version}` |
 | Response     | `Location` header with ZIP download URL           |
 
-The filename is `{urlEncodedAgentName}-{agentId}-{agentVersion}.zip` whenever the agent's
-descriptor carries a name (it drops to `{agentId}-{agentVersion}.zip` only for a nameless
-agent), so read it from the `Location` header rather than constructing it.
+The filename is `{slug}--{agentId}-{agentVersion}-{token}.zip`, where `{slug}` is the slugified agent name and `{token}` is a random hex token (a nameless agent has no slug and no `--`). Read it from the `Location` header rather than constructing it.
 
 **Example:**
 
@@ -407,7 +405,8 @@ raw JSON of each side. The `sourceId` values are what `selectedResources` expect
 - `CREATE` — No matching local resource found; will be created
 - `UPDATE` — Matching local resource found; will be updated
 - `SKIP` — Resource is unchanged; will be skipped
-- `CONFLICT` — Match is ambiguous; must be resolved manually
+- `CONFLICT` — The target's copy was changed on this instance since the last sync (or import) wrote it, and the source changed it too. Written only when named explicitly in `selectedResources`
+- `REMOVE` — The target has it and the source no longer does (a workflow step, or a whole workflow). Sync and upgrade previews can emit it; see the [Agent Sync Guide](agent-sync-guide.md)
 
 ### Importing an Agent (Merge)
 
@@ -466,7 +465,7 @@ The upgrade strategy matches resources by **structure** (workflow position, exte
 
 ### Upgrade response codes
 
-An upgrade (and every `/backup/sync` call, which shares the same executor) answers with one
+An upgrade (and every `/backup/import/sync` call, which shares the same executor) answers with one
 of three statuses. **All three are 2xx**, so a client must branch on the status code, not on
 `response.ok`:
 

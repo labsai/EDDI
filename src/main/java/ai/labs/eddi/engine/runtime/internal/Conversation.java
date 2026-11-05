@@ -534,6 +534,19 @@ public class Conversation implements IConversation {
             // they are, which is the behaviour every turn had before.
             cm.recordPropertyChanges(propertiesAtTurnStart);
         }
+        // Cluster mode (A1): the user-memory upsert is NOT fenced — only the
+        // conversation snapshot is — so it is the one write a node that can no longer
+        // trust its lease must not make: another node may already run this
+        // conversation's next turn. Asked of the lease itself, right before the write,
+        // rather than of the cancel flag its lost-callback raises, which can arrive
+        // later. The owed writes are already recorded on the memory
+        // (recordPendingLongTermWrites), so they are not lost: the turn that commits
+        // next writes them.
+        if (conversationMemory.isLeaseLost()) {
+            LOGGER.warnf("Not writing the long-term properties of conversation %s: this node's lease on it is lost",
+                    conversationMemory.getConversationId());
+            return;
+        }
         storePropertiesPermanently();
     }
 
@@ -998,6 +1011,10 @@ public class Conversation implements IConversation {
         return prop;
     }
 
+    /** Spend and usage records the secret-context scrub leaves alone. */
+    private static final Set<String> ACCOUNTING_KEYS = Set.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_METERED_COST,
+            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
+
     private boolean isSecretContextKey(String dataKey) {
         return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));
     }
@@ -1089,6 +1106,13 @@ public class Conversation implements IConversation {
             if (isSecretContextKey(datum.getKey())) {
                 writable.setResult(secretContextPlaceholder());
                 writable.setPossibleResults(null);
+                continue;
+            }
+            if (ACCOUNTING_KEYS.contains(datum.getKey())) {
+                // Numbers EDDI computed, never text a caller supplied — and the secret
+                // values are the caller's: a secret "0.0042" equal to the turn's cost
+                // turned audit:cost into a placeholder string, which metering and the
+                // budget checks then read as no spend at all.
                 continue;
             }
             Object cleaned = scrubSecretsFrom(datum.getResult(), needles, exact);
@@ -1362,9 +1386,22 @@ public class Conversation implements IConversation {
 
     private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException, ConversationPauseException {
+        boolean first = true;
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
-            conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
-            data.stream().filter(Objects::nonNull).forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
+            var step = conversationMemory.getCurrentStep();
+            step.setCurrentWorkflowId(executableWorkflow.getWorkflowId());
+            // The first workflow gets the supplied data as given — a rerun's step still
+            // holds the previous run's context, which a new value must replace. After
+            // that, a datum an earlier workflow's task replaced stays replaced:
+            // re-storing the original put back the plaintext input a scope:secret
+            // instruction had just vaulted and scrubbed, and the step was persisted
+            // with it.
+            boolean keepReplacements = !first;
+            data.stream().filter(Objects::nonNull).forEach(datum -> {
+                IData<?> current = keepReplacements ? step.getData(datum.getKey()) : null;
+                step.storeData(current != null ? current : datum);
+            });
+            first = false;
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
@@ -1466,7 +1503,13 @@ public class Conversation implements IConversation {
     private void persistRevisionCandidate(ConversationPauseException e) {
         HitlRevisionCandidate candidate = conversationMemory.getHitlRevisionCandidate();
         HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
-        if (candidate == null || policy == null || !policy.revise() || candidate.getTranscriptJson() == null) {
+        if (candidate == null || policy == null) {
+            return;
+        }
+        // Kept for a revision (needs the frozen request) or for an approver's edit
+        // (needs only the draft).
+        boolean revisable = policy.revise() && candidate.getTranscriptJson() != null;
+        if (!revisable && !policy.captureDraft()) {
             return;
         }
         if (!answerPrecedesPause(candidate, e.getPausedWorkflowId(), e.getPausedAbsoluteTaskIndex())) {
@@ -1564,6 +1607,31 @@ public class Conversation implements IConversation {
             }
         }
         return true;
+    }
+
+    /**
+     * "Approve with edits" ({@code hitlConfig.review.allowAnswerEdits}): the
+     * approver's text replaces the draft (see {@link ReviewerEditStep}). When the
+     * engine refuses it — an output guardrail blocked it, or the configuration
+     * changed since the pause — the human's decision stands but cannot be applied:
+     * the turn pauses again, on the same task and the unchanged draft, with a new
+     * pause id.
+     */
+    private void applyReviewerEdit(HitlDecision decision, HitlRevisionCandidate candidate, IWritableConversationStep step)
+            throws LifecycleException, ConversationPauseException {
+        HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
+        String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
+        int pausedIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex();
+        IExecutableWorkflow workflow = policy != null && policy.captureDraft() && candidate != null && candidate.getDraft() != null
+                && answerPrecedesPause(candidate, pausedWorkflowId, pausedIndex) ? findWorkflow(candidate.getWorkflowId()) : null;
+        var outcome = ReviewerEditStep.apply(conversationMemory, step, workflow, candidate, decision, policy != null && policy.screenEdits());
+        step.setCurrentWorkflowId(pausedWorkflowId);
+        if (!outcome.applied()) {
+            conversationMemory.setHitlRevisionCandidate(candidate);
+            clearHitlStatusMarker(step);
+            throw new ConversationPauseException(pausedWorkflowId, pausedIndex, conversationMemory.getHitlPauseReason(),
+                    ConversationPauseException.PauseOrigin.RULE);
+        }
     }
 
     /**
@@ -1898,6 +1966,12 @@ public class Conversation implements IConversation {
                 return;
             }
 
+            // review.allowAnswerEdits: an approval with an edited answer replaces the
+            // draft before the remaining tasks run; a refused edit pauses again.
+            if (!toolPause && decision.getEditedAnswer() != null) {
+                applyReviewerEdit(decision, revisionCandidate, currentStep);
+            }
+
             String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
             // RULE pauses resume AFTER the paused task (the rule already evaluated;
             // +1 = backward compat). TOOL_CALL pauses resume AT the paused task so
@@ -2032,6 +2106,7 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlPauseReason(null);
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
+        conversationMemory.setHitlApprovalContext(null);
     }
 
     /**

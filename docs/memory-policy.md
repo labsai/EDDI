@@ -56,12 +56,12 @@ Turn 1: User asks "What's the weather?"
 Turn 1: User asks "What's the weather?"
   → The httpcalls task (the weather API call) fails with HTTP 503
   → Raw error is marked as UNCOMMITTED (hidden from LLM)
-  → Error digest injected: {"type": "errorDigest", "taskId": "ai.labs.httpcalls", "taskType": "httpCalls",
-                            "text": "Task 'eddi://ai.labs.httpcalls' failed: ..."}
+  → Error digest stored under the `taskErrors` output key (for the caller), e.g.
+    {"type": "errorDigest", "taskId": "ai.labs.httpcalls", "taskType": "httpCalls",
+     "text": "Task 'eddi://ai.labs.httpcalls' failed: ..."}
   → Action emitted: "task_failed_ai.labs.httpcalls"
-  → LLM sees concise digest on next turn
-  → LLM can respond: "I'm sorry, I couldn't check the weather right now."
-  → Behavior rules can react to "task_failed_ai.labs.httpcalls" action
+  → Behavior rules can react to "task_failed_ai.labs.httpcalls", for example by
+    selecting an output such as "I'm sorry, I couldn't check the weather right now."
 ```
 
 ## Commit Flags
@@ -90,9 +90,14 @@ The error digest is stored as a special output type:
   "type": "errorDigest",
   "taskId": "ai.labs.httpcalls",
   "taskType": "httpCalls",
+  "errorType": "<classification>",
+  "code": "<machine-readable code>",
+  "retryable": false,
   "text": "Task 'eddi://ai.labs.httpcalls' failed: <reason>"
 }
 ```
+
+`errorType`, `code` and `retryable` (plus `retryAfterMs` when the provider asked callers to wait) are the machine-readable half that also feeds the `error` object of the REST response.
 
 `text` is always `Task '<eddi:// task id>' failed: ` followed by the reason. The reason is kept short
 on purpose: HTTP(S) URLs are replaced with `[url]` (other schemes, such as a `mongodb://` URL, are not), stack frames and fully-qualified exception class names are
@@ -103,7 +108,7 @@ only — the `Task '…' failed: ` prefix comes on top of it. A failing model ca
 
 The same text is also stored as step data under `taskError:eddi://<taskId>`.
 
-The UI can render error digests with distinct styling (warning icon, collapsible panel). The LLM receives the concise `text` summary rather than raw error noise.
+The UI can render error digests with distinct styling (warning icon, collapsible panel). The digest is deliberately kept out of the conversation output the model is shown: `taskErrors` is not part of the history the LLM sees, so it does not see the failure unless an author puts it into a prompt themselves. To make the model aware of a failure, react to the `task_failed_<taskId>` action with a behavior rule.
 
 ### A failed turn always tells the caller why
 
@@ -139,7 +144,7 @@ With `continueOnFailure: true` the remaining tasks keep running after the failur
 turn can answer for itself:
 
 - an output set keyed on `task_failed_<taskId>` renders a fallback message in the same turn;
-- an LLM task placed after a failed HTTP call sees the digest and can explain what went wrong.
+- a behavior rule that matches `task_failed_<taskId>` can emit actions that trigger a later task (for example an LLM task that explains the problem). Only tasks after the failing one still run, so the rule must sit in a second behavior-rules step placed after the failing task and before the fallback task; the first behavior step has already run by then.
 
 ```json
 {
