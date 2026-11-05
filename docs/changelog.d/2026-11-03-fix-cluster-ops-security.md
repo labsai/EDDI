@@ -53,6 +53,8 @@
 | 2026-11-03 | Hostname-verified NATS TLS refused every certificate issued for a host name | jnats dials and hands TLS the resolved IP, so endpoint identification compared the certificate with an IP | `ServerNameTrustManager` checks the certificate against the configured host names; `NatsConnectionSecurityIT` covers it | fix/cluster-ops-security |
 ```
 
+- Operator prompt (revision 55): a `config` NATS failure is diagnosed from the reported error detail (credential, trust store or client certificate), and with `eddi.cluster.readiness.require-nats=true` a node that connected and then became degraded is also not ready.
+
 ```decision-log
 | 2026-11-03 | NATS auth/TLS failures and "never connected since boot" fail readiness by default | Review C2: such nodes served every turn unfenced while green | Capping unfenced time in the coordinator (owned by another workstream); keeping readiness UP |
 | 2026-11-03 | Cluster scheduler jobs run on virtual threads behind a timer-only pool | Review D6: two blocked jobs starved presence past its TTL | A dedicated presence thread only (presence is owned by another workstream) |

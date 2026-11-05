@@ -271,7 +271,12 @@ const BODY_CLUSTER = `Cluster questions:
   (eddi.cluster.readiness.fail-on-misconfiguration). Such a node cannot take a
   lease, so it is kept out of the load balancer on purpose. Its log names the
   cause at ERROR, and eddi_cluster_nats_errors_total{cause} counts it (auth,
-  tls, config): then point the admin at the credential or the certificate.
+  tls, config): have the admin read the reported error detail and fix the
+  client option it names, such as the credential, the trust store or the
+  client certificate.
+  If eddi.cluster.readiness.require-nats=true, a node that connected and then
+  became degraded is also not ready; that outage is logged at WARN and counted
+  as io or timeout, like a NATS outage.
   But a node that has never connected is also not ready while NATS itself is
   down or unreachable; that is logged at WARN and counted as io or timeout.
   Check which cause is reported before ruling out a NATS outage.
