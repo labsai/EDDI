@@ -1278,6 +1278,25 @@ describe("reactivateOperator", () => {
   it("refuses when there is no provisioned agent to redeploy", async () => {
     await expect(reactivateOperator(config())).rejects.toThrow(/no provisioned agent/i);
   });
+
+  it("brings back the newest stored version, not the one activation recorded", async () => {
+    // Activated as v1, edited in place to v2, then paused: "Turn back on" must
+    // redeploy v2, or the admin's edit silently disappears.
+    let deployUrl = "";
+    server.use(
+      http.get("*/agentstore/agents/op-1/currentversion", () => HttpResponse.json(2)),
+      http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
+        deployUrl = request.url;
+        return HttpResponse.json({ status: "READY", agentId: params.agentId, version: 2, environment: "production" });
+      }),
+      http.put(`${BASE}/${OPERATOR_VARIABLE_KEY}`, () => new HttpResponse(null, { status: 204 })),
+    );
+
+    await reactivateOperator(config({ enabled: false, agentId: "op-1", version: 1 }));
+
+    expect(deployUrl).toContain("/deploy/op-1");
+    expect(deployUrl).toContain("version=2");
+  });
 });
 
 describe("readOperatorConfig — malformed blob shapes", () => {

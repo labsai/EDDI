@@ -9,9 +9,10 @@
 **What changed** (`ui/manager`):
 - `servedOperatorVersion` in `src/lib/api/operator.ts`: the highest version deployed in the Operator's environment (`GET /administration/{env}/deploymentstatus`), else the newest stored version (a paused Operator), else the recorded one.
 - `readOperatorStatus` reads the status at that version and returns it (`OperatorStatus.version`); the status card's Version row shows it; `RegisteredOperatorHealth` redeploys it; `gateDryRun` sends it.
-- Tests in `src/lib/api/__tests__/operator.test.ts`, mutation-checked: reverting `readOperatorStatus` and `gateDryRun` to `config.version` fails two of them.
+- `reactivateOperator` ("Turn back on" after a pause) redeploys the newest stored version, the same rule the kill switch uses. It used to redeploy the recorded one, so an Operator edited to v2 and then paused came back as v1 (found in review).
+- Tests in `src/lib/api/__tests__/operator.test.ts`, mutation-checked: reverting `readOperatorStatus`, `gateDryRun` or `reactivateOperator` to `config.version` fails the matching test.
 
-Teardown already used the live version (`liveOperatorVersion`, after a reconfigure left two Operators deployed); this extends the same rule to the readers.
+Teardown and the kill switch already used the live version (`liveOperatorVersion`, after a reconfigure left two Operators deployed); this extends the same rule to the readers and to reactivation.
 
 ### Default favicon
 

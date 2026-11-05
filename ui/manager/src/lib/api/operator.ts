@@ -1198,12 +1198,16 @@ export async function reactivateOperator(
   if (!config.agentId || config.version == null) {
     throw new Error("The operator has no provisioned agent to re-enable.");
   }
+  // The newest stored version, not the recorded one: an operator edited in place
+  // (v2) and then paused must come back as v2, not as the v1 activation recorded.
+  // Same rule as the kill switch below (see liveOperatorVersion).
+  const version = Math.max(await liveOperatorVersion(config.agentId, config.version), config.version);
   // Through the grant flow, like activation: an operator whose model key is
   // restricted needs its agent on the grant to come back up, and a plain deploy
   // here used to fail (or be refused) with no way to fix it from this screen.
   const outcome = await runDeployWithGrants({
     agentId: config.agentId,
-    version: config.version,
+    version,
     environment: config.environment,
   });
   if (outcome.kind === "cancelled") {
