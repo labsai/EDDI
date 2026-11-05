@@ -266,17 +266,24 @@ function ApprovalQueueRow({
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
             ? item.toolNames.join(", ")
             : isHumanTurn
-              ? isTieBreak
-                ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
-                  t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
-                    member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
-                  })
-                : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
-                    member:
-                      turnMemberName ||
-                      item.pendingMemberId ||
-                      t("hitl.humanTurnMemberFallback", "a member"),
-                  })
+              ? (
+                  <span
+                    data-testid={`human-turn-reason-${item.conversationId}`}
+                    data-reason-kind={isTieBreak ? "tie-break" : "turn"}
+                  >
+                    {isTieBreak
+                      ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
+                        t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
+                          member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                        })
+                      : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                          member:
+                            turnMemberName ||
+                            item.pendingMemberId ||
+                            t("hitl.humanTurnMemberFallback", "a member"),
+                        })}
+                  </span>
+                )
               : item.pauseReason || "—"}
         </td>
         <td className="px-4 py-3 text-muted-foreground text-xs max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pausedAt", "Paused")}>

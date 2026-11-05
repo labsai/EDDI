@@ -536,6 +536,29 @@ class AgentGroupStoreTest {
         assertDoesNotThrow(() -> store.validateHumanMembers(parent));
     }
 
+    /**
+     * A HUMAN_DECIDES voteConfig left on a non-VOTE phase never starts a vote, so
+     * it must not refuse the parent that nests the group.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesConfigOnNonVotePhase_isAccepted() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var staleVoteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null));
+        var opinion = new DiscussionPhase("Opinions", PhaseType.OPINION, "ALL", TurnOrder.PARALLEL, ContextScope.NONE, false, null, 1, false,
+                null, false, staleVoteConfig);
+        var child = voteGroup(opinion);
+        assertFalse(AgentGroupStore.hasHumanDecidesVote(child));
+
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
+    }
+
     @Test
     void votePhase_negativeWeight_isRejected() {
         var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(

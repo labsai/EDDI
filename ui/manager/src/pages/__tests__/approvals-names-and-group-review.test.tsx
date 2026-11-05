@@ -127,7 +127,10 @@ describe("ApprovalsPage — which agent or group is this?", () => {
       ),
     );
     renderWithProviders(<ApprovalsPage />);
-    expect(await screen.findByText(/Waiting on Ana Alvarez to decide the vote/)).toBeInTheDocument();
+    const reason = await screen.findByTestId("human-turn-reason-gc-tie");
+    expect(reason).toHaveAttribute("data-reason-kind", "tie-break");
+    // The resolved member name is data, not copy: the row names the decider.
+    await waitFor(() => expect(reason).toHaveTextContent("Ana Alvarez"));
     expect(screen.queryByText(/tied vote/)).not.toBeInTheDocument();
   });
 

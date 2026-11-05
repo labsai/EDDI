@@ -88,11 +88,11 @@ fallback is one turn, like the policy it borrows.
 
 ## Audit and metrics
 
-Each resolution writes one `hitl.approval` audit entry with `verdict: "TIE_BROKEN"`,
+With the audit ledger enabled, each resolution writes one `hitl.approval` audit entry with `verdict: "TIE_BROKEN"`,
 `approvalCategory: "group.vote_tiebreak"`, `reasonCode` (`HUMAN_CHOICE`, `TIMEOUT_NO_DECISION` or
 `TIMEOUT_MODERATOR`), the options and the choice. It is a human turn, not an approval, so it carries **no
-`decisionOutcome`** — approval analytics skip it. Counter `eddi.group.vote.tiebreaks{policy, resolution}`
-counts resolutions (`human`, `timeout_none`, `timeout_moderator`).
+`decisionOutcome`** — approval analytics skip it. When a meter registry is present (the default with
+metrics enabled), counter `eddi.group.vote.tiebreaks{policy, resolution}` counts resolutions (`human`, `timeout_none`, `timeout_moderator`).
 
 ## Interactions
 

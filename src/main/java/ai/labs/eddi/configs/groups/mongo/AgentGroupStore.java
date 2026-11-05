@@ -501,11 +501,13 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     /**
      * True if one of the config's explicit phases is a VOTE whose tie policy is
      * {@code HUMAN_DECIDES}. Preset styles never expand to that policy, so only
-     * explicit phases are read.
+     * explicit phases are read. A {@code voteConfig} left on a non-VOTE phase (the
+     * Manager keeps it when the type is switched) never starts a vote, so it does
+     * not count.
      */
     static boolean hasHumanDecidesVote(AgentGroupConfiguration config) {
         return config.getPhases() != null && config.getPhases().stream()
-                .anyMatch(p -> p != null && p.voteConfig() != null
+                .anyMatch(p -> p != null && p.type() == AgentGroupConfiguration.PhaseType.VOTE && p.voteConfig() != null
                         && p.voteConfig().tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES);
     }
 

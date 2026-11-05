@@ -77,6 +77,16 @@ Operator/MCP follow-up: [`planning/operator-followups/group-human-tiebreak.md`](
   stamped v5 (an older pod refuses any resume during a rolling upgrade), and that `choice` is required for a
   tie-break; [MCP Server](../mcp-server.md) says the same for `submit_group_human_input`.
 
+Review follow-ups (round 3):
+
+- `AgentGroupStore.hasHumanDecidesVote` reads only `VOTE` phases: a `voteConfig` the Manager keeps on a phase
+  whose type was switched never starts a vote, so it no longer refuses the parent that nests the group.
+- The Manager inbox reason for a human turn carries `data-testid="human-turn-reason-<id>"` and
+  `data-reason-kind`, and the tie-break test asserts those instead of the English copy.
+- [MCP Server](../mcp-server.md) says a `TIE_BREAK` pause is answered by `humanTieBreak.decider`, a principal who
+  need not be a member; [Group Human Decisions](../group-human-decisions.md) says the audit entry and the counter
+  are written only when the audit ledger and the meter registry are present.
+
 ```decision-log
 | 2026-11-02 | A HUMAN_DECIDES tie-break pauses through the I6 AWAITING_HUMAN_INPUT path, not the approval path | Approval endpoints are binary and carry no content, and any eddi-approver could then set the outcome of a vote; the I6 path already has the decider-or-admin guard, timeouts, crash recovery, CAS and the inbox | A PHASE approval with the choice in the note; letting approvers break ties |
 | 2026-11-02 | GroupConversation schema v5 for PendingHumanInput.detail and RESUME_KIND_TIE_BREAK | Both are resume-consumed: an older pod resolving a tie-break would re-run the vote's last repeat | Riding v4 because the fields are additive |
