@@ -289,6 +289,14 @@ public class EmailInboundProcessor {
                 count(ctx, EmailMetrics.DEFERRED);
                 return Disposition.DEFERRED;
             }
+            // A Message-ID is not a secret: it travels in every forward and reply. A
+            // mail from someone else carrying the id of a mail still waiting here is not
+            // that mail, and must not take over its row - nor the conversation the row
+            // names. It waits; once the real mail has run it is settled as a duplicate.
+            if (row.recipient() != null && !row.recipient().equals(sender)) {
+                count(ctx, EmailMetrics.DEFERRED);
+                return Disposition.DEFERRED;
+            }
         }
 
         // 5. Who sent it — or rather, whether the From can be believed.

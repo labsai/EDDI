@@ -204,6 +204,11 @@ class ToolLoopRunner {
 
         // Active specs: what the LLM currently sees (LAZY starts narrow).
         List<ToolSpecification> activeSpecs = computeInitialActiveSpecs(setup, isLazy);
+        if (isLazy) {
+            // What discover_tools already activated in this turn (a cascade step
+            // before this one) or, with lazyRetention: conversation, earlier.
+            LazyToolCatalog.reactivate(memory, task, setup.builtInSpecs(), activeSpecs);
+        }
 
         // Build message list with system message if provided
         List<ChatMessage> messages = new ArrayList<>();
@@ -547,13 +552,21 @@ class ToolLoopRunner {
                     // always the tail).
                     CallAdmission admission = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap, toolCallsThisTurn);
                     toolCallsThisTurn += admission.admitted().size();
+                    List<ToolExecutionRequest> admitted = admission.admitted();
+                    // LAZY: a lazily-managed tool the model calls without discover_tools
+                    // having activated it is refused here, before the gate — never run,
+                    // and never put in front of a human for approval.
+                    if (isLazy) {
+                        admitted = refuseUnactivated(admitted, builtInSpecs, activeSpecs, toolSources, aiMessage, currentMessages, trace,
+                                exchangeRecorder);
+                    }
                     // === Argument schema (before the gate) ===
                     // A call whose arguments break its tool's declared schema is answered
                     // NOT_EXECUTED here and never reaches the gate: no human is asked to
                     // approve a request that cannot be right. Only executors that declare
                     // a schema check anything (ToolArgumentValidator).
-                    List<ToolExecutionRequest> admitted = refuseInvalidArguments(admission.admitted(), toolExecutors, toolSources,
-                            currentMessages, aiMessage, trace, exchangeRecorder);
+                    admitted = refuseInvalidArguments(admitted, toolExecutors, toolSources, currentMessages, aiMessage, trace,
+                            exchangeRecorder);
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
@@ -801,6 +814,37 @@ class ToolLoopRunner {
         addResult(currentMessages, call, request, SELF_CONVERSATION_REFUSAL, exchangeRecorder);
         trace.add(Map.of("type", "hitl_self_conversation", "tool", request.name(), "detail", selfTargeted));
         return true;
+    }
+
+    /**
+     * Answers every call to a lazily-managed tool that is not active with
+     * {@link LazyToolCatalog#NOT_ACTIVATED_REFUSAL} and returns the rest. A refused
+     * call reaches no gate, no executor and no mock; it is traced as
+     * {@code tool_not_activated}.
+     */
+    private static List<ToolExecutionRequest> refuseUnactivated(List<ToolExecutionRequest> admitted, List<ToolSpecification> lazySpecs,
+                                                                List<ToolSpecification> activeSpecs, Map<String, String> toolSources,
+                                                                AiMessage call, List<ChatMessage> currentMessages,
+                                                                List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        List<ToolExecutionRequest> kept = null;
+        for (int i = 0; i < admitted.size(); i++) {
+            ToolExecutionRequest request = admitted.get(i);
+            if (!LazyToolCatalog.isUnactivated(request, lazySpecs, activeSpecs)) {
+                if (kept != null) {
+                    kept.add(request);
+                }
+                continue;
+            }
+            if (kept == null) {
+                kept = new ArrayList<>(admitted.subList(0, i));
+            }
+            String source = toolSources == null ? null : toolSources.get(request.name());
+            LOGGER.debugf("Refusing call to not-yet-activated LAZY tool '%s'", sanitize(request.name()));
+            LazyToolCatalog.countRefusal(source);
+            addResult(currentMessages, call, request, LazyToolCatalog.NOT_ACTIVATED_REFUSAL, exchangeRecorder);
+            trace.add(Map.of("type", "tool_not_activated", "tool", request.name()));
+        }
+        return kept != null ? kept : admitted;
     }
 
     /**
@@ -1720,7 +1764,10 @@ class ToolLoopRunner {
         // a provenance envelope first would make that parse fail. The envelope is
         // for the model's benefit, and the model still gets one.
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
+            int before = activeSpecs.size();
             activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
+            LazyToolCatalog.countActivation(activeSpecs.size() - before);
+            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
         }
 
         // Govern what comes back. Until now the comment on the live loop's caller

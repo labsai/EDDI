@@ -164,6 +164,26 @@ class McpApiToolBuilderTest {
             """;
 
     @Test
+    @DisplayName("each tag group's configuration carries a description from the tag, for LAZY discover_tools")
+    void groupDescriptionFromTag() {
+        String spec = """
+                {
+                  "openapi": "3.0.0",
+                  "info": { "title": "Shop", "version": "1.0.0" },
+                  "tags": [ { "name": "users", "description": "Find and invite users.\\nSecond line is dropped." } ],
+                  "paths": {
+                    "/users": { "get": { "operationId": "listUsers", "tags": ["users"], "responses": { "200": { "description": "ok" } } } },
+                    "/orders": { "get": { "operationId": "listOrders", "tags": ["orders"], "responses": { "200": { "description": "ok" } } } }
+                  }
+                }
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, "https://api.example.com", null);
+
+        assertEquals("users: Find and invite users.", result.configsByGroup().get("users").getDescription());
+        assertEquals("orders", result.configsByGroup().get("orders").getDescription(), "a tag without a description is named only");
+    }
+
+    @Test
     void parseSpec_validJson_returnsOpenAPI() {
         var openAPI = McpApiToolBuilder.parseSpec(PETSTORE_SPEC);
         assertNotNull(openAPI);

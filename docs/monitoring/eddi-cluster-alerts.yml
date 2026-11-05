@@ -132,6 +132,30 @@ groups:
             GET /administration/coordinator/dead-letters lists them; replay or
             discard each (docs/coordinator-admin.md).
 
+      - alert: EddiClusterNodeDuplicate
+        expr: max by (instance) (eddi_cluster_node_duplicate) == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Another live JVM uses the node id of {{ $labels.instance }}"
+          description: >-
+            Two nodes with one eddi.cluster.node-id break lease mutual exclusion
+            and RPC routing. The node that detected it reports not-ready and stops
+            announcing itself. Give every replica a unique node id (the pod name).
+
+      - alert: EddiClusterSigningRejected
+        expr: sum by (instance, kind, reason) (increase(eddi_cluster_signing_rejected_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cluster messages were refused by signature checks on {{ $labels.instance }}"
+          description: >-
+            A {{ $labels.kind }} message was refused ({{ $labels.reason }}): someone
+            publishes on NATS without the cluster signing key, a node runs with
+            another key, or clocks are skewed past eddi.cluster.signing.max-age.
+            Never routine — check which client holds the NATS credentials.
+
   - name: eddi-cluster-nats
     rules:
       - alert: EddiNatsJetStreamStorageHigh

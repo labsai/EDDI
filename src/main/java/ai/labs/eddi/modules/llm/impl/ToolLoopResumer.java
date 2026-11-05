@@ -217,6 +217,14 @@ class ToolLoopResumer {
         // Restore the active-spec surface. For LAZY, reactivate exactly the specs that
         // were active at pause time (activatedToolNames); otherwise the full set.
         List<ToolSpecification> activeSpecs = restoreActiveSpecs(setup, isLazy, batch.getActivatedToolNames());
+        if (isLazy) {
+            // Plus whatever this turn recorded after the batch was frozen (or before,
+            // for a batch that predates the record). The approved calls below run by
+            // name either way: every executor is registered whether or not its spec
+            // is active, and they never pass the not-activated refusal.
+            // restoreActiveSpecs returns a fresh mutable list for LAZY.
+            LazyToolCatalog.reactivate(memory, task, setup.builtInSpecs(), activeSpecs);
+        }
 
         // ── Step 1: reconstitute the transcript (primary) or fall back to rebuild ──
         List<ChatMessage> currentMessages = new ArrayList<>();
