@@ -282,7 +282,10 @@ Applies only if you run more than one node.
   and `toolQuotas` `"window": "RUN"` store nothing new beyond their own counters.
 - **Alerts run their maintenance schedule by default.** `eddi.alerts.enabled` defaults to `true`, which
   creates one background maintenance schedule (retries and digests) at startup; with no alert rules
-  nothing is delivered. Set it to `false` to create nothing.
+  nothing is delivered. Set it to `false` to create nothing. **On a mixed-version cluster set it to
+  `false` until every pod runs 6.7:** a 6.5 or 6.6 scheduler does not recognise the `alertType` marker
+  on that schedule, so it may claim the row and treat it as an ordinary conversation fire, which has no
+  agent target and can fail, retry or dead-letter. Enable it once the rollout is complete.
 
 ### New opt-in features
 
