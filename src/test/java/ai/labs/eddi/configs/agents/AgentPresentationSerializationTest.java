@@ -47,7 +47,8 @@ class AgentPresentationSerializationTest {
         var titles = new TitleGeneration();
         titles.setEnabled(true);
         titles.setLlmProvider("openai");
-        titles.setLlmModel("gpt-4o-mini");
+        // Long enough to reach the scrubber's entropy check: a short name never would.
+        titles.setLlmModel("claude-haiku-4-5-20251001");
         titles.setParameters(Map.of("apiKey", "${vault:openai-key}"));
         titles.setMaxLength(40);
         var configuration = new AgentConfiguration();
@@ -66,7 +67,7 @@ class AgentPresentationSerializationTest {
         assertNull(read.getConversationControls().getRedo(), "an absent switch stays absent");
         assertEquals(Boolean.TRUE, read.getConversationControls().getRawHtml());
         assertTrue(read.getTitleGeneration().isEnabled());
-        assertEquals("gpt-4o-mini", read.getTitleGeneration().getLlmModel());
+        assertEquals("claude-haiku-4-5-20251001", read.getTitleGeneration().getLlmModel());
         assertEquals("${vault:openai-key}", read.getTitleGeneration().getParameters().get("apiKey"),
                 "a vault reference travels as the reference, never resolved");
         assertEquals(40, read.getTitleGeneration().getMaxLength());

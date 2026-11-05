@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Palette } from "lucide-react";
 import type { Agent, AgentAppearance, ConversationControls, TitleGeneration } from "@/lib/api/agents";
@@ -11,6 +11,15 @@ const DEFAULT_ON_CONTROLS = ["undo", "redo", "attachments", "rating", "quickRepl
 /** Mirrors the backend's AgentPresentationValidator caps. */
 const MAX_STARTERS = 6;
 const MAX_STARTER_LENGTH = 200;
+
+/** The starters a textarea's text stands for: non-blank lines, capped. Blank lines never reach the draft. */
+function parseStarters(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.slice(0, MAX_STARTER_LENGTH))
+    .filter((line) => line.trim())
+    .slice(0, MAX_STARTERS);
+}
 
 /**
  * How the agent presents itself to the people chatting with it — `appearance`,
@@ -35,6 +44,17 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
   const appearance: AgentAppearance = agent.appearance ?? {};
   const controls: ConversationControls = agent.conversationControls ?? {};
   const titles: TitleGeneration = agent.titleGeneration ?? {};
+
+  // The textarea keeps what was typed, a trailing blank line included, so a new line can be
+  // started; the draft gets only parseStarters(text). When the stored starters change from
+  // outside (another agent or version, a discarded draft), the text follows them.
+  const storedStarters = (appearance.starters ?? []).join("\n");
+  const [startersText, setStartersText] = useState(storedStarters);
+  const [startersSource, setStartersSource] = useState(storedStarters);
+  if (startersSource !== storedStarters) {
+    setStartersSource(storedStarters);
+    if (parseStarters(startersText).join("\n") !== storedStarters) setStartersText(storedStarters);
+  }
 
   function patchAppearance(updates: Partial<AgentAppearance>) {
     onChange({ ...agent, appearance: { ...appearance, ...updates } });
@@ -113,16 +133,11 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
             })}
           </span>
           <textarea
-            value={(appearance.starters ?? []).join("\n")}
-            onChange={(e) =>
-              patchAppearance({
-                starters: e.target.value
-                  .split("\n")
-                  .map((line) => line.slice(0, MAX_STARTER_LENGTH))
-                  .filter((line, index, all) => line.trim() || index === all.length - 1)
-                  .slice(0, MAX_STARTERS),
-              })
-            }
+            value={startersText}
+            onChange={(e) => {
+              setStartersText(e.target.value);
+              patchAppearance({ starters: parseStarters(e.target.value) });
+            }}
             rows={3}
             disabled={disabled}
             className={inputClass}
