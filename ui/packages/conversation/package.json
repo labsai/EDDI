@@ -11,6 +11,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./team": "./src/team/index.ts",
     "./markdown.css": "./src/styles/markdown.css"
   },
   "scripts": {
