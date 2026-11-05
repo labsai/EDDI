@@ -33,6 +33,7 @@ import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "@/hooks/use-chat-ratings";
 import { lastStepIndex, ratableSteps } from "@eddi/core";
 import { ChatActivity } from "./chat-activity";
+import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
@@ -813,6 +814,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 ) : (
                   <InlineThinkingIndicator events={currentTurnEvents} />
                 ))}
+              <GuardrailActivity messages={messages} isProcessing={isProcessing} />
 
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && !stepMovePending && (

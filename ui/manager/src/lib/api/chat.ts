@@ -4,6 +4,7 @@ import {
   createConversationApi,
   parseConversationIdFromLocation,
   type ContextMap,
+  type OutputImage,
   type SSEEvent,
   type SSEEventType,
 } from "@eddi/core";
@@ -119,6 +120,12 @@ export interface ChatMessage {
   isError?: boolean;
   /** Guardrails that fired on the turn this agent bubble answers, in order. */
   guardrails?: GuardrailNotice[];
+  /**
+   * `image` output items the agent designer put in the reply — rendered as
+   * images, unlike an image in the model's text, which becomes a link (§2.5).
+   * @eddi/core's `extractOutputImages` keeps only safe URIs.
+   */
+  images?: OutputImage[];
   /**
    * The conversation step this message belongs to, when the source said so (a
    * transcript rebuilt from a snapshot). Reply ratings are keyed by it; live
