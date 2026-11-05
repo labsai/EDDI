@@ -33,6 +33,7 @@ import com.mongodb.MongoDriverInformation;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -45,6 +46,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,6 +59,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+
+import javax.sql.DataSource;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -221,6 +226,27 @@ public class EmbeddingStoreFactory {
                 closeQuietly(client);
             })
             .build();
+
+    /**
+     * pgvector connection pools, one per server and login — see
+     * {@link PgVectorConnectionPools}. Like the MongoClients, not closed when a
+     * secret changes; a rotated password is a new key and a new pool, and the
+     * superseded one empties itself when idle.
+     */
+    private final PgVectorConnectionPools pgVectorPools = new PgVectorConnectionPools();
+
+    /** Most connections one pgvector pool opens. */
+    static final String PGVECTOR_POOL_MAX_SIZE_PROPERTY = "eddi.rag.pgvector.pool.max-size";
+
+    static final int DEFAULT_PGVECTOR_POOL_MAX_SIZE = 10;
+
+    /**
+     * Field-injected so the constructors keep their shape; the initializer is the
+     * value for tests that construct the factory directly.
+     */
+    @Inject
+    @ConfigProperty(name = PGVECTOR_POOL_MAX_SIZE_PROPERTY, defaultValue = "10")
+    int pgVectorPoolMaxSize = DEFAULT_PGVECTOR_POOL_MAX_SIZE;
 
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
@@ -692,7 +718,12 @@ public class EmbeddingStoreFactory {
      * KnowledgeBaseStorage)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
      * text-embedding-3-small)</li>
+     * <li>{@code layout}, {@code vectorIndex}, {@code hnswM},
+     * {@code hnswEfConstruction}, {@code hnswEfSearch}, {@code insertBatchSize} —
+     * see {@link PgVectorSchema}</li>
      * </ul>
+     * Connections come from a pool shared per server and login
+     * ({@link PgVectorConnectionPools}).
      */
     private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
@@ -706,12 +737,36 @@ public class EmbeddingStoreFactory {
         int dimension = parseIntParam(params, "dimension", 1536);
 
         String table = physicalName(params, "table", ragConfigId, config);
+        PgVectorSchema.Settings settings = PgVectorSchema.settings(params);
 
-        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
-                sanitize(table), dimension);
+        DataSource dataSource = pgVectorPools.get(host, port, database, user, password, pgVectorPoolMaxSize);
+        PgVectorSchema.Layout layout;
+        try (Connection connection = dataSource.getConnection()) {
+            PgVectorSchema.ensureExtension(connection);
+            layout = PgVectorSchema.resolveLayout(settings.layout(), PgVectorSchema.inspect(connection, table), table);
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not prepare table " + sanitize(table) + ": " + sanitize(e.getMessage()), e);
+        }
+        boolean indexed = layout == PgVectorSchema.Layout.V2 && settings.hnsw();
 
-        return PgVectorEmbeddingStore.builder().host(host).port(port).database(database).user(user).password(password).table(table)
-                .dimension(dimension).createTable(true).build();
+        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d, layout=%s, hnsw=%s", sanitize(host), port,
+                sanitize(database), sanitize(table), dimension, layout, indexed);
+
+        var builder = PgVectorEmbeddingStore.datasourceBuilder().datasource(dataSource).table(table).dimension(dimension)
+                .useIndex(false).createTable(true).dropTableFirst(false).skipCreateVectorExtension(true)
+                .metadataStorageConfig(PgVectorSchema.metadataStorageConfig(layout));
+        var store = new EddiPgVectorEmbeddingStore(builder, indexed ? settings.efSearch() : null, settings.insertBatchSize());
+
+        if (layout == PgVectorSchema.Layout.V2) {
+            try (Connection connection = dataSource.getConnection()) {
+                PgVectorSchema.createIndexes(connection, table, settings, dimension);
+            } catch (SQLException e) {
+                throw new IllegalStateException(
+                        "pgvector: could not create the indexes of table " + sanitize(table) + ": " + sanitize(e.getMessage()),
+                        e);
+            }
+        }
+        return store;
     }
 
     // ──────────────────────────────────────────────────
@@ -1172,6 +1227,20 @@ public class EmbeddingStoreFactory {
         // invalidateAll fires the removal listener, which closes each client.
         mongoClientCache.invalidateAll();
         mongoClientCache.cleanUp();
+        pgVectorPools.closeAll();
+    }
+
+    /** Open pgvector connection pools — for tests. */
+    long pgVectorPoolCount() {
+        return pgVectorPools.size();
+    }
+
+    /** Closes the pooled MongoDB clients and pgvector connection pools. */
+    @PreDestroy
+    void shutdown() {
+        mongoClientCache.invalidateAll();
+        mongoClientCache.cleanUp();
+        pgVectorPools.closeAll();
     }
 
     /**
