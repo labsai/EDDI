@@ -947,4 +947,21 @@ class SharedTaskListTest {
             assertEquals(SharedTaskList.TaskStatus.COMPLETED, task.status());
         }
     }
+
+    @Test
+    void aReworkedTaskForgetsTheReviewerEditOfItsSupersededResult() {
+        var item = new SharedTaskList.TaskItem("t1", "Do it", 0);
+        list.addTask(item);
+        String id = item.id();
+        list.assignTask(id, "agent-a", "Agent A");
+        list.startTask(id);
+        list.submitForApproval(id, "first result");
+        list.approveTaskWithEditedResult(id, "edited", new SharedTaskList.ReviewerEdit("bob", "2026-11-03T00:00:00Z", "abc", 12));
+        assertEquals(1, list.getReviewerEdits().size());
+        list.failTask(id, "verification failed");
+
+        list.reworkTask(id, "try again");
+
+        assertEquals(0, list.getReviewerEdits().size(), "an edit recorded against the superseded result no longer describes the task");
+    }
 }

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.groups.model.HandoffPolicies;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
@@ -119,8 +120,9 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         // === Agent Mode Features (Optional - triggers agent mode when set) ===
 
         /**
-         * List of EDDI httpcall URIs to use as tools. Setting this enables agent mode
-         * with tool calling.
+         * Legacy. The entries are NOT resolved: HTTP call tools are discovered from the
+         * workflow ({@code enableHttpCallTools}). A non-empty list only switches the
+         * task into agent mode.
          */
         private List<String> tools;
 
@@ -151,9 +153,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Boolean enableMcpCallTools = true;
 
         /**
-         * Whitelist of specific built-in tools to enable. Options: "calculator",
+         * Whitelist of specific tools to enable. Built-in options: "calculator",
          * "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer",
-         * "pdfreader", "weather"
+         * "pdfreader", "weather", "fetch_page" (alias "fetch_tool_response_page").
+         * Context-bound keys: "usermemory", "conversationRecall", "artifacts",
+         * "group_tasks" and the dynamic-agent tools "create_sub_agent",
+         * "converse_with_agent", "find_agents_by_capability", "recruit_agent",
+         * "teardown_agent". See docs/langchain.md.
          */
         private List<String> builtInToolsWhitelist;
 
@@ -368,6 +374,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.5.0
          */
         private ToolQuotaConfig toolQuotas;
+
+        /**
+         * Cross-team handoff: the teams this agent may file tasks into through the
+         * {@code handoff_to_team} tool. Absent means the tool is never assembled. A
+         * target only receives when its own {@code handoffConfig.accept} lists this
+         * agent (two-sided consent) — see {@code docs/team-handoff.md}.
+         *
+         * @since 6.7.0
+         */
+        private HandoffPolicies.TeamHandoffConfig teamHandoff;
 
         /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
@@ -1049,6 +1065,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {
+            return teamHandoff;
+        }
+
+        public void setTeamHandoff(HandoffPolicies.TeamHandoffConfig teamHandoff) {
+            this.teamHandoff = teamHandoff;
         }
 
         public Integer getDefaultToolTimeoutMs() {

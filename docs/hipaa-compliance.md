@@ -27,7 +27,7 @@ until you configure them** — the column says which.
 | **Transmission Security** (§164.312(e)) | TLS — deployer configures | ⚠️ Deployer responsibility |
 | **Encryption at Rest** (§164.312(a)(2)(iv)) | Database-level TDE — deployer configures | ⚠️ Deployer responsibility |
 | **Data Disposal** (§164.310(d)(2)(i)) | GDPR cascade delete (`DELETE /admin/gdpr/{userId}`) — deletes the user's data and redacts their audit-ledger content; database logs keep a pseudonymized id and expire only with `eddi.logs.db-retention-days` | ✅ Built-in |
-| **Incident Response** (§164.308(a)(6)) | Documented runbook ([incident-response.md](incident-response.md)) | ✅ Built-in |
+| **Incident Response** (§164.308(a)(6)) | Documented runbook ([incident-response.md](incident-response.md)) | 📄 Documentation only |
 | **Secret Management** | AES-256-GCM Secrets Vault with envelope encryption | ✅ Built-in |
 
 ---
@@ -195,8 +195,8 @@ each operation. EDDI provides several mechanisms:
 
 1. **Conversation History Windowing**: `ConversationHistoryBuilder` limits
    the number of past turns sent to the LLM (configurable per agent)
-2. **Context Selection Rules** (planned): Conditional context loading based
-   on current action — sends only task-relevant data to the LLM
+2. **Context selection** is not available today; limit what reaches the LLM with
+   windowing and the template data you choose to include
 3. **Self-hosted models**: Eliminates external PHI exposure entirely
 
 ---
@@ -223,12 +223,12 @@ HIPAA breach notification timelines differ from GDPR:
 
 | Regulation | Notify Authority | Notify Individuals |
 |---|---|---|
-| **HIPAA** | HHS within **60 days** | Without unreasonable delay, no later than **60 days** |
+| **HIPAA** | 500 or more individuals: HHS within **60 days** of discovery, contemporaneously with individual notice. Under 500: annual log to HHS, within 60 days of the end of the calendar year | Without unreasonable delay, no later than **60 days** |
 | **GDPR** | Supervisory authority within **72 hours** | Without undue delay if high risk |
 
 For small breaches (< 500 individuals), HIPAA allows annual batch notification
-to HHS. For large breaches (≥ 500), immediate notification plus media notice
-in affected states.
+to HHS. For large breaches (≥ 500), HHS is notified at the same time as the
+individuals (within 60 days of discovery), plus media notice in affected states.
 
 See [incident-response.md](incident-response.md) for the full response
 runbook.

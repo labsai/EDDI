@@ -7,12 +7,15 @@ package ai.labs.eddi.configs.groups.mongo;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.groups.validation.GroupGapsValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
+import ai.labs.eddi.configs.groups.HandoffConfigValidator;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeValidation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -46,6 +49,13 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
 
     private static final Logger LOGGER = Logger.getLogger(AgentGroupStore.class);
 
+    /**
+     * Field-injected so the constructor tests build stays as it was; null (a store
+     * built by hand) skips the grant rule.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
     @Inject
     public AgentGroupStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "groups", documentBuilder, AgentGroupConfiguration.class);
@@ -56,9 +66,11 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             throws IResourceStore.ResourceStoreException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
+        validateServiceJudgeGrants(groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);
@@ -78,10 +90,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             IResourceStore.ResourceNotFoundException {
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
+        validateServiceJudgeGrants(groupConfiguration);
         rejectNestingCycle(id, groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);
@@ -104,6 +118,29 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      */
     static void validateMembersAndLimits(AgentGroupConfiguration config) {
         List<String> problems = memberAndLimitProblems(config);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A SERVICE judge's vault references must name secrets granted to all agents (a
+     * group has no agent identity to check a narrower grant against). Needs the
+     * secret metadata, so it is not part of the static
+     * {@link #memberAndLimitProblems}.
+     */
+    void validateServiceJudgeGrants(AgentGroupConfiguration config) {
+        if (serviceJudgeVaultGrants == null || config.getPhases() == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (int i = 0; i < config.getPhases().size(); i++) {
+            var phase = config.getPhases().get(i);
+            var service = phase != null && phase.convergence() != null ? phase.convergence().service() : null;
+            if (service != null) {
+                problems.addAll(serviceJudgeVaultGrants.problems("phases[" + i + "].convergence.service.parameters", service.parameters()));
+            }
+        }
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }
@@ -178,6 +215,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     && !AgentGroupConfiguration.ConvergenceConfig.MODE_VERDICT.equals(convergence.mode())) {
                 problems.add("phases[" + i + "].convergence.mode must be SIMILARITY or VERDICT, got " + convergence.mode());
             }
+            problems.addAll(ServiceJudgeValidation.problems("phases[" + i + "].convergence", convergence, config.getName()));
         }
         problems.addAll(presetRoleProblems(config));
         return problems;

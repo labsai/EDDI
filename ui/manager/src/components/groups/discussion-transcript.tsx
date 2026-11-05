@@ -259,6 +259,7 @@ export function DiscussionTranscript({
         pausedPhaseName: streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName,
         granularity: streamState?.hitlPause?.granularity || conversation?.hitlPauseType,
         pendingTaskIds,
+        approvalContext: conversation?.hitlApprovalContext ?? null,
       }
     : null;
   const [frozenCard, setFrozenCard] = useState<typeof liveCardProps>(null);
@@ -773,6 +774,7 @@ export function DiscussionTranscript({
               pausedPhaseName={cardProps.pausedPhaseName}
               granularity={cardProps.granularity}
               pendingTaskIds={cardProps.pendingTaskIds}
+              approvalContext={cardProps.approvalContext}
               isSubmitting={isDeciding}
               onDecide={(verdict, note, taskApprovals) => {
                 if (gcId) onApprove?.(gcId, verdict, note, taskApprovals);

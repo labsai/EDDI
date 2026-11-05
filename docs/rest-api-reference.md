@@ -61,6 +61,7 @@ for anything this page does not cover.
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
 | `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |
+| `POST /conversationstore/conversations/end-inactive` | End conversations idle for `inactiveForDays` (admin; optional `agentId`, `dryRun`) | `200` |
 
 The agent must be **deployed** to the environment you start in — see
 [Deployment management](deployment-management-of-agents.md).
@@ -105,6 +106,8 @@ key, on this call and on every `say`. The usual cause is wrapping the map in
 deployed and `READY` in that environment.
 
 ## Sending a message
+
+**Retrying safely.** Send an `Idempotency-Key` (or `X-EDDI-Request-Id`; the former wins) header on `POST /agents/{conversationId}` and its `/stream` twin so a retried request does not run the turn twice. A duplicate of a turn still in flight answers `409` with `Retry-After`. The protection has limits: a failed turn is not remembered, and a completed turn is replayed only within `eddi.turns.idempotency.ttl-seconds` and while its step is among the conversation's latest 50. A retry outside those conditions runs the turn again and can repeat side-effecting tools. See [conversations.md](conversations.md#idempotent-turns).
 
 The same path takes plain text or JSON.
 
@@ -164,7 +167,7 @@ the turn produced any, sits next to it. Query parameters, shared by this call,
 
 | Parameter | Default | Effect |
 | --- | --- | --- |
-| `returnDetailed` | `false` | `true` returns every memory entry of the step. By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
+| `returnDetailed` | `false` | `true` returns the step's other memory entries too, except `audit:*`, `*:trace:*` and `*Error` keys, which are withheld (values are redacted). By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
 | `returnCurrentStepOnly` | `true` | `false` returns all turns since the start |
 | `returningFields` | — | Repeatable; restricts the snapshot to the named top-level fields |
 
@@ -463,6 +466,33 @@ Results are newest first. A non-admin sees only their own conversations.
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
 
+## Calling an API as the user: secret context
+
+A context entry marked `"secret": true` lives for the request that carried it: the
+pipeline reads the live value, and it is replaced by `<secret context>` in
+everything stored when the turn ends. Send it with every message, and again in the
+`context` of `POST /agents/{conversationId}/resume` when a paused turn is approved:
+
+```json
+{ "input": "Show my open invoices",
+  "context": { "userToken": { "type": "string", "value": "eyJ…", "secret": true } } }
+```
+
+An httpcall header written as `Bearer ${context:userToken}` sends it to the
+API — only from a secret entry, only in a header, only to the configuration's
+own host, and failing the call when it is missing. See
+[Per-turn credentials from secret context](httpcalls.md#per-turn-credentials-from-secret-context).
+
+An agent whose tools are generated from an OpenAPI spec is managed with three
+admin endpoints, described under
+[the Platform Operator case study](architecture.md#building-an-operator-agent-for-your-own-api):
+
+| Method & path | Purpose | Success |
+| --- | --- | --- |
+| `POST /administration/agents/setup-api` | Create the agent (`apiAuth` may be `Bearer ${context:userToken}`) | `201` |
+| `POST /administration/agents/setup-api` with `"dryRun": true` | Return what would be created; write nothing | `200` |
+| `POST /administration/agents/{agentId}/setup-api/sync` | Regenerate the tools from a new spec as a compatible agent version; `"dryRun": true` reports the diff only | `200`; `400` naming each reference when a removed tool is still referenced |
+
 ## Errors
 
 | Status | Body (examples) | Cause |
@@ -475,7 +505,9 @@ delete a conversation they do not own.
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
+| `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
+| `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |
 
 For symptoms and fixes beyond the status code, see

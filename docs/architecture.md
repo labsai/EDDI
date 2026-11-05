@@ -539,7 +539,7 @@ Two services modify the system prompt before it is sent to the LLM. Both are con
 
 **Execution order**: Identity masking → Counterweight → LLM call.
 
-Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight-cautious`, `counterweight-strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
+Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight_cautious`, `counterweight_strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
 
 See [LLM Integration — Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking) for configuration details.
 
@@ -729,6 +729,16 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 6. **Editing, not echoing**: a stored configuration holds credential *references* (`${vault:…}`), and an API call resolves those before it sends — so an edit that echoed a document back would write the plaintext secret, and is refused. The operator edits LLM, HTTP-call and MCP-call configurations with `PATCH` (RFC 6902) and sends only what changes; see [Editing a configuration that holds a reference](secrets-vault.md#editing-a-configuration-that-holds-a-reference-patch-not-echo). The Manager refuses any LLM-config patch that touches a task's `toolApprovals`, the same way it refuses a `PUT` that carries one.
 
+### Building an operator agent for your own API
+
+An application can build an operator for *its* API the same way, with EDDI's converter rather than a script of its own:
+
+- **Per-user token.** With EDDI's OIDC off, pass `"apiAuth": "Bearer ${context:userToken}"`; each turn sends the user's token as secret context and it is resolved only into that header, only towards the generated calls' own host, failing closed when absent (see [Per-turn credentials from secret context](httpcalls.md#per-turn-credentials-from-secret-context)).
+- **Generate only.** `"dryRun": true` on `setup-api` returns the apicalls configurations, the LLM configuration with its tool list, the workflow, the agent with its gate, `unusableEndpoints` and `unmatchedEndpoints`, and writes nothing (`200`, action `api_agent_dry_run`; a plaintext `apiKey`/`apiAuth` is shown as a placeholder, never echoed). It cannot read the vault: whether a `vaultKeyName` exists or holds the same value is decided when the agent is created, and when that name comes with a plaintext `apiKey` the destination rule is listed under `resources.warnings` rather than enforced, because an existing key would be reused as stored.
+- **Re-sync.** `POST /administration/agents/{agentId}/setup-api/sync` with the regenerated spec regenerates only the apicalls configurations setup stamped with `openApiOrigin`, rewrites the LLM task's `tools` list and the generated API summary at the end of its prompt, keeps everything else (prompt, model, `hitlConfig`, `toolQuotas`, `responseSchema`, hand-written tools), and saves the agent as a **compatible** version, so running conversations move to it once deployed. It reports added, changed and removed tools; a removed tool still named by `toolQuotas`, a `toolApprovals` exemption or a tool-result guardrail exemption is refused with `400`, each reference listed, nothing written. The request's `requireApproval` patterns are added to the gate, never removed, and its exemptions are ignored. An agent created before the marker existed is refused with how to add `"openApiOrigin": {"group": "<tag>", "authHeader": "Authorization"}` to its generated configurations. `"dryRun": true` reports the diff without writing.
+
+Neither is part of the Platform Operator's own toolset: `dryRun` is hidden from the OpenAPI schema its tools are generated from, and the sync endpoint is in no operator scope (asserted in `tool-scopes.test.ts`).
+
 ### Keeping It Up to Date
 
 Everything provisioning bakes into the operator — its instructions, its endpoint allow-list and its approval gate — is a snapshot. Upgrading EDDI upgrades the Manager, not an operator that is already running, so an operator activated on an older release keeps its older instructions and tools until it is upgraded.
@@ -796,7 +806,7 @@ graph TD
 
 | Level          | Purpose                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Agent**      | List of workflow URIs + channels. The top-level container.                                                                      |
+| **Agent**      | List of workflow URIs (plus channel integrations, configured separately). The top-level container.                                                                      |
 | **Workflow**   | Ordered list of workflow extensions — each extension = one lifecycle task type. **Order matters**: tasks execute sequentially. |
 | **Extension**  | The actual configuration that drives each `ILifecycleTask`. Referenced by URI from the workflow.                                |
 | **Descriptor** | Metadata (name, description, timestamps) for any resource. Not functional, purely for UI/management.                           |

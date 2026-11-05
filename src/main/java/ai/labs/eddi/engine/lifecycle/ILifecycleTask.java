@@ -109,18 +109,21 @@ public interface ILifecycleTask {
      * executes. Common types include:
      * </p>
      * <ul>
-     * <li><code>input</code> - Raw input processing</li>
-     * <li><code>input:normalized</code> - Normalized input</li>
      * <li><code>expressions</code> - Parsed expressions</li>
      * <li><code>behavior_rules</code> - Rule evaluation</li>
-     * <li><code>actions</code> - Action triggers</li>
-     * <li><code>httpcalls</code> - External API calls</li>
+     * <li><code>properties</code> - Property setter</li>
+     * <li><code>httpCalls</code> - External API calls</li>
+     * <li><code>mcpCalls</code> - MCP tool calls</li>
+     * <li><code>langchain</code> - LLM task</li>
      * <li><code>output</code> - Response generation</li>
      * </ul>
      *
      * <p>
-     * The type is used by the LifecycleManager to determine execution order and
-     * filter tasks when partial lifecycle execution is needed.
+     * Matching is case-sensitive ({@code "httpcalls"} matches nothing). The type
+     * does not determine execution order, which is the workflow's step order; it
+     * only selects where a partial lifecycle run starts: the LifecycleManager runs
+     * the suffix of the pipeline beginning at the first task whose type starts with
+     * the requested type.
      * </p>
      *
      * @return type identifier of this lifecycle task

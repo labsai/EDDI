@@ -36,6 +36,8 @@ the cascade actually finished:
   "sharedArtifactsDeleted": 0,
   "schedulesDeleted": 0,
   "connectionGrantsDeleted": 1,
+  "autoVaultedSecretsDeleted": 0,
+  "additionalDeleted": {},
   "failedSteps": [],
   "complete": true,
   "completedAt": "2026-04-02T15:30:00Z"
@@ -50,6 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -112,7 +115,11 @@ principal, not a user: erasing or exporting it is refused with 400.
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
-6. Conversation snapshots — **permanently deleted**
+6. Conversation snapshots — **permanently deleted**, unless an earlier step that finds
+   its records by conversation id (attachments, dead letters, journal entries,
+   descriptors, checkpoints, auto-vaulted secrets) failed: the snapshots are then
+   **kept** (reported as `conversations`, "kept until … erased"), because they are what
+   lists the conversations under the user, and a re-run needs them to reach what is left
 7. Managed conversation mappings — **permanently deleted** (and evicted from their cache)
 8. Group conversation transcripts — **permanently deleted** (kept for a re-run when
    step 2 could not finish with their blobs, see there)
@@ -140,7 +147,7 @@ principal, not a user: erasing or exporting it is refused with 400.
     erasure is not `complete`. Details: [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion).
     Under `eddi.audit.erasure-mode=pseudonymize` only the userId is replaced and
     the content is **kept** — choose that only when a legal hold requires it
-15. Stores that registered as GDPR participants — the user directory, workspace
+15. Stores that registered as GDPR participants — conversation ratings, tool quotas, alerts, personal-space secrets and variables (`personalSpaceResources`), the user directory, workspace
     notifications and the **A2A task store** (a peer's tasks and context bindings,
     each holding the message it sent and the reply it got, keyed by the peer's
     principal), the **email ledger** (HITL notification rows and conversation-mode
@@ -167,7 +174,8 @@ principal, not a user: erasing or exporting it is refused with 400.
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
     other people's data and stay). Ratings deliberately outlive retention purges
     of transcripts, so no conversation sweep reaches them. See
-    [Conversation Ratings](conversation-ratings.md)
+    [Conversation Ratings](conversation-ratings.md). The `hitlOversight` participant deletes the audit samples of the user's
+    conversations and keeps their approval-decision facts without them ([HITL Oversight](hitl-oversight.md#gdpr))
 17. **Tool quota counters** (`toolQuotas`) — **permanently deleted** by the `toolQuotas`
     participant: every counter whose subject equals the erased user id. A counter holds a subject
     identifier and a count, no content, and expires on its own an hour after its window ends. When an
@@ -189,9 +197,9 @@ The export is a structured, machine-readable JSON bundle of these categories —
 yet every category EDDI erases; what it leaves out is named in `omittedCategories`
 (see the note below):
 - All persistent user memories
-- All conversation transcripts (with full chat history)
+- Conversation outputs (the chat history as recorded in the conversation outputs). Conversation properties, step data and checkpoints are **not** exported
 - All managed conversation mappings (intent→conversation bindings)
-- All audit processing records (capped at 10,000 entries)
+- Audit processing records: conversation id, agent id, task type, duration, LLM detail and timestamp (capped at 10,000 entries; the prompt input, output and tool calls of the entry are not included)
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —
   the binaries themselves are not inlined and must be fetched via the attachment
   download API
@@ -201,6 +209,8 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)
   blocks new ratings
+- HITL oversight (`hitlOversight`): audit samples of the user's conversations (redacted tool arguments) and the approval-decision
+  facts of their conversations and decisions (capped at 10,000 each)
 - Alerting (`alerts`): for a user who runs agents, the alert rules they created or last
   edited — id, name, times and which role — and the alert events they acknowledged —
   id, rule name, source, agent, fired and acknowledged times; for a user who chatted,
@@ -239,8 +249,11 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
 >   `failedCategories` — the same two signals for the group sections.
 >
 > A bundle with `complete: false` is **not** a complete Art. 15 / Art. 20
-> response — do not file the request as fulfilled on it. (The audit-record cap of
-> 10,000 is still reported in the server log only.)
+> response — do not file the request as fulfilled on it. (The audit-record
+> cap of 10,000 is silent: the bundle does not flag it and `complete` ignores it, so
+> a user with more audit rows than that needs a supplementary extract. A failure
+> while reading the memories, mappings, audit, attachment or grant blocks is likewise
+> only logged and does not appear in `failedCategories`.)
 >
 > 207 rather than 206 Partial Content, which earlier releases sent: 206 is a range
 > status and RFC 9110 requires a `Content-Range` alongside it, which this endpoint
@@ -321,13 +334,17 @@ Art. 18 legal control, which is why it is not the default.
 | **GDPR** | 30 days | Up to 90 days for complex requests |
 | **CCPA** | 45 days | Up to 90 days with notification |
 
-EDDI's erasure and export operations complete in seconds — the timeline
-constraint is your internal DSAR process, not the technical execution.
+EDDI's erasure and export are normally quick for a typical user, though a user with
+very many conversations, or a cluster that has to stop work on several nodes, takes
+longer. The timeline constraint is usually your internal DSAR process, not the
+technical execution.
 
 ## Retention Configuration
 
 ```properties
-# Auto-delete ended conversations after N days (default: 365, -1 to disable)
+# Auto-delete ended conversations after N days (default: 365, -1 to disable).
+# A database migrated from EDDI 5 holds this sweep until
+# eddi.migration.v6-rename.retention-confirmed=true; the dev profile overrides these defaults.
 eddi.conversations.deleteEndedConversationsOnceOlderThanDays=365
 
 # End idle conversations after N days (default: 90; -1 disables)
@@ -437,12 +454,12 @@ and reduce them to the minimum necessary for your use case.
 
 ## What erasure and export do not reach
 
-Erasure covers every store EDDI keys by a user — the fourteen steps and the
+Erasure covers every store EDDI keys by a user — the steps and the
 participants listed above. Export is narrower: it is the bundle described under
 [Right of Access](#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100),
 and what it leaves out — schedules and HITL journal entries among them — is named in its
 `omittedCategories`, so an export must not be handed over as complete without
-reading that field. Beyond both, four classes of data sit outside EDDI's reach
+reading that field. Beyond both, several classes of data sit outside EDDI's reach
 altogether, each for a different reason; a controller's record of processing
 should name them and the measure that bounds each one.
 
@@ -451,9 +468,11 @@ should name them and the measure that bounds each one.
 | **RAG knowledge bases** (`ragstore`, pgvector, external vector stores) | Agent-level reference material an editor ingests for the agent, not records about a user. Nothing in a knowledge base is keyed by a user id, so no per-user sweep is possible — and personal data ingested as a source is a document the controller chose to publish to the agent, removed through the knowledge base's own source management | Review sources before ingestion, and delete a source that holds a data subject's record through the RAG store's source endpoints (see [rag.md](rag.md#ingestion-sources)) |
 | **Application log files** (console, files a log shipper collects) | Written as text to destinations EDDI does not control and cannot rewrite afterwards. The persisted database logs *are* pseudonymised (step 13); the console copy is not. Credential material is redacted before any record is written, and user ids appear only where the logging context carries them | Keep file and shipper retention short, and treat the collected logs as a processor's data set in your record of processing |
 | **Telemetry exports** (OpenTelemetry spans, Micrometer metrics) | Spans carry conversation and agent ids and timings, never message content or user ids; metrics are aggregates. Once exported they are the collector's data, outside EDDI's reach | Retention is set on the collector or metrics backend |
+| **Approver identity in other users' HITL tool journals** | The journal is deleted by conversation id, so an approver's `decidedBy` entry inside another user's journal survives the approver's own erasure | Treat approver ids as pseudonymous staff data and bound them with the journal's retention |
+| **Group discussions the user took part in but did not start** | The group store matches the discussion's owner, so only discussions the user started are erased or exported | Handle shared transcripts in your DSAR process |
 | **LLM-provider retention** | Every LLM call sends the message and its context to the configured provider, a processor under its own DPA; EDDI cannot recall what the provider has logged | Choose providers with zero-retention terms, or self-host (Ollama, jlama); see [LLM Provider Data Flow](#llm-provider-data-flow) |
 
-The dead-letter sink of the audit ledger is a fifth case, treated above under
+The dead-letter sink of the audit ledger is a further case, treated above under
 [its own heading](#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
 
 ## Audit Ledger Legal Basis

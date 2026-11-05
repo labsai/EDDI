@@ -4,13 +4,15 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 ## Quick Start — Grafana Dashboards
 
-E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
-`docker-compose.monitoring.yml`:
+E.D.D.I ships three dashboards that the Kubernetes monitoring component and
+`docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+[Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 166 panels, 22 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -82,9 +84,10 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Persistent Memory — Dream & Summarization` ·
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
-`Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
+`Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
-`Runtime context (Quarkus / JVM built-ins)`
+`Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
+`Conversation Ratings` · `Alerts`
 
 ---
 
@@ -197,6 +200,7 @@ eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
 eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
+eddi_tool_arguments_refused_total          # Calls refused before the approval gate because their arguments violate the tool's argumentSchema (tag: source)
 eddi_tool_quota_decisions_total            # toolQuotas decisions per call (tags: tool, outcome = allowed | refused | precheck_refused | unavailable | released)
 eddi_tool_quota_store_failures_total      # toolQuotas counter-store operations that failed, calls refused fail closed (tag: operation = reserve | precheck | release)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
@@ -301,6 +305,7 @@ eddi_group_close_count_total                # Conversations closed to further ro
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
+eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
 
 ### Standing Team (Cadence) Metrics
@@ -310,6 +315,9 @@ eddi_team_cadence_runs_started_total        # Cadence fires that started a discu
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
+eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
+eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
 
 ### Scheduled Trigger Metrics
@@ -691,6 +699,10 @@ eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdic
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
 eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
+eddi_hitl_decision_total                    # Decided HITL units (answer, tool call, phase, task); tags: surface, outcome, channel
+eddi_hitl_edit_chars                        # Summary: characters an approver changed per edit; tag: kind
+eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift, redacted_content)
+eddi_hitl_approval_context_render_total     # approvalContext blocks rendered at pause commit; tags: outcome (ok, empty, failed, too_large), surface (regular, group)
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
@@ -710,6 +722,23 @@ lists the oldest pauses first, so the cap drops the newest). They read `NaN` unt
 after a failed one. Pauses minus resumes, the old way of estimating the backlog,
 reset with every restart and never saw pauses taken before it; alert on
 `eddi_hitl_pending_oldest_age_seconds` instead (`EddiApprovalWaitingLong`).
+
+**Oversight — approval analytics, sampled audit, earned autonomy** ([hitl-oversight.md](hitl-oversight.md)). No meter carries
+an agent or category tag; the per-category numbers are in `GET /hitl/analytics/summary`.
+
+```text
+eddi_hitl_decision_latency_seconds          # Timer: how long a pause waited for its decision; tags: surface, pause_type
+eddi_hitl_decision_projection_failures_total # Decision units that could not be stored for analytics (a rebuild repairs them)
+eddi_audit_sample_total                     # Allowed calls considered by the sampled audit; tag: outcome (sampled|capped|dropped|skipped)
+eddi_audit_sample_review_total              # Sample verdicts; tag: verdict (OK|FLAGGED)
+eddi_audit_sample_expired_total             # Samples that expired unreviewed — an oversight-capacity signal
+eddi_audit_sample_pending                   # Samples waiting for review, store-wide (gauge)
+eddi_autonomy_recommendation_total          # Recommendations opened; tag: kind (PROMOTE|REVERT)
+eddi_autonomy_promotion_applied_total       # Recommendations a human applied
+eddi_autonomy_demotion_total                # Categories suspended; tag: trigger (REASON_CODE|SAMPLE_FLAGGED|MANUAL)
+eddi_autonomy_suspension_active             # Categories suspended right now, store-wide (gauge)
+eddi_autonomy_suspension_gated_total        # Calls the suspension overlay gated
+```
 
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
@@ -923,6 +952,8 @@ eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
+eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
