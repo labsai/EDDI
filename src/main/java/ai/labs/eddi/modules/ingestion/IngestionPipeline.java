@@ -9,14 +9,26 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
-import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest;
-import ai.labs.eddi.modules.ingestion.crawl.CrawlSink;
+import ai.labs.eddi.modules.ingestion.connector.Coverage;
+import ai.labs.eddi.modules.ingestion.connector.DiscoveryContext;
+import ai.labs.eddi.modules.ingestion.connector.DiscoveryResult;
+import ai.labs.eddi.modules.ingestion.connector.KnownVersion;
+import ai.labs.eddi.modules.ingestion.connector.Partition;
+import ai.labs.eddi.modules.ingestion.connector.SourceConnector;
+import ai.labs.eddi.modules.ingestion.connector.SourceConnectors;
+import ai.labs.eddi.modules.ingestion.connector.SourceContext;
+import ai.labs.eddi.modules.ingestion.connector.SourceDocument;
+import ai.labs.eddi.modules.ingestion.connector.SourceDocument.Content;
+import ai.labs.eddi.modules.ingestion.connector.SourceError;
+import ai.labs.eddi.modules.ingestion.connector.SourceException;
+import ai.labs.eddi.modules.ingestion.connector.WorkItem;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
+import ai.labs.eddi.modules.ingestion.crawl.WebSourceConnector;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.ExtractionLimits;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
-import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
+import ai.labs.eddi.modules.ingestion.files.UploadSourceConnector;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
@@ -126,16 +138,18 @@ public class IngestionPipeline {
     public static final String METADATA_SOURCE_KEY = "sourceKey";
     public static final String METADATA_INGESTED_AT = "ingestedAt";
 
-    private final WebCrawler crawler;
+    private final SourceConnectors connectors;
     private final HtmlToMarkdownConverter converter;
     private final IIngestionStateStore stateStore;
-    private final IIngestedFileStore fileStore;
     private final DocumentExtractors extractors;
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final MeterRegistry meterRegistry;
 
-    @Inject
+    /**
+     * The pipeline with the two built-in connectors, for callers that assemble it
+     * by hand rather than through CDI.
+     */
     public IngestionPipeline(WebCrawler crawler,
             HtmlToMarkdownConverter converter,
             IIngestionStateStore stateStore,
@@ -144,10 +158,21 @@ public class IngestionPipeline {
             EmbeddingModelFactory embeddingModelFactory,
             EmbeddingStoreFactory embeddingStoreFactory,
             MeterRegistry meterRegistry) {
-        this.crawler = crawler;
+        this(SourceConnectors.of(new WebSourceConnector(crawler), new UploadSourceConnector(fileStore)),
+                converter, stateStore, extractors, embeddingModelFactory, embeddingStoreFactory, meterRegistry);
+    }
+
+    @Inject
+    public IngestionPipeline(SourceConnectors connectors,
+            HtmlToMarkdownConverter converter,
+            IIngestionStateStore stateStore,
+            DocumentExtractors extractors,
+            EmbeddingModelFactory embeddingModelFactory,
+            EmbeddingStoreFactory embeddingStoreFactory,
+            MeterRegistry meterRegistry) {
+        this.connectors = connectors;
         this.converter = converter;
         this.stateStore = stateStore;
-        this.fileStore = fileStore;
         this.extractors = extractors;
         this.embeddingModelFactory = embeddingModelFactory;
         this.embeddingStoreFactory = embeddingStoreFactory;
@@ -289,10 +314,8 @@ public class IngestionPipeline {
             if (mode == Mode.INGEST) {
                 markForSweepIfFresh(source, sourceKey, runId);
             }
-            SourceRun sourceRun = source.isUpload()
-                    ? readUploadedFiles(sourceKey, source, collector)
-                    : crawl(source, collector);
-            WebCrawler.CrawlSummary summary = sourceRun.summary();
+            SourceRun sourceRun = discover(connectors.forType(source.getType()), source, sourceKey, runId, mode,
+                    collector);
 
             // Added to, not assigned: a file retired as unreadable during the run is
             // already counted.
@@ -306,7 +329,7 @@ public class IngestionPipeline {
                 collector.storeRefused = new InMemoryStoreRetiredException(knowledgeBaseId).getMessage();
             }
 
-            IngestionReport report = collector.toReport(summary, null, startedAt);
+            IngestionReport report = collector.toReport(sourceRun.stopReason(), null, startedAt);
             finish(mode, runId, sourceKey, report, statusFor(collector), trigger);
             return report;
         } catch (Throwable t) {
@@ -418,11 +441,16 @@ public class IngestionPipeline {
         if (mode != Mode.INGEST) {
             return 0;
         }
+        if (sourceRun.coverage() == Coverage.INCREMENTAL) {
+            // A change feed reports deletions as DELETE items, already applied.
+            // Absence from it means nothing.
+            return 0;
+        }
         if (!sourceRun.coveredWholeSource()) {
             collector.tombstoningSkipped = true;
             LOGGER.infof("Not reconciling deletions for source '%s': the run stopped at %s rather than covering "
                     + "the source", LogSanitizer.sanitize(source.getName()),
-                    sourceRun.summary().discoveryIncomplete() ? "incomplete sitemap discovery" : sourceRun.summary().stopReason());
+                    sourceRun.incompleteReason() != null ? sourceRun.incompleteReason() : sourceRun.stopReason());
             return 0;
         }
         List<DocumentState> gone = stateStore.bumpAndFindMissing(
@@ -725,20 +753,65 @@ public class IngestionPipeline {
      * What a run covered, and how.
      *
      * <p>
-     * Coverage is carried separately from the summary because the two kinds of
-     * source know it differently. A crawl can only infer it — it stopped at a page
-     * cap, or it reached nothing at all, and {@code CrawlSummary} works that out
-     * from what happened. An upload source knows it outright: it listed the store.
-     * Reusing the crawl's inference for uploads would mean an operator who deletes
-     * the last file of a source is told nothing was concluded, and its vectors
-     * would stay in the knowledge base for good.
+     * Coverage comes from the connector, because sources know it differently. A
+     * crawl can only infer it — it stopped at a page cap, or it reached nothing at
+     * all — and reports {@link Coverage#FULL_TRAVERSAL}, to which
+     * {@link #learnedSomething} is added here. An upload source knows it outright:
+     * it listed the store, and reports {@link Coverage#FULL_LISTING}. Applying the
+     * crawl's inference to uploads would mean an operator who deletes the last file
+     * of a source is told nothing was concluded, and its vectors would stay in the
+     * knowledge base for good.
+     *
+     * @param coveredWholeSource
+     *            whether absence from this run is evidence of deletion
+     * @param incompleteReason
+     *            the connector's explanation when coverage fell short, for the log
      */
-    private record SourceRun(WebCrawler.CrawlSummary summary, boolean coveredWholeSource) {
+    private record SourceRun(WebCrawler.StopReason stopReason, Coverage coverage, boolean coveredWholeSource,
+            String incompleteReason) {
     }
 
-    private SourceRun crawl(IngestionSource source, Collector collector) {
-        WebCrawler.CrawlSummary summary = crawler.crawl(toCrawlRequest(source), collector);
-        return new SourceRun(summary, summary.coveredWholeSource() && learnedSomething(collector));
+    /**
+     * Runs a connector's discovery over its source, processing every document as it
+     * is found.
+     *
+     * <p>
+     * Sequential, one document at a time, on the calling thread — exactly as the
+     * crawl and the upload loop ran before connectors existed. A connector's run
+     * level failure ends the run like any other exception.
+     */
+    private SourceRun discover(SourceConnector connector, IngestionSource source, String sourceKey, String runId,
+                               Mode mode, Collector collector) {
+        SourceContext context = new SourceContext(source, sourceKey, runId, mode == Mode.PREVIEW);
+        DiscoveryResult result;
+        try {
+            List<Partition> partitions = connector.listPartitions(context);
+            if (partitions.size() != 1) {
+                // Several partitions need a cursor each and a coverage per partition,
+                // which arrive with the work queue. Refused rather than half-run.
+                throw new IllegalStateException("Source type '" + connector.type() + "' lists "
+                        + partitions.size() + " partitions; this version runs exactly one per source");
+            }
+            Partition partition = partitions.get(0);
+            connector.verifyAccess(context, partition);
+            Instant deadline = uploadDeadline(Instant.now(), source);
+            result = connector.discover(new Discovery(connector, context, partition, deadline, collector));
+        } catch (SourceException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+        if (result.nextCursor() != null) {
+            // Nothing persists cursors yet, so the next run lists in full — the safe
+            // direction to be wrong in.
+            LOGGER.debugf("Source '%s' returned a cursor, which this version does not store",
+                    LogSanitizer.sanitize(source.getName()));
+        }
+        boolean covered = switch (result.coverage()) {
+            case FULL_LISTING -> true;
+            case FULL_TRAVERSAL -> learnedSomething(collector);
+            case INCREMENTAL, PARTIAL -> false;
+        };
+        return new SourceRun(WebCrawler.StopReason.valueOf(result.stopReason().name()), result.coverage(), covered,
+                result.incompleteReason());
     }
 
     /**
@@ -757,11 +830,11 @@ public class IngestionPipeline {
      * rather than only failures that hide the content.
      *
      * <p>
-     * This is a statement about crawling, which is why it lives here rather than in
-     * the reconciliation it feeds. An upload source that lists an empty store has
-     * learned something definitive: the operator deleted the files. Applying a
-     * crawler's caution to it would leave a deleted document answering questions
-     * for ever, because an upload source has no next crawl to correct it.
+     * This is a statement about traversal, which is why it applies to
+     * {@link Coverage#FULL_TRAVERSAL} only. An upload source that lists an empty
+     * store has learned something definitive: the operator deleted the files.
+     * Applying a crawler's caution to it would leave a deleted document answering
+     * questions for ever, because an upload source has no next crawl to correct it.
      */
     private static boolean learnedSomething(Collector collector) {
         boolean nothingUsable = collector.ingested + collector.unchanged == 0;
@@ -770,61 +843,12 @@ public class IngestionPipeline {
     }
 
     /**
-     * Reads every file an upload source holds, extracting text from each.
+     * When a run's discovery has to stop, handed to every connector as
+     * {@link DiscoveryContext#deadline()}. The crawler enforces its own budget from
+     * the same setting; the upload connector uses this one.
      *
      * <p>
-     * The file's own hash decides whether it changed, and it is known without
-     * reading the bytes — so an unchanged 20 MB manual costs one metadata query per
-     * run rather than a download and a full PDF parse.
-     */
-    private SourceRun readUploadedFiles(String sourceKey, IngestionSource source, Collector collector) {
-        Instant start = Instant.now();
-        Instant deadline = uploadDeadline(start, source);
-        List<StoredFile> files;
-        try {
-            files = fileStore.list(sourceKey);
-        } catch (RuntimeException e) {
-            // The store is unavailable, so this run learned nothing about which files
-            // exist. Reported as an uncovered run: concluding "no files" here would
-            // delete the whole knowledge base over a database blip.
-            collector.onError(new CrawlSink.CrawlError(null, null,
-                    "The uploaded files of this source could not be listed: " + describe(e), 0, true));
-            return new SourceRun(uploadSummary(collector, start, WebCrawler.StopReason.CANCELLED), false);
-        }
-
-        ExtractionLimits limits = ExtractionLimits.defaults()
-                .withMaxCharacters(source.settings().maxContentLengthOrDefault());
-        WebCrawler.StopReason stopReason = WebCrawler.StopReason.COMPLETED;
-        int read = 0;
-
-        for (StoredFile file : files) {
-            if (collector.isCancelled()) {
-                stopReason = WebCrawler.StopReason.CANCELLED;
-                break;
-            }
-            if (Instant.now().isAfter(deadline)) {
-                stopReason = WebCrawler.StopReason.TIME_LIMIT;
-                break;
-            }
-            if (read >= source.upload().maxFilesOrDefault()) {
-                // The limit was lowered after the files were uploaded. Stopping short
-                // is not coverage, so nothing is concluded to be deleted.
-                stopReason = WebCrawler.StopReason.PAGE_LIMIT;
-                break;
-            }
-            read++;
-            readOneFile(sourceKey, source, file, limits, collector);
-        }
-
-        boolean covered = stopReason == WebCrawler.StopReason.COMPLETED;
-        return new SourceRun(uploadSummary(collector, start, stopReason), covered);
-    }
-
-    /**
-     * When a run over uploaded files has to stop.
-     *
-     * <p>
-     * The same budget a crawl gets. Without it a run over a large source can
+     * The same budget a crawl gets. Without it a run over a large upload source can
      * outlive the point at which it is treated as abandoned, and the next fire
      * starts a second worker embedding into the same store — each one deleting the
      * other's fresh chunks, because replacement filters on the run id.
@@ -838,90 +862,66 @@ public class IngestionPipeline {
         return start.plus(Duration.ofMinutes(source.settings().timeBudgetMinutesOrDefault()));
     }
 
-    private void readOneFile(String sourceKey, IngestionSource source, StoredFile file,
-                             ExtractionLimits limits, Collector collector) {
-        // Asked before the bytes are fetched: an unchanged file needs neither.
-        var known = stateStore.lookup(sourceKey, file.fileId());
-        if (!collector.reembedAll && known.isPresent() && !known.get().tombstoned()
-                && !known.get().hasChanged(file.contentHash())) {
-            collector.onUnchanged(file.fileId());
-            return;
+    /**
+     * The framework's side of a discovery: what the connector asks, answered from
+     * the run's state, and what it finds, handed to the run's collector.
+     */
+    private static final class Discovery implements DiscoveryContext {
+
+        private final SourceConnector connector;
+        private final SourceContext context;
+        private final Partition partition;
+        private final Instant deadline;
+        private final Collector collector;
+
+        private Discovery(SourceConnector connector, SourceContext context, Partition partition, Instant deadline,
+                Collector collector) {
+            this.connector = connector;
+            this.context = context;
+            this.partition = partition;
+            this.deadline = deadline;
+            this.collector = collector;
         }
-        try {
-            byte[] content = fileStore.load(sourceKey, file.fileId()).orElse(null);
-            if (content == null) {
-                // Deleted between the listing and the read. Not an error and not a
-                // miss: the next run will see it gone and reconcile it properly.
-                return;
-            }
-            String markdown = extractors.extract(content, file.mimeType(), limits);
-            if (markdown.isBlank()) {
-                // A scan with no text layer, or a document with nothing in it. The file
-                // is the whole of this source's evidence, so this is a definitive
-                // answer, not a page that failed to load.
-                collector.onUnreadableFile(file, DocumentExtractors.emptyDocumentReason(file.mimeType()));
-                return;
-            }
-            if (markdown.length() >= limits.maxCharacters()) {
-                // Said once per file rather than silently embedding the first third
-                // of a manual as if it were the whole thing.
-                LOGGER.infof("File '%s' of source '%s' was truncated at %d characters (maxContentLength)",
-                        LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()),
-                        limits.maxCharacters());
-            }
-            collector.onExtractedDocument(file.fileId(), "file:" + file.fileName(),
-                    titleOf(file.fileName()), markdown, file.contentHash());
-        } catch (UnreadableDocumentException e) {
-            collector.onUnreadableFile(file, describe(e));
-        } catch (IIngestedFileStore.IngestedFileStoreException e) {
-            // The bytes could not be fetched this time. Recorded as unreachable rather
-            // than missing: the file is there, and a store blip is not evidence that
-            // the source is empty.
-            collector.onError(new CrawlSink.CrawlError(file.fileId(), file.fileName(),
-                    describe(e), 0, true));
+
+        @Override
+        public SourceContext source() {
+            return context;
         }
-    }
 
-    private static WebCrawler.CrawlSummary uploadSummary(Collector collector, Instant start,
-                                                         WebCrawler.StopReason stopReason) {
-        return new WebCrawler.CrawlSummary(collector.ingested, collector.unchanged, collector.skipped,
-                collector.failed, collector.unreachable, collector.seen, 0L,
-                Duration.between(start, Instant.now()), stopReason);
-    }
+        @Override
+        public Partition partition() {
+            return partition;
+        }
 
-    /** A file name without its extension reads better as a document title. */
-    static String titleOf(String fileName) {
-        int dot = fileName.lastIndexOf('.');
-        String stem = dot > 0 ? fileName.substring(0, dot) : fileName;
-        return stem.isBlank() ? fileName : stem;
-    }
+        @Override
+        public Optional<String> cursor() {
+            return Optional.empty();
+        }
 
-    private static CrawlRequest toCrawlRequest(IngestionSource source) {
-        IngestionSource.WebSource web = source.getWeb();
-        IngestionSource.IngestionSettings settings = source.settings();
+        @Override
+        public Instant deadline() {
+            return deadline;
+        }
 
-        var scope = new CrawlRequest.Scope(
-                web.isSameSiteOnly(),
-                web.isIncludeSubdomains(),
-                web.getPathPrefix(),
-                web.getMaxDepth() == null ? 3 : web.getMaxDepth(),
-                web.getExcludePatterns());
+        @Override
+        public Optional<KnownVersion> knownVersion(String documentId) {
+            return collector.knownVersion(documentId);
+        }
 
-        int maxPages = web.getMaxPages() == null ? 200 : web.getMaxPages();
-        var limits = new CrawlRequest.Limits(
-                maxPages,
-                0, // derived from maxPages
-                settings.maxBytesPerPageOrDefault(),
-                0, // default total budget
-                Duration.ofMinutes(settings.timeBudgetMinutesOrDefault()),
-                Duration.ofSeconds(web.getTimeoutSeconds() == null ? 15 : web.getTimeoutSeconds()));
+        @Override
+        public void accept(WorkItem item) {
+            collector.process(item, connector, context);
+        }
 
-        var politeness = new CrawlRequest.Politeness(
-                Duration.ofMillis(web.getRequestDelayMs() == null ? 500 : web.getRequestDelayMs()),
-                web.getUserAgent(),
-                web.isRespectRobots());
+        @Override
+        public void reportFailure(String documentId, String location, SourceError error) {
+            collector.onFailure(documentId, error);
+        }
 
-        return new CrawlRequest(web.getStartUrl(), scope, limits, politeness, web.getSitemapUrls());
+        @Override
+        public boolean isCancelled() {
+            return collector.isCancelled();
+        }
     }
 
     private static String describe(Throwable t) {
@@ -964,10 +964,10 @@ public class IngestionPipeline {
     }
 
     /**
-     * Receives crawled pages and does the per-document work: convert, compare,
-     * embed, record.
+     * Receives what a connector discovers and does the per-document work: fetch,
+     * convert, compare, embed, record.
      */
-    private final class Collector implements CrawlSink {
+    private final class Collector {
 
         private final RagConfiguration knowledgeBase;
         private final String knowledgeBaseId;
@@ -1027,6 +1027,7 @@ public class IngestionPipeline {
          * there rather than failing every remaining document the same way.
          */
         private String storeRefused;
+        private ExtractionLimits extractionLimits;
         private Instant nextOwnershipCheck = Instant.MIN;
         private final IngestionRun.Trigger trigger;
         private Instant nextProgressReport = Instant.MIN;
@@ -1065,23 +1066,21 @@ public class IngestionPipeline {
             return model;
         }
 
-        @Override
-        public ConditionalHeaders conditionalFor(String documentId) {
+        /** See {@link DiscoveryContext#knownVersion}. */
+        Optional<KnownVersion> knownVersion(String documentId) {
             if (reembedAll) {
                 // A 304 would report the page unchanged, and the store no longer has it.
-                return ConditionalHeaders.none();
+                return Optional.empty();
             }
             return stateStore.lookup(sourceKey, documentId)
                     // A tombstoned document has no vectors any more, so revalidating it
                     // would earn a 304 and leave it permanently unretrievable. Ask for
                     // the body.
                     .filter(state -> !state.tombstoned())
-                    .map(state -> new ConditionalHeaders(state.etag(), state.lastModified()))
-                    .orElseGet(ConditionalHeaders::none);
+                    .map(state -> new KnownVersion(state.contentHash(), state.etag(), state.lastModified()));
         }
 
-        @Override
-        public boolean isCancelled() {
+        boolean isCancelled() {
             return budgetExhausted || storeRefused != null || !stillOwnsRun(false);
         }
 
@@ -1162,8 +1161,62 @@ public class IngestionPipeline {
             return rate != null && rate > 0 ? ((segments + discardedSegments) / 1000.0) * rate : 0.0;
         }
 
-        @Override
-        public void onUnchanged(String documentId) {
+        /**
+         * One discovered document, handled before discovery moves on.
+         */
+        void process(WorkItem item, SourceConnector connector, SourceContext context) {
+            switch (item.action()) {
+                case UNCHANGED -> onUnchanged(item.documentId());
+                case DELETE -> onDeleted(item.documentId());
+                case UPSERT -> upsert(item, connector, context);
+            }
+        }
+
+        private void upsert(WorkItem item, SourceConnector connector, SourceContext context) {
+            SourceDocument document = item.prefetched();
+            if (document == null) {
+                // Asked before the content is fetched: an unchanged document needs
+                // neither the download nor the extraction.
+                if (item.versionToken() != null && unchangedVersion(item.documentId(), item.versionToken())) {
+                    onUnchanged(item.documentId());
+                    return;
+                }
+                try {
+                    document = connector.fetch(item, context);
+                } catch (SourceException e) {
+                    if (e.error() instanceof SourceError.NotFound) {
+                        // Gone between discovery and fetch. Not an error and not a miss:
+                        // the next run will see it gone and reconcile it properly.
+                        return;
+                    }
+                    onFailure(item.documentId(), e.error());
+                    return;
+                }
+                if (!item.documentId().equals(document.documentId())) {
+                    throw new IllegalStateException("Source type '" + connector.type() + "' fetched document '"
+                            + document.documentId() + "' for work item '" + item.documentId() + "'");
+                }
+            }
+            switch (document.content()) {
+                case Content.HtmlPage page -> onPage(document, page);
+                case Content.FileBytes file -> onFile(document, file);
+                case Content.Text text -> onText(document, text);
+            }
+        }
+
+        /**
+         * Whether a version token the source reported matches what was embedded — known
+         * without the content, so the document is neither fetched nor parsed.
+         */
+        private boolean unchangedVersion(String documentId, String versionToken) {
+            if (reembedAll) {
+                return false;
+            }
+            var known = stateStore.lookup(sourceKey, documentId);
+            return known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(versionToken);
+        }
+
+        void onUnchanged(String documentId) {
             seen++;
             unchanged++;
             if (mode == Mode.INGEST) {
@@ -1172,16 +1225,23 @@ public class IngestionPipeline {
             reportProgress(false);
         }
 
-        @Override
-        public void onError(CrawlError error) {
+        /**
+         * A failure the connector met and moved past.
+         *
+         * @param documentId
+         *            null when it concerns the source as a whole, which says nothing
+         *            about any document's content
+         */
+        void onFailure(String documentId, SourceError error) {
+            boolean contentUnknown = documentId == null || !error.isDefinitive();
             failed++;
             reportProgress(false);
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
-            if (error.contentUnknown()) {
+            if (contentUnknown) {
                 inconclusive++;
             }
 
-            if (mode != Mode.INGEST || error.documentId() == null || !error.contentUnknown()) {
+            if (mode != Mode.INGEST || documentId == null || !contentUnknown) {
                 return;
             }
             // The server refused, failed, or asked us to come back later, so this run
@@ -1190,50 +1250,133 @@ public class IngestionPipeline {
             // tail pages of a rate-limited site are deleted after
             // tombstoneAfterMissedRuns runs, with every run reporting success.
             unreachable++;
-            stateStore.recordUnreachable(sourceKey, error.documentId(), runId);
-        }
-
-        @Override
-        public void onPage(CrawledPage page) {
-            seen++;
-            try {
-                String markdown = converter.convert(page.html(), page.finalUrl(),
-                        source.settings().maxContentLengthOrDefault());
-                if (page.truncated()) {
-                    // The body hit its size cap, so this document is incomplete. Said
-                    // once per page rather than silently embedding a fragment as if it
-                    // were the whole thing.
-                    LOGGER.infof("Document '%s' of source '%s' was truncated at the page size cap",
-                            LogSanitizer.sanitize(page.documentId()), LogSanitizer.sanitize(source.getName()));
-                }
-                acceptDocument(page.documentId(), page.finalUrl(), page.title(), markdown,
-                        ContentHashes.sha256(markdown), page.etag(), page.lastModified(), true);
-            } catch (RuntimeException e) {
-                recordDocumentFailure(e);
-            }
+            stateStore.recordUnreachable(sourceKey, documentId, runId);
         }
 
         /**
-         * A document whose text something other than the crawler produced — an uploaded
-         * file.
-         *
-         * @param changeKey
-         *            what decides whether this document changed. For a file it is the
-         *            hash of the bytes, not of the extracted text: the text is
-         *            re-derived on every run, and an extractor improving its output
-         *            would otherwise re-embed every file in the knowledge base.
+         * A document a change feed reports deleted: its chunks go now, without waiting
+         * for missed runs. Vectors first, tombstone afterwards, as in
+         * {@link #reconcileDeletions}.
          */
-        void onExtractedDocument(String documentId, String url, String title, String markdown, String changeKey) {
+        void onDeleted(String documentId) {
+            if (mode != Mode.INGEST || !stillOwnsRun(true)) {
+                return;
+            }
+            try {
+                store().removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
+                        .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
+            } catch (UnsupportedFeatureException e) {
+                replaceUnsupported = true;
+            } catch (RuntimeException e) {
+                failed++;
+                inconclusive++;
+                meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+                LOGGER.warnf(e, "Could not remove the chunks of deleted document '%s' of source '%s'; they stay live",
+                        LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(source.getName()));
+                return;
+            }
+            stateStore.markTombstoned(sourceKey, List.of(documentId));
+            tombstoned++;
+            reportProgress(false);
+        }
+
+        private void onPage(SourceDocument document, Content.HtmlPage page) {
             seen++;
             try {
-                acceptDocument(documentId, url, title, markdown, changeKey, null, null, false);
+                String markdown = converter.convert(page.html(), document.citationUrl(),
+                        source.settings().maxContentLengthOrDefault());
+                logIfTruncated(document);
+                acceptDocument(document, markdown);
             } catch (RuntimeException e) {
                 recordDocumentFailure(e);
             }
         }
 
         /**
-         * An uploaded file that yields no text — it cannot be read, or it has none.
+         * A stored file: its text is extracted here, and a file that yields none is a
+         * definitive failure rather than a skipped page.
+         */
+        private void onFile(SourceDocument document, Content.FileBytes file) {
+            ExtractionLimits limits = extractionLimits();
+            try {
+                String markdown = extractors.extract(file.bytes(), file.mimeType(), limits);
+                if (markdown.isBlank()) {
+                    // A scan with no text layer, or a document with nothing in it. The file
+                    // is the whole of this source's evidence, so this is a definitive
+                    // answer, not a page that failed to load.
+                    onUnreadable(document, DocumentExtractors.emptyDocumentReason(file.mimeType()));
+                    return;
+                }
+                if (markdown.length() >= limits.maxCharacters()) {
+                    // Said once per file rather than silently embedding the first third
+                    // of a manual as if it were the whole thing.
+                    LOGGER.infof("File '%s' of source '%s' was truncated at %d characters (maxContentLength)",
+                            LogSanitizer.sanitize(document.displayName()), LogSanitizer.sanitize(source.getName()),
+                            limits.maxCharacters());
+                }
+                logIfTruncated(document);
+                seen++;
+                try {
+                    acceptDocument(document, markdown);
+                } catch (RuntimeException e) {
+                    recordDocumentFailure(e);
+                }
+            } catch (UnreadableDocumentException e) {
+                onUnreadable(document, describe(e));
+            }
+        }
+
+        private void onText(SourceDocument document, Content.Text text) {
+            seen++;
+            try {
+                logIfTruncated(document);
+                acceptDocument(document, text.text());
+            } catch (RuntimeException e) {
+                recordDocumentFailure(e);
+            }
+        }
+
+        private void logIfTruncated(SourceDocument document) {
+            if (document.truncated()) {
+                // The body hit its size cap, so this document is incomplete. Said
+                // once per page rather than silently embedding a fragment as if it
+                // were the whole thing.
+                LOGGER.infof("Document '%s' of source '%s' was truncated at the page size cap",
+                        LogSanitizer.sanitize(document.documentId()), LogSanitizer.sanitize(source.getName()));
+            }
+        }
+
+        private ExtractionLimits extractionLimits() {
+            if (extractionLimits == null) {
+                extractionLimits = ExtractionLimits.defaults()
+                        .withMaxCharacters(source.settings().maxContentLengthOrDefault());
+            }
+            return extractionLimits;
+        }
+
+        /**
+         * Hands a document's text to the shared path.
+         *
+         * <p>
+         * The change key is the source's version token when it supplied one — for a
+         * file, the hash of the bytes rather than of the extracted text, because the
+         * text is re-derived on every run and an extractor improving its output would
+         * otherwise re-embed every file in the knowledge base. Otherwise it is the hash
+         * of the text.
+         */
+        private void acceptDocument(SourceDocument document, String markdown) {
+            String changeKey = document.versionToken() != null
+                    ? document.versionToken()
+                    : ContentHashes.sha256(markdown);
+            SourceDocument.ResponseValidators validators = document.validators();
+            acceptDocument(document.documentId(), document.citationUrl(), document.title(), markdown, changeKey,
+                    validators == null ? null : validators.etag(),
+                    validators == null ? null : validators.lastModified(),
+                    validators != null);
+        }
+
+        /**
+         * A stored file that yields no text — it cannot be read, or it has none.
          *
          * <p>
          * Unlike a crawl error, this is definitive: the stored file is all there is,
@@ -1243,25 +1386,27 @@ public class IngestionPipeline {
          * scanned copy left the previous text answering questions indefinitely while
          * the file list showed only the new one.
          */
-        void onUnreadableFile(StoredFile file, String reason) {
+        private void onUnreadable(SourceDocument document, String reason) {
+            String documentId = document.documentId();
             seen++;
             failed++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
-            LOGGER.warnf("File '%s' of source '%s' was not ingested: %s", LogSanitizer.sanitize(file.fileName()),
+            LOGGER.warnf("File '%s' of source '%s' was not ingested: %s",
+                    LogSanitizer.sanitize(document.displayName()),
                     LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(reason));
             if (mode != Mode.INGEST) {
                 return;
             }
-            var known = stateStore.lookup(sourceKey, file.fileId());
+            var known = stateStore.lookup(sourceKey, documentId);
             if (known.isEmpty() || known.get().tombstoned()) {
                 return;
             }
             if (!stillOwnsRun(true)) {
-                ownershipUnverified(file.fileId(), true);
+                ownershipUnverified(documentId, true);
                 return;
             }
             try {
-                store().removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(file.fileId())
+                store().removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             } catch (UnsupportedFeatureException e) {
                 replaceUnsupported = true;
@@ -1269,13 +1414,13 @@ public class IngestionPipeline {
                 // Left as it was — still live, and counted as looked-at rather than
                 // missing — so the next run tries again.
                 LOGGER.warnf(e, "Could not remove the superseded chunks of file '%s' of source '%s'",
-                        LogSanitizer.sanitize(file.fileName()), LogSanitizer.sanitize(source.getName()));
+                        LogSanitizer.sanitize(document.displayName()), LogSanitizer.sanitize(source.getName()));
                 unreachable++;
                 inconclusive++;
-                stateStore.recordUnreachable(sourceKey, file.fileId(), runId);
+                stateStore.recordUnreachable(sourceKey, documentId, runId);
                 return;
             }
-            stateStore.markTombstoned(sourceKey, List.of(file.fileId()));
+            stateStore.markTombstoned(sourceKey, List.of(documentId));
             tombstoned++;
         }
 
@@ -1505,7 +1650,7 @@ public class IngestionPipeline {
             return textSegments.size();
         }
 
-        IngestionReport toReport(WebCrawler.CrawlSummary summary, String error, Instant startedAt) {
+        IngestionReport toReport(WebCrawler.StopReason stopReason, String error, Instant startedAt) {
             double cost = currentCost();
             if (error == null && superseded) {
                 error = "The run stopped: its source was purged, removed or reaped while it was running";
@@ -1523,7 +1668,7 @@ public class IngestionPipeline {
                                     : IngestionReport.Outcome.COMPLETED,
                     seen, ingested, unchanged, skipped, failed, tombstoned, segments, cost,
                     replaceUnsupported, tombstoningSkipped,
-                    summary == null ? null : summary.stopReason(),
+                    stopReason,
                     Duration.between(startedAt, Instant.now()),
                     error);
         }
