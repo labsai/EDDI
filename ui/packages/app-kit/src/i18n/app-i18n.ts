@@ -3,6 +3,7 @@ import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import { setDefaultVariables, setupI18n, SUPPORTED_LANGUAGES, type LocaleLoader, type SupportedLanguage } from "@eddi/ui";
 import { withConversationLocales } from "@eddi/conversation";
+import { mergeLocaleBundles, withTeamLocales } from "@eddi/conversation/team";
 import en from "./locales/en.json";
 import { brandVariables, getBrand, subscribeBrand } from "../lib/brand";
 
@@ -30,22 +31,15 @@ const APP_KIT_LOCALE_LOADERS: AppLocaleLoaders = {
 };
 
 type Bundle = Record<string, unknown>;
-const isObject = (v: unknown): v is Bundle => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * Deep-merge two nested locale bundles; `over` wins a clash. The files are
  * nested (`{"groups": {"title": …}}`) and one namespace can be split between the
- * package and an app (`groups.*` is mostly here, partly the Manager's), so a
- * shallow spread would drop half of it.
+ * packages and an app (`groups.*` is partly here, partly the team components'
+ * in @eddi/conversation, partly the Manager's), so a shallow spread would drop
+ * part of it. @eddi/conversation/team's merge, which it uses for its own strings.
  */
-export function mergeBundles(base: Bundle, over: Bundle): Bundle {
-  const out: Bundle = { ...base };
-  for (const [key, value] of Object.entries(over)) {
-    const prev = out[key];
-    out[key] = isObject(prev) && isObject(value) ? mergeBundles(prev, value) : value;
-  }
-  return out;
-}
+export const mergeBundles: (base: Bundle, over: Bundle) => Bundle = mergeLocaleBundles;
 
 /** An app's English bundle and loader map, with this package's strings merged in. */
 export function withAppKitLocales(
@@ -63,7 +57,8 @@ export function withAppKitLocales(
 
 /**
  * Initialise the app's i18next — the default instance — for one of the signed-in
- * apps: its own strings, this package's and `@eddi/conversation`'s, the language
+ * apps: its own strings, this package's and `@eddi/conversation`'s (the agent
+ * kind's `conversation.*` and the team components' `groups.*`), the language
  * detector (stored choice first, so a language picked in the Manager is the one
  * Workforce opens in), and the brand's `{{productName}}` / `{{shortName}}`.
  *
@@ -72,7 +67,8 @@ export function withAppKitLocales(
  */
 export function setupAppI18n(english: Bundle, loaders: AppLocaleLoaders): Promise<unknown> {
   const withKit = withAppKitLocales(english, loaders);
-  const bundles = withConversationLocales(withKit.english, withKit.loaders);
+  const withTeam = withTeamLocales(withKit.english, withKit.loaders);
+  const bundles = withConversationLocales(withTeam.english, withTeam.loaders);
   const ready = setupI18n({
     i18n,
     languages: SUPPORTED_LANGUAGES,

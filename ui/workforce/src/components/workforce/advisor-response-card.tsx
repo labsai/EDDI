@@ -5,13 +5,13 @@ import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 import { pinsStorageKey } from "@eddi/app-kit/lib/workforce-pins";
 import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, getInitials } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
-import { truncateContent } from "@eddi/app-kit/components/groups/group-utils";
-import { StructuredEntryBody } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { entryBodyToMarkdown, isStructuredBody, readEntryBody } from "@eddi/app-kit/lib/group-entry-body";
+import { truncateContent } from "@eddi/conversation/team";
+import { StructuredEntryBody } from "@eddi/conversation/team";
+import { entryBodyToMarkdown, isStructuredBody, readEntryBody } from "@eddi/conversation/team";
 import type { TaskDefinition, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Pin Types & Hook ────────────────────────────────────────────
 

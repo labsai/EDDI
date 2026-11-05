@@ -34,10 +34,11 @@ the Chat UI could also use belongs in one of the three packages below instead.
 | `hooks/*` | Their TanStack Query hooks; `use-app-navigate.ts` |
 | `components/auth/*` | `AuthProvider`, the Keycloak session, `AuthContext` |
 | `components/ui/*`, `components/shared/*` | Primitives (badge, dialog, skeleton, …) and shared pieces; `app-link.tsx` (`AppLink`, `AppNavigate`) |
-| `components/chat/*`, `components/groups/*`, `components/editors/*`, … | The components both apps render: `ChatPanel`, the group transcript pieces, the group editors |
+| `components/chat/*`, `components/groups/*`, `components/editors/*`, … | The components both apps render: `ChatPanel`, the group editors, the discussion panel. The team components (task board, decision card, structured turns, the overview) are `@eddi/conversation/team`'s since phase 6 |
+| `hooks/use-group-discussion-stream.ts` | The apps' binding of `@eddi/conversation`'s `GroupDiscussion` controller: a transport over `lib/api/groups`, one controller per group writing its slot of `useGroupStreamStore` |
 | `components/layout/app-providers.tsx`, `lib/start-app.tsx` | The provider stack and the boot both `main.tsx` files use |
 | `lib/app-paths.ts` | Which app serves a path (`/manage`, `/welcome` → Manager; `/workforce` → Workforce) and whether that is the running one (`import.meta.env.VITE_EDDI_APP`, set by each app's `vite.config.ts`) |
-| `i18n/app-i18n.ts`, `i18n/locales/*` | `setupAppI18n`: the strings of this package's components in eleven locales, deep-merged into each app's bundle with `@eddi/conversation`'s |
+| `i18n/app-i18n.ts`, `i18n/locales/*` | `setupAppI18n`: the strings of this package's components in eleven locales, deep-merged into each app's bundle with `@eddi/conversation`'s (the agent kind's and, through `withTeamLocales`, the team components') |
 | `styles/app.css` | The base stylesheet (tokens, markdown, typography, scrollbars, prose rhythm); `@source` makes Tailwind scan this package |
 | `test/*` | The shared Vitest setup (`setup-common.ts`), `test-utils.tsx` (`renderPage`, `renderAs`, …), the route-integrity and app-boundary suites, the group rendering matrix fixtures, and the E2E fixtures (`test/e2e/*`) |
 | `test/mocks/*` | The MSW mock API both apps run against in Vitest and under `npm run dev` |

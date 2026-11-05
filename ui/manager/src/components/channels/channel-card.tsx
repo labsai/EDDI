@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Cable, Copy, Trash2, Users, Bot, Hash, Webhook, Mail } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import type { EnrichedChannelDescriptor } from "@/lib/api/channels";
 
 function SlackIcon({ className }: { className?: string }) {

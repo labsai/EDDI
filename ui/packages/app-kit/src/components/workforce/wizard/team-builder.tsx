@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Sparkles, X } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { Button } from "@eddi/ui";
-import { Badge } from "../../ui/badge";
+import { Badge } from "@eddi/ui";
 import { AdvisorAvatar } from "../advisor-avatar";
 import { AgentPicker } from "../../shared/agent-picker";
 import { SecretKeyPicker } from "../../shared/secret-key-picker";

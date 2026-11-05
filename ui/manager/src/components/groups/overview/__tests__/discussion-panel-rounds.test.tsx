@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
-import { setStoredDiscussionView } from "@eddi/app-kit/components/groups/overview/discussion-view-mode";
+import { setStoredDiscussionView } from "@eddi/conversation/team";
 import type { GroupConversation, TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
 
 /**

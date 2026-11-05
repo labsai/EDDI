@@ -1,17 +1,17 @@
 import { memo, useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
-import { ConversationMarkdown } from "./conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "../../lib/api/chat";
 import type { DecisionRecord } from "../../lib/api/groups";
 import {
   formatMarkdownText,
   parseVerdictJson,
   type VerdictJson,
-} from "../groups/group-utils";
-import { DecisionRecordCard } from "../groups/decision-record-card";
-import { StructuredEntryBody } from "../groups/structured-entry-body";
-import { entryBodyToMarkdown, isStructuredBody, readMessageBody } from "../../lib/group-entry-body";
+} from "@eddi/conversation/team";
+import { DecisionRecordCard } from "@eddi/conversation/team";
+import { StructuredEntryBody } from "@eddi/conversation/team";
+import { entryBodyToMarkdown, isStructuredBody, readMessageBody } from "@eddi/conversation/team";
 import { isImageMime, formatBytes } from "../../lib/api/attachments";
 import type { OwnRating, RatingInput, RatingProfile } from "../../lib/api/ratings";
 import { ChatStepRating } from "./chat-rating";

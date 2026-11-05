@@ -12,7 +12,7 @@ import {
   PowerOff,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";

@@ -57,4 +57,4 @@ export function stateLabel(
  * Localized name for a discussion style. Re-exported so the analytics
  * filters and every other surface resolve the same key.
  */
-export { styleLabel } from "@eddi/app-kit/lib/discussion-styles";
+export { styleLabel } from "@eddi/conversation/team";

@@ -5,10 +5,10 @@ import type { GroupSaveProblem } from "@eddi/app-kit/lib/group-config";
 import { Check, Clock, Loader2, X } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
 import { type DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import type { MemberSlot } from "@eddi/app-kit/components/workforce/wizard/team-builder";
 import { effectiveLlm, providerLabel, type LlmDefaults } from "@eddi/app-kit/components/workforce/wizard/member-validation";
 

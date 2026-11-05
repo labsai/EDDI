@@ -405,7 +405,9 @@ describe("Workforce Coverage Tests", () => {
       expect(screen.getByText(/What is the best approach\?/i)).toBeInTheDocument();
     });
 
-    it("renders SynthesizedAnswerFooter when synthesizedAnswer exists and no SYNTHESIS entry", () => {
+    // The viewer renders through the board transcript (phase 6): a trailing
+    // synthesized answer is its synthesis card, not a footer of its own.
+    it("renders the synthesized answer as the synthesis card when no SYNTHESIS entry exists", () => {
       vi.spyOn(useGroupsHook, "useGroupConversation").mockReturnValue({
         isLoading: false,
         isError: false,
@@ -426,8 +428,7 @@ describe("Workforce Coverage Tests", () => {
       } as any);
 
       renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
-      expect(screen.getByText(/Final Synthesized Answer/i)).toBeInTheDocument();
-      expect(screen.getByText(/The final answer is 42\./i)).toBeInTheDocument();
+      expect(screen.getByTestId("synthesis-card")).toHaveTextContent("The final answer is 42.");
     });
 
     it("does not render SynthesizedAnswerFooter when a SYNTHESIS transcript entry already exists", () => {
@@ -526,7 +527,8 @@ describe("Workforce Coverage Tests", () => {
       } as any);
 
       renderWithProviders(<ConversationViewer groupId="grp1" conversationId="conv1" onClose={vi.fn()} />);
-      expect(screen.getByText(/No content/i)).toBeInTheDocument();
+      // The board transcript's wording for a turn that carried no text.
+      expect(screen.getByText(/No response generated/i)).toBeInTheDocument();
     });
 
     it("calls onClose when close button clicked", async () => {

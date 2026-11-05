@@ -5,7 +5,7 @@ import { AlertTriangle, Bot, Globe, Info, Loader2, Server, X } from "lucide-reac
 import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
 import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";

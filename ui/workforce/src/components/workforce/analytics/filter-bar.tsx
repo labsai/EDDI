@@ -7,7 +7,7 @@ import {
   type GroupConversationState,
   type DiscussionStyle,
 } from "@eddi/app-kit/lib/api/groups";
-import { styleLabel } from "@eddi/app-kit/lib/discussion-styles";
+import { styleLabel } from "@eddi/conversation/team";
 import type { ActiveFilter } from "@/components/workforce/analytics/filter-utils";
 
 // ─── Dropdown ────────────────────────────────────────────────────

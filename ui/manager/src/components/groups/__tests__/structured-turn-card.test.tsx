@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
-import { StructuredTurnCard } from "@eddi/app-kit/components/groups/structured-turn-card";
+import { StructuredTurnCard } from "@eddi/conversation/team";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import { parseStructuredPayload } from "@eddi/app-kit/lib/group-payloads";
+import { parseStructuredPayload } from "@eddi/conversation/team";
 import type { TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 
 function entry(type: TranscriptEntryType, content: string): TranscriptEntry {

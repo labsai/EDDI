@@ -1,29 +1,16 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { X, AlertCircle, Sparkles, Download, ChevronDown, ChevronUp } from "lucide-react";
-import { cn, hashColor, formatRelativeTime } from "@eddi/app-kit/lib/utils";
+import { X, AlertCircle, Download } from "lucide-react";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { useGroupConversation } from "@eddi/app-kit/hooks/use-groups";
-import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
-import { Button } from "@eddi/ui";
+import { Badge, Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
-import { isAgentFailurePlaceholder, parseTranscriptContent, truncateContent } from "@eddi/app-kit/components/groups/group-utils";
-import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
-import { AgentFailedNotice, StructuredEntryBody } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { isStructuredBody, readEntryBody } from "@eddi/app-kit/lib/group-entry-body";
-import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
+import { DecisionRecordCard, DiscussionInsights, PersistedTaskBoard } from "@eddi/conversation/team";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
-import { PersistedTaskBoard } from "@eddi/app-kit/components/groups/task-board";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
-import {
-  entryTypeInfo,
-  type DiscussionStyle,
-  type TaskDefinition,
-  type TranscriptEntry,
-  type GroupConversationState,
-} from "@eddi/app-kit/lib/api/groups";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import type { DiscussionStyle, TaskDefinition, GroupConversationState } from "@eddi/app-kit/lib/api/groups";
+import { BoardTranscript } from "@/components/workforce/board-transcript";
+import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -79,491 +66,6 @@ function stateI18nKey(state: GroupConversationState): string {
   return map[state] ?? "Workforce.history.created";
 }
 
-// ─── Border Color Mapping ────────────────────────────────────────
-
-/** Map hashColor bg-* class → border-s-* class for the start-border accent. */
-const BG_TO_BORDER: Record<string, string> = {
-  "bg-blue-500": "border-s-blue-500",
-  "bg-emerald-500": "border-s-emerald-500",
-  "bg-ochre-500": "border-s-ochre-500",
-  "bg-purple-500": "border-s-purple-500",
-  "bg-rose-500": "border-s-rose-500",
-  "bg-cyan-500": "border-s-cyan-500",
-  "bg-indigo-500": "border-s-indigo-500",
-  "bg-orange-500": "border-s-orange-500",
-  "bg-teal-500": "border-s-teal-500",
-  "bg-pink-500": "border-s-pink-500",
-  "bg-lime-500": "border-s-lime-500",
-  "bg-violet-500": "border-s-violet-500",
-};
-
-function agentBorderClass(agentId: string): string {
-  const bg = hashColor(agentId);
-  return BG_TO_BORDER[bg] ?? "border-s-muted-foreground";
-}
-
-// ─── Phase icons ─────────────────────────────────────────────────
-
-const PHASE_ICONS: Record<string, string> = {
-  OPINION: "📋",
-  CRITIQUE: "🔍",
-  REVISION: "🔄",
-  EXECUTE: "⚡",
-  VERIFY: "✅",
-  SYNTHESIS: "💡",
-  CHALLENGE: "⚔️",
-  DEFENSE: "🛡️",
-  ARGUMENT: "📢",
-  REBUTTAL: "↩️",
-  PLAN: "📝",
-  TASK_RESULT: "📦",
-  VERIFICATION: "☑️",
-  // Wave-3 entry types (I14/I11/I8/I18) — looked up by TranscriptEntryType.
-  VOTE: "🗳️",
-  PROPOSAL: "🤝",
-  BARGAIN: "🔄",
-  RETRO: "🪞",
-  BID: "💰",
-};
-
-// ─── Constants ───────────────────────────────────────────────────
-
-/** Height in px above which we collapse a message (~6 lines) */
-const COLLAPSE_THRESHOLD = 144;
-
-// ─── Hooks ──────────────────────────────────────────────────────
-
-/** Shared collapse state for message cards */
-function useCollapsibleContent(dep: unknown) {
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isCollapsible, setIsCollapsible] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (contentRef.current) {
-      setIsCollapsible(contentRef.current.scrollHeight > COLLAPSE_THRESHOLD);
-    }
-  }, [dep]);
-
-  return { contentRef, isCollapsible, isExpanded, setIsExpanded };
-}
-
-// ─── Sub-components ──────────────────────────────────────────────
-
-function PhaseSeparator({
-  phaseName,
-  phaseType,
-  index,
-}: {
-  phaseName: string | null;
-  phaseType: string;
-  index: number;
-}) {
-  const { t } = useTranslation();
-  const icon = PHASE_ICONS[phaseType] ?? "📌";
-  // Never undefined — see entryTypeInfo. The `as keyof typeof` cast this
-  // replaced satisfied the compiler while the runtime value could still be
-  // absent, which is how eleven entry types ended up unlabelled here.
-  const typeInfo = entryTypeInfo(phaseType);
-
-  return (
-    <div
-      className="flex items-center gap-3 my-4"
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      <div className="flex-1 h-px bg-muted" />
-      <div
-        className={cn(
-          "flex items-center gap-1.5 ps-3 pe-3 py-1 rounded-full",
-          "text-xs uppercase tracking-wider font-medium",
-          "bg-muted text-muted-foreground",
-        )}
-      >
-        <span>{icon}</span>
-        <span>
-          {phaseName ?? t("Workforce.history.phase", "Phase")}
-        </span>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-          {typeInfo.label}
-        </Badge>
-      </div>
-      <div className="flex-1 h-px bg-muted" />
-    </div>
-  );
-}
-
-function QuestionBubble({ content, index }: { content: string | null; index: number }) {
-  const { t } = useTranslation();
-
-  return (
-    <div
-      className="flex justify-end"
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      <div
-        className={cn(
-          "bg-primary text-primary-foreground rounded-2xl rounded-ee-md ps-4 pe-4 py-3 max-w-lg",
-          "shadow-sm",
-        )}
-      >
-        <p className="text-sm whitespace-pre-wrap leading-relaxed">
-          {content || t("Workforce.history.noContent", "No content")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function AgentEntryCard({
-  entry,
-  index,
-  memberDisplayNames,
-  preConfiguredTasks,
-}: {
-  entry: TranscriptEntry;
-  index: number;
-  memberDisplayNames?: Record<string, string>;
-  preConfiguredTasks?: TaskDefinition[];
-}) {
-  const { t } = useTranslation();
-  const typeInfo = entryTypeInfo(entry.type);
-  const borderClass = agentBorderClass(entry.speakerAgentId);
-  // The same reading the Manager transcript and the Workforce board do — a
-  // contract card, a task plan or verification sheet, a failure notice, or
-  // prose. See `readEntryBody`.
-  const body = readEntryBody(entry, { memberNames: memberDisplayNames, preConfiguredTasks });
-  const parsedContent = body.kind === "markdown" ? body.text : "";
-  const hasContent = parsedContent.trim().length > 0;
-  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-s-4 p-4",
-        "bg-card border-border",
-        borderClass,
-      )}
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-2">
-        <AdvisorAvatar
-          name={entry.speakerDisplayName}
-          agentId={entry.speakerAgentId}
-          size="sm"
-        />
-        <span className="font-medium text-sm text-foreground">
-          {entry.speakerDisplayName}
-        </span>
-        <Badge variant="secondary" className="text-[10px]">
-          {typeInfo.label}
-        </Badge>
-        {entry.targetAgentId && (
-          <span className="text-xs text-muted-foreground">
-            → {entry.targetAgentId}
-          </span>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="ps-10">
-        {isStructuredBody(body) ? (
-          <StructuredEntryBody body={body} />
-        ) : hasContent ? (
-          <>
-            <div
-              ref={contentRef}
-              className={cn(
-                "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
-                isCollapsible && !isExpanded && "max-h-36",
-              )}
-            >
-              <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                <ConversationMarkdown escapeRawHtml>
-                  {truncateContent(
-                    parsedContent,
-                    t("groups.contentTruncated", "[Content truncated]"),
-                  )}
-                </ConversationMarkdown>
-              </div>
-              {isCollapsible && !isExpanded && (
-                <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
-              )}
-            </div>
-            {isCollapsible && (
-              <button
-                onClick={() => setIsExpanded((v) => !v)}
-                className="flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-              >
-                {isExpanded ? (
-                  <>
-                    <ChevronUp className="h-3 w-3" />
-                    {t("common.showLess", "Show less")}
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="h-3 w-3" />
-                    {t("common.showMore", "Show more")}
-                  </>
-                )}
-              </button>
-            )}
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground italic">
-            {/* An abstention carries no body by design — the type is the message. */}
-            {entry.type === "ABSTAINED"
-              ? t("groups.abstainedBody", "Declined to add anything new this round.")
-              : t("Workforce.history.noContent", "No content")}
-          </p>
-        )}
-      </div>
-
-      {/* Timestamp */}
-      {entry.timestamp && (
-        <div className="ps-10 mt-2">
-          <span className="text-[10px] text-muted-foreground">
-            {new Date(entry.timestamp).toLocaleTimeString()}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SynthesisEntryCard({
-  entry,
-  index,
-}: {
-  entry: TranscriptEntry;
-  index: number;
-}) {
-  const { t } = useTranslation();
-  const parsedContent = parseTranscriptContent(entry.content ?? "");
-  const hasContent = parsedContent.trim().length > 0;
-  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-s-4 p-4",
-        "bg-brand-50 border-brand-300 border-s-brand-500",
-        "dark:bg-brand-500/10 dark:border-brand-700 dark:border-s-brand-500",
-      )}
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <Sparkles className="h-4 w-4 text-brand-600 dark:text-brand-400" />
-        <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
-          {t("Workforce.history.synthesis", "Synthesis")}
-        </span>
-        {entry.speakerDisplayName && (
-          <span className="text-xs text-brand-600/70 dark:text-brand-400/70">
-            — {entry.speakerDisplayName}
-          </span>
-        )}
-      </div>
-      <div
-        ref={contentRef}
-        className={cn(
-          "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
-          isCollapsible && !isExpanded && "max-h-36",
-        )}
-      >
-        {isAgentFailurePlaceholder(entry.content) ? (
-          <AgentFailedNotice className="ps-6" />
-        ) : hasContent ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 ps-6 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-            <ConversationMarkdown escapeRawHtml>
-              {truncateContent(
-                parsedContent,
-                t("groups.contentTruncated", "[Content truncated]"),
-              )}
-            </ConversationMarkdown>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground italic ps-6">
-            {t("Workforce.history.noContent", "No content")}
-          </p>
-        )}
-        {isCollapsible && !isExpanded && (
-          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-brand-50 dark:from-brand-500/10 to-transparent pointer-events-none" />
-        )}
-      </div>
-      {isCollapsible && (
-        <button
-          onClick={() => setIsExpanded((v) => !v)}
-          className="flex items-center gap-1 mt-1 ps-6 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-        >
-          {isExpanded ? (
-            <>
-              <ChevronUp className="h-3 w-3" />
-              {t("common.showLess", "Show less")}
-            </>
-          ) : (
-            <>
-              <ChevronDown className="h-3 w-3" />
-              {t("common.showMore", "Show more")}
-            </>
-          )}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function ErrorEntryCard({
-  entry,
-  index,
-}: {
-  entry: TranscriptEntry;
-  index: number;
-}) {
-  const { t } = useTranslation();
-  const errorBody = parseTranscriptContent(entry.content ?? "").trim();
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border border-s-4 p-3",
-        "bg-red-50 border-red-200 border-s-red-500",
-        "dark:bg-red-500/10 dark:border-red-800 dark:border-s-red-500",
-      )}
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <AlertCircle className="h-4 w-4 text-red-500" />
-        <span className="font-medium text-sm text-red-700 dark:text-red-300">
-          {entry.speakerDisplayName}
-        </span>
-        <Badge variant="destructive" className="text-[10px]">
-          {t("Workforce.history.error", "Error")}
-        </Badge>
-      </div>
-      {entry.errorReason && (
-        <p className="text-xs text-red-600 dark:text-red-400 mt-1 ps-6">
-          {entry.errorReason}
-        </p>
-      )}
-      {/* An ERROR entry normally carries its text in `errorReason` with a null
-          body, but the engine has more than one site that builds one and a
-          future/older shape may put text here. Parse it like every other body
-          rather than printing whatever the wire held. */}
-      {errorBody && (
-        <p className="text-sm text-red-700 dark:text-red-300 whitespace-pre-wrap mt-2 ps-6">
-          {errorBody}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function SkippedEntryCard({
-  entry,
-  index,
-}: {
-  entry: TranscriptEntry;
-  index: number;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border p-3 opacity-60",
-        "bg-muted/50 border-border",
-      )}
-      style={{
-        animation: "br-message-in 250ms ease-out both",
-        animationDelay: `${Math.min(index * 40, 400)}ms`,
-      }}
-    >
-      <p className="text-xs text-muted-foreground">
-        {t("Workforce.history.skipped", "{{name}} — Skipped", {
-          name: entry.speakerDisplayName,
-        })}
-        {entry.errorReason && <span className="ms-1">({entry.errorReason})</span>}
-      </p>
-    </div>
-  );
-}
-
-function SynthesizedAnswerFooter({ content }: { content: string }) {
-  const { t } = useTranslation();
-  const parsedContent = parseTranscriptContent(content);
-  const { contentRef, isCollapsible, isExpanded, setIsExpanded } = useCollapsibleContent(parsedContent);
-
-  return (
-    <div
-      className={cn(
-        "rounded-xl border-2 border-brand-400/50 p-5 mt-4",
-        "bg-gradient-to-b from-brand-50 to-brand-100/50",
-        "dark:from-brand-500/10 dark:to-brand-500/5 dark:border-brand-500/30",
-      )}
-    >
-      <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-5 w-5 text-brand-600 dark:text-brand-400" />
-        <h3 className="text-sm font-bold text-brand-800 dark:text-brand-200">
-          {t("Workforce.history.finalAnswer", "Final Synthesized Answer")}
-        </h3>
-      </div>
-      <div
-        ref={contentRef}
-        className={cn(
-          "relative transition-[max-height] duration-300 ease-in-out overflow-hidden",
-          isCollapsible && !isExpanded && "max-h-36",
-        )}
-      >
-        <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/80 [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-          {isAgentFailurePlaceholder(content) ? (
-            <AgentFailedNotice />
-          ) : (
-            <ConversationMarkdown escapeRawHtml>
-              {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
-            </ConversationMarkdown>
-          )}
-        </div>
-        {isCollapsible && !isExpanded && (
-          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-brand-100/50 dark:from-brand-500/5 to-transparent pointer-events-none" />
-        )}
-      </div>
-      {isCollapsible && (
-        <button
-          onClick={() => setIsExpanded((v) => !v)}
-          className="flex items-center gap-1 mt-1 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-        >
-          {isExpanded ? (
-            <>
-              <ChevronUp className="h-3 w-3" />
-              {t("common.showLess", "Show less")}
-            </>
-          ) : (
-            <>
-              <ChevronDown className="h-3 w-3" />
-              {t("common.showMore", "Show more")}
-            </>
-          )}
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ─── Loading Skeleton ────────────────────────────────────────────
 
 function ViewerSkeleton() {
@@ -601,13 +103,6 @@ function ConversationViewer({
     groupId,
     conversationId,
   );
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to top when conversation changes
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [conversationId]);
-
   // ── Export conversation as Markdown ────────────────────────
   /**
    * Export the discussion as Markdown.
@@ -628,24 +123,6 @@ function ConversationViewer({
       "text/markdown",
     );
   }, [conversation, conversationId, groupName, t]);
-
-  // Process transcript to insert phase separators
-  const processedEntries = useMemo(() => {
-    if (!conversation?.transcript) return [];
-    let lastPhase = -1;
-    return conversation.transcript.map((entry) => {
-      let showPhaseHeader = false;
-      if (
-        entry.phaseIndex >= 0 &&
-        entry.phaseIndex !== lastPhase &&
-        entry.type !== "QUESTION"
-      ) {
-        lastPhase = entry.phaseIndex;
-        showPhaseHeader = true;
-      }
-      return { entry, showPhaseHeader };
-    });
-  }, [conversation?.transcript]);
 
   if (isLoading) {
     return (
@@ -684,32 +161,11 @@ function ConversationViewer({
     : conversation.created
       ? new Date(conversation.created).getTime()
       : 0;
-  const hasSynthesisEntry = conversation.transcript.some(
-    (e) => e.type === "SYNTHESIS",
-  );
-
-  // Structured decision (F3) — rendered directly before the prose synthesis,
-  // because the synthesis body is the judge's reasoning and the finding it
-  // argues for has to come first (same placement as the Manager transcript and
-  // the live board). Anchored to the LAST synthesis entry; trails the
-  // transcript when there is no synthesis element at all.
-  const showDecision = hasDisplayableDecision(conversation.decision);
-  let lastSynthesisIdx = -1;
-  if (showDecision) {
-    for (let i = conversation.transcript.length - 1; i >= 0; i--) {
-      if (conversation.transcript[i]!.type === "SYNTHESIS") {
-        lastSynthesisIdx = i;
-        break;
-      }
-    }
-  }
-  const decisionCard = showDecision ? (
+  // The structured decision (F3) is the overview's outcome; the transcript
+  // places it itself, before the synthesis it argues for.
+  const decisionCard = hasDisplayableDecision(conversation.decision) ? (
     <DecisionRecordCard decision={conversation.decision!} />
   ) : null;
-  const showSynthesisFooter =
-    !!conversation.synthesizedAnswer &&
-    !!parseTranscriptContent(conversation.synthesizedAnswer).trim() &&
-    !hasSynthesisEntry;
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
@@ -798,113 +254,46 @@ function ConversationViewer({
           </>
         }
         transcript={
-          <div
-            ref={scrollRef}
-            role="log"
-            aria-label={t("Workforce.history.transcript", "Conversation transcript")}
-            className="flex-1 overflow-y-auto ps-5 pe-5 py-4 space-y-3"
-          >
-            {/* Persisted task board (TASK_FORCE plans and agent-filed tasks, I5/I18)
-                — the same component the Manager transcript and the live board
-                render. Placed first, like the Manager, so a task-force session
-                opens on WHAT was done before the discussion of it. */}
-            {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
-              <PersistedTaskBoard
-                taskList={conversation.taskList!}
-                memberDisplayNames={conversation.memberDisplayNames}
-              />
-            )}
-
-            {/* Shared artifacts, negotiation ledger and windowing summary
-                (I17/I11/I9) — the same component the Manager transcript and the
-                live board render, so every surface showing a group discussion
-                shows the same state. This viewer reads the single-conversation
-                GET, which is the only response that carries `artifacts`. */}
-            <DiscussionInsights conversation={conversation} />
-
-            {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
-              const phaseHeader = showPhaseHeader ? (
-                <PhaseSeparator
-                  key={`phase-${entry.phaseIndex}`}
-                  phaseName={entry.phaseName}
-                  phaseType={entry.type}
-                  index={idx}
-                />
-              ) : null;
-
-              switch (entry.type) {
-                case "QUESTION":
-                  return (
-                    <QuestionBubble
-                      key={`q-${idx}`}
-                      content={entry.content}
-                      index={idx}
-                    />
-                  );
-
-                case "SYNTHESIS":
-                  return (
-                    <div key={`syn-${idx}`} className="space-y-3">
-                      {phaseHeader}
-                      {idx === lastSynthesisIdx && decisionCard}
-                      <SynthesisEntryCard entry={entry} index={idx} />
-                    </div>
-                  );
-
-                case "ERROR":
-                  return (
-                    <div key={`err-${idx}`}>
-                      {phaseHeader}
-                      <ErrorEntryCard entry={entry} index={idx} />
-                    </div>
-                  );
-
-                case "SKIPPED":
-                  return (
-                    <div key={`skip-${idx}`}>
-                      {phaseHeader}
-                      <SkippedEntryCard entry={entry} index={idx} />
-                    </div>
-                  );
-
-                default:
-                  return (
-                    <div key={`r-${idx}`}>
-                      {phaseHeader}
-                      <AgentEntryCard
-                        entry={entry}
-                        index={idx}
-                        memberDisplayNames={conversation.memberDisplayNames}
-                        preConfiguredTasks={preConfiguredTasks}
-                      />
-                    </div>
-                  );
-              }
-            })}
-
-            {/* Structured decision when no synthesis element exists to anchor it */}
-            {lastSynthesisIdx < 0 && !showSynthesisFooter && decisionCard}
-
-            {/* ── Footer: Synthesized Answer ──────────────────────── */}
-            {showSynthesisFooter && (
+          // One transcript for a team's discussion, live or stored: the board's.
+          // Read-only here — no live row, no convergence stream — and opened at
+          // the top rather than following new entries. Keyed by conversation so
+          // picking another one starts at its top again.
+          <BoardTranscript
+            key={conversationId}
+            transcript={conversation.transcript}
+            boardId={groupId}
+            sessionId={conversationId}
+            synthesizedAnswer={conversation.synthesizedAnswer}
+            decision={conversation.decision}
+            memberDisplayNames={conversation.memberDisplayNames}
+            preConfiguredTasks={preConfiguredTasks}
+            follow={false}
+            label={t("Workforce.history.transcript", "Conversation transcript")}
+            className="flex-1 ps-5 pe-5 py-4"
+            header={
               <>
-                {lastSynthesisIdx < 0 && decisionCard}
-                <SynthesizedAnswerFooter content={conversation.synthesizedAnswer!} />
+                {/* Persisted task board (TASK_FORCE plans and agent-filed tasks,
+                    I5/I18) first, so a task-force session opens on WHAT was done;
+                    then shared artifacts, the negotiation ledger and the windowing
+                    summary (I17/I11/I9). The single-conversation GET is the only
+                    response that carries `artifacts`. */}
+                {(conversation.taskList?.tasks?.length ?? 0) > 0 && (
+                  <PersistedTaskBoard
+                    taskList={conversation.taskList!}
+                    memberDisplayNames={conversation.memberDisplayNames}
+                  />
+                )}
+                <DiscussionInsights conversation={conversation} />
+                {conversation.transcript.length === 0 && (
+                  <div className="flex items-center justify-center py-12">
+                    <p className="text-sm text-muted-foreground">
+                      {t("Workforce.history.emptyTranscript", "No transcript entries yet")}
+                    </p>
+                  </div>
+                )}
               </>
-            )}
-
-            {/* Empty transcript */}
-            {conversation.transcript.length === 0 && (
-              <div className="flex items-center justify-center py-12">
-                <p className="text-sm text-muted-foreground">
-                  {t(
-                    "Workforce.history.emptyTranscript",
-                    "No transcript entries yet",
-                  )}
-                </p>
-              </div>
-            )}
-          </div>
+            }
+          />
         }
       />
     </div>

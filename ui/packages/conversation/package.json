@@ -2,7 +2,7 @@
   "name": "@eddi/conversation",
   "version": "0.0.0",
   "private": true,
-  "description": "Controllers and components for every kind of EDDI conversation: the AgentConversation turn state machine, the one markdown renderer, the message list, composer, activity indicator, paused and rating cards.",
+  "description": "Controllers and components for every kind of EDDI conversation: the AgentConversation turn state machine, the one markdown renderer, the message list, composer, activity indicator, paused and rating cards; the GroupDiscussion controller and the team components (./team).",
   "type": "module",
   "sideEffects": [
     "*.css"
@@ -11,6 +11,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./team": "./src/team/index.ts",
+    "./team/locales/*": "./src/team/i18n/locales/*",
+    "./i18next": "./src/i18next/index.ts",
     "./markdown.css": "./src/styles/markdown.css"
   },
   "scripts": {
@@ -21,10 +24,13 @@
   },
   "dependencies": {
     "@eddi/core": "*",
+    "@eddi/ui": "*",
+    "i18next": "^26.4.7",
     "katex": "^0.19.1",
     "lucide-react": "^1.59.0",
     "mdast-util-gfm": "^3.1.0",
     "micromark-extension-gfm": "^3.0.0",
+    "react-i18next": "^17.0.21",
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",

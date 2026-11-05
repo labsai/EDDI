@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@eddi/app-kit/lib/utils";
-import { entryBodyToMarkdown, readEntryBody, readMessageBody } from "@eddi/app-kit/lib/group-entry-body";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { entryBodyToMarkdown, readEntryBody, readMessageBody } from "@eddi/conversation/team";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Types ───────────────────────────────────────────────────────
 

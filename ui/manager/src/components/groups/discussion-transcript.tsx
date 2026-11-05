@@ -3,24 +3,24 @@ import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ArrowDown, Ch
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalCard } from "@/components/hitl/approval-card";
-import { HumanTurnBanner } from "@eddi/app-kit/components/groups/human-turn-banner";
-import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
+import { HumanTurnBanner } from "@eddi/conversation/team";
+import { DiscussionInsights } from "@eddi/conversation/team";
 import { AgentResponseCard } from "./agent-response-card";
-import { TaskBoard, PersistedTaskBoard } from "@eddi/app-kit/components/groups/task-board";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { TaskBoard, PersistedTaskBoard } from "@eddi/conversation/team";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
-import { isAgentFailurePlaceholder, parseTranscriptContent, safeFormatDate } from "@eddi/app-kit/components/groups/group-utils";
-import { AgentFailedNotice } from "@eddi/app-kit/components/groups/structured-entry-body";
+import { isAgentFailurePlaceholder, parseTranscriptContent, safeFormatDate } from "@eddi/conversation/team";
+import { AgentFailedNotice } from "@eddi/conversation/team";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@eddi/app-kit/lib/api/groups";
 import type { HitlVerdict } from "@eddi/app-kit/lib/api/hitl";
 import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
-import { styleInfo as localizedStyleInfo } from "@eddi/app-kit/lib/discussion-styles";
+import { styleInfo as localizedStyleInfo } from "@eddi/conversation/team";
 import { STYLE_THEME } from "./discussion-style-theme";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 interface DiscussionTranscriptProps {
   conversation: GroupConversation | null;

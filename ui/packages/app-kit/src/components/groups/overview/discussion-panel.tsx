@@ -1,16 +1,16 @@
 import { type ReactNode, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../../lib/utils";
-import { useDiscussionDigest } from "../../../hooks/use-discussion-digest";
+import { useDiscussionDigest } from "@eddi/conversation/team";
 import type { GroupStreamState } from "../../../hooks/use-group-discussion-stream";
 import type { DiscussionPhase, DiscussionStyle, GroupConversation } from "../../../lib/api/groups";
-import { DiscussionOverview } from "./discussion-overview";
-import { DiscussionSplit, DiscussionViewToggle } from "./discussion-view-toggle";
+import { DiscussionOverview } from "@eddi/conversation/team";
+import { DiscussionSplit, DiscussionViewToggle } from "@eddi/conversation/team";
 import {
   getStoredDiscussionView,
   setStoredDiscussionView,
   type DiscussionViewMode,
-} from "./discussion-view-mode";
+} from "@eddi/conversation/team";
 
 interface DiscussionPanelProps {
   /**

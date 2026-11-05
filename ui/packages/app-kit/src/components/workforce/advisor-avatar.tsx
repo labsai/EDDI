@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn, hashColor, getInitials } from "../../lib/utils";
-import { Badge } from "../ui/badge";
+import { Badge } from "@eddi/ui";
 
 const SIZE_CLASSES = {
   xs: "h-6 w-6 text-[10px]",

@@ -20,6 +20,10 @@
 
 @source "../";
 @source not "../**/*.test.*";
+/* The team components (@eddi/conversation/team) are Tailwind-styled and render
+   only in these two apps; the rest of that package is the Chat UI's BEM. */
+@source "../../../conversation/src/team";
+@source not "../../../conversation/src/**/*.test.*";
 
 /* The prompt editor's template-variable colour (content-editor.tsx). Monaco
    takes theme colours as hex, not CSS, so the editor reads these once at start

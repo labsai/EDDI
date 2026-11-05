@@ -21,7 +21,7 @@
 // ── ui/ ────────────────────────────────────────────────────────────────────
 export { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 export { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
-export { Badge, badgeVariants } from "@eddi/app-kit/components/ui/badge";
+export { Badge, badgeVariants } from "@eddi/ui";
 export { Button, buttonVariants } from "@eddi/ui";
 export {
   Card,

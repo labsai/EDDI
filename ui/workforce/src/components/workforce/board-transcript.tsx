@@ -3,14 +3,14 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Copy, CheckCircle2, GitMerge } from "lucide-react";
 import { cn, getInitials } from "@eddi/app-kit/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
 import type { DecisionRecord, TaskDefinition, TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 import { entryTypeInfo } from "@eddi/app-kit/lib/api/groups";
 import type { ConvergenceProgress } from "@eddi/app-kit/hooks/use-group-discussion-stream";
-import { isAgentFailurePlaceholder, parseTranscriptContent } from "@eddi/app-kit/components/groups/group-utils";
-import { AgentFailedNotice } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { isAgentFailurePlaceholder, parseTranscriptContent } from "@eddi/conversation/team";
+import { AgentFailedNotice } from "@eddi/conversation/team";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -45,6 +45,16 @@ interface BoardTranscriptProps {
   memberDisplayNames?: Record<string, string>;
   /** The group's configured tasks, which a pre-configured PLAN entry's one-line summary stands for. */
   preConfiguredTasks?: TaskDefinition[];
+
+  /** The session the entries belong to — scopes pins to it (the history viewer). */
+  sessionId?: string;
+  /**
+   * Keep the view at the bottom as content arrives (default). Off for a stored
+   * discussion read from the start — the history viewer.
+   */
+  follow?: boolean;
+  /** An accessible name for the transcript; given, it is a `log` region. */
+  label?: string;
 
   className?: string;
 }
@@ -388,10 +398,15 @@ function NoticeCard({
   delay: number;
 }) {
   const { t } = useTranslation();
+  // An error row can carry both what the member said and why it failed (the
+  // stored history usually does); show both rather than dropping the message.
+  const said = parseTranscriptContent(entry.content ?? "").trim();
   const text =
     tone === "abstained"
       ? t("groups.abstainedBody", "Declined to add anything new this round.")
-      : entry.errorReason || parseTranscriptContent(entry.content ?? "").trim() || t("common.error", "Error");
+      : said && entry.errorReason && said !== entry.errorReason
+        ? `${said} (${entry.errorReason})`
+        : entry.errorReason || said || t("common.error", "Error");
 
   return (
     <div
@@ -418,12 +433,14 @@ function NoticeCard({
 function EnhancedResponseEntry({
   entry,
   boardId,
+  sessionId,
   delay,
   memberDisplayNames,
   preConfiguredTasks,
 }: {
   entry: TranscriptEntry;
   boardId: string;
+  sessionId?: string;
   delay: number;
   memberDisplayNames?: Record<string, string>;
   preConfiguredTasks?: TaskDefinition[];
@@ -451,6 +468,7 @@ function EnhancedResponseEntry({
         memberDisplayNames={memberDisplayNames}
         preConfiguredTasks={preConfiguredTasks}
         boardId={boardId}
+        sessionId={sessionId}
         timestamp={time}
       />
     </div>
@@ -490,6 +508,9 @@ function BoardTranscript({
   convergence,
   memberDisplayNames,
   preConfiguredTasks,
+  sessionId,
+  follow = true,
+  label,
   className,
 }: BoardTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -516,10 +537,10 @@ function BoardTranscript({
   const lastContent = transcript[transcript.length - 1]?.content ?? null;
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && isNearBottomRef.current) {
+    if (el && follow && isNearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header, decision, convergence]);
+  }, [transcript.length, lastContent, synthesizedAnswer, isLive, header, decision, convergence, follow]);
 
   // Check if transcript already contains a SYNTHESIS entry
   const hasSynthesisEntry = transcript.some((e) => e.type === "SYNTHESIS");
@@ -558,7 +579,7 @@ function BoardTranscript({
   }, [transcript]);
 
   return (
-    <div ref={scrollRef} onScroll={handleScroll} aria-live="polite" aria-relevant="additions" className={cn("flex flex-col gap-2 overflow-y-auto", className)}>
+    <div ref={scrollRef} onScroll={handleScroll} aria-live="polite" aria-relevant="additions" role={label ? "log" : undefined} aria-label={label} className={cn("flex flex-col gap-2 overflow-y-auto", className)}>
       {header}
 
       {processedEntries.map(({ entry, showPhaseHeader }, idx) => {
@@ -608,6 +629,7 @@ function BoardTranscript({
                   <EnhancedResponseEntry
                     entry={entry}
                     boardId={boardId}
+                    sessionId={sessionId}
                     delay={delay}
                     memberDisplayNames={memberDisplayNames}
                     preConfiguredTasks={preConfiguredTasks}
@@ -634,6 +656,7 @@ function BoardTranscript({
                 <EnhancedResponseEntry
                   entry={entry}
                   boardId={boardId}
+                  sessionId={sessionId}
                   delay={delay}
                   memberDisplayNames={memberDisplayNames}
                   preConfiguredTasks={preConfiguredTasks}

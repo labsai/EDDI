@@ -6,8 +6,19 @@ unification plan, `planning/frontend-unification-plan.md` §3.2). React and
 ids, callbacks and the server's settings in. Consumed **as source** through the
 npm workspace link (`exports` point at `src/index.ts`), so there is no build step.
 
-Phase 3b brings the **agent** kind (1:1 conversations). The operator and team
-kinds follow in phase 6.
+Phase 3b brought the **agent** kind (1:1 conversations); phase 6 the **team**
+kind (group discussions, below). The operator kind still runs its own loop in the
+Manager (`use-operator-chat.ts`); see the changelog of phase 6 for why.
+
+Three entries, so an app resolves only what it renders:
+
+| Entry | What | Who imports it |
+| --- | --- | --- |
+| `@eddi/conversation` | The agent kind: controller, components, the one markdown renderer, the `conversation.*` strings | All three apps |
+| `@eddi/conversation/team` | The team kind: the `GroupDiscussion` controller and the team components | The Manager and Workforce |
+| `@eddi/conversation/i18next` | `ConversationMarkdown`: the markdown renderer with a react-i18next app's translator | The Manager and Workforce |
+
+The Chat UI never resolves the last two, so they cost its bundle nothing.
 
 | Module | What it holds |
 | --- | --- |
@@ -70,6 +81,32 @@ setupI18n({ i18n, english, loaders, /* … */ });
 // <ConversationTextProvider t={t}>…</ConversationTextProvider>
 ```
 
+## The team kind (`@eddi/conversation/team`)
+
+| Module | What it holds |
+| --- | --- |
+| `controller/group-discussion.ts` | `GroupDiscussion`: one group's discussion streamed over SSE — the state a run builds (phases, member turns, the human member's turn, the approval pause, the decision, costs, stances, tasks), `applyGroupStreamEvent` (the reducer every event goes through), and start, approve-and-resume, continue a round, detach (`abort`), Stop (`cancel`: the deferred Stop, 409 as already ended), `reset`, `whenAccepted`. A plain store (`subscribe`, `getSnapshot`) over a `GroupTransport` the host binds to its client, with an optional host store |
+| `team/i18n.ts`, `team/i18n/locales/*` | The team components' strings: nested `groups.*` keys read through the app's react-i18next, eleven locales, `withTeamLocales` (deep merge; `@eddi/app-kit`'s `setupAppI18n` calls it) |
+| `team/group-utils.ts`, `group-entry-body.ts`, `group-payloads.ts`, `group-decision.ts`, `discussion-styles.ts`, `duration.ts`, `use-discussion-digest.ts` | What a transcript entry says (structured bodies, VOTE/BID/BARGAIN/RETRO payloads, a decision's headline), style labels, ISO durations, the overview's digest |
+| `team/*.tsx` | `StructuredTurnCard`, `StructuredEntryBody`, `DecisionRecordCard`, `TaskBoard` / `PersistedTaskBoard`, `NegotiationLedger`, `ArtifactsPanel`, `DiscussionInsights`, `HumanTurnBanner` |
+| `team/overview/*` | The overview: `PhaseRail`, `MemberRoster`, `ParticipationMatrix`, `InteractionMap`, `BidBoard`, `DiscussionOverview`, the transcript / overview / split toggle |
+
+The contract they render — `TranscriptEntry`, `GroupConversation`, the SSE events —
+is `@eddi/core/groups`. The components are Tailwind-styled (both apps scan
+`src/team` through `@eddi/app-kit`'s `app.css`) and router-free: what links
+somewhere arrives from the host. The signed-in apps bind the controller in
+`@eddi/app-kit`'s `hooks/use-group-discussion-stream.ts` (a transport over their
+client, one controller per group writing its slot of a Zustand store, so a
+discussion keeps streaming while the user is on another screen).
+
+```ts
+import { GroupDiscussion } from "@eddi/conversation/team";
+
+const discussion = new GroupDiscussion({ groupId, transport }); // transport: GroupTransport
+await discussion.start("Should we ship?");
+discussion.getSnapshot().transcript; // QUESTION, member turns, SYNTHESIS…
+```
+
 ## Rules
 
 - **Router-free, no server globals, no app import.** `eslint.config.js`
@@ -78,10 +115,16 @@ setupI18n({ i18n, english, loaders, /* … */ });
   `@eddi/core` nor `@eddi/ui` imports this package.
 - **The turn rules live in the controller, once.** A fix to how a turn is sent,
   refused, paused or resumed goes into `agent-conversation.ts` with a case in
-  `agent-conversation.test.ts`, and every agent surface gets it.
+  `agent-conversation.test.ts`, and every agent surface gets it. The same holds for
+  a group discussion: `group-discussion.ts`, with a case in `group-discussion.test.ts`
+  (the apps' stream tests run through it as well).
 - **Every string is a `conversation.*` key, in all eleven locales**
-  (`i18n/text.test.ts` checks parity and placeholders). The Manager's
-  `npm run i18n:check` reads these files with its own.
+  (`i18n/text.test.ts` checks parity and placeholders) — except the team
+  components', which are nested keys in `team/i18n/locales` (`team/i18n.test.ts`).
+  Both apps' `npm run i18n:check` read every `i18n/locales` directory of the
+  package with their own files.
+- **The Chat UI's bundle does not move.** Nothing the main entry reaches may import
+  `team/` or `i18next/`; the widget's first load sits on its budget.
 - **Strict.** It compiles under the strictest app (the Manager's
   `noUncheckedIndexedAccess` and ES2020 target).
 - Checks: `npm run typecheck`, `npm run lint`, `npm test` in this directory. CI runs
