@@ -18,6 +18,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -41,6 +42,21 @@ class ClusterReplayAndPseudonymTest {
         when(instance.get()).thenReturn(value);
         return instance;
     }
+    @Test
+    @DisplayName("key rotation: a rotated node opens a hash sealed with a previous key; a node on the old key cannot open the new")
+    void rotationOpensPreviousKeySeals() {
+        String rotatedKey = "fixturefixturefixturefixturefixture-rotated";
+        ClusterMessageSigner oldNode = signer(KEY);
+        ClusterMessageSigner rotated = new ClusterMessageSigner(
+                ClusterSigningConfig.of(rotatedKey, List.of(KEY), false, Duration.ofSeconds(60)), new SimpleMeterRegistry());
+        String hash = KvKeys.sha256("alice@example.com");
+
+        assertEquals(hash, rotated.unseal(oldNode.seal(hash)).orElseThrow());
+        assertEquals(hash, rotated.unseal(rotated.seal(hash)).orElseThrow());
+        assertTrue(oldNode.unseal(rotated.seal(hash)).isEmpty(), "documented: re-run erasures made during the rolling window");
+        assertTrue(rotated.unseal("not-base64!").isEmpty());
+    }
+
     @Test
     @DisplayName("a value far larger than a user-id hash is refused instead of sealed")
     void oversizedValueIsNotSealed() {

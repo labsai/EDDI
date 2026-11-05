@@ -44,7 +44,7 @@ import static org.mockito.Mockito.when;
 class NatsClusterRpcSigningTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final String KEY = "0123456789abcdef0123456789abcdef-rpc-key";
+    private static final String KEY = "fixturefixturefixturefixturefixture-rpc-key";
     private static final String SUBJECT = "eddi.EDDI.rpc.all.admin-drain";
 
     private NatsConnectionManager connections;

@@ -114,6 +114,12 @@ public class ClusterMessageSigner {
     private final String currentKid;
     private final Map<String, byte[]> verificationKeys = new LinkedHashMap<>();
     private final SecretKeySpec sealKey;
+    /**
+     * The seal keys {@link #unseal} tries: the current one, then one per previous
+     * key, so a value sealed by a node still on the old key opens during a
+     * rotation.
+     */
+    private final List<SecretKeySpec> unsealKeys = new ArrayList<>();
     private final SecureRandom random = new SecureRandom();
     private final Set<String> warnedUnsigned = ConcurrentHashMap.newKeySet();
     private final Set<String> warnedRejections = ConcurrentHashMap.newKeySet();
@@ -143,6 +149,14 @@ public class ClusterMessageSigner {
             verificationKeys.putIfAbsent(kid(bytes), bytes);
         }
         this.sealKey = currentKey == null ? null : new SecretKeySpec(derive(currentKey, "eddi-cluster-seal-v1"), "AES");
+        if (sealKey != null) {
+            unsealKeys.add(sealKey);
+            for (byte[] verification : verificationKeys.values()) {
+                if (verification != currentKey) {
+                    unsealKeys.add(new SecretKeySpec(derive(verification, "eddi-cluster-seal-v1"), "AES"));
+                }
+            }
+        }
         Duration window = config.maxAge() == null ? Duration.ofSeconds(60) : config.maxAge();
         this.seenNonces = Caffeine.newBuilder().maximumSize(MAX_REMEMBERED_NONCES)
                 .expireAfterWrite(window.multipliedBy(2).plusHours(2)).build();
@@ -342,24 +356,34 @@ public class ClusterMessageSigner {
     }
 
     /**
-     * Opens a value sealed by {@link #seal} on any node with the same key; empty if
-     * it cannot.
+     * Opens a value sealed by {@link #seal} on any node with the same key, or with
+     * a key this node lists in {@code previous-keys} (a node not yet rotated);
+     * empty if it cannot. A node still on the old key cannot open what a rotated
+     * node sealed with the new one — see the rotation steps in clustering.md.
      */
     public Optional<String> unseal(String sealed) {
         if (sealKey == null || sealed == null) {
             return Optional.empty();
         }
+        byte[] raw;
         try {
-            byte[] raw = Base64.getUrlDecoder().decode(sealed);
-            if (raw.length < 13) {
-                return Optional.empty();
-            }
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, sealKey, new GCMParameterSpec(128, raw, 0, 12));
-            return Optional.of(new String(cipher.doFinal(raw, 12, raw.length - 12), StandardCharsets.UTF_8));
-        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            raw = Base64.getUrlDecoder().decode(sealed);
+        } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
+        if (raw.length < 13) {
+            return Optional.empty();
+        }
+        for (SecretKeySpec key : unsealKeys) {
+            try {
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, raw, 0, 12));
+                return Optional.of(new String(cipher.doFinal(raw, 12, raw.length - 12), StandardCharsets.UTF_8));
+            } catch (GeneralSecurityException | IllegalArgumentException e) {
+                // not sealed with this key: try the next
+            }
+        }
+        return Optional.empty();
     }
 
     /**

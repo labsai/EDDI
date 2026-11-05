@@ -118,6 +118,9 @@ public class ClusterPresence {
     private volatile long foreignRevisionSeen;
     private volatile boolean duplicate;
     private volatile String duplicateDetail;
+    /** Run once each time this node's ownership of its id becomes confirmed. */
+    private final List<Runnable> identityConfirmedListeners = new CopyOnWriteArrayList<>();
+    private volatile boolean identityConfirmedAnnounced;
     private final Set<String> warnedVersionMixes = ConcurrentHashMap.newKeySet();
     private volatile int distinctVersions = 1;
 
@@ -170,6 +173,43 @@ public class ClusterPresence {
         } catch (IOException | RuntimeException e) {
             LOGGER.debugf("Presence write failed: %s", e.getMessage());
         }
+        announceIdentity();
+    }
+
+    private void announceIdentity() {
+        if (!isIdentityConfirmed()) {
+            identityConfirmedAnnounced = false;
+            return;
+        }
+        if (identityConfirmedAnnounced) {
+            return;
+        }
+        identityConfirmedAnnounced = true;
+        for (Runnable listener : identityConfirmedListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Identity-confirmed listener failed");
+            }
+        }
+    }
+
+    /**
+     * True once this JVM holds its own presence record — written fresh, or taken
+     * over from a predecessor that did not rewrite it for one interval — and no
+     * twin is flagged. Before that, a record or lease under this node id and
+     * another boot may belong to a live twin.
+     */
+    public boolean isIdentityConfirmed() {
+        return ownRevision > 0 && !duplicate;
+    }
+
+    /**
+     * Runs {@code listener} each time {@link #isIdentityConfirmed()} becomes true,
+     * on the presence thread.
+     */
+    public void onIdentityConfirmed(Runnable listener) {
+        identityConfirmedListeners.add(listener);
     }
 
     /**
@@ -374,14 +414,17 @@ public class ClusterPresence {
 
     private List<Map<String, Object>> fromWatch() {
         long now = System.currentTimeMillis();
+        // A watch does not see a value expire: anything older than the TTL is gone,
+        // and is dropped here, or the records of crashed nodes would pile up.
+        watched.entrySet().removeIf(e -> now - e.getValue().writtenAt() >= ttlMillis);
         List<Map<String, Object>> members = new ArrayList<>();
-        watched.forEach((key, w) -> {
-            // A watch does not see a value expire: anything older than the TTL is gone.
-            if (now - w.writtenAt() < ttlMillis) {
-                members.add(w.record());
-            }
-        });
+        watched.values().forEach(w -> members.add(w.record()));
         return members;
+    }
+
+    /** How many watched records are kept (for tests). */
+    int watchedRecords() {
+        return watched.size();
     }
 
     // ---------------------------------------------------------------- members

@@ -80,6 +80,25 @@ replay of a message it had already seen, which the 60 s window keeps short.
   `ClusterPresence.isDuplicate()` is true (a twin still runs its lease sweeps).
 - WS-B: `RestAgentAdministration` keeps calling `announceTransientDeployment`; nothing else needed.
 
+### Review follow-ups
+
+- **The boot sweep waits for presence to confirm the node id.** On a twin's first connect presence
+  has not yet told a live twin from a dead predecessor (that takes one interval), so the
+  duplicate flag was still down and the sweep deleted the live twin's leases. The sweep, and the
+  own-node-id takeover, now need `ClusterView.isNodeIdentityConfirmed()` (this JVM holds its own
+  presence record and no twin is flagged); `ClusterPresence.onIdentityConfirmed` re-runs the
+  sweep when that happens.
+- **A failed event re-subscribe is retried by the periodic stream check**, which resyncs once it
+  succeeds. Before, a subscribe that failed after a stream recreation while the connection stayed
+  up left the node deaf until the next reconnect.
+- **Key rotation and sealed GDPR hashes.** A rotated node also opens hashes sealed with a key in
+  `previous-keys`; a node still on the old key cannot open the new key's, so `clustering.md` now
+  says to re-run erasures made during the rolling window.
+- `eddi-cluster-alerts.yml` gains the `EddiClusterNodeDuplicate` and `EddiClusterSigningRejected`
+  rules `metrics.md` already promised. The presence watch drops records past the TTL instead of
+  only skipping them, and the signed-event test tampers with the timestamp and the nonce too. Test fixture keys are low-entropy strings (a hex-looking
+  key tripped secret scanning).
+
 **Files:** [`TransientDeployments.java`](../../src/main/java/ai/labs/eddi/engine/cluster/TransientDeployments.java),
 [`AgentDeploymentManagement.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java),
 [`DeploymentStore.java`](../../src/main/java/ai/labs/eddi/configs/deployment/mongo/DeploymentStore.java),

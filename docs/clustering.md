@@ -245,7 +245,11 @@ and kept **outside NATS**: a Kubernetes Secret, a vault, not the NATS credential
 rotation, set the new key and list the old one in `eddi.cluster.signing.previous-keys` on
 every node, then remove it once every node signs with the new one. The same key also seals
 the user-id hash a GDPR stop sends (AES-GCM), which would otherwise be a plain SHA-256 that
-can be reversed from a list of e-mail addresses.
+can be reversed from a list of e-mail addresses. A rotated node also opens hashes sealed with a
+key it lists in `previous-keys`, but a node still on the old key cannot open one sealed with the
+new key. So while the rotation rolls out, a GDPR stop that reaches a node not yet rotated can
+miss that node's running turn and report the erasure step incomplete: **re-run any erasure made
+during the rolling window once every node signs with the new key.**
 
 What signing does not cover: the payloads are not encrypted (turn on `nats.tls`), the KV
 buckets and streams are state rather than messages (restrict them with per-node NATS

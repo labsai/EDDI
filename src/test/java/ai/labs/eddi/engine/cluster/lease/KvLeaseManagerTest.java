@@ -123,6 +123,14 @@ class KvLeaseManagerTest {
         public boolean isDuplicateNode() {
             return duplicate;
         }
+
+        /** Presence has settled this node's id; true unless a test says otherwise. */
+        volatile boolean identityConfirmed = true;
+
+        @Override
+        public boolean isNodeIdentityConfirmed() {
+            return identityConfirmed && !duplicate;
+        }
     }
 
     private ScheduledExecutorService scheduler;
@@ -353,6 +361,19 @@ class KvLeaseManagerTest {
         view.duplicate = false;
         a.sweepOwnStaleLeases();
         assertTrue(kv.get("c.twin").isEmpty(), "the skipped sweep runs on a later connect");
+    }
+
+    @Test
+    @DisplayName("on a twin's first connect, before presence has settled the id, the sweep leaves the live twin's leases alone")
+    void unconfirmedIdentityDefersBootSweep() {
+        kv.create("c.twin", "{\"node\":\"a\",\"boot\":\"twin\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        KvLeaseManager a = manager("a", "new");
+        view.identityConfirmed = false; // first connect: not yet flagged a duplicate, not yet confirmed
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isPresent(), "an unconfirmed id must not sweep a lease that may be a live twin's");
+        view.identityConfirmed = true; // presence took the id over from a dead predecessor
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isEmpty(), "the deferred sweep runs once presence confirms the id");
     }
 
     @Test

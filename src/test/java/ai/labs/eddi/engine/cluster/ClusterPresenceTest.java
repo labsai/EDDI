@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +77,36 @@ class ClusterPresenceTest {
     }
 
     @Test
+    @DisplayName("C6: the id is confirmed (and listeners told once) only after the takeover, never on a twin's first connect")
+    void identityIsConfirmedOnlyOnceOwned() {
+        ClusterPresence first = presence("node-a", "boot1");
+        first.publishSafely();
+        assertTrue(first.isIdentityConfirmed(), "a fresh record is this node's own");
+
+        ClusterPresence twin = presence("node-a", "boot2");
+        AtomicInteger twinConfirmed = new AtomicInteger();
+        twin.onIdentityConfirmed(twinConfirmed::incrementAndGet);
+        twin.publishSafely(); // first connect: the live record is not yet told from a dead one
+        assertFalse(twin.isIdentityConfirmed());
+        first.publishSafely();
+        twin.publishSafely();
+        assertTrue(twin.isDuplicate());
+        assertFalse(twin.isIdentityConfirmed());
+        assertEquals(0, twinConfirmed.get(), "a twin never runs the boot sweep");
+
+        ClusterPresence restarted = presence("node-b", "boot2");
+        presence("node-b", "boot1").publishSafely(); // a predecessor that then crashed
+        AtomicInteger confirmed = new AtomicInteger();
+        restarted.onIdentityConfirmed(confirmed::incrementAndGet);
+        restarted.publishSafely();
+        assertEquals(0, confirmed.get(), "not confirmed on the first connect");
+        restarted.publishSafely(); // unchanged for one interval: taken over
+        restarted.publishSafely();
+        assertTrue(restarted.isIdentityConfirmed());
+        assertEquals(1, confirmed.get(), "told once, not on every write");
+    }
+
+    @Test
     @DisplayName("C6: the record of a crashed previous boot (unchanged for one interval) is taken over")
     void deadPredecessorIsTakenOver() throws Exception {
         ClusterPresence previousBoot = presence("node-a", "boot1");
@@ -127,6 +158,7 @@ class ClusterPresenceTest {
 
         List<Map<String, Object>> members = presence.currentMembers();
         assertEquals(List.of("a", "b"), members.stream().map(m -> m.get("node")).toList(), "a record older than the TTL is gone");
+        assertEquals(2, presence.watchedRecords(), "an expired record is dropped, not only skipped");
         presence.onWatched("n.b", null, false, now);
         assertEquals(1, presence.members().size(), "a deleted record leaves at once");
         verify(nodes, never()).keys();

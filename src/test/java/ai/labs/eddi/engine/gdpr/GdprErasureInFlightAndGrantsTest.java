@@ -286,7 +286,7 @@ class GdprErasureInFlightAndGrantsTest {
                 .thenReturn(Map.of("n2", Map.of("stopped", 0), "n3", Map.of("stopped", 0), "n4", Map.of("stopped", 0)));
         service.clusterRpc = rpc;
         ClusterMessageSigner signer = new ClusterMessageSigner(
-                ClusterSigningConfig.of("0123456789abcdef0123456789abcdef-test", List.of(), false, Duration.ofSeconds(60)),
+                ClusterSigningConfig.of("fixturefixturefixturefixturefixture-test", List.of(), false, Duration.ofSeconds(60)),
                 new SimpleMeterRegistry());
         Instance<ClusterMessageSigner> signerInstance = mock(Instance.class);
         when(signerInstance.isResolvable()).thenReturn(true);

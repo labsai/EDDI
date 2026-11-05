@@ -23,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.List;
@@ -163,6 +164,34 @@ class JetStreamEventBusHardeningTest {
     }
 
     @Test
+    @DisplayName("B2: a re-subscribe that failed after a recreation is retried by the next stream check, which resyncs")
+    void failedResubscribeIsRetriedByTheCheck() throws Exception {
+        JetStreamEventBus bus = new JetStreamEventBus(connections, registry);
+        StreamInfo original = streamInfo(bus.desiredStream(), ZonedDateTime.parse("2026-11-01T00:00:00Z"));
+        when(jsm.getStreamInfo(anyString())).thenReturn(original);
+        AtomicInteger flushes = new AtomicInteger();
+        bus.onResync(flushes::incrementAndGet);
+        connectHook(bus).run();
+        waitFor(() -> flushes.get() == 1);
+
+        StreamInfo recreated = streamInfo(bus.desiredStream(), ZonedDateTime.parse("2026-11-02T00:00:00Z"));
+        when(jsm.getStreamInfo(anyString())).thenReturn(recreated);
+        when(jetStream.subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any()))
+                .thenThrow(new IOException("timeout right after the recreation")).thenReturn(null);
+        bus.checkStreamIdentity(); // detects the recreation; its re-subscribe fails
+        waitFor(() -> flushes.get() == 2);
+
+        bus.checkStreamIdentity(); // the connection stayed up: no onConnected, the check retries
+        waitFor(() -> flushes.get() == 3);
+        verify(jetStream, times(3)).subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any());
+
+        bus.checkStreamIdentity(); // subscribed again: nothing more to do
+        Thread.sleep(200);
+        assertEquals(3, flushes.get());
+        verify(jetStream, times(3)).subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any());
+    }
+
+    @Test
     @DisplayName("B2: a stream sequence that goes back means the stream was recreated")
     void sequenceGoingBackResyncs() throws Exception {
         JetStreamEventBus bus = new JetStreamEventBus(connections, registry);
@@ -258,6 +287,14 @@ class JetStreamEventBusHardeningTest {
         ClusterMessageSigner attacker = new ClusterMessageSigner(
                 ClusterSigningConfig.of("another-key-that-is-long-enough-to-pass", List.of(), false, Duration.ofSeconds(60)), registry);
         bus.receive(subject, attacker.sign(subject, data, null, 1), data, 0);
+        // The signature covers the timestamp and the nonce: changing either one of a
+        // fresh, never-delivered event's header is refused.
+        byte[] fresh = event(ClusterEvent.SECRET_CHANGED, "n4");
+        Headers freshHeaders = signer.sign(subject, fresh, null, ClusterEvent.VERSION);
+        String sig = freshHeaders.getFirst(ClusterMessageSigner.HEADER_SIGNATURE);
+        long ts = Long.parseLong(sig.replaceAll(".*;t=(\\d+);.*", "$1"));
+        bus.receive(subject, withSignature(freshHeaders, sig.replace(";t=" + ts + ";", ";t=" + (ts - 1) + ";")), fresh, 0);
+        bus.receive(subject, withSignature(freshHeaders, sig.replaceAll(";n=[^;]+;", ";n=AAAAAAAAAAAAAAAAAAAAAA;")), fresh, 0);
         Thread.sleep(200);
         assertEquals(1, seen.size(), "only the genuine event is handled");
 
@@ -273,6 +310,15 @@ class JetStreamEventBusHardeningTest {
         strictBus.receive(subject, null, event(ClusterEvent.SECRET_CHANGED, "old-node"), 0);
         Thread.sleep(200);
         assertTrue(strictSeen.isEmpty(), "eddi.cluster.signing.required=true refuses unsigned events");
+    }
+
+    private static Headers withSignature(Headers signed, String signature) {
+        Headers copy = new Headers();
+        for (String key : signed.keySet()) {
+            copy.put(key, signed.get(key));
+        }
+        copy.put(ClusterMessageSigner.HEADER_SIGNATURE, signature);
+        return copy;
     }
 
     private static void waitFor(BooleanSupplier condition) throws InterruptedException {

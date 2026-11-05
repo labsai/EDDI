@@ -349,7 +349,8 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
             subscribedDispatcher = dispatcher;
             subscribedOn = connection;
         } catch (IOException | JetStreamApiException | RuntimeException e) {
-            LOGGER.warnf("Could not subscribe to cluster events: %s — retried on the next connect", e.getMessage());
+            LOGGER.warnf("Could not subscribe to cluster events: %s — retried by the stream check and on the next connect",
+                    e.getMessage());
         }
     }
 
@@ -380,6 +381,19 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
      */
     synchronized void checkStreamIdentity() {
         if (!connections.isConnected()) {
+            return;
+        }
+        if (subscribedOn == null) {
+            // A subscribe that failed (typically a JetStream timeout right after the
+            // stream was recreated) is not retried by a connection that stays up: no
+            // onConnected follows. Retry it here, and resync once it succeeds, since
+            // with DeliverPolicy.New whatever was published meanwhile never arrives.
+            subscribe(connections.requireConnected());
+            if (subscribedOn == null) {
+                return;
+            }
+            firstSubscriptionResynced.set(true);
+            resync("re-subscribed to the event stream after a failed subscription; events published meanwhile are lost");
             return;
         }
         try {
