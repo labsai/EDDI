@@ -5384,6 +5384,36 @@
       "teams": "팀",
       "previewTitle": "최종 사용자에게 보이는 내용",
       "previewCounts": "등록된 에이전트 {{agents}}개와 팀 {{teams}}개가 사용이 허용된 사람들에게 제공됩니다."
+    },
+    "sessions": {
+      "title": "내 대화",
+      "loading": "불러오는 중…",
+      "loadError": "대화를 불러오지 못했습니다. 다시 시도",
+      "empty": "아직 대화가 없습니다. 홈에서 시작해 보세요.",
+      "pinned": "고정됨",
+      "today": "오늘",
+      "yesterday": "어제",
+      "previous7": "지난 7일",
+      "previous30": "지난 30일",
+      "rename": "이름 바꾸기",
+      "renameLabel": "대화 제목",
+      "pin": "고정",
+      "unpin": "고정 해제",
+      "delete": "삭제",
+      "deleteTitle": "이 대화를 삭제할까요?",
+      "deleteDescription": "“{{title}}”이(가) 목록에서 사라집니다. 여기서는 되돌릴 수 없습니다.",
+      "renameFailed": "이름을 바꾸지 못했습니다: {{error}}",
+      "pinFailed": "고정을 변경하지 못했습니다: {{error}}",
+      "deleteFailed": "삭제하지 못했습니다: {{error}}"
+    },
+    "home": {
+      "composerLabel": "대화 시작",
+      "placeholder": "{{agent}}에게 질문…",
+      "messageLabel": "메시지",
+      "agentLabel": "에이전트",
+      "send": "보내기",
+      "starters": "추천",
+      "recent": "최근"
     }
   },
   "operator": {

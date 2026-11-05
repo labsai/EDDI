@@ -5384,6 +5384,36 @@
       "teams": "Teams",
       "previewTitle": "Was Endnutzer sehen",
       "previewCounts": "{{agents}} gelistete Agenten und {{teams}} gelistete Teams werden den Personen angeboten, die sie nutzen dürfen."
+    },
+    "sessions": {
+      "title": "Deine Unterhaltungen",
+      "loading": "Wird geladen…",
+      "loadError": "Unterhaltungen konnten nicht geladen werden. Erneut versuchen",
+      "empty": "Noch keine Unterhaltungen. Starte eine auf der Startseite.",
+      "pinned": "Angeheftet",
+      "today": "Heute",
+      "yesterday": "Gestern",
+      "previous7": "Letzte 7 Tage",
+      "previous30": "Letzte 30 Tage",
+      "rename": "Umbenennen",
+      "renameLabel": "Titel der Unterhaltung",
+      "pin": "Anheften",
+      "unpin": "Lösen",
+      "delete": "Löschen",
+      "deleteTitle": "Diese Unterhaltung löschen?",
+      "deleteDescription": "„{{title}}“ verschwindet aus deiner Liste. Das lässt sich hier nicht rückgängig machen.",
+      "renameFailed": "Umbenennen fehlgeschlagen: {{error}}",
+      "pinFailed": "Anheften fehlgeschlagen: {{error}}",
+      "deleteFailed": "Löschen fehlgeschlagen: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Unterhaltung beginnen",
+      "placeholder": "Frag {{agent}}…",
+      "messageLabel": "Deine Nachricht",
+      "agentLabel": "Agent",
+      "send": "Senden",
+      "starters": "Vorschläge",
+      "recent": "Zuletzt"
     }
   },
   "operator": {

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { getAgentProfile } from "@/lib/api/agents";
+import { resolveConversationControls } from "@/lib/api/catalog";
 
 /**
- * The deployed agent's profile, as far as conversation review is concerned: its
- * review notice, and whether the lookup is still out.
+ * The deployed agent's profile, as far as a chat is concerned: its review
+ * notice, its rating controls, its `conversationControls` (B4), and whether the
+ * lookup is still out.
  *
  * One query for the notice and for the chat that must wait for it, so both see
  * the same answer. `pending` is true only while a lookup is actually outstanding:
@@ -22,6 +24,13 @@ export function useAgentReviewProfile(agentId: string | null, environment?: stri
     reviewNotice: query.data?.reviewNotice ?? null,
     /** How the deployed version asks for ratings, or null when it does not. */
     rating: query.data?.rating ?? null,
+    /**
+     * Which controls to offer, defaults applied: everything on (and raw HTML
+     * off) while the lookup is out, when it failed, or on an older backend.
+     */
+    controls: resolveConversationControls(query.data?.conversationControls),
+    /** The deployed version's appearance, or null. */
+    appearance: query.data?.appearance ?? null,
     // A disabled query also reports isPending, so it counts only with an agent.
     pending: !!agentId && query.isPending,
   };

@@ -128,7 +128,7 @@ export/import and [agent sync](agent-sync-guide.md) carry it like any other fiel
 
 | Role | What Workforce shows |
 | --- | --- |
-| `eddi-user` | The catalog: listed agents (opens a chat) and listed teams (opens the board), their discussions and threads. No team builder, team settings or analytics. `/` and `/welcome` go straight to `/workforce` |
+| `eddi-user` | Home: a composer with an agent picker and the agent's starters, the recent conversations, then the catalog — listed agents (opens a chat) and listed teams (opens the board). The sidebar lists their chats and team sessions by date ([Workforce guide](workforce-guide.md)). No team builder, team settings or analytics. `/` and `/welcome` go straight to `/workforce` |
 | `eddi-editor` | The building dashboard, read from the stores, plus a **What end users see** section that counts the listed entries, or explains how to list one when there are none |
 | `eddi-admin` | As an editor, plus a link to the Platform Operator at `/manage/operator`. Workforce does not mount the Operator's drawer |
 

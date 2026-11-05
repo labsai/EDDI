@@ -5439,6 +5439,36 @@
       "teams": "Équipes",
       "previewTitle": "Ce que voient les utilisateurs finaux",
       "previewCounts": "{{agents}} agents répertoriés et {{teams}} équipes répertoriées sont proposés aux personnes autorisées à les utiliser."
+    },
+    "sessions": {
+      "title": "Vos conversations",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger vos conversations. Réessayer",
+      "empty": "Aucune conversation pour l’instant. Commencez-en une depuis l’accueil.",
+      "pinned": "Épinglées",
+      "today": "Aujourd’hui",
+      "yesterday": "Hier",
+      "previous7": "7 derniers jours",
+      "previous30": "30 derniers jours",
+      "rename": "Renommer",
+      "renameLabel": "Titre de la conversation",
+      "pin": "Épingler",
+      "unpin": "Désépingler",
+      "delete": "Supprimer",
+      "deleteTitle": "Supprimer cette conversation ?",
+      "deleteDescription": "« {{title}} » disparaît de votre liste. Cette action est irréversible ici.",
+      "renameFailed": "Impossible de renommer : {{error}}",
+      "pinFailed": "Impossible de modifier l’épingle : {{error}}",
+      "deleteFailed": "Impossible de supprimer : {{error}}"
+    },
+    "home": {
+      "composerLabel": "Démarrer une conversation",
+      "placeholder": "Demandez à {{agent}}…",
+      "messageLabel": "Votre message",
+      "agentLabel": "Agent",
+      "send": "Envoyer",
+      "starters": "Suggestions",
+      "recent": "Récent"
     }
   },
   "operator": {

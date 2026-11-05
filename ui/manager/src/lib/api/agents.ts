@@ -398,6 +398,10 @@ export interface AgentProfile {
    * Absent or null when it asks for none.
    */
   rating?: import("./ratings").RatingProfile | null;
+  /** The deployed version's `appearance` (B4); null when it sets none, absent on an older backend. */
+  appearance?: import("./catalog").AgentAppearanceProfile | null;
+  /** The resolved `conversationControls` (B4); absent on an older backend. */
+  conversationControls?: Partial<import("./catalog").ConversationControlsProfile> | null;
 }
 
 export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {

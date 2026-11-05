@@ -162,6 +162,12 @@ interface ChatState {
   isProcessing: boolean;
   isThinking: boolean;
   streamingEnabled: boolean;
+  /**
+   * False when the selected agent switched streaming off
+   * (`conversationControls.streaming`): its turns are then sent without
+   * streaming whatever the user's toggle says.
+   */
+  agentStreaming: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
   quickReplies: string[];
@@ -229,6 +235,7 @@ interface ChatState {
   setProcessing: (v: boolean) => void;
   setThinking: (v: boolean) => void;
   toggleStreaming: () => void;
+  setAgentStreaming: (allowed: boolean) => void;
   clearMessages: () => void;
   setUndoRedo: (undo: boolean, redo: boolean) => void;
   setQuickReplies: (replies: string[]) => void;
@@ -256,6 +263,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isProcessing: false,
   isThinking: false,
   streamingEnabled: loadStreamingPref(),
+  agentStreaming: true,
   undoAvailable: false,
   redoAvailable: false,
   quickReplies: [],
@@ -343,6 +351,8 @@ export const useChatStore = create<ChatState>((set) => ({
       }
       return { streamingEnabled: next };
     }),
+
+  setAgentStreaming: (allowed) => set({ agentStreaming: allowed }),
 
   clearMessages: () =>
     set((s) => {
@@ -929,7 +939,10 @@ export function useSendMessage() {
         throw new Error("No active conversation");
       }
       managerT = t;
-      chatConversation.setOptions({ streaming: state.streamingEnabled, t: t as unknown as Translate });
+      chatConversation.setOptions({
+        streaming: state.streamingEnabled && state.agentStreaming,
+        t: t as unknown as Translate,
+      });
       const result = await chatConversation.send(message, isSecret, { attachments: attachments ?? [] });
       if (result.outcome === "refused" || result.outcome === "failed") {
         throw result.failure.error ?? new Error(result.failure.message);

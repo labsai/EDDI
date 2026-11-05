@@ -32,6 +32,7 @@ import { TemplatesPanel } from "@/components/workforce/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
 import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { EndUserCatalog, CatalogPreview } from "@/components/workforce/catalog-view";
+import { HomeComposer, RecentSessions } from "@/components/workforce/workforce-home";
 import { toast } from "sonner";
 
 // ─── View mode persistence ───────────────────────────────────────
@@ -449,6 +450,12 @@ function AuthorDashboard() {
   // Populated — 3-pillar Intelligence Dashboard
   return (
     <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
+      {/* ─── Home (T1.4): ask an agent, pick up where you left off ── */}
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <HomeComposer />
+        <RecentSessions />
+      </div>
+
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 

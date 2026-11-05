@@ -45,6 +45,7 @@ import { isSafePathSegment } from "@/lib/api/path-segment";
 import { InputHint } from "@/components/chat/input-hint";
 import { PauseNotice } from "@/components/hitl/pause-notice";
 import { SecretInputField } from "./secret-input-field";
+import type { InitialChatMessage } from "@/lib/workforce-chat-start";
 import {
   Bot,
   ChevronDown,
@@ -72,7 +73,35 @@ import {
   Star,
 } from "lucide-react";
 
-export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
+export interface ChatPanelProps {
+  embedded?: boolean;
+  /**
+   * Keep the open conversation in the address bar (`?agentId=…&conversationId=…`),
+   * so a reload or a second tab returns to it (T1.15). Workforce sets it; the
+   * Manager's chat clears the parameters once read, as before.
+   */
+  urlSync?: boolean;
+  /**
+   * A first message to send in a NEW conversation with `agentId` once that
+   * agent is selected — Workforce Home's composer and starters. Comes from
+   * router state, never from the URL (see `workforce-chat-start.ts`).
+   */
+  initialMessage?: InitialChatMessage | null;
+  /** Called once the initial message has been taken, so the host can drop it. */
+  onInitialMessageConsumed?: () => void;
+}
+
+/** The query parameters as one comparable value. */
+function paramKey(agentId: string | null, conversationId: string | null): string {
+  return `${agentId ?? ""}|${conversationId ?? ""}`;
+}
+
+export function ChatPanel({
+  embedded = false,
+  urlSync = false,
+  initialMessage = null,
+  onInitialMessageConsumed,
+}: ChatPanelProps = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -150,10 +179,25 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Every send waits while the review lookup is out, so nobody commits a turn an
   // opted-in agent's maintainers may read before being told so. A failed lookup
   // settles it: the chat waits for the request, never blocks on it.
-  const { pending: reviewPending, rating: ratingProfile } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
+  const {
+    pending: reviewPending,
+    rating: agentRatingProfile,
+    controls,
+  } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
+  // The agent's conversationControls (B4): a control it switched off is not
+  // offered here either, so a designer sees what the agent's users see.
+  const ratingProfile = controls.rating ? agentRatingProfile : null;
+  useEffect(() => {
+    useChatStore.getState().setAgentStreaming(controls.streaming);
+  }, [controls.streaming]);
   // The same rating controls the Chat UI shows, so designers can try the flow.
   const ratings = useChatRatings(conversationId, ratingProfile, messages);
   const ratableByPosition = useMemo(() => ratableSteps(messages), [messages]);
+
+  // The URL pair this panel has acted on (urlSync), and a conversation the URL
+  // named that is still being read.
+  const handledParamsRef = useRef<string | null>(null);
+  const awaitingConversationRef = useRef<string | null>(null);
 
   useEffect(() => {
     const rawAgentIdParam = searchParams.get("agentId");
@@ -180,6 +224,12 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     // the chance once the param is cleared.
     if (deployedAgents === undefined) return;
 
+    // With the URL kept in sync, the parameters stay in the address bar, so this
+    // effect sees them again on every render — and after the user picked another
+    // agent, before the URL follows. Act on each pair once.
+    const key = paramKey(agentIdParam, conversationIdParam);
+    if (urlSync && handledParamsRef.current === key) return;
+
     // Deep links only PRESELECT the agent; they never start or reopen a
     // conversation on their own. Auto-starting from URL params let a crafted
     // link (e.g. in agent studio, /manage/chat, /workforce/chat) silently open a
@@ -199,16 +249,82 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
     // open one): nothing is started, resumed or sent, so the rule above holds.
     // Skipped when it is already the open one.
     if (conversationIdParam && conversationIdParam !== useChatStore.getState().conversationId) {
+      awaitingConversationRef.current = conversationIdParam;
       loadConversation.mutate(
         { agentId: agentIdParam, conversationId: conversationIdParam },
-        { onError: (err) => toast.error(getErrorMessage(err)) },
+        {
+          onError: (err) => toast.error(getErrorMessage(err)),
+          onSettled: () => {
+            if (awaitingConversationRef.current === conversationIdParam) awaitingConversationRef.current = null;
+          },
+        },
       );
+    }
+
+    if (urlSync) {
+      // Keep the two ids — a reload or a second tab opens the same
+      // conversation (T1.15) — and drop the (ignored) agentName.
+      handledParamsRef.current = key;
+      if (searchParams.has("agentName")) {
+        const next = new URLSearchParams();
+        next.set("agentId", agentIdParam);
+        if (conversationIdParam) next.set("conversationId", conversationIdParam);
+        setSearchParams(next, { replace: true });
+      }
+      return;
     }
 
     // Remove query params so a refresh does not re-trigger, and so the
     // (ignored) agentName does not linger in the URL.
     setSearchParams({}, { replace: true });
-  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, loadConversation, setSearchParams]);
+  }, [searchParams, deployedAgents, selectedAgentId, setSelectedAgent, loadConversation, setSearchParams, urlSync]);
+
+  // T1.15 — the other direction: the conversation on screen goes into the
+  // address bar, so a reload or a second tab returns to it. Only once the URL's
+  // own parameters were acted on (above), and never while a conversation the
+  // URL named is still loading, or the half-switched store would overwrite it.
+  useEffect(() => {
+    if (!urlSync || deployedAgents === undefined) return;
+    const urlAgentId = searchParams.get("agentId");
+    const urlKey = paramKey(urlAgentId, searchParams.get("conversationId"));
+    if (urlAgentId && handledParamsRef.current !== urlKey) return;
+    // Read live: the effect above may have switched the agent in this same
+    // commit, and this render's values would still be the previous one's.
+    const live = useChatStore.getState();
+    if (live.loadingConversationId || !live.selectedAgentId) return;
+    if (awaitingConversationRef.current) {
+      if (awaitingConversationRef.current !== live.conversationId) return;
+      awaitingConversationRef.current = null;
+    }
+    const storeKey = paramKey(live.selectedAgentId, live.conversationId);
+    if (storeKey === urlKey) return;
+    handledParamsRef.current = storeKey;
+    const next = new URLSearchParams();
+    next.set("agentId", live.selectedAgentId);
+    if (live.conversationId) next.set("conversationId", live.conversationId);
+    setSearchParams(next, { replace: true });
+  }, [urlSync, deployedAgents, searchParams, isLoadingConversation, selectedAgentId, conversationId, setSearchParams]);
+
+  // Workforce Home handed over a first message: start a NEW conversation with
+  // that agent and send it, once the agent is selected and its review notice
+  // has been looked up (Home showed the notice beside its composer).
+  const initialTakenRef = useRef(false);
+  useEffect(() => {
+    if (!initialMessage || initialTakenRef.current) return;
+    if (deployedAgents === undefined || reviewPending) return;
+    if (useChatStore.getState().selectedAgentId !== initialMessage.agentId) return;
+    initialTakenRef.current = true;
+    onInitialMessageConsumed?.();
+    useChatStore.getState().clearMessages();
+    startConversation
+      .mutateAsync({ agentId: initialMessage.agentId, environment: environmentFor(initialMessage.agentId) })
+      .then((started) => {
+        // Installed only if nothing replaced the transcript meanwhile.
+        if (useChatStore.getState().conversationId !== started) return;
+        sendMessage.mutate({ message: initialMessage.text });
+      })
+      .catch((err) => toast.error(getErrorMessage(err)));
+  }, [initialMessage, deployedAgents, reviewPending, selectedAgentId, onInitialMessageConsumed, startConversation, sendMessage, environmentFor]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -384,7 +500,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Dropping files anywhere on the chat area stages them, same as the picker
   // and paste. Secret mode blocks it — a masked turn must not carry a file.
   const { isDragOver, dropHandlers } = useFileDrop(
-    Boolean(conversationId) && !isSecretMode,
+    Boolean(conversationId) && !isSecretMode && controls.attachments,
     handlePasteFiles,
   );
 
@@ -865,7 +981,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && !reviewPending && (
+        {controls.quickReplies && quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && !reviewPending && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -918,7 +1034,8 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             onToggleSecret={toggleSecretMode}
             fileInputRef={fileInputRef}
             onFileChange={handleFileInput}
-            onPasteFiles={handlePasteFiles}
+            onPasteFiles={controls.attachments ? handlePasteFiles : undefined}
+            allowAttachments={controls.attachments}
             isUploading={isUploading}
             hasConversation={!!conversationId}
             pendingAttachments={pendingAttachments}
@@ -927,10 +1044,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             // Disabled while either move (or a rerun) is pending: the flags
             // only change after the re-read, so a double click would otherwise
             // undo a second turn.
-            onUndo={conversationId && undoAvailable && !isProcessing && !conversationBusy
+            onUndo={controls.undo && conversationId && undoAvailable && !isProcessing && !conversationBusy
               ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
-            onRedo={conversationId && redoAvailable && !isProcessing && !conversationBusy
+            onRedo={controls.redo && conversationId && redoAvailable && !isProcessing && !conversationBusy
               ? () => redoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
             embedded={embedded}
@@ -961,6 +1078,7 @@ function ChatInputWithSecretToggle({
   onUndo,
   onRedo,
   embedded = false,
+  allowAttachments = true,
 }: {
   /** Returns whether the message was sent; the draft is kept when it was not. */
   onSend: (message: string, isSecret?: boolean) => boolean;
@@ -980,6 +1098,8 @@ function ChatInputWithSecretToggle({
   onUndo?: () => void;
   onRedo?: () => void;
   embedded?: boolean;
+  /** False when the agent switched attachments off (`conversationControls.attachments`). */
+  allowAttachments?: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -1018,6 +1138,7 @@ function ChatInputWithSecretToggle({
   return (
     <div className="border-t border-border bg-background p-4 min-w-0" data-tour="chat-input-area">
       {/* Hidden file input for attachments */}
+      {allowAttachments && (
       <input
         ref={fileInputRef}
         type="file"
@@ -1026,6 +1147,7 @@ function ChatInputWithSecretToggle({
         onChange={onFileChange}
         data-testid="chat-file-input"
       />
+      )}
       {/* Pending attachment chips */}
       {pendingAttachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2" data-testid="pending-attachments">
@@ -1040,6 +1162,7 @@ function ChatInputWithSecretToggle({
       )}
       <div className="flex items-end gap-2 min-w-0">
         {/* 📎 Attach button */}
+        {allowAttachments && (
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -1062,6 +1185,7 @@ function ChatInputWithSecretToggle({
             <Paperclip className="h-4 w-4" />
           )}
         </button>
+        )}
         {/* 🔒 Secret mode toggle */}
         <button
           type="button"

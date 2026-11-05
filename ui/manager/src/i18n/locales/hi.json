@@ -5384,6 +5384,36 @@
       "teams": "टीमें",
       "previewTitle": "अंतिम उपयोगकर्ता क्या देखते हैं",
       "previewCounts": "{{agents}} सूचीबद्ध एजेंट और {{teams}} सूचीबद्ध टीमें उन लोगों को दी जाती हैं जिन्हें उनका उपयोग करने की अनुमति है।"
+    },
+    "sessions": {
+      "title": "आपकी बातचीत",
+      "loading": "लोड हो रहा है…",
+      "loadError": "आपकी बातचीत लोड नहीं हो सकी। फिर से कोशिश करें",
+      "empty": "अभी कोई बातचीत नहीं। होम से एक शुरू करें।",
+      "pinned": "पिन की गई",
+      "today": "आज",
+      "yesterday": "कल",
+      "previous7": "पिछले 7 दिन",
+      "previous30": "पिछले 30 दिन",
+      "rename": "नाम बदलें",
+      "renameLabel": "बातचीत का शीर्षक",
+      "pin": "पिन करें",
+      "unpin": "पिन हटाएँ",
+      "delete": "हटाएँ",
+      "deleteTitle": "यह बातचीत हटाएँ?",
+      "deleteDescription": "“{{title}}” आपकी सूची से हट जाएगी। इसे यहाँ वापस नहीं किया जा सकता।",
+      "renameFailed": "नाम नहीं बदला जा सका: {{error}}",
+      "pinFailed": "पिन नहीं बदला जा सका: {{error}}",
+      "deleteFailed": "हटाया नहीं जा सका: {{error}}"
+    },
+    "home": {
+      "composerLabel": "बातचीत शुरू करें",
+      "placeholder": "{{agent}} से पूछें…",
+      "messageLabel": "आपका संदेश",
+      "agentLabel": "एजेंट",
+      "send": "भेजें",
+      "starters": "सुझाव",
+      "recent": "हाल की"
     }
   },
   "operator": {

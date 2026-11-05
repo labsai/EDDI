@@ -130,6 +130,19 @@ const WORKFLOWS_MOCK = [
   },
 ];
 
+/**
+ * Renames and pins (`PATCH /conversationstore/conversations/{id}`) layered over
+ * `CONVERSATIONS_MOCK`, so the fixture itself never changes; `src/test/setup.ts`
+ * clears them after every test.
+ */
+const CONVERSATION_PATCHES = new Map<string, Record<string, unknown>>();
+/** Marks a deleted conversation in `CONVERSATION_PATCHES`; never sent to the client. */
+const DELETED = "__deleted";
+
+export function resetConversationPatches(): void {
+  CONVERSATION_PATCHES.clear();
+}
+
 const CONVERSATIONS_MOCK = [
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
@@ -142,6 +155,10 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 8,
     environment: "production",
     agentName: "Support Agent",
+    // B2: the first user message as title, pinned by its owner.
+    title: "Where is order 1042?",
+    titleSource: "AUTO",
+    pinned: true,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv2",
@@ -166,6 +183,9 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 3,
     environment: "production",
     agentName: "Support Agent",
+    title: "Refund for a damaged parcel",
+    titleSource: "USER",
+    pinned: false,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv4",
@@ -1080,9 +1100,21 @@ export const handlers = [
   }),
 
   // What a chat window shows about an agent, and how much it is used.
-  http.get("*/agents/:agentId/profile", ({ params }) =>
-    HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
-  ),
+  http.get("*/agents/:agentId/profile", ({ params }) => {
+    // A listed agent answers with its catalog appearance and controls (B4);
+    // any other with none set: no appearance, the default controls.
+    const listed = MOCK_CATALOG_AGENTS.find((a) => a.agentId === String(params.agentId));
+    return HttpResponse.json({
+      agentId: String(params.agentId),
+      name: listed?.name ?? null,
+      description: listed?.description ?? null,
+      reviewNotice: null,
+      appearance: listed?.appearance ?? null,
+      conversationControls: listed?.conversationControls ?? {
+        undo: true, redo: true, attachments: true, rating: true, quickReplies: true, streaming: true, rawHtml: false,
+      },
+    });
+  }),
   http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
 
   // The end-user catalog (IRestCatalog) — what Workforce reads for an eddi-user.
@@ -1574,7 +1606,12 @@ export const handlers = [
     const agentId = url.searchParams.get("agentId");
     const conversationId = url.searchParams.get("conversationId");
     const conversationState = url.searchParams.get("conversationState");
-    let result = [...CONVERSATIONS_MOCK];
+    // What the owner renamed or pinned (PATCH below) since the last reset.
+    let result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      return [{ ...c, ...patch }];
+    });
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
@@ -1666,8 +1703,35 @@ export const handlers = [
     });
   }),
 
-  // Delete conversation
-  http.delete("*/conversationstore/conversations/:id", () => {
+  // Rename / pin (B2) — owner only; mirrors RestConversationStore.patchConversation:
+  // 400 for neither field or a blank / too long title, 404 for an unknown id.
+  http.patch("*/conversationstore/conversations/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { title?: unknown; pinned?: unknown };
+    const hasTitle = body.title !== undefined && body.title !== null;
+    const hasPinned = body.pinned !== undefined && body.pinned !== null;
+    if (!hasTitle && !hasPinned) return HttpResponse.json({ error: "Nothing to change" }, { status: 400 });
+    const title = hasTitle ? String(body.title).replace(/\s+/g, " ").trim() : undefined;
+    if (title !== undefined && (title.length === 0 || title.length > 200)) {
+      return HttpResponse.json({ error: "Invalid title" }, { status: 400 });
+    }
+    const id = String(params.id);
+    const entry = CONVERSATIONS_MOCK.find((c) => c.resource.endsWith(`/${id}`));
+    if (!entry) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const patch = { ...CONVERSATION_PATCHES.get(id) };
+    if (title !== undefined) {
+      patch.title = title;
+      patch.titleSource = "USER";
+    }
+    if (hasPinned) patch.pinned = body.pinned === true;
+    CONVERSATION_PATCHES.set(id, patch);
+    return HttpResponse.json({ ...entry, ...patch });
+  }),
+
+  // Delete conversation — gone from the listing afterwards, as on the backend
+  // (a soft delete drops the descriptor).
+  http.delete("*/conversationstore/conversations/:id", ({ params }) => {
+    const id = String(params.id);
+    CONVERSATION_PATCHES.set(id, { ...CONVERSATION_PATCHES.get(id), [DELETED]: true });
     return new HttpResponse(null, { status: 204 });
   }),
 

@@ -1,3 +1,4 @@
+import { parseConversationControls, type ConversationControls } from "@eddi/core";
 import { api } from "../api-client";
 import type { RatingProfile } from "./ratings";
 import type { AgentGroupConfiguration, DiscussionStyle, GroupMember, MemberType } from "./groups";
@@ -25,6 +26,66 @@ export interface CatalogAgent {
   reviewNotice?: string | null;
   rating?: RatingProfile | null;
   callerLevel: CatalogCallerLevel;
+  /**
+   * The deployed version's `appearance`, as the profile serves it; null (or
+   * absent on an older backend) when the agent sets none.
+   */
+  appearance?: AgentAppearanceProfile | null;
+  /** The deployed version's resolved `conversationControls`; absent on an older backend. */
+  conversationControls?: ConversationControlsProfile | null;
+}
+
+/** `AppearanceProfile` of the profile and the catalog: validated when the agent was saved. */
+export interface AgentAppearanceProfile {
+  /** The name to show, or null for the agent's name. */
+  displayName?: string | null;
+  /** An https URL or a data:image URI, or null. */
+  avatar?: string | null;
+  /** `#rgb` or `#rrggbb`, or null for the theme's. */
+  accentColor?: string | null;
+  /** Conversation starters, in order. */
+  starters?: string[];
+}
+
+/**
+ * `ControlsProfile`: which chat controls to offer, every default applied —
+ * true unless the agent switched it off, except `rawHtml` (false unless on).
+ * The rule lives in @eddi/core (`parseConversationControls`), shared with the
+ * Chat UI.
+ */
+export type ConversationControlsProfile = ConversationControls;
+
+/** The controls a profile or catalog entry reports, with the defaults for anything it leaves out. */
+export function resolveConversationControls(controls: unknown): ConversationControlsProfile {
+  return parseConversationControls(controls);
+}
+
+/** The name an agent shows: its `appearance.displayName`, else its name. */
+export function catalogDisplayName(agent: Pick<CatalogAgent, "agentId" | "name" | "appearance">): string {
+  return agent.appearance?.displayName?.trim() || agent.name?.trim() || agent.agentId;
+}
+
+/**
+ * An accent colour safe to put in a style attribute: only `#rgb` / `#rrggbb`,
+ * which the backend already enforces on save — checked again because the
+ * value ends up in CSS.
+ */
+export function safeAccentColor(value: string | null | undefined): string | null {
+  return value && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : null;
+}
+
+/**
+ * An avatar safe to put in an `<img src>`: an https URL or a raster
+ * `data:image` URI (no SVG), as the backend validates on save.
+ */
+export function safeAvatarUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(value)) return value;
+  try {
+    return new URL(value).protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface CatalogGroupMember {

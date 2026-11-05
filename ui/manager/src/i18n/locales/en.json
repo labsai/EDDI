@@ -5384,6 +5384,36 @@
       "teams": "Teams",
       "previewTitle": "What end users see",
       "previewCounts": "{{agents}} listed agents and {{teams}} listed teams are offered to the people allowed to use them."
+    },
+    "sessions": {
+      "title": "Your conversations",
+      "loading": "Loading…",
+      "loadError": "Couldn't load your conversations. Retry",
+      "empty": "No conversations yet. Start one from Home.",
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "previous7": "Previous 7 days",
+      "previous30": "Previous 30 days",
+      "rename": "Rename",
+      "renameLabel": "Conversation title",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "delete": "Delete",
+      "deleteTitle": "Delete this conversation?",
+      "deleteDescription": "“{{title}}” disappears from your list. This cannot be undone here.",
+      "renameFailed": "Couldn't rename: {{error}}",
+      "pinFailed": "Couldn't change the pin: {{error}}",
+      "deleteFailed": "Couldn't delete: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Start a conversation",
+      "placeholder": "Ask {{agent}}…",
+      "messageLabel": "Your message",
+      "agentLabel": "Agent",
+      "send": "Send",
+      "starters": "Suggestions",
+      "recent": "Recent"
     }
   },
   "operator": {

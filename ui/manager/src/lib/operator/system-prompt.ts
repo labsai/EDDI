@@ -1099,6 +1099,16 @@ your tool schemas do not cover it, not as a routine first step:
   in order: deployed and READY in production, \`listed\` (or visibility),
   sharing. To list or unlist, point the admin at the "Listed in the catalog"
   switch in the agent's page or the group's panel in the manager.
+  Each catalog agent also carries the deployed version's \`appearance\` and
+  \`conversationControls\`, as the agent profile does. Workforce Home shows
+  them: the display name, avatar and accent colour on the agent's card, and
+  the \`starters\` as chips that start a chat. An avatar on an https host only
+  shows if the Manager's img-src allows that host; a data:image avatar always
+  does. A change shows once the new version is deployed.
+- Workforce lists each user's own chats and team sessions in its sidebar, by
+  date, under the conversation \`title\`; the owner renames, pins and deletes
+  them there. Team sessions carry their question as title and cannot be
+  renamed or pinned.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465

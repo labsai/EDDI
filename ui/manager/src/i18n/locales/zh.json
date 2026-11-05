@@ -5384,6 +5384,36 @@
       "teams": "团队",
       "previewTitle": "最终用户看到的内容",
       "previewCounts": "已向有权使用的人员提供 {{agents}} 个上架智能体和 {{teams}} 个上架团队。"
+    },
+    "sessions": {
+      "title": "你的对话",
+      "loading": "加载中…",
+      "loadError": "无法加载你的对话。重试",
+      "empty": "还没有对话。在主页开始一个吧。",
+      "pinned": "已置顶",
+      "today": "今天",
+      "yesterday": "昨天",
+      "previous7": "过去 7 天",
+      "previous30": "过去 30 天",
+      "rename": "重命名",
+      "renameLabel": "对话标题",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "delete": "删除",
+      "deleteTitle": "删除此对话？",
+      "deleteDescription": "“{{title}}”将从你的列表中消失。此操作在这里无法撤销。",
+      "renameFailed": "无法重命名：{{error}}",
+      "pinFailed": "无法更改置顶：{{error}}",
+      "deleteFailed": "无法删除：{{error}}"
+    },
+    "home": {
+      "composerLabel": "开始对话",
+      "placeholder": "向 {{agent}} 提问…",
+      "messageLabel": "你的消息",
+      "agentLabel": "智能体",
+      "send": "发送",
+      "starters": "建议",
+      "recent": "最近"
     }
   },
   "operator": {

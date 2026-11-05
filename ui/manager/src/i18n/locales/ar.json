@@ -5604,6 +5604,36 @@
       "teams": "الفرق",
       "previewTitle": "ما يراه المستخدمون النهائيون",
       "previewCounts": "يُعرض {{agents}} من الوكلاء المُدرجين و{{teams}} من الفرق المُدرجة على الأشخاص المسموح لهم باستخدامها."
+    },
+    "sessions": {
+      "title": "محادثاتك",
+      "loading": "جارٍ التحميل…",
+      "loadError": "تعذّر تحميل محادثاتك. أعد المحاولة",
+      "empty": "لا توجد محادثات بعد. ابدأ واحدة من الصفحة الرئيسية.",
+      "pinned": "مثبّتة",
+      "today": "اليوم",
+      "yesterday": "أمس",
+      "previous7": "آخر 7 أيام",
+      "previous30": "آخر 30 يومًا",
+      "rename": "إعادة تسمية",
+      "renameLabel": "عنوان المحادثة",
+      "pin": "تثبيت",
+      "unpin": "إلغاء التثبيت",
+      "delete": "حذف",
+      "deleteTitle": "حذف هذه المحادثة؟",
+      "deleteDescription": "ستختفي «{{title}}» من قائمتك. لا يمكن التراجع عن ذلك هنا.",
+      "renameFailed": "تعذّرت إعادة التسمية: {{error}}",
+      "pinFailed": "تعذّر تغيير التثبيت: {{error}}",
+      "deleteFailed": "تعذّر الحذف: {{error}}"
+    },
+    "home": {
+      "composerLabel": "بدء محادثة",
+      "placeholder": "اسأل {{agent}}…",
+      "messageLabel": "رسالتك",
+      "agentLabel": "الوكيل",
+      "send": "إرسال",
+      "starters": "اقتراحات",
+      "recent": "الأخيرة"
     }
   },
   "operator": {

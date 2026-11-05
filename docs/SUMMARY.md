@@ -71,6 +71,7 @@
 - [Email Integration](email-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
+- [Workforce for End Users](workforce-guide.md)
 
 ## Security & Compliance
 

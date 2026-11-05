@@ -5439,6 +5439,36 @@
       "teams": "Equipos",
       "previewTitle": "Lo que ven los usuarios finales",
       "previewCounts": "Se ofrecen {{agents}} agentes listados y {{teams}} equipos listados a las personas autorizadas a usarlos."
+    },
+    "sessions": {
+      "title": "Tus conversaciones",
+      "loading": "Cargando…",
+      "loadError": "No se pudieron cargar tus conversaciones. Reintentar",
+      "empty": "Aún no hay conversaciones. Empieza una desde Inicio.",
+      "pinned": "Fijadas",
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "previous7": "Últimos 7 días",
+      "previous30": "Últimos 30 días",
+      "rename": "Cambiar nombre",
+      "renameLabel": "Título de la conversación",
+      "pin": "Fijar",
+      "unpin": "Desfijar",
+      "delete": "Eliminar",
+      "deleteTitle": "¿Eliminar esta conversación?",
+      "deleteDescription": "«{{title}}» desaparece de tu lista. No se puede deshacer aquí.",
+      "renameFailed": "No se pudo cambiar el nombre: {{error}}",
+      "pinFailed": "No se pudo cambiar el fijado: {{error}}",
+      "deleteFailed": "No se pudo eliminar: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Iniciar una conversación",
+      "placeholder": "Pregunta a {{agent}}…",
+      "messageLabel": "Tu mensaje",
+      "agentLabel": "Agente",
+      "send": "Enviar",
+      "starters": "Sugerencias",
+      "recent": "Recientes"
     }
   },
   "operator": {

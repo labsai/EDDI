@@ -5384,6 +5384,36 @@
       "teams": "チーム",
       "previewTitle": "エンドユーザーに表示される内容",
       "previewCounts": "掲載されたエージェント {{agents}} 件とチーム {{teams}} 件が、利用を許可された人に提供されています。"
+    },
+    "sessions": {
+      "title": "あなたの会話",
+      "loading": "読み込み中…",
+      "loadError": "会話を読み込めませんでした。再試行",
+      "empty": "まだ会話がありません。ホームから始めましょう。",
+      "pinned": "ピン留め",
+      "today": "今日",
+      "yesterday": "昨日",
+      "previous7": "過去 7 日間",
+      "previous30": "過去 30 日間",
+      "rename": "名前を変更",
+      "renameLabel": "会話のタイトル",
+      "pin": "ピン留め",
+      "unpin": "ピン留めを解除",
+      "delete": "削除",
+      "deleteTitle": "この会話を削除しますか？",
+      "deleteDescription": "「{{title}}」はリストから消えます。ここでは元に戻せません。",
+      "renameFailed": "名前を変更できませんでした：{{error}}",
+      "pinFailed": "ピン留めを変更できませんでした：{{error}}",
+      "deleteFailed": "削除できませんでした：{{error}}"
+    },
+    "home": {
+      "composerLabel": "会話を始める",
+      "placeholder": "{{agent}} に質問…",
+      "messageLabel": "メッセージ",
+      "agentLabel": "エージェント",
+      "send": "送信",
+      "starters": "おすすめ",
+      "recent": "最近"
     }
   },
   "operator": {

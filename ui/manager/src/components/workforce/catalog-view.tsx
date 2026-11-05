@@ -5,7 +5,8 @@ import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
-import { catalogMembers } from "@/lib/api/catalog";
+import { catalogDisplayName, catalogMembers, safeAccentColor } from "@/lib/api/catalog";
+import { AgentAvatar, HomeComposer, RecentSessions } from "./workforce-home";
 import { AgentWorkforceCard } from "./agent-workforce-card";
 import { WorkforceCard } from "./workforce-card";
 import { CatalogEmptyState } from "./catalog-empty-state";
@@ -62,6 +63,13 @@ export function EndUserCatalog() {
         <CatalogEmptyState canAuthor={false} />
       ) : (
         <>
+          {/* Home (T1.4): a composer first, then the recent conversations,
+              then everything the person may use. */}
+          <div className="mx-auto w-full max-w-2xl space-y-6">
+            <HomeComposer />
+            <RecentSessions />
+          </div>
+
           {agentList.length > 0 && (
             <section aria-label={t("Workforce.catalog.agents", "Agents")}>
               <h2 className="text-lg font-semibold text-foreground mb-3">
@@ -71,9 +79,11 @@ export function EndUserCatalog() {
                 {agentList.map((agent) => (
                   <div key={agent.agentId} data-testid={`catalog-agent-${agent.agentId}`}>
                     <AgentWorkforceCard
-                      name={agent.name || t("workforce.unnamed", "Unnamed Agent")}
+                      name={catalogDisplayName(agent) || t("workforce.unnamed", "Unnamed Agent")}
                       agentId={agent.agentId}
                       description={agent.description}
+                      avatar={agent.appearance?.avatar || agent.appearance?.accentColor ? <AgentAvatar agent={agent} /> : undefined}
+                      accentColor={safeAccentColor(agent.appearance?.accentColor)}
                       onClick={() =>
                         navigate(
                           `/workforce/chat?agentId=${encodeURIComponent(agent.agentId)}&agentName=${encodeURIComponent(agent.name || agent.agentId)}`,
