@@ -14,6 +14,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.Dispatcher;
 import io.nats.client.JetStream;
+import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.api.StreamConfiguration;
 import io.nats.client.api.StreamInfo;
@@ -189,6 +190,63 @@ class JetStreamEventBusHardeningTest {
         Thread.sleep(200);
         assertEquals(3, flushes.get());
         verify(jetStream, times(3)).subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("B2: a subscribe retry that fails because the stream is gone recreates the stream, subscribes and resyncs")
+    void failedRetryProvisionsAMissingStream() throws Exception {
+        JetStreamEventBus bus = new JetStreamEventBus(connections, registry);
+        StreamInfo original = streamInfo(bus.desiredStream(), ZonedDateTime.parse("2026-11-01T00:00:00Z"));
+        when(jsm.getStreamInfo(anyString())).thenReturn(original);
+        when(jetStream.subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any()))
+                .thenThrow(new IOException("no stream")).thenThrow(new IOException("no stream")).thenReturn(null);
+        AtomicInteger flushes = new AtomicInteger();
+        bus.onResync(flushes::incrementAndGet);
+        connectHook(bus).run(); // the subscribe fails: not subscribed
+
+        when(jsm.getStreamInfo(anyString())).thenThrow(mock(JetStreamApiException.class));
+        StreamInfo recreated = streamInfo(bus.desiredStream(), ZonedDateTime.parse("2026-11-02T00:00:00Z"));
+        when(jsm.addStream(any())).thenReturn(recreated);
+        bus.checkStreamIdentity(); // the retry fails again, then the check finds the stream missing
+
+        verify(jsm).addStream(any());
+        verify(jetStream, times(3)).subscribe(anyString(), any(Dispatcher.class), any(), anyBoolean(), any());
+        waitFor(() -> flushes.get() > 0);
+        assertTrue(flushes.get() > 0, "the recreated stream is resynced");
+    }
+
+    @Test
+    @DisplayName("B3: a resync the full control lane refuses is kept and retried shortly, not lost until the next request")
+    void refusedResyncIsRetried() throws Exception {
+        JetStreamEventBus bus = new JetStreamEventBus(connections, registry);
+        bus.startCluster();
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        bus.subscribe(ClusterEvent.SECRET_CHANGED, e -> {
+            running.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        AtomicInteger flushes = new AtomicInteger();
+        bus.onResync(flushes::incrementAndGet);
+
+        byte[] secret = event(ClusterEvent.SECRET_CHANGED, "n2");
+        bus.receive(secret, 0);
+        assertTrue(running.await(3, TimeUnit.SECONDS));
+        for (int i = 0; i < JetStreamEventBus.LANE_CAPACITY + 3; i++) {
+            bus.receive(secret, 0); // the last ones are dropped, and so is the resync they ask for
+        }
+        ArgumentCaptor<Runnable> retry = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).schedule(retry.capture(), eq(JetStreamEventBus.RESYNC_RETRY_MILLIS), eq(TimeUnit.MILLISECONDS));
+
+        release.countDown();
+        waitFor(() -> registry.get("eddi.cluster.events.dispatch.queue").gauge().value() == 0);
+        retry.getValue().run();
+        waitFor(() -> flushes.get() == 1);
+        assertEquals(1, flushes.get(), "the drops coalesce into one pending retry, which flushes once the lane has room");
     }
 
     @Test

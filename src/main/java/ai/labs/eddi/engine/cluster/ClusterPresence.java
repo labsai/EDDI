@@ -32,6 +32,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
@@ -116,6 +117,13 @@ public class ClusterPresence {
      * predecessor from a twin.
      */
     private volatile long foreignRevisionSeen;
+    /**
+     * When {@link #foreignRevisionSeen} was first seen: a takeover needs one full
+     * interval of monotonic time, not merely two writes in a row (a reconnect and a
+     * scheduled tick can come milliseconds apart).
+     */
+    private volatile long foreignSeenAt;
+    private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
     private volatile boolean duplicate;
     private volatile String duplicateDetail;
     /** Run once each time this node's ownership of its id becomes confirmed. */
@@ -140,6 +148,15 @@ public class ClusterPresence {
         this.meterRegistry = meterRegistry;
         this.bucketName = bucketName;
         this.ttlMillis = ttl.toMillis();
+    }
+
+    /**
+     * For tests: the monotonic millisecond clock the takeover interval is measured
+     * with.
+     */
+    ClusterPresence withClock(LongSupplier clock) {
+        this.clock = clock;
+        return this;
     }
 
     private static SharedBucket nodesBucket(NatsConnectionManager connections) {
@@ -228,7 +245,14 @@ public class ClusterPresence {
                 duplicateDetail = null;
             }
             foreignRevisionSeen = 0;
-            nodes.create(key, value).ifPresent(rev -> ownRevision = rev);
+            // A lost create leaves this node unconfirmed: the record belongs to whoever
+            // won it, and the next write tells a predecessor from a twin as usual.
+            long created = 0;
+            try {
+                created = nodes.create(key, value).orElse(0L);
+            } finally {
+                ownRevision = created;
+            }
             return;
         }
         ISharedKv.Versioned seen = current.get();
@@ -258,6 +282,7 @@ public class ClusterPresence {
             // Wait one interval: a live twin rewrites its record by then, a dead
             // predecessor does not.
             foreignRevisionSeen = seen.revision();
+            foreignSeenAt = clock.getAsLong();
             LOGGER.infof("Presence key of node id %s is held by boot %s — checking for one interval whether that is a live JVM "
                     + "or this node's previous boot", connections.node().nodeId(), holder);
             return;
@@ -265,6 +290,9 @@ public class ClusterPresence {
         if (seen.revision() != foreignRevisionSeen) {
             flagDuplicate(holder, "its record kept being rewritten");
             return;
+        }
+        if (clock.getAsLong() - foreignSeenAt < connections.config().presenceInterval().toMillis()) {
+            return; // not yet a full interval: a live twin may simply not have written again
         }
         takeOver(key, value, seen, "its record did not change for one interval");
     }

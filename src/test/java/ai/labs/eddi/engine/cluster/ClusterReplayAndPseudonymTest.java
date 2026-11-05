@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,6 +43,25 @@ class ClusterReplayAndPseudonymTest {
         when(instance.get()).thenReturn(value);
         return instance;
     }
+    @Test
+    @DisplayName("every rejection series exists at zero before the first refusal, so increase() sees the first one")
+    void rejectionCountersArePreRegistered() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        new ClusterMessageSigner(ClusterSigningConfig.of(KEY, List.of(), false, Duration.ofSeconds(60)), registry);
+        for (String kind : ClusterMessageSigner.VERIFIED_KINDS) {
+            for (ClusterMessageSigner.Rejection why : ClusterMessageSigner.Rejection.values()) {
+                var counter = registry.find("eddi.cluster.signing.rejected").tags("kind", kind, "reason", why.name().toLowerCase())
+                        .counter();
+                assertNotNull(counter, kind + "/" + why);
+                assertEquals(0.0, counter.count());
+            }
+        }
+
+        SimpleMeterRegistry keyless = new SimpleMeterRegistry();
+        new ClusterMessageSigner(ClusterSigningConfig.of(null, List.of(), false, Duration.ofSeconds(60)), keyless);
+        assertNull(keyless.find("eddi.cluster.signing.rejected").counter(), "a node that refuses nothing exports no zero series");
+    }
+
     @Test
     @DisplayName("key rotation: a rotated node opens a hash sealed with a previous key; a node on the old key cannot open the new")
     void rotationOpensPreviousKeySeals() {

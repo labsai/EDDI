@@ -15,11 +15,16 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -34,7 +39,10 @@ class ClusterPresenceTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private static final long INTERVAL = ClusterConfig.defaults().presenceInterval().toMillis();
+
     private InMemorySharedKv bucket;
+    private final AtomicLong clock = new AtomicLong(1_000_000L);
 
     @BeforeEach
     void setUp() {
@@ -50,7 +58,7 @@ class ClusterPresenceTest {
     }
 
     private ClusterPresence presence(String nodeId, String boot) {
-        return new ClusterPresence(connections(nodeId, boot), bucket, new SimpleMeterRegistry());
+        return new ClusterPresence(connections(nodeId, boot), bucket, new SimpleMeterRegistry()).withClock(clock::get);
     }
 
     @Test
@@ -100,6 +108,7 @@ class ClusterPresenceTest {
         restarted.onIdentityConfirmed(confirmed::incrementAndGet);
         restarted.publishSafely();
         assertEquals(0, confirmed.get(), "not confirmed on the first connect");
+        clock.addAndGet(INTERVAL);
         restarted.publishSafely(); // unchanged for one interval: taken over
         restarted.publishSafely();
         assertTrue(restarted.isIdentityConfirmed());
@@ -114,11 +123,59 @@ class ClusterPresenceTest {
 
         ClusterPresence restarted = presence("node-a", "boot2");
         restarted.publishSafely();
+        clock.addAndGet(INTERVAL);
         restarted.publishSafely();
 
         assertFalse(restarted.isDuplicate());
         Map<?, ?> record = JSON.readValue(bucket.get("n.node-a").orElseThrow().value(), Map.class);
         assertEquals("boot2", record.get("boot"));
+    }
+
+    @Test
+    @DisplayName("C6: two writes in quick succession (a reconnect and a tick) are not an interval: no takeover, no confirmation")
+    void takeoverNeedsAFullInterval() throws Exception {
+        presence("node-a", "boot1").publishSafely(); // possibly a live JVM between its writes
+
+        ClusterPresence restarted = presence("node-a", "boot2");
+        AtomicInteger confirmed = new AtomicInteger();
+        restarted.onIdentityConfirmed(confirmed::incrementAndGet);
+        restarted.publishSafely();
+        clock.addAndGet(INTERVAL - 1);
+        restarted.publishSafely();
+        restarted.publishSafely();
+
+        assertFalse(restarted.isIdentityConfirmed());
+        assertEquals(0, confirmed.get());
+        Map<?, ?> record = JSON.readValue(bucket.get("n.node-a").orElseThrow().value(), Map.class);
+        assertEquals("boot1", record.get("boot"), "the other record is left alone");
+
+        clock.addAndGet(1);
+        restarted.publishSafely();
+        assertTrue(restarted.isIdentityConfirmed());
+        assertEquals(1, confirmed.get());
+    }
+
+    @Test
+    @DisplayName("C6: a lost create after the own record expired leaves the node unconfirmed, not holding a stale revision")
+    void lostCreateResetsTheOwnRevision() {
+        ISharedKv nodes = spy(bucket);
+        ClusterPresence mine = new ClusterPresence(connections("node-a", "boot1"), nodes, new SimpleMeterRegistry())
+                .withClock(clock::get);
+        AtomicInteger confirmed = new AtomicInteger();
+        mine.onIdentityConfirmed(confirmed::incrementAndGet);
+        mine.publishSafely();
+        assertTrue(mine.isIdentityConfirmed());
+        assertEquals(1, confirmed.get());
+
+        nodes.delete("n.node-a"); // the record expired (e.g. a long NATS outage)
+        doAnswer(inv -> {
+            nodes.put("n.node-a", "{\"node\":\"node-a\",\"boot\":\"boot9\"}".getBytes());
+            return OptionalLong.empty(); // another JVM won the create
+        }).when(nodes).create(anyString(), any());
+        mine.publishSafely();
+
+        assertFalse(mine.isIdentityConfirmed(), "the record now belongs to whoever won the create");
+        assertEquals(1, confirmed.get(), "listeners are not told again");
     }
 
     @Test

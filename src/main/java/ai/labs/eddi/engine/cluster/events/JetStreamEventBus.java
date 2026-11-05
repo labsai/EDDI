@@ -142,6 +142,8 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
     private Counter resyncCounter;
 
     static final int LANE_CAPACITY = 10_000;
+    /** How soon a resync the full control lane refused is offered to it again. */
+    static final long RESYNC_RETRY_MILLIS = 1_000L;
     /** How often (in 2 s ticks) the stream's identity is checked: 30 s. */
     static final int STREAM_CHECK_TICKS = 15;
 
@@ -389,12 +391,14 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
             // onConnected follows. Retry it here, and resync once it succeeds, since
             // with DeliverPolicy.New whatever was published meanwhile never arrives.
             subscribe(connections.requireConnected());
-            if (subscribedOn == null) {
+            if (subscribedOn != null) {
+                firstSubscriptionResynced.set(true);
+                resync("re-subscribed to the event stream after a failed subscription; events published meanwhile are lost");
                 return;
             }
-            firstSubscriptionResynced.set(true);
-            resync("re-subscribed to the event stream after a failed subscription; events published meanwhile are lost");
-            return;
+            // Still failing: perhaps because the stream itself is gone (its provisioning
+            // failed on connect). Fall through, so the check below recreates it and
+            // subscribes again.
         }
         try {
             StreamInfo info = connections.jetStreamManagement().getStreamInfo(stream);
@@ -627,8 +631,15 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
                 }
             });
         } catch (RejectedExecutionException full) {
-            resyncQueued.set(false);
-            LOGGER.warn("Cluster cache resync not queued: the event dispatch queue is full — retried by the next request");
+            // Keep the request: nothing else would repair the dropped events once the
+            // lanes drain. Requests arriving meanwhile join this pending retry.
+            LOGGER.warn("Cluster cache resync not queued: the event dispatch queue is full — retrying shortly");
+            try {
+                connections.scheduler().schedule(this::enqueueResync, RESYNC_RETRY_MILLIS, TimeUnit.MILLISECONDS);
+            } catch (RuntimeException e) {
+                resyncQueued.set(false);
+                LOGGER.debugf("Cluster cache resync retry not scheduled (%s) — retried by the next request", e.getMessage());
+            }
         }
     }
 

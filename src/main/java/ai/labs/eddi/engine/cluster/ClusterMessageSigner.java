@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.cluster;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.impl.Headers;
@@ -96,6 +97,13 @@ public class ClusterMessageSigner {
         UNSIGNED, MALFORMED, UNKNOWN_KEY, BAD_SIGNATURE, EXPIRED, REPLAYED
     }
 
+    /**
+     * The {@code kind} tags {@link #verify} is called with. Their rejection
+     * counters are registered at zero up front: a series born on its first refusal
+     * starts at 1, and Prometheus {@code increase()} cannot see that first sample.
+     */
+    static final List<String> VERIFIED_KINDS = List.of("event", "rpc", "rpc-reply");
+
     /** The outcome of a verification. */
     public record Verdict(boolean accepted, Rejection rejection, String nonce) {
 
@@ -160,6 +168,14 @@ public class ClusterMessageSigner {
         Duration window = config.maxAge() == null ? Duration.ofSeconds(60) : config.maxAge();
         this.seenNonces = Caffeine.newBuilder().maximumSize(MAX_REMEMBERED_NONCES)
                 .expireAfterWrite(window.multipliedBy(2).plusHours(2)).build();
+        if (config.required() || !verificationKeys.isEmpty()) {
+            // Only a node that can refuse anything gets the zero series.
+            for (String kind : VERIFIED_KINDS) {
+                for (Rejection why : Rejection.values()) {
+                    rejectionCounter(kind, why);
+                }
+            }
+        }
     }
 
     /**
@@ -301,8 +317,12 @@ public class ClusterMessageSigner {
         return Verdict.accept(fields.get("n"));
     }
 
+    private Counter rejectionCounter(String kind, Rejection why) {
+        return meterRegistry.counter("eddi.cluster.signing.rejected", "kind", kind, "reason", why.name().toLowerCase());
+    }
+
     private Verdict rejected(String kind, Rejection why) {
-        meterRegistry.counter("eddi.cluster.signing.rejected", "kind", kind, "reason", why.name().toLowerCase()).increment();
+        rejectionCounter(kind, why).increment();
         if (warnedRejections.add(kind + "/" + why)) {
             LOGGER.warnf("Refused a cluster %s: %s (logged once per reason; see eddi.cluster.signing.rejected)", kind,
                     why.name().toLowerCase().replace('_', ' '));

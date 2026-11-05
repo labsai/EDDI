@@ -98,6 +98,14 @@ replay of a message it had already seen, which the 60 s window keeps short.
   rules `metrics.md` already promised. The presence watch drops records past the TTL instead of
   only skipping them, and the signed-event test tampers with the timestamp and the nonce too. Test fixture keys are low-entropy strings (a hex-looking
   key tripped secret scanning).
+- **Second round.** A presence takeover needs one full interval of (monotonic) clock time, not
+  two writes in a row — a reconnect and a scheduled tick can come milliseconds apart and would
+  have confirmed the id over a live twin. A create lost after the own record expired resets the
+  own revision, so the node is no longer "confirmed" without a record. The
+  `eddi.cluster.signing.rejected` series are registered at zero on a node that can refuse
+  anything, so `EddiClusterSigningRejected` fires on the first refusal. A failed subscribe retry
+  falls through to the stream check, which recreates a missing stream; a resync the full control
+  lane refuses is kept and retried after a second instead of waiting for the next request.
 
 **Files:** [`TransientDeployments.java`](../../src/main/java/ai/labs/eddi/engine/cluster/TransientDeployments.java),
 [`AgentDeploymentManagement.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagement.java),
