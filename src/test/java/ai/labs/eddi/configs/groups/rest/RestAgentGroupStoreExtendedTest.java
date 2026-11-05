@@ -90,6 +90,18 @@ class RestAgentGroupStoreExtendedTest {
         }
 
         @Test
+        @DisplayName("a group that does not exist is reported as missing, not as an admin-only teamBudget edit")
+        void missingStoredGroupIsNotTreatedAsATeamBudgetChange() throws Exception {
+            var config = new AgentGroupConfiguration(); // teamBudget: null
+            config.setName("Group");
+            when(groupStore.read("missing", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+            when(groupStore.update("missing", 1, config)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> restStore.updateGroup("missing", 1, config));
+            verify(groupStore).update("missing", 1, config);
+        }
+
+        @Test
         @DisplayName("descriptor not changed when name/description are same")
         void noChangeWhenSame() throws Exception {
             var config = new AgentGroupConfiguration();

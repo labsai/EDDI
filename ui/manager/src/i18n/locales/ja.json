@@ -4697,6 +4697,7 @@
     "limitedByTenant": "テナント予算による制限",
     "exhausted": "予算を使い切りました",
     "unavailable": "現在、予算を読み取れません。",
+    "staleRead": "予算を更新できませんでした。表示中の数値は古い可能性があります。",
     "adjust": "今月を調整",
     "transfer": "予算を移す",
     "history": "履歴",

@@ -225,6 +225,20 @@ describe("TeamBudgetsTable", () => {
     expect(await screen.findByTestId("team-budgets-empty")).toBeInTheDocument();
   });
 
+  it("keeps the cached table and an open transfer dialog when a background poll fails", async () => {
+    const { queryClient } = renderPage("/manage/quotas", <TeamBudgetsTable />);
+    fireEvent.click(await screen.findByTestId("team-budget-open-transfer"));
+    const dialog = await screen.findByTestId("team-budget-transfer-dialog");
+    server.use(http.get("*/administration/team-budgets", () => HttpResponse.json({ error: "down" }, { status: 503 })));
+    await act(async () => {
+      await queryClient.refetchQueries();
+    });
+    expect(await screen.findByTestId("team-budgets-stale")).toBeInTheDocument();
+    expect(screen.queryByTestId("team-budgets-error")).toBeNull();
+    expect(screen.getByTestId("team-budget-row-studio")).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+  });
+
   it("will not transfer a team to itself", async () => {
     renderPage("/manage/quotas", <TeamBudgetsTable />);
     fireEvent.click(await screen.findByTestId("team-budget-open-transfer"));

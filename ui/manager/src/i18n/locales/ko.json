@@ -4697,6 +4697,7 @@
     "limitedByTenant": "테넌트 예산에 의해 제한됨",
     "exhausted": "예산 소진",
     "unavailable": "지금은 예산을 읽을 수 없습니다.",
+    "staleRead": "예산을 새로 고칠 수 없습니다. 이 수치는 최신이 아닐 수 있습니다.",
     "adjust": "이번 달 조정",
     "transfer": "예산 이전",
     "history": "기록",

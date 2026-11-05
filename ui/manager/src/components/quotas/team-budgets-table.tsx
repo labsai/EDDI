@@ -28,10 +28,15 @@ export function TeamBudgetsTable() {
   const [transferFrom, setTransferFrom] = useState<string | null>(null);
 
   const teams = (budgets.data?.teams ?? []).filter((s) => s.capUsd !== null);
-  if (groups.isError) {
+  // Only a failure with nothing loaded replaces the table. A failed background poll
+  // keeps the cached table — and with it an open TransferBudgetDialog, whose
+  // Idempotency-Key and completion callback would be lost on unmount, inviting a
+  // repeat of a transfer that already succeeded.
+  if (groups.isError && !groups.data) {
     return null;
   }
-  if (budgets.isError) {
+  const staleRead = budgets.isError && budgets.data !== undefined;
+  if (budgets.isError && !staleRead) {
     // A failed budget read (503) is shown, not hidden: an empty page would read as
     // "no team has a budget".
     return (
@@ -68,6 +73,17 @@ export function TeamBudgetsTable() {
           </Button>
         )}
       </div>
+
+      {staleRead && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="team-budgets-stale">
+          <p role="alert" className="text-sm text-destructive">
+            {t("teamBudget.staleRead", "The budget could not be refreshed; these numbers may be out of date.")}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => void budgets.refetch()} disabled={budgets.isFetching} data-testid="team-budgets-retry">
+            {t("common.retry", "Retry")}
+          </Button>
+        </div>
+      )}
 
       {teams.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="team-budgets-empty">

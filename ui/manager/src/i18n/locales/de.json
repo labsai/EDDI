@@ -4697,6 +4697,7 @@
     "limitedByTenant": "Durch das Mandantenbudget begrenzt",
     "exhausted": "Budget aufgebraucht",
     "unavailable": "Das Budget konnte gerade nicht gelesen werden.",
+    "staleRead": "Das Budget konnte nicht aktualisiert werden; diese Zahlen sind möglicherweise veraltet.",
     "adjust": "Diesen Monat anpassen",
     "transfer": "Budget übertragen",
     "history": "Verlauf",

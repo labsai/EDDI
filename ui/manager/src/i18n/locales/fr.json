@@ -4749,6 +4749,7 @@
     "limitedByTenant": "Limité par le budget du locataire",
     "exhausted": "Budget épuisé",
     "unavailable": "Le budget n'a pas pu être lu pour le moment.",
+    "staleRead": "Le budget n'a pas pu être actualisé ; ces chiffres peuvent être obsolètes.",
     "adjust": "Ajuster ce mois",
     "transfer": "Transférer du budget",
     "history": "Historique",

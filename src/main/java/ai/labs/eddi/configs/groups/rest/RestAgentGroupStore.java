@@ -155,13 +155,17 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
      * stored block is read so an editor can neither raise nor remove a cap; an
      * unreadable one counts as changed, so the save needs the admin role (fail
      * closed) -- treating it as "had none" would let {@code teamBudget: null}
-     * through as unchanged.
+     * through as unchanged. A group that does not exist is the exception: it has no
+     * cap to raise or remove, so it is checked as "had none" and the update itself
+     * reports the missing resource.
      */
     private void requireTeamBudgetChangeAllowed(String id, Integer version, AgentGroupConfiguration neu) {
         TeamBudgetConfig after = neu == null ? null : neu.getTeamBudget();
         AgentGroupConfiguration old;
         try {
             old = groupStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            old = null;
         } catch (Exception e) {
             LOG.debugf("Could not read group %s v%s for the teamBudget edit check: %s", sanitize(id), version, e.getMessage());
             TeamBudgetEditPolicy.checkAgainstUnreadable(after, teamBudgetAdminOnlyEdits, resourceAccessGuard);

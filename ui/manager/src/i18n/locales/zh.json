@@ -4697,6 +4697,7 @@
     "limitedByTenant": "受租户预算限制",
     "exhausted": "预算已用完",
     "unavailable": "目前无法读取预算。",
+    "staleRead": "无法刷新预算；这些数字可能已过时。",
     "adjust": "调整本月",
     "transfer": "转移预算",
     "history": "历史",

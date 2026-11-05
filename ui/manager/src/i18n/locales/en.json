@@ -4738,6 +4738,7 @@
     "limitedByTenant": "Limited by the tenant budget",
     "exhausted": "Budget spent",
     "unavailable": "The budget could not be read right now.",
+    "staleRead": "The budget could not be refreshed; these numbers may be out of date.",
     "adjust": "Adjust this month",
     "transfer": "Transfer budget",
     "history": "History",

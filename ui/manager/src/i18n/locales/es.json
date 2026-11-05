@@ -4749,6 +4749,7 @@
     "limitedByTenant": "Limitado por el presupuesto del inquilino",
     "exhausted": "Presupuesto agotado",
     "unavailable": "No se pudo leer el presupuesto en este momento.",
+    "staleRead": "No se pudo actualizar el presupuesto; estas cifras pueden estar desactualizadas.",
     "adjust": "Ajustar este mes",
     "transfer": "Transferir presupuesto",
     "history": "Historial",

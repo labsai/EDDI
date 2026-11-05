@@ -104,8 +104,9 @@ combined remainder.
 
 Two bounds to know about:
 
-- **Overshoot** is at least one in-flight turn per concurrent discussion plus one synthesis phase, as for
-  `maxCostPerDiscussion`, and more where several turns are dispatched under one check: a `PARALLEL` phase checks
+- **Overshoot** is at least one in-flight turn per concurrent discussion, as for `maxCostPerDiscussion`. Under
+  `SYNTHESIZE_NOW` add one synthesis phase, which is exempt from the ceiling; under `ABORT` the discussion fails at
+  the ceiling and no synthesis phase runs. It is more where several turns are dispatched under one check: a `PARALLEL` phase checks
   the ceiling once and then runs every speaker, and a task-force wave runs all its tasks before the next check. So
   one discussion can overshoot by a whole parallel phase or wave; size the cap with that margin when a team uses
   them. Two discussions of the same team running at once each learn of the other's spend at their next charge.

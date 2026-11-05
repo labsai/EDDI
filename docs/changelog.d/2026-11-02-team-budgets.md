@@ -71,6 +71,15 @@ CodeRabbit's full review of the merged-with-main head:
 - Docs: kill-switch timing, the overshoot of `PARALLEL` phases and task-force waves, retries across a month
   boundary, the 50-group table limit, and the corrected upgrade note and `TeamBudgetConfig` Javadoc.
 
+Second round of review follow-ups:
+
+- The `teamBudget` edit check treats a group that does not exist as having no cap, so a non-admin's update of a
+  missing id gets the store's 404 instead of a misleading admin-only 403; other store failures still fail closed.
+- Manager: a failed background poll of the Quotas table keeps the cached table and any open transfer dialog (and
+  its `Idempotency-Key`) mounted, with a "could not be refreshed" notice and a retry; only a failure with nothing
+  loaded replaces the table.
+- Docs: the synthesis-phase overshoot applies only under `SYNTHESIZE_NOW`; `ABORT` runs no synthesis phase.
+
 ```decision-log
 | 2026-11-02 | A team's monthly spend is charged from the root discussion's cost-ledger delta; the root group pays and a nested child charges nothing | The ledger already holds member, nested and group-system spend and records by replacement, so a delta cannot double-count; the per-call spend feed has no root and cannot express the in-run ceiling | Per-call `ISpendSink` events (attribute nested children to the child group, tenant-accepted charges only); reading the tenant counter (stays 0 with quotas disabled) |
 | 2026-11-02 | Gates fail closed on an unreadable team budget, metering never fails work | A budget nobody can read is not a budget with room; failing open would drop every cap during an outage | Fail-open at the gate |
