@@ -2,6 +2,7 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import { setDefaultVariables, setupI18n, SUPPORTED_LANGUAGES, type LocaleLoader, type SupportedLanguage } from "@eddi/ui";
+import { withConversationLocales } from "@eddi/conversation";
 import en from "./locales/en.json";
 import { brandVariables, getBrand, subscribeBrand } from "@/lib/brand";
 
@@ -55,11 +56,18 @@ const LOCALE_LOADERS: Record<Exclude<SupportedLanguage, "en">, LocaleLoader> = {
  * `setupI18n` (@eddi/ui) also keeps `dir` and `lang` on `<html>` in step with
  * the RESOLVED language.
  */
+/**
+ * The shared `conversation.*` strings (@eddi/conversation) ride along in each
+ * locale's bundle: the components the Manager takes from that package render
+ * them.
+ */
+const bundles = withConversationLocales(en, LOCALE_LOADERS);
+
 export const i18nReady: Promise<unknown> = setupI18n({
   i18n,
   languages: SUPPORTED_LANGUAGES,
-  english: en,
-  loaders: LOCALE_LOADERS,
+  english: bundles.english,
+  loaders: bundles.loaders,
   plugins: [LanguageDetector, initReactI18next],
   // `{{productName}}` / `{{shortName}}` in any string, from the deployment's
   // brand (src/lib/brand.ts). Set before `i18nReady` resolves, so the first

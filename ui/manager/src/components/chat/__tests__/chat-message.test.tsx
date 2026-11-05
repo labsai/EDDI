@@ -33,9 +33,11 @@ const agentNoContent: ChatMessageType = {
 };
 
 describe("ChatMessage — untrusted HTML", () => {
-  it("keeps raw HTML in bot output escaped rather than live markup", () => {
+  it("never turns raw HTML in bot output into live frames or images", () => {
     // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
-    // with full app-origin access (no CSP), so rehypeRaw must stay off.
+    // with full app-origin access (no CSP). The one markdown renderer
+    // (@eddi/conversation) passes HTML only through rehype-sanitize, and turns
+    // every image into a link.
     const { container } = renderWithProviders(
       <ChatMessage
         message={{

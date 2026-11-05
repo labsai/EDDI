@@ -3,7 +3,7 @@
    ────────────────────────────────────────────── */
 
 import { memo } from "react";
-import type { QuickReply } from "@/types";
+import type { QuickReply } from "@eddi/core";
 
 interface QuickRepliesProps {
   replies: QuickReply[];

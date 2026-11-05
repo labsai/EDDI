@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────
-   ChatInput — Auto-growing textarea + send button
+   Composer — Auto-growing textarea + send button
    With a secret-mode (lock) toggle for client-initiated secret input.
    ────────────────────────────────────────────── */
 
@@ -13,9 +13,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Eye, EyeOff, LoaderCircle, Lock, LockOpen, Paperclip, SendHorizontal, X } from "lucide-react";
-import { useChatState, useChatDispatch, useComposerConversationRef, DEFAULT_PLACEHOLDER } from "@/store/chat-store";
-import { isImeComposing } from "@/ime";
-import { t } from "@/i18n";
+import { isImeComposing } from "./ime";
+import type { Translate } from "../i18n/text";
+import { useConversationContext } from "../react/context";
+import { useConversationText } from "../react/hooks";
 import {
   uploadAttachment,
   deleteAttachment,
@@ -58,29 +59,29 @@ export function discardAttachment(conversationId: string, storageRef: string): v
 }
 
 /** Turn an upload failure into copy that names the actual reason. */
-function describeUploadFailure(err: unknown, fileName: string): string {
+function describeUploadFailure(err: unknown, fileName: string, t: Translate): string {
   if (err instanceof ApiError) {
     const { code, message } = errorPayload(err);
     // Quarkus enforces its own request-body cap before the attachment layer
     // runs, so an oversize upload can arrive as a bare 413 with no envelope.
     if (err.status === 413 || code === "ATTACHMENT_TOO_LARGE") {
-      return t("attach.tooLarge", { file: fileName });
+      return t("conversation.attach.tooLarge", { file: fileName });
     }
     if (err.status === 401 || err.status === 403) {
-      return t("attach.notAllowed");
+      return t("conversation.attach.notAllowed");
     }
     // ATTACHMENT_REJECTED is a catch-all: a declared-vs-detected MIME mismatch
     // (there is no type allowlist), the per-conversation file-count and byte
     // quotas, empty files — and on Postgres any wrapped SQLException, so an
     // outage arrives dressed as a rejection too. Only the server's own text
     // separates them, so prefer it to a guess.
-    if (message) return t("attach.rejectedWhy", { file: fileName, message });
-    if (code) return t("attach.rejected", { file: fileName });
+    if (message) return t("conversation.attach.rejectedWhy", { file: fileName, message });
+    if (code) return t("conversation.attach.rejected", { file: fileName });
   }
-  return t("attach.failed", { file: fileName });
+  return t("conversation.attach.failed", { file: fileName });
 }
 
-interface ChatInputProps {
+export interface ComposerProps {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
   conversationId?: string | null;
@@ -90,6 +91,8 @@ interface ChatInputProps {
    * embedded widget must not grab the host page's focus when it loads.
    */
   focusSignal?: number;
+  /** The host's placeholder; the translated default without one. */
+  placeholder?: string;
 }
 
 function isCoarsePointer(): boolean {
@@ -99,10 +102,13 @@ function isCoarsePointer(): boolean {
   );
 }
 
-export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }: ChatInputProps) {
-  const { isProcessing, config, isSecretMode, pendingAttachments, restoreDraft } =
-    useChatState();
-  const dispatch = useChatDispatch();
+export function Composer({ onSend, disabled, conversationId, focusSignal = 0, placeholder }: ComposerProps) {
+  const {
+    state: { isProcessing, isSecretMode, pendingAttachments, restoreDraft },
+    dispatch,
+    composerConversation,
+  } = useConversationContext();
+  const t = useConversationText();
   const [value, setValue] = useState("");
   /**
    * Files currently uploading, shown as placeholder chips ahead of the staged
@@ -246,7 +252,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
   // does not change the conversation, and clearing the ref would delete a file
   // the user attached to the conversation they are still in.
   const ownConversationRef = useRef<string | null | undefined>(conversationId);
-  const currentConversationRef = useComposerConversationRef() ?? ownConversationRef;
+  const currentConversationRef = composerConversation ?? ownConversationRef;
   useLayoutEffect(() => {
     currentConversationRef.current = conversationId;
   }, [conversationId, currentConversationRef]);
@@ -330,7 +336,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
       const room =
         MAX_ATTACHMENTS_PER_TURN - pendingAttachments.length - uploading.length;
       if (room <= 0) {
-        notify(t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN }));
+        notify(t("conversation.attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN }));
         return;
       }
       const accepted = picked.slice(0, room);
@@ -338,8 +344,8 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
         // Name the casualties: slice() keeps FileList order, which is
         // OS-determined, so "2 not attached" leaves the user guessing which.
         notify(
-          `${t("attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN })} ` +
-            t("attach.notAttached", {
+          `${t("conversation.attach.maxFiles", { max: MAX_ATTACHMENTS_PER_TURN })} ` +
+            t("conversation.attach.notAttached", {
               files: picked
                 .slice(room)
                 .map((f) => f.name)
@@ -374,11 +380,11 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
             dispatch({ type: "ADD_ATTACHMENT", attachment: result });
             announce(
               result.forwardableInline === false
-                ? t("attach.doneLarge", { file: file.name })
-                : t("attach.done", { file: file.name }),
+                ? t("conversation.attach.doneLarge", { file: file.name })
+                : t("conversation.attach.done", { file: file.name }),
             );
           } catch (err) {
-            notify(describeUploadFailure(err, file.name));
+            notify(describeUploadFailure(err, file.name, t));
           } finally {
             setUploading((prev) => prev.filter((u) => u.id !== id));
           }
@@ -386,6 +392,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
       );
     },
     [
+      t,
       conversationId,
       currentConversationRef,
       dispatch,
@@ -424,9 +431,9 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
         discardAttachment(owner, storageRef);
       }
       dispatch({ type: "REMOVE_ATTACHMENT", storageRef });
-      announce(t("attach.removed", { file: fileName }));
+      announce(t("conversation.attach.removed", { file: fileName }));
     },
-    [conversationId, dispatch, announce],
+    [conversationId, dispatch, announce, t],
   );
 
   return (
@@ -459,12 +466,12 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
                 // gives a screen-reader user no way to tell them apart.
                 aria-label={
                   duplicateNames.has(a.fileName)
-                    ? t("attach.removeNth", {
+                    ? t("conversation.attach.removeNth", {
                         file: a.fileName,
                         n: i + 1,
                         total: pendingAttachments.length,
                       })
-                    : t("attach.remove", { file: a.fileName })
+                    : t("conversation.attach.remove", { file: a.fileName })
                 }
                 aria-describedby={
                   a.forwardableInline === false ? `warn-${a.storageRef}` : undefined
@@ -480,7 +487,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
                   className="chat-attachments__warn"
                   data-testid="attachment-warn"
                 >
-                  {t("attach.chipLarge")}
+                  {t("conversation.attach.chipLarge")}
                 </span>
               )}
             </span>
@@ -496,7 +503,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
                 <LoaderCircle className="chat-attachments__icon chat-icon-spin" size="1em" /> {u.name}
               </span>
               {/* The spinner is the only visual difference from a staged chip. */}
-              <span className="chat-sr-only">{t("attach.uploading")}</span>
+              <span className="chat-sr-only">{t("conversation.attach.uploading")}</span>
             </span>
           ))}
         </div>
@@ -522,11 +529,11 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
         disabled={!conversationId || atCapacity || isProcessing || disabled}
         title={
           atCapacity
-            ? t("input.attachLimit", { max: MAX_ATTACHMENTS_PER_TURN })
-            : t("input.attach")
+            ? t("conversation.input.attachLimit", { max: MAX_ATTACHMENTS_PER_TURN })
+            : t("conversation.input.attach")
         }
         data-testid="chat-attach-btn"
-        aria-label={isUploading ? t("input.attachBusy") : t("input.attach")}
+        aria-label={isUploading ? t("conversation.input.attachBusy") : t("conversation.input.attach")}
       >
         {isUploading ? (
           <LoaderCircle className="chat-icon-spin" size="1em" />
@@ -543,9 +550,9 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
         // hears "Secret mode, toggle button, pressed" instead of a verb that
         // flips. A turn in flight keeps the mode it was sent with.
         disabled={isProcessing}
-        title={isSecretMode ? t("input.secretOn") : t("input.secretOff")}
+        title={isSecretMode ? t("conversation.input.secretOn") : t("conversation.input.secretOff")}
         data-testid="chat-secret-toggle"
-        aria-label={t("input.secretToggle")}
+        aria-label={t("conversation.input.secretToggle")}
         aria-pressed={isSecretMode}
       >
         {isSecretMode ? <Lock size="1em" /> : <LockOpen size="1em" />}
@@ -560,9 +567,9 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={t("input.secretPlaceholder")}
+            placeholder={t("conversation.input.secretPlaceholder")}
             disabled={disabled}
-            aria-label={t("input.label")}
+            aria-label={t("conversation.input.label")}
             className="chat-input__secret-field"
             autoComplete="off"
           />
@@ -570,8 +577,8 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
             type="button"
             className="chat-input__eye-toggle"
             onClick={() => setSecretVisible((v) => !v)}
-            title={secretVisible ? t("input.hide") : t("input.show")}
-            aria-label={secretVisible ? t("input.secretHide") : t("input.secretShow")}
+            title={secretVisible ? t("conversation.input.hide") : t("conversation.input.show")}
+            aria-label={secretVisible ? t("conversation.input.secretHide") : t("conversation.input.secretShow")}
             data-testid="chat-eye-toggle"
           >
             {/* Shows the action, like the aria-label: an open eye reveals. */}
@@ -587,11 +594,9 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            config.placeholder && config.placeholder !== DEFAULT_PLACEHOLDER
-              ? config.placeholder
-              : t("input.placeholder")
+            placeholder || t("conversation.input.placeholder")
           }
-          aria-label={t("input.label")}
+          aria-label={t("conversation.input.label")}
           disabled={disabled}
           rows={1}
           className="chat-input__textarea"
@@ -603,7 +608,7 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
         onClick={handleSend}
         disabled={!canSend}
         className={`chat-input__send ${canSend ? "chat-input__send--active" : "chat-input__send--disabled"}`}
-        aria-label={t("input.send")}
+        aria-label={t("conversation.input.send")}
       >
         {isProcessing ? (
           <span className="chat-input__spinner" />

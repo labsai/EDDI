@@ -9,7 +9,7 @@ import {
   act,
   within,
 } from "@testing-library/react";
-import { ChatInput, discardAttachment, DISCARD_RETRY_MS } from "./ChatInput";
+import { Composer as ChatInput, discardAttachment, DISCARD_RETRY_MS } from "@eddi/conversation";
 import { ChatProvider, useChatState } from "@/store/chat-store";
 import {
   uploadAttachment,

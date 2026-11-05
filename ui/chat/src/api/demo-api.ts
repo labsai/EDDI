@@ -6,6 +6,7 @@
    ────────────────────────────────────────────── */
 
 import type { ChatMessage, QuickReply, SSEEvent } from "@/types";
+import type { AgentTransport } from "@eddi/conversation";
 import {
   CONVERSATION_STEP,
   type RatingClient,
@@ -219,6 +220,25 @@ export async function* demoSendMessageStreaming(
 export function demoGetQuickReplies(message: string): QuickReply[] {
   const response = getResponse(message);
   return response.quickReplies ?? [];
+}
+
+/** The demo as an AgentConversation transport: no server, scripted turns. */
+export function createDemoTransport(): AgentTransport {
+  const none = () => Promise.resolve();
+  return {
+    mode: "local",
+    welcome: async () => {
+      const { conversationId, welcomeMessage, quickReplies } = await demoStartConversation();
+      return { conversationId, message: welcomeMessage, quickReplies };
+    },
+    stream: (_conversationId, text) => demoSendMessageStreaming(text),
+    quickRepliesAfter: demoGetQuickReplies,
+    read: () => Promise.reject(new Error("the demo has no server to read")),
+    undo: none,
+    redo: none,
+    rerun: none,
+    cancel: none,
+  };
 }
 
 /* ─── Demo ratings ────────────────────────────── */

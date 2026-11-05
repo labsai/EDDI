@@ -7,9 +7,9 @@
 
 import { useState, useCallback, useId, type KeyboardEvent } from "react";
 import { Eye, EyeOff, Lock, SendHorizontal } from "lucide-react";
-import { useChatDispatch } from "@/store/chat-store";
-import { isImeComposing } from "@/ime";
-import { t } from "@/i18n";
+import { isImeComposing } from "./ime";
+import { useConversationContext } from "../react/context";
+import { useConversationText } from "../react/hooks";
 
 interface SecretInputProps {
   label?: string;
@@ -42,7 +42,8 @@ export function SecretInput({
   disabled = false,
   autoFocus = true,
 }: SecretInputProps) {
-  const dispatch = useChatDispatch();
+  const { dispatch } = useConversationContext();
+  const t = useConversationText();
   const [value, setValue] = useState(defaultValue);
   const [visible, setVisible] = useState(false);
   const inputId = useId();
@@ -109,7 +110,7 @@ export function SecretInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder || (isSecret ? t("input.secretPlaceholder") : "")}
+            placeholder={placeholder || (isSecret ? t("conversation.input.secretPlaceholder") : "")}
             disabled={disabled}
             autoFocus={autoFocus}
             autoComplete={isSecret ? "off" : undefined}
@@ -120,8 +121,8 @@ export function SecretInput({
               type="button"
               className="secret-input__eye-toggle"
               onClick={() => setVisible((v) => !v)}
-              aria-label={visible ? t("input.secretHide") : t("input.secretShow")}
-              title={visible ? t("input.hide") : t("input.show")}
+              aria-label={visible ? t("conversation.input.secretHide") : t("conversation.input.secretShow")}
+              title={visible ? t("conversation.input.hide") : t("conversation.input.show")}
               data-testid="secret-input-eye"
             >
               {/* Shows the action, like the aria-label: an open eye reveals. */}
@@ -134,7 +135,7 @@ export function SecretInput({
           className={`chat-input__send ${value && !disabled ? "chat-input__send--active" : "chat-input__send--disabled"}`}
           onClick={handleSubmit}
           disabled={!value || disabled}
-          aria-label={isSecret ? t("input.sendSecret") : t("input.send")}
+          aria-label={isSecret ? t("conversation.input.sendSecret") : t("conversation.input.send")}
           data-testid="secret-input-send"
         >
           <SendHorizontal size="1em" />
@@ -146,7 +147,7 @@ export function SecretInput({
         onClick={handleCancel}
         data-testid="secret-input-cancel"
       >
-        {t("input.typeInstead")}
+        {t("conversation.input.typeInstead")}
       </button>
     </div>
   );

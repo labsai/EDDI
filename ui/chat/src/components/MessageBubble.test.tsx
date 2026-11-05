@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MessageBubble } from "./MessageBubble";
-import { looksLikeMath } from "./markdown-plugins";
+import { Message as MessageBubble } from "@eddi/conversation";
+import { looksLikeMath } from "@eddi/conversation";
 import { markdownLink } from "@eddi/core";
 
 describe("looksLikeMath", () => {

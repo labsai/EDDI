@@ -9,7 +9,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@eddi/core";
-import { t } from "@/i18n";
+import { useConversationText } from "../react/hooks";
 
 interface StepRatingProps {
   stepIndex: number;
@@ -20,6 +20,7 @@ interface StepRatingProps {
 }
 
 export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingProps) {
+  const t = useConversationText();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [comment, setComment] = useState("");
@@ -61,7 +62,7 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
     <div
       className={`step-rating${score !== undefined ? " step-rating--rated" : ""}`}
       role="group"
-      aria-label={t("rating.reply.group")}
+      aria-label={t("conversation.rating.reply.group")}
       data-testid={`step-rating-${stepIndex}`}
     >
       <div className="step-rating__buttons">
@@ -69,8 +70,8 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
           type="button"
           className="step-rating__btn"
           aria-pressed={score === 1}
-          aria-label={t("rating.reply.up")}
-          title={t("rating.reply.up")}
+          aria-label={t("conversation.rating.reply.up")}
+          title={t("conversation.rating.reply.up")}
           onClick={() => rate(1)}
           data-testid="step-rating-up"
         >
@@ -80,8 +81,8 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
           type="button"
           className="step-rating__btn"
           aria-pressed={score === 0}
-          aria-label={t("rating.reply.down")}
-          title={t("rating.reply.down")}
+          aria-label={t("conversation.rating.reply.down")}
+          title={t("conversation.rating.reply.down")}
           onClick={() => rate(0)}
           aria-expanded={hasDetails ? detailsOpen : undefined}
           aria-controls={hasDetails && detailsOpen ? formId : undefined}
@@ -96,7 +97,7 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
           id={formId}
           className="step-rating__details"
           role="group"
-          aria-label={t("rating.reply.detailsLabel")}
+          aria-label={t("conversation.rating.reply.detailsLabel")}
           data-testid="step-rating-details"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -105,7 +106,7 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
             }
           }}
         >
-          <p className="step-rating__question">{t("rating.reply.whatWentWrong")}</p>
+          <p className="step-rating__question">{t("conversation.rating.reply.whatWentWrong")}</p>
           {profile.reasonTags.length > 0 && (
             <div className="rating-tags">
               {profile.reasonTags.map((tag, i) => (
@@ -125,8 +126,8 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
           {commentOffered(profile, "THUMBS", 0) && (
             <textarea
               className="rating-comment"
-              aria-label={t("rating.comment.label")}
-              placeholder={t("rating.comment.placeholder")}
+              aria-label={t("conversation.rating.comment.label")}
+              placeholder={t("conversation.rating.comment.placeholder")}
               maxLength={profile.commentMaxLength}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
@@ -137,10 +138,10 @@ export function StepRating({ stepIndex, rating, profile, onRate }: StepRatingPro
           )}
           <div className="step-rating__actions">
             <button type="button" className="rating-btn rating-btn--primary" onClick={send} data-testid="step-rating-send">
-              {t("rating.send")}
+              {t("conversation.rating.send")}
             </button>
             <button type="button" className="rating-btn" onClick={() => setDetailsOpen(false)} data-testid="step-rating-skip">
-              {t("rating.skip")}
+              {t("conversation.rating.skip")}
             </button>
           </div>
         </div>

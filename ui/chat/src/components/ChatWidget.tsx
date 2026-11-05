@@ -1,167 +1,50 @@
 /* ──────────────────────────────────────────────
-   ChatWidget — Main chat orchestrator
-   Manages conversation lifecycle, message flow,
-   and composes all sub-components.
+   ChatWidget — the embeddable chat
+   Wires the route, the embedding (tokens, colours, config) and the agent's
+   profile to the shared AgentConversation (@eddi/conversation), and composes
+   the shared conversation components with the widget's own chrome.
    ────────────────────────────────────────────── */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 
-import { useChatState, useChatDispatch } from "@/store/chat-store";
-import { t } from "@/i18n";
+import { useChatState, useChatDispatch, useChatController, DEFAULT_PLACEHOLDER } from "@/store/chat-store";
+import { t, getLocale } from "@/i18n";
 import { useChatRoute } from "@/location";
-import { MessageBubble } from "./MessageBubble";
-import { ChatInput } from "./ChatInput";
-import { SecretInput } from "./SecretInput";
-import { QuickReplies } from "./QuickReplies";
-import { TypingIndicator, ThinkingIndicator, indicatorStatusText } from "./Indicators";
-import { ScrollToBottom } from "./ScrollToBottom";
 import { ChatHeader } from "./ChatHeader";
+import {
+  Composer,
+  Message,
+  MessageList,
+  PausedCard,
+  QuickReplies,
+  RatingCard,
+  SecretInput,
+  ThinkingIndicator,
+  TypingIndicator,
+  createConversationTransport,
+  createManagedTransport,
+  indicatorStatusText,
+} from "@eddi/conversation";
 
 import {
-  startConversation,
-  readConversation,
-  sendMessage,
-  sendMessageStreaming,
-  sendManagedAgentMessage,
-  loadManagedConversation,
-  undoConversation,
-  redoConversation,
   fetchAgentProfile,
-  rerunLastStep,
-  endManagedConversation,
   setBaseUrl,
   setAuthToken,
-  ApiError,
   parseRatingProfile,
-  lastStepIndex,
   ratableSteps,
-  buildAttachmentContext,
-  outputsCarryStepIndexes,
-  stepsToMessages,
-  cancelConversation,
-  parseDoneSnapshot,
-  parseErrorEvent,
-  isSkippedTurn,
   isPausedState,
-  extractOutputTexts,
-  extractOutputImages,
-  findInputField,
-  isTurnPaused,
-  parseToolCallName,
-  UNCONSUMED_STREAM_ERROR_CODES,
   type ApprovalStatus,
-  type DoneSnapshot,
-  type OutputImage,
+  type ConversationSnapshot,
 } from "@eddi/core";
 import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
 import { readUrlToken } from "@/api/chat-config";
-import {
-  isDemoMode,
-  demoStartConversation,
-  demoSendMessageStreaming,
-  demoGetQuickReplies,
-  demoRatingClient,
-  DEMO_RATING_PROFILE,
-} from "@/api/demo-api";
+import { isDemoMode, createDemoTransport, demoRatingClient, DEMO_RATING_PROFILE } from "@/api/demo-api";
 import { httpRatingClient } from "@/api/rating-api";
 import { useRatings } from "@/hooks/useRatings";
-import { RatingCard } from "./RatingCard";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
-import { PausedCard } from "./PausedCard";
-import { skippedTurnMessage } from "@/turn-notices";
-import type {
-  ChatMessage,
-  SSEEvent,
-  ChatConfig,
-  ConversationState,
-  ConversationSnapshot,
-} from "@/types";
+import type { ChatConfig } from "@/types";
 import { END_REASON_AGENT_VERSION_RETIRED } from "@/types";
-
-/**
- * Per-turn mutable bookkeeping for the SSE loop. `tokenCount` is what
- * distinguishes a genuinely empty answer from a turn the server dropped.
- */
-interface TurnContext {
-  tokenCount: number;
-  /**
-   * The conversation state as it was when this turn was sent. Required to tell
-   * a turn that PAUSED (accepted, then gated) from one the server DROPPED
-   * (rejected because the conversation was already paused/busy/ended) — both
-   * end with zero tokens and the same conversationState.
-   */
-  stateBeforeSend: ConversationState | null;
-  /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
-  userMessageId: string | null;
-  /**
-   * This turn's own `done` said AWAITING_HUMAN. A read right after it can still
-   * see the previous stored state (READY), because a backend may announce the
-   * pause before persisting it; such a read must not take the pause back.
-   */
-  announcedPause: boolean;
-  /**
-   * The stream ended with a `done` whose payload could not be parsed. The turn
-   * finished on the server, but its outputs, quick replies and state are not
-   * known yet: the caller re-reads the conversation and applies that instead.
-   */
-  doneUnreadable: boolean;
-}
-
-function newTurn(
-  stateBeforeSend: ConversationState | null,
-  userMessageId: string | null = null,
-): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false };
-}
-
-function makeAgentMessage(content: string, images?: OutputImage[], stepIndex?: number): ChatMessage {
-  return {
-    id: `agent-${Date.now()}-${Math.random()}`,
-    role: "agent",
-    content,
-    timestamp: Date.now(),
-    ...(images?.length ? { images } : {}),
-    ...(stepIndex !== undefined ? { stepIndex } : {}),
-  };
-}
-
-/**
- * Text the widget itself wrote — a refused send, a failed undo — as opposed to
- * something the agent said. It renders as a system notice, never as an agent
- * bubble, so a reader cannot take "Undo failed" for the agent speaking.
- */
-function makeNotice(content: string): ChatMessage {
-  return {
-    id: `notice-${Date.now()}-${Math.random()}`,
-    role: "agent",
-    kind: "notice",
-    content,
-    timestamp: Date.now(),
-  };
-}
-
-/** Transcript copy for a conversation that could not be started. */
-function startFailureMessage(err: unknown, environment?: string): string {
-  if (err instanceof ApiError && err.status === 404) {
-    return environment
-      ? t("start.notFoundEnv", { env: environment })
-      : t("start.notFound");
-  }
-  // 401 is "no valid credentials"; 403 is "refused". A 403 can also be the
-  // server declining an origin it does not recognise, which nothing in the
-  // response distinguishes, so the copy stays factual and blames nobody.
-  if (err instanceof ApiError && err.status === 401) {
-    return t("start.unauthorized");
-  }
-  if (err instanceof ApiError && err.status === 403) {
-    return t("start.forbidden");
-  }
-  if (err instanceof ApiError && err.status === 400) {
-    return t("start.badRequest");
-  }
-  return t("start.generic");
-}
 
 /** How long to wait for a postMessage token before starting without one. */
 const TOKEN_WAIT_MS = 5000;
@@ -346,6 +229,7 @@ export function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfi
 export function ChatWidget() {
   const state = useChatState();
   const dispatch = useChatDispatch();
+  const controller = useChatController();
 
   const {
     params: { environment, agentId, userId: userIdParam, intent },
@@ -391,79 +275,11 @@ export function ChatWidget() {
   const isManagedAgent = !!intent;
   const isDemo = isDemoMode(environment, agentId);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  /**
-   * Whether the view should follow new content. True while the reader is at
-   * (or near) the bottom; scrolling up to read turns it off, so a streaming
-   * reply stops dragging them back down every token.
-   */
-  const stickToBottomRef = useRef(true);
   const initializedRef = useRef(false);
-  /** Why the conversation could not be started, so the user can retry. */
-  const [startFailed, setStartFailed] = useState(false);
   /** Inline "start a new conversation?" confirmation is showing. */
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   /** Bumped to move focus into the composer once the field that replaced it goes. */
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
-  /**
-   * isProcessing is also raised by undo, redo, retry and cancel, which use it
-   * as the re-entrancy guard. Those are not the agent composing a reply, so
-   * this flag keeps the typing dots and the Stop button (which would cancel
-   * the conversation and raise a false "interrupted" banner) off for them.
-   */
-  const [historyBusy, setHistoryBusy] = useState(false);
-  useEffect(() => {
-    if (!state.isProcessing) setHistoryBusy(false);
-  }, [state.isProcessing]);
-  /** Controller for the in-flight SSE read, so it can be stopped on demand. */
-  const abortRef = useRef<AbortController | null>(null);
-  /**
-   * Live conversation state. handleSend must read this at CLICK time; taking it
-   * from the callback closure made it stale by however long the memo lived, so
-   * skipped-turn detection compared against an out-of-date state.
-   */
-  const conversationStateRef = useRef(state.conversationState);
-  /**
-   * Mirrors isProcessing for reads at click time. The composer disables itself
-   * while busy, but QuickReplies and SecretInput call handleSend directly, so
-   * the guard has to live in handleSend rather than in each caller.
-   */
-  const isProcessingRef = useRef(state.isProcessing);
-  /**
-   * Synced after commit, not during render. Assigning during render is impure:
-   * a render React discards — StrictMode's double invoke, or a concurrent
-   * re-render that never commits — would leave these holding state the user
-   * never saw, and handleSend would then guard against it. Every reader is a
-   * click handler, which cannot run before the commit, so this is timing
-   * equivalent and strictly safer.
-   */
-  useEffect(() => {
-    conversationStateRef.current = state.conversationState;
-    isProcessingRef.current = state.isProcessing;
-  }, [state.conversationState, state.isProcessing]);
-  /**
-   * Bumped whenever the widget switches conversation. Async continuations
-   * capture it and bail if it moved, so an abandoned stream cannot write into
-   * the conversation that replaced it.
-   */
-  const generationRef = useRef(0);
-  /**
-   * Raw texts sent this session with secret mode on. The backend scrubs a
-   * secret turn when it ends and masks older stored turns on read, so after a
-   * reload the turn output's `input` — "<secret input>" for a secret turn — and
-   * `input:initial` are what mask it (stepsToMessages). This session set
-   * remains a fallback for a backend that sends neither.
-   */
-  const secretTextsRef = useRef<Set<string>>(new Set());
-  /**
-   * Raw input of in-flight turns, keyed by the user message's id. A single
-   * slot let a late-failing turn withdraw a newer, unrelated message.
-   */
-  const pendingTurnsRef = useRef<
-    Map<string, { text: string; attachments: typeof state.pendingAttachments; isSecret: boolean }>
-  >(new Map());
 
   /* ─── Apply query param config on mount ──────── */
   useEffect(() => {
@@ -475,14 +291,13 @@ export function ChatWidget() {
 
   /* ─── Apply the accent, then the URL's colours ── */
   // config.accentColor is the embedder's, the brand's, or `?accentColor=`'s
-  // (which SET_CONFIG above put there) — precedence in src/api/brand.ts. It was
-  // stored but never applied before. The URL's colour params go on last, so a
-  // `?userBg=` still beats the user-bubble colour the accent derives.
+  // (which SET_CONFIG above put there) — precedence in src/api/brand.ts. The
+  // URL's colour params go on last, so a `?userBg=` still beats the
+  // user-bubble colour the accent derives.
   useEffect(() => {
     applyAccentColor(state.config.accentColor);
     applyColorOverrides(searchParams);
   }, [state.config.accentColor, searchParams]);
-
 
   /* ─── Set base URL + auth on mount ──────────── */
   useEffect(() => {
@@ -536,502 +351,22 @@ export function ChatWidget() {
     };
   }, [tokenOriginParam]);
 
-  /* ─── Apply a finished turn ───────────────────
-     The `done` payload, or — when that was unreadable — the conversation
-     re-read after the stream, which carries the same two fields.        */
-  const applyDoneSnapshot = useCallback(
-    (snapshot: DoneSnapshot | null, turn: TurnContext): void => {
-      const lastOutput = snapshot?.conversationOutputs?.length
-        ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
-        : undefined;
-      const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
-      const outputImages = extractOutputImages(lastOutput?.output);
-      const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
-
-      // A requested input field (a password prompt) arrives here on the
-      // streaming path, which is the default. Reading it only from the
-      // non-streaming snapshot meant the key went into the plain textarea,
-      // was shown in clear and was sent without `secretInput`. A skipped
-      // turn carries the PREVIOUS step's outputs, so it must not re-apply.
-      const inputField = skipped ? null : findInputField(lastOutput?.output);
-      if (inputField) {
-        dispatch({ type: "SET_INPUT_FIELD", field: inputField });
-      }
-
-      if (skipped) {
-        // The server dropped this turn without consuming it. The payload
-        // carries the PREVIOUS step's outputs, so its quick replies must
-        // not be applied — doing so re-offered stale buttons as if new.
-        //
-        // The user's own bubble must go too: leaving it there asserts the
-        // message was sent when it never reached the agent. Withdrawing it
-        // also hands the text back to the composer so it can be resent.
-        const pending = turn.userMessageId
-          ? pendingTurnsRef.current.get(turn.userMessageId)
-          : undefined;
-        if (turn.userMessageId) {
-          pendingTurnsRef.current.delete(turn.userMessageId);
-          dispatch({
-            type: "WITHDRAW_LAST_USER_MESSAGE",
-            messageId: turn.userMessageId,
-            draft: pending?.text,
-            attachments: pending?.attachments,
-            wasSecret: pending?.isSecret,
-          });
-        } else {
-          dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-        }
-        dispatch({
-          type: "ADD_MESSAGE",
-          message: makeNotice(
-            skippedTurnMessage(snapshot?.conversationState),
-          ),
-        });
-      } else if (turn.tokenCount === 0) {
-        // No tokens, but the turn WAS accepted. Any text lives only in the
-        // done payload — including HITL's pending-approval placeholder,
-        // which arrives as a bare string. Dropping it left a paused turn
-        // rendering as "No response".
-        dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-        if (outputText || outputImages.length) {
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeAgentMessage(outputText, outputImages),
-          });
-        }
-        if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
-          dispatch({
-            type: "SET_QUICK_REPLIES",
-            replies: lastOutput?.quickReplies ?? [],
-          });
-        }
-      } else if (snapshot?.conversationOutputs?.length) {
-        // Tokens already rendered the answer, but responseValidation can
-        // SUPERSEDE them (fallback text) after the fact. The snapshot is
-        // authoritative.
-        if (outputText) {
-          dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
-        }
-        // Images never stream as tokens; the snapshot is their only source.
-        if (outputImages.length) {
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeAgentMessage("", outputImages),
-          });
-        }
-        dispatch({
-          type: "SET_QUICK_REPLIES",
-          replies: lastOutput?.quickReplies ?? [],
-        });
-      }
-
-      if (snapshot?.conversationState) {
-        // Remembered for the post-stream re-read, which may still see READY.
-        if (snapshot.conversationState === "AWAITING_HUMAN") turn.announcedPause = true;
-        dispatch({
-          type: "SET_CONVERSATION_STATE",
-          state: snapshot.conversationState,
-        });
-      }
-
-      dispatch({ type: "FINISH_STREAMING" });
-      dispatch({ type: "SET_PROCESSING", value: false });
-    },
-    [dispatch],
-  );
-
-  /* ─── SSE event handler (declared early to avoid reference issues) ──
-     Returns `true` when the stream is logically complete (done / error),
-     so the caller can break out of the for-await loop.                  */
-  const handleSSEEvent = useCallback(
-    (event: SSEEvent, turn: TurnContext): boolean => {
-      switch (event.type) {
-        case "token":
-          turn.tokenCount += 1;
-          dispatch({ type: "SET_THINKING", value: false });
-          // Text is flowing, so whichever model won the cascade is answering.
-          dispatch({ type: "SET_ESCALATING", value: false });
-          // No event says a tool finished; resumed output is that signal.
-          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-          dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
-          return false;
-
-        // Pipeline progress. The backend emits no "thinking" event, so these
-        // are what actually tell us the agent is working before any text.
-        case "task_start":
-          if (turn.tokenCount === 0) {
-            dispatch({ type: "SET_THINKING", value: true });
-          }
-          return false;
-
-        case "task_complete":
-          return false;
-
-        case "task_failed":
-          // Structured per-task failure (#593). The turn may still recover
-          // (cascade escalation, retry), so `done`/`error` decides the final
-          // outcome — but stop implying the agent is still composing.
-          dispatch({ type: "SET_THINKING", value: false });
-          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-          return false;
-
-        // Emitted right before each tool runs — the name only; arguments come
-        // later, redacted, in task_complete's toolTrace. Deliberately NOT
-        // guarded on tokenCount: a model may write a sentence and then call a
-        // tool, and the silence while that tool runs is exactly the wait worth
-        // explaining. The next token clears it again.
-        case "tool_call": {
-          const tool = parseToolCallName(event.data);
-          if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
-          return false;
-        }
-
-        // Step starts are pure observability — task_start already raised the
-        // thinking indicator, and it is guarded on tokenCount so it cannot come
-        // back after text has begun. Raising it again here would undo that: a
-        // guaranteed-accept step may stream live, time out mid-stream, and be
-        // followed by the next step's start.
-        case "cascade_step_start":
-          return false;
-
-        // An escalation means a cheaper model was abandoned mid-turn. The wait
-        // that follows is silent — a buffered cascade emits its whole answer as
-        // one token — so say something rather than leave a bare spinner.
-        case "cascade_escalation":
-          dispatch({ type: "SET_ESCALATING", value: true });
-          return false;
-
-        case "done": {
-          const snapshot = parseDoneSnapshot(event.data);
-          if (!snapshot) {
-            // The turn finished on the server, but its payload is unreadable
-            // (a proxy truncated it, say). Applying it as an empty snapshot
-            // ended a zero-token turn with no reply and no quick replies, and
-            // treating it as a stream failure would hand back a draft the agent
-            // already consumed. Stop reading; the caller re-reads the
-            // conversation and applies that instead.
-            turn.doneUnreadable = true;
-            return true;
-          }
-          applyDoneSnapshot(snapshot, turn);
-          return true;
-        }
-
-        case "error": {
-          // Payload is {"message":"…","code":"…"}, not a bare string.
-          const { message, code } = parseErrorEvent(event.data);
-          if (
-            turn.tokenCount === 0 &&
-            code !== null &&
-            UNCONSUMED_STREAM_ERROR_CODES.has(code)
-          ) {
-            // The server refused this turn before running it — the streaming
-            // twin of a 409. Withdraw the optimistic bubble and hand the draft
-            // (a secret included, masked) back, instead of leaving a message
-            // in the transcript that never reached the agent. The refresh after
-            // the stream then picks up the paused state for awaiting_approval.
-            const pending = turn.userMessageId
-              ? pendingTurnsRef.current.get(turn.userMessageId)
-              : undefined;
-            if (turn.userMessageId) {
-              pendingTurnsRef.current.delete(turn.userMessageId);
-              dispatch({
-                type: "WITHDRAW_LAST_USER_MESSAGE",
-                messageId: turn.userMessageId,
-                draft: pending?.text,
-                attachments: pending?.attachments,
-                wasSecret: pending?.isSecret,
-              });
-            } else {
-              dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            }
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: makeNotice(
-                code === "awaiting_approval"
-                  ? t("send.awaiting")
-                  : t("send.notSent", { message }),
-              ),
-            });
-            dispatch({ type: "FINISH_STREAMING" });
-            dispatch({ type: "SET_PROCESSING", value: false });
-            return true;
-          }
-          if (turn.tokenCount === 0) {
-            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: makeNotice(`⚠️ ${message}`),
-            });
-          } else {
-            dispatch({
-              type: "APPEND_TO_LAST_AGENT",
-              token: `\n\n⚠️ ${message}`,
-            });
-          }
-          dispatch({ type: "FINISH_STREAMING" });
-          dispatch({ type: "SET_PROCESSING", value: false });
-          return true;
-        }
-
-        default:
-          // Unknown event: ignore rather than render. New backend events must
-          // never leak into the transcript as visible text.
-          return false;
-      }
-    },
-    [dispatch, applyDoneSnapshot],
-  );
-
-  /* ─── Process conversation snapshot ─────────── */
-  const processSnapshot = useCallback(
-    /**
-     * @param dedupe Suppress texts already rendered from an identical snapshot
-     *   slot. ONLY for reads that deliberately revisit a step already shown —
-     *   retry and the post-approval refresh. It must stay off for ordinary
-     *   sends: `returnCurrentStepOnly=true` pins every response to one output
-     *   at index 0, so the key degenerates to the reply text and a repeated
-     *   utterance (a fallback, a re-prompt) would be silently swallowed.
-     */
-    (
-      snapshot: Partial<ConversationSnapshot>,
-      { dedupe = false, fullHistory = false }: { dedupe?: boolean; fullHistory?: boolean } = {},
-    ) => {
-      // Managed-agent mode never calls startConversation, so without this the
-      // widget has no conversationId — disabling HITL polling, cancel, retry
-      // and attachments for the entire managed route.
-      if (snapshot.conversationId) {
-        dispatch({ type: "SET_CONVERSATION_ID", id: snapshot.conversationId });
-      }
-      if (snapshot.conversationState) {
-        dispatch({
-          type: "SET_CONVERSATION_STATE",
-          state: snapshot.conversationState,
-          endReason: snapshot.endReason ?? null,
-        });
-      }
-
-      // Track undo/redo availability
-      dispatch({
-        type: "SET_UNDO_REDO",
-        undoAvailable: snapshot.undoAvailable ?? false,
-        redoAvailable: snapshot.redoAvailable ?? false,
-      });
-
-      // Handle the "conversationOutputs" format (from POST /agents responses).
-      // On a full read their positions are the server's step indexes — but only
-      // when they agree with conversationSteps. When the lists disagree, the
-      // transcript is rebuilt from the steps instead (below), which carry the
-      // person's turns and the real indexes: output-only agent messages left
-      // unstamped would all count as step 0 and key every reply rating to the
-      // greeting.
-      const outputsList = snapshot.conversationOutputs;
-      const useOutputs =
-        !!outputsList?.length &&
-        (!fullHistory || !snapshot.conversationSteps?.length || outputsCarryStepIndexes(outputsList, snapshot.conversationSteps));
-      if (useOutputs && snapshot.conversationOutputs) {
-        const stampSteps = fullHistory;
-        snapshot.conversationOutputs.forEach((output, index, outputs) => {
-          // Extract agent replies and detect input field requests
-          const agentReplies: unknown[] = output.output ?? [];
-
-          // inputField items configure the composer rather than the transcript,
-          // and only the LATEST turn's request is still open: a full-snapshot
-          // refresh (HITL resume) would otherwise re-raise a password prompt
-          // from an earlier turn that was already answered.
-          if (index === outputs.length - 1) {
-            const field = findInputField(agentReplies);
-            if (field) dispatch({ type: "SET_INPUT_FIELD", field });
-          }
-
-          // Handles bare-string entries too — HITL's pending-approval
-          // placeholder and reviewer-rejection message arrive as raw strings.
-          extractOutputTexts(agentReplies).forEach((text) => {
-            // A full read lists every step, so the position is the server's
-            // step index (reply ratings are keyed by it). A turn response
-            // carries only its own step, at index 0, and is counted instead.
-            const message = makeAgentMessage(text, undefined, stampSteps ? index : undefined);
-            dispatch({
-              type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
-              message,
-            });
-          });
-          const images = extractOutputImages(agentReplies);
-          if (images.length && !dedupe) {
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: makeAgentMessage("", images, stampSteps ? index : undefined),
-            });
-          }
-        });
-
-        // Quick replies from the last output (most recent step)
-        const lastOutput =
-          snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1];
-        dispatch({
-          type: "SET_QUICK_REPLIES",
-          replies: lastOutput.quickReplies ?? [],
-        });
-      }
-
-      // conversationSteps is a FALLBACK, not an additional source. The backend
-      // populates BOTH lists from the same memory for every response
-      // (ConversationMemoryUtilities:172-209) and only nulls one out when the
-      // caller passes returningFields, which this client never sends. Rendering
-      // both showed every reply twice — and echoed the user's `input:initial`,
-      // which is the raw text even for a secret turn.
-      //
-      // This block was inert before the step shape was corrected, which is why
-      // the duplication only appeared once the mapping started working.
-      else if (snapshot.conversationSteps?.length) {
-        for (const message of stepsToMessages(
-          snapshot.conversationSteps,
-          secretTextsRef.current,
-          snapshot.conversationOutputs,
-          fullHistory,
-        )) {
-          dispatch({
-            type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
-            message,
-          });
-        }
-        // Rebuilt from the steps although outputs exist: the latest output still
-        // carries the open input-field request and the quick replies.
-        const lastOutput = outputsList?.length ? outputsList[outputsList.length - 1] : null;
-        if (lastOutput) {
-          const field = findInputField(lastOutput.output ?? []);
-          if (field) dispatch({ type: "SET_INPUT_FIELD", field });
-          dispatch({ type: "SET_QUICK_REPLIES", replies: lastOutput.quickReplies ?? [] });
-        }
-      }
-    },
-    [dispatch],
-  );
-
-  /**
-   * Show the agent's name, once per open, from the conversation read itself.
-   *
-   * It used to be fetched from `/descriptorstore/descriptors/{id}/simple`, an
-   * authoring endpoint that refuses a user holding only `eddi-user` — so the
-   * very people the chat is for never saw it. The backend now puts the name on
-   * the conversation snapshot for anyone allowed to use the agent. With no name
-   * the header simply shows the logo, titled with the configured `title`.
-   */
-  const loadAgentName = useCallback(
-    (snapshot: { agentName?: unknown }, gen: number) => {
-      if (isDemo || state.config.showAgentName === false) return;
-      const name = snapshot.agentName;
-      if (typeof name !== "string" || !name.trim()) return;
-      if (gen === generationRef.current) {
-        dispatch({ type: "SET_AGENT_NAME", name });
-      }
-    },
-    [dispatch, isDemo, state.config.showAgentName],
-  );
-
-  /**
-   * Open a conversation: the one the route names on first load, a fresh one on
-   * restart. Every await re-checks the generation: the first load used to have
-   * no such check, so "New conversation" clicked while its welcome read was
-   * still in flight got the OLD conversation's greeting grafted onto the new
-   * one, and its id could overwrite the new id.
-   */
-  const openConversation = useCallback(
-    async (fresh: boolean) => {
-      const gen = generationRef.current;
-      setStartFailed(false);
-      try {
-        if (isDemo) {
-          // Demo mode: use mock data
-          const result = await demoStartConversation();
-          if (gen !== generationRef.current) return;
-          dispatch({ type: "SET_CONVERSATION_ID", id: result.conversationId });
-          dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
-          dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
-          dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
-        } else if (isManagedAgent && intent && userId) {
-          // A managed load always returns the CURRENT conversation, so a
-          // restart must end it first — otherwise "New conversation" re-showed
-          // the same one and the agent kept its whole context.
-          if (fresh) await endManagedConversation(intent, userId);
-          const snapshot = await loadManagedConversation(intent, userId);
-          if (gen !== generationRef.current) return;
-          // The route names an intent; the snapshot names the agent, whose review
-          // notice must be shown like any other's.
-          setManagedAgentId(snapshot.agentId || null);
-          processSnapshot(snapshot, { fullHistory: true });
-          loadAgentName(snapshot, gen);
-        } else if (environment && agentId) {
-          // Direct agent: POST to create conversation
-          const convId = await startConversation(environment, agentId, userId);
-          if (gen !== generationRef.current) return;
-          dispatch({ type: "SET_CONVERSATION_ID", id: convId });
-
-          // GET to pick up welcome message
-          const snapshot = await readConversation(convId);
-          if (gen !== generationRef.current) return;
-          processSnapshot(snapshot, { fullHistory: true });
-          loadAgentName(snapshot, gen);
-        }
-      } catch (err) {
-        if (gen !== generationRef.current) return;
-        // A managed conversation that did not load names no agent; waiting on its
-        // notice would keep the input closed for good.
-        if (isManagedAgent) setManagedAgentId((current) => current ?? null);
-        console.error("Failed to start conversation:", err);
-        // A failed start used to reach the console only, leaving the widget
-        // on "Starting conversation…" for good.
-        dispatch({
-          type: "ADD_MESSAGE",
-          message: makeNotice(startFailureMessage(err, environment)),
-        });
-        // The composer is closed until a conversation exists; this is the way out.
-        setStartFailed(true);
-      }
-    },
-    [
-      dispatch,
-      isDemo,
-      isManagedAgent,
-      intent,
-      userId,
-      environment,
-      agentId,
-      processSnapshot,
-      loadAgentName,
-    ],
-  );
-
-  /* ─── Auto-start conversation ───────────────── */
-  // Held until the token the host promised has arrived (or the wait ran out).
-  useEffect(() => {
-    if (!tokenReady || initializedRef.current) return;
-    initializedRef.current = true;
-    openConversation(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenReady]);
-
   /* ─── Review notice ─────────────────────────── */
-  // The agent's name comes from loadAgentName, per conversation. This only asks
-  // whether the maintainers may read the conversation, which is shown whatever
-  // the name setting: it is about the person's data, not decoration. An EDDI
-  // older than the profile endpoint answers 404, and there is nothing to announce.
-  // Whether the lookup below has answered. The input stays closed until it has:
-  // otherwise a slow profile let somebody type before they were told the
+  // Whether the profile lookup below has answered. Nothing is sent until it
+  // has: otherwise a slow profile let somebody type before they were told the
   // conversation may be read. A failure (an EDDI without the endpoint) settles
   // it too, so it only ever waits for the request, never blocks on it.
   const [profileSettled, setProfileSettled] = useState(false);
-  // Read at click time by handleSend, which quick replies and the secret input
-  // call directly: gating only the composer let a quick reply through before the
-  // notice appeared. Synced after commit, like the refs above.
+  // Read at send time by the controller (`canSend`), which quick replies and
+  // the requested field call directly. Synced after commit.
   const profileSettledRef = useRef(false);
   useEffect(() => {
     profileSettledRef.current = profileSettled;
   }, [profileSettled]);
-  // The agent behind a managed route, which names an intent rather than an agent.
-  // Undefined until the managed conversation has loaded; null when it named none.
-  const [managedAgentId, setManagedAgentId] = useState<string | null | undefined>(undefined);
-  const profileAgentId = agentId ?? (isManagedAgent ? managedAgentId : null);
+  // The agent behind a managed route, which names an intent rather than an
+  // agent: undefined until the managed conversation has loaded; null when it
+  // named none.
+  const profileAgentId = agentId ?? (isManagedAgent ? state.openedAgentId : null);
   useEffect(() => {
     // A new target starts without the previous one's notice, and a slower answer
     // for the previous target cannot overwrite the new one's.
@@ -1083,599 +418,75 @@ export function ChatWidget() {
   const ratableByPosition = useMemo(() => ratableSteps(state.messages), [state.messages]);
   const clearRatedStep = ratings.clearStep;
 
-  /* ─── Send message ──────────────────────────── */
-  const handleSend = useCallback(
-    async (text: string, isSecret?: boolean) => {
-      // Re-entrancy guard. QuickReplies and SecretInput bypass the composer's
-      // disabled state, so a click during an in-flight turn used to start a
-      // second one — two streams writing into the same transcript.
-      if (isProcessingRef.current) return;
-      // Nothing is sent before the review notice has had its chance to appear.
-      if (!profileSettledRef.current) return;
-
-      // Conversation identity for THIS turn. Every async continuation below
-      // must re-check it: New Conversation can land while a request is in
-      // flight, and an unguarded continuation then grafts the abandoned turn
-      // onto the conversation that replaced it.
-      const sendGen = generationRef.current;
-
-      // Attachments staged in the composer travel with THIS turn as
-      // attachment_N context entries — the only path the backend reads.
-      const attachments = state.pendingAttachments;
-      const attachmentContext = buildAttachmentContext(attachments);
-
-      const secretContext = isSecret
-        ? { secretInput: { type: "string" as const, value: "true" } }
-        : undefined;
-
-      const context =
-        secretContext || Object.keys(attachmentContext).length > 0
-          ? { ...secretContext, ...attachmentContext }
-          : undefined;
-
-      // Add user message (display masked if secret). Attachments are named in
-      // the transcript so the user can see what was actually sent.
-      // A file above the forward limit was stored but will not be inlined. The
-      // model gets a note in its place rather than the bytes, so the agent may
-      // or may not be able to reach the content — say the part we know is true.
-      // "assistant", not "model": nothing else user-facing here uses that word.
-      //
-      // Note this line lives in the bubble TEXT, so it does not survive an
-      // undo/redo — stepsToMessages rebuilds user bubbles from the raw
-      // input:initial. Do not treat it as a durable record.
-      const attachmentLine = attachments.length
-        ? attachments
-            .map((a) =>
-              a.forwardableInline === false
-                ? t("attach.largeLine", { file: a.fileName })
-                : `📎 ${a.fileName}`,
-            )
-            .join("\n")
-        : "";
-      const displayed = isSecret ? "●●●●●●●●" : text;
-      const userMsg: ChatMessage = {
-        id: `user-${Date.now()}-${Math.random()}`,
-        role: "user",
-        content: [attachmentLine, displayed].filter(Boolean).join("\n\n"),
-        timestamp: Date.now(),
-      };
-      // Remember the REAL input per turn: the bubble content is display text
-      // (masked secrets, "📎 name" lines) and must never be what we hand back.
-      const turnId = userMsg.id;
-      pendingTurnsRef.current.set(turnId, {
-        text,
-        attachments,
-        isSecret: !!isSecret,
-      });
-      if (isSecret && text.trim()) secretTextsRef.current.add(text.trim());
-      const withdrawTurn = () => {
-        const pending = pendingTurnsRef.current.get(turnId);
-        pendingTurnsRef.current.delete(turnId);
-        dispatch({
-          type: "WITHDRAW_LAST_USER_MESSAGE",
-          messageId: turnId,
-          draft: pending?.text,
-          attachments: pending?.attachments,
-          wasSecret: pending?.isSecret,
-        });
-      };
-
-      dispatch({ type: "ADD_MESSAGE", message: userMsg });
-      dispatch({ type: "CLEAR_ATTACHMENTS" });
-      // A requested input field lasts for ONE reply. A quick reply answers it
-      // too, and must not leave a stale password prompt over the next turn.
-      dispatch({ type: "CLEAR_INPUT_FIELD" });
-      dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
-      dispatch({ type: "SET_PROCESSING", value: true });
-      dispatch({ type: "SET_THINKING", value: true });
-      // Start every turn un-escalated and tool-less, however the previous one
-      // ended.
-      dispatch({ type: "SET_ESCALATING", value: false });
-      dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-
-      // This turn's controller. Every transport honours it — the SSE read, and
-      // the plain fetches of the non-streaming and managed routes — so Stop and
-      // New conversation can actually stop a turn instead of only hiding it.
-      const abort = new AbortController();
-      abortRef.current = abort;
-      /** True once Stop or New conversation has taken this turn over. */
-      const stopped = () => abortRef.current !== abort;
-      const turn = newTurn(conversationStateRef.current, turnId);
-      // Sending always follows the conversation to the bottom again.
-      stickToBottomRef.current = true;
-
-      try {
-        if (isDemo) {
-          // Demo mode: simulated streaming response
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: {
-              id: `agent-${Date.now()}-${Math.random()}`,
-              role: "agent",
-              content: "",
-              timestamp: Date.now(),
-              isStreaming: true,
-            },
-          });
-
-          const events = demoSendMessageStreaming(text);
-          const demoTurn = newTurn(conversationStateRef.current);
-          let demoDone = false;
-          for await (const event of events) {
-            if (handleSSEEvent(event, demoTurn)) demoDone = true;
-          }
-          if (demoTurn.doneUnreadable) applyDoneSnapshot(null, demoTurn);
-          // Safety net: finish streaming if the stream closed without a done event
-          if (!demoDone) dispatch({ type: "FINISH_STREAMING" });
-
-          // Set quick replies after streaming completes
-          const qrs = demoGetQuickReplies(text);
-          dispatch({ type: "SET_QUICK_REPLIES", replies: qrs });
-        } else if (isManagedAgent && intent && userId) {
-          // Managed agent (non-streaming only)
-          const snapshot = await sendManagedAgentMessage(
-            intent,
-            userId,
-            text,
-            context,
-            abort.signal,
-          );
-          // Stopped, or the conversation was replaced, while the reply was in
-          // flight: it belongs to a turn nobody is waiting for any more.
-          if (sendGen !== generationRef.current || stopped()) return;
-          dispatch({ type: "SET_THINKING", value: false });
-          processSnapshot(snapshot);
-          dispatch({ type: "SET_PROCESSING", value: false });
-        } else if (
-          state.config.enableStreaming &&
-          environment &&
-          agentId &&
-          state.conversationId
-        ) {
-          // Streaming path
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: {
-              id: `agent-${Date.now()}-${Math.random()}`,
-              role: "agent",
-              content: "",
-              timestamp: Date.now(),
-              isStreaming: true,
-            },
-          });
-
-          // The controller also lets us break out of the for-await when "done"
-          // fires: proxies (Vite dev, nginx) may not forward the SSE close
-          // signal, so reader.read() would hang forever without it.
-          const gen = generationRef.current;
-          let streamDone = false;
-
-          const events = sendMessageStreaming(state.conversationId, text, { context, signal: abort.signal });
-
-          try {
-            for await (const event of events) {
-              // New Conversation (or another swap) happened mid-stream: stop
-              // writing tokens, state and undo/redo into the conversation that
-              // replaced this one.
-              if (gen !== generationRef.current) break;
-              const isDone = handleSSEEvent(event, turn);
-              if (isDone) {
-                streamDone = true;
-                abort.abort();
-                break;
-              }
-            }
-          } catch (e) {
-            if (e instanceof DOMException && e.name === "AbortError") {
-              // expected after abort — swallow
-            } else {
-              throw e;
-            }
-          }
-          // Every continuation past this point belongs to the turn we just
-          // read. If the conversation was swapped mid-stream, this turn is
-          // abandoned — including its safety net, which would otherwise clear
-          // isProcessing/isThinking and un-stream a bubble in the conversation
-          // that replaced it.
-          if (gen !== generationRef.current) return;
-
-          // Safety net: finish streaming if the stream closed without a done event
-          if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
-
-          // The `done` payload is a trimmed snapshot carrying only
-          // conversationState and conversationOutputs — undoAvailable and
-          // redoAvailable are absent, so without this re-read the undo/redo
-          // buttons stay permanently greyed out on the streaming path.
-          try {
-            const after = await readConversation(state.conversationId, true);
-            if (gen !== generationRef.current) return;
-            // The `done` payload could not be read, so nothing of the turn's
-            // outcome has been applied yet. This read of the current step
-            // carries the same two fields — state and outputs — so it stands in.
-            if (turn.doneUnreadable && !stopped()) applyDoneSnapshot(after, turn);
-            dispatch({
-              type: "SET_UNDO_REDO",
-              undoAvailable: after.undoAvailable ?? false,
-              redoAvailable: after.redoAvailable ?? false,
-            });
-            // A stream that fails sends `error` and closes WITHOUT a `done`,
-            // so nothing else on this path learns the conversation is now
-            // ERROR / EXECUTION_INTERRUPTED — leaving the recovery banner
-            // unreachable on the default transport.
-            //
-            // But this read RACES a Stop: handleStop cancels and then sets
-            // EXECUTION_INTERRUPTED, and a refresh issued before that lands
-            // afterwards carrying a stale READY, wiping the state Stop just
-            // set — and with it the recovery banner. handleStop clears
-            // abortRef, so a controller that is no longer current means this
-            // turn was stopped and its refresh must not speak for the state.
-            // A READY read straight after this turn announced a pause is the
-            // store not having caught up, not a decision: keep the pause, and let
-            // the approval-status watch (useHitlPolling) say when it resolves.
-            const staleOverPause = turn.announcedPause && after.conversationState === "READY";
-            if (after.conversationState && !stopped() && !staleOverPause) {
-              dispatch({
-                type: "SET_CONVERSATION_STATE",
-                state: after.conversationState,
-                // A turn refused with `conversation_ended` lands here: the
-                // reason decides what the ended footer tells the user.
-                endReason: after.endReason ?? null,
-              });
-            }
-          } catch {
-            // Availability refresh is best-effort; a failure here must not
-            // sink an otherwise successful turn.
-            //
-            // Unless it was also the only source of the turn's outcome: then
-            // end the turn, and say so when nothing of the reply is on screen.
-            // The message WAS consumed, so the draft is not handed back.
-            if (
-              turn.doneUnreadable &&
-              gen === generationRef.current &&
-              !stopped()
-            ) {
-              applyDoneSnapshot(null, turn);
-              if (turn.tokenCount === 0) {
-                dispatch({
-                  type: "ADD_MESSAGE",
-                  message: makeNotice(`⚠️ ${t("send.connectionLost")}`),
-                });
-              }
-            }
-          }
-        } else if (environment && agentId && state.conversationId) {
-          // Non-streaming path — pass context for secret input
-          const snapshot = await sendMessage(state.conversationId, text, { userId, context, signal: abort.signal });
-          if (sendGen !== generationRef.current || stopped()) return;
-          dispatch({ type: "SET_THINKING", value: false });
-          processSnapshot(snapshot);
-          dispatch({ type: "SET_PROCESSING", value: false });
-        }
-      } catch (err) {
-        // A failure that lands after New Conversation belongs to the turn the
-        // user abandoned. Every branch below writes into the transcript —
-        // withdrawing a bubble, restoring a draft, a warning, a state re-read —
-        // and would otherwise do so in the conversation that replaced it.
-        if (sendGen !== generationRef.current) return;
-        // Stop (or New conversation) ended this turn on purpose — the abort
-        // surfaces here as a rejected fetch. The UI was reset by whoever
-        // stopped it, and what happens next must not be reported as a failure.
-        if (!isDemo && stopped()) return;
-
-        dispatch({ type: "SET_PROCESSING", value: false });
-        dispatch({ type: "SET_THINKING", value: false });
-        // This path never reaches FINISH_STREAMING, so clear it here too.
-        dispatch({ type: "SET_ESCALATING", value: false });
-        dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-
-        const status = err instanceof ApiError ? err.status : null;
-
-        if (status === 409) {
-          // The turn was refused and NEVER consumed — most often because the
-          // conversation is awaiting a human decision. Withdraw the optimistic
-          // bubble, hand the text back to the composer, and say why. The
-          // server's own text ("…resolve it via POST /agents/<id>/resume…")
-          // is an operator instruction, not something to show an end user.
-          withdrawTurn();
-          dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("send.conflict")) });
-          // Re-read so the paused state (and its card) appears immediately.
-          // Gated on conversationId ALONE: readConversation ignores
-          // environment/agentId, and the managed route never has them — so
-          // requiring them meant the managed route never learned it had been
-          // refused, leaving the composer live against a paused conversation.
-          if (state.conversationId) {
-            try {
-              const snap = await readConversation(state.conversationId, true);
-              if (sendGen !== generationRef.current) return;
-              if (snap.conversationState) {
-                dispatch({
-                  type: "SET_CONVERSATION_STATE",
-                  state: snap.conversationState,
-                  endReason: snap.endReason ?? null,
-                });
-              }
-            } catch {
-              // best effort
-            }
-          }
-          return;
-        }
-
-        if (status === 410 && state.conversationId) {
-          // The conversation has ended (RestAgentEngine answers 410 GONE) and
-          // the turn was never consumed. Ask why: an agent update that retired
-          // the conversation's version gets its own footer.
-          let endReason: string | null = null;
-          try {
-            const snap = await readConversation(state.conversationId, true);
-            endReason = snap.endReason ?? null;
-          } catch {
-            // best effort — the generic ended footer still applies
-          }
-          // The user may have started a new conversation while the reread was in
-          // flight; this send's outcome must not land in that one.
-          if (sendGen !== generationRef.current) return;
-          withdrawTurn();
-          dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
-          if (endReason !== END_REASON_AGENT_VERSION_RETIRED) {
-            dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("send.ended")) });
-          }
-          return;
-        }
-
-        // Every other 4xx refused the turn before it ran: the message was never
-        // consumed, so withdraw the bubble and hand the text back. Each has
-        // its own copy because the remedies differ (sign in again, shorten,
-        // wait, ask the operator) and "could not be sent" says none of them.
-        if (status !== null && status >= 400 && status < 500) {
-          withdrawTurn();
-          const copy =
-            status === 401
-              ? t("send.sessionExpired")
-              : status === 403
-                ? t("send.forbidden")
-                : status === 404
-                  ? t("send.notFound")
-                  : status === 413
-                    ? t("send.tooLarge")
-                    : status === 429
-                      ? t("send.rateLimited")
-                      : t("send.failed");
-          dispatch({ type: "ADD_MESSAGE", message: makeNotice(copy) });
-          return;
-        }
-
-        console.error("Failed to send message:", err);
-        // From here the failure is a dropped connection or a server error.
-        if (turn.tokenCount === 0) {
-          // Nothing of the answer arrived, so the user has nothing to keep:
-          // take the bubble back and put the text in the composer again.
-          // (withdrawTurn also drops the empty streaming placeholder.)
-          withdrawTurn();
-          dispatch({ type: "FINISH_STREAMING" });
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeNotice(
-              status === 503 ? t("send.unavailable") : t("send.failed"),
-            ),
-          });
-          return;
-        }
-        // Part of the answer is already on screen. Keep it, say it may be
-        // cut short, and re-read the conversation: the server may have
-        // finished the turn, or still be running it — either way the next
-        // send must not run on a guessed state (it answered 409 before).
-        pendingTurnsRef.current.delete(turnId);
-        dispatch({ type: "FINISH_STREAMING" });
-        dispatch({
-          type: "APPEND_TO_LAST_AGENT",
-          token: `\n\n⚠️ ${t("send.connectionLost")}`,
-        });
-        if (state.conversationId) {
-          try {
-            const after = await readConversation(state.conversationId, true);
-            if (sendGen !== generationRef.current || stopped()) return;
-            dispatch({
-              type: "SET_UNDO_REDO",
-              undoAvailable: after.undoAvailable ?? false,
-              redoAvailable: after.redoAvailable ?? false,
-            });
-            if (after.conversationState) {
-              dispatch({
-                type: "SET_CONVERSATION_STATE",
-                state: after.conversationState,
-                endReason: after.endReason ?? null,
-              });
-            }
-          } catch {
-            // best effort
-          }
-        }
-      } finally {
-        // Release this turn's record. Only the failure paths deleted it, so a
-        // long session accumulated one entry (text + attachments) per
-        // successful turn, forever.
-        pendingTurnsRef.current.delete(turnId);
-        if (abortRef.current === abort) abortRef.current = null;
-      }
-    },
-    [
-      dispatch,
-      processSnapshot,
-      handleSSEEvent,
-      applyDoneSnapshot,
-      isDemo,
-      isManagedAgent,
-      intent,
-      userId,
-      environment,
-      agentId,
-      state.conversationId,
-      state.config.enableStreaming,
-      state.pendingAttachments,
-    ],
-  );
-
   /**
-   * Rebuild the view after an undo or redo from the snapshot the endpoint
-   * returns — transcript, undo/redo availability, and what the composer is
-   * offering (quick replies, a requested input field). The last two used to be
-   * left as the undone turn had set them, so Undo kept showing the buttons of a
-   * step that no longer existed.
+   * Show the agent's name, once per open, from the conversation read itself —
+   * the snapshot carries it for anyone allowed to use the agent, including a
+   * user holding only `eddi-user`. With no name the header shows the logo,
+   * titled with the configured `title`.
    */
-  const applyHistorySnapshot = useCallback(
-    (
-      snapshot: ConversationSnapshot,
-      fallback: { undoAvailable: boolean; redoAvailable: boolean },
-    ) => {
-      // Rebuild from the shape the endpoint really returns. An empty result
-      // usually means "could not rebuild", NOT "the conversation is empty" —
-      // replacing a populated transcript with [] is how this wiped the whole
-      // chat. Only an explicitly empty step list, with no outputs, is empty.
-      const msgs = stepsToMessages(
-        snapshot.conversationSteps,
-        secretTextsRef.current,
-        snapshot.conversationOutputs,
-        true,
-      );
-      if (msgs.length) {
-        dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
-      } else if (
-        Array.isArray(snapshot.conversationSteps) &&
-        snapshot.conversationSteps.length === 0 &&
-        !snapshot.conversationOutputs?.length
-      ) {
-        // Undone all the way back: the old bubbles must not linger.
-        dispatch({ type: "REPLACE_MESSAGES", messages: [] });
-      }
-      dispatch({
-        type: "SET_UNDO_REDO",
-        undoAvailable: snapshot.undoAvailable ?? fallback.undoAvailable,
-        redoAvailable: snapshot.redoAvailable ?? fallback.redoAvailable,
-      });
-      const outputs = snapshot.conversationOutputs;
-      const last = outputs?.length ? outputs[outputs.length - 1] : undefined;
-      dispatch({ type: "SET_QUICK_REPLIES", replies: last?.quickReplies ?? [] });
-      const field = findInputField(last?.output);
-      if (field) dispatch({ type: "SET_INPUT_FIELD", field });
-      else dispatch({ type: "CLEAR_INPUT_FIELD" });
+  const loadAgentName = useCallback(
+    (snapshot: Partial<ConversationSnapshot>, gen: number) => {
+      if (isDemo || state.config.showAgentName === false) return;
+      const name = snapshot.agentName;
+      if (typeof name !== "string" || !name.trim()) return;
+      if (controller.isCurrent(gen)) dispatch({ type: "SET_AGENT_NAME", name });
     },
-    [dispatch],
+    [controller, dispatch, isDemo, state.config.showAgentName],
   );
 
-  /* ─── Undo ──────────────────────────────────── */
-  const handleUndo = useCallback(async () => {
-    // environment/agentId are unused by the API layer (v6 paths are
-    // conversation-scoped) and are undefined on the managed route, where these
-    // guards made undo/redo/retry silently inert.
-    if (!state.conversationId) return;
-    const gen = generationRef.current;
-    if (isDemo) return; // Demo mode doesn't support undo
+  /* ─── The route, as the controller's transport ─ */
+  const transport = useMemo(() => {
+    if (isDemo) return createDemoTransport();
+    if (isManagedAgent && intent && userId) return createManagedTransport({ intent, userId });
+    if (environment && agentId) return createConversationTransport({ environment, agentId, userId });
+    return null;
+  }, [isDemo, isManagedAgent, intent, userId, environment, agentId]);
 
-    try {
-      dispatch({ type: "SET_PROCESSING", value: true });
-      setHistoryBusy(true);
-      // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await undoConversation(state.conversationId);
-      const snapshot = await readConversation(state.conversationId);
+  // Before any effect below can open, send or poll: a layout effect runs ahead
+  // of every passive one.
+  useLayoutEffect(() => {
+    if (transport) controller.setOptions({ transport });
+    controller.setOptions({
+      streaming: !!state.config.enableStreaming,
+      canSend: () => profileSettledRef.current,
+      environment,
+      onStepRerun: clearRatedStep,
+      t,
+    });
+    controller.onOpened = loadAgentName;
+  }, [controller, transport, state.config.enableStreaming, environment, clearRatedStep, loadAgentName]);
 
-      // Rebuild from the shape the endpoint really returns. An empty result
-      // means "could not rebuild", NOT "the conversation is empty" — replacing
-      // a populated transcript with [] is how this wiped the whole chat.
-      // A New Conversation while this was in flight must not have its
-      // transcript replaced by the old conversation's history.
-      if (gen !== generationRef.current) return;
-      applyHistorySnapshot(snapshot, { undoAvailable: false, redoAvailable: true });
-    } catch (err) {
-      // Abandoned by New Conversation: its error is not the new one's.
-      if (gen !== generationRef.current) return;
-      // 409 is expected while the conversation is paused or a turn is running —
-      // undo/redo availability is deliberately NOT pause-aware server-side, so
-      // the button can be enabled while the operation is refused.
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: makeNotice(
-          err instanceof ApiError && err.status === 409
-            ? t("undo.notNow")
-            : t("undo.failed"),
-        ),
-      });
-    } finally {
-      if (gen === generationRef.current) {
-        dispatch({ type: "SET_PROCESSING", value: false });
-      }
-    }
-  }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
+  /* ─── Auto-start conversation ───────────────── */
+  // Held until the token the host promised has arrived (or the wait ran out).
+  useEffect(() => {
+    if (!tokenReady || initializedRef.current || !transport) return;
+    initializedRef.current = true;
+    void controller.open(false);
+  }, [tokenReady, transport, controller]);
 
-  /* ─── Redo ──────────────────────────────────── */
-  const handleRedo = useCallback(async () => {
-    if (!state.conversationId) return;
-    const gen = generationRef.current;
-    if (isDemo) return;
+  /* ─── Actions ───────────────────────────────── */
+  const handleSend = useCallback(
+    (text: string, isSecret?: boolean) => {
+      void controller.send(text, isSecret);
+    },
+    [controller],
+  );
 
-    try {
-      dispatch({ type: "SET_PROCESSING", value: true });
-      setHistoryBusy(true);
-      // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await redoConversation(state.conversationId);
-      const snapshot = await readConversation(state.conversationId);
-
-      // Rebuild from the shape the endpoint really returns. An empty result
-      // means "could not rebuild", NOT "the conversation is empty" — replacing
-      // a populated transcript with [] is how this wiped the whole chat.
-      // A New Conversation while this was in flight must not have its
-      // transcript replaced by the old conversation's history.
-      if (gen !== generationRef.current) return;
-      applyHistorySnapshot(snapshot, { undoAvailable: true, redoAvailable: false });
-    } catch (err) {
-      // Abandoned by New Conversation: its error is not the new one's.
-      if (gen !== generationRef.current) return;
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: makeNotice(
-          err instanceof ApiError && err.status === 409
-            ? t("redo.notNow")
-            : t("redo.failed"),
-        ),
-      });
-    } finally {
-      if (gen === generationRef.current) {
-        dispatch({ type: "SET_PROCESSING", value: false });
-      }
-    }
-  }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
-
-  /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
     (value: string) => {
       // The clicked button unmounts with the replies; keep a keyboard user's
       // place by moving focus to the composer once it is enabled again.
       setComposerFocusSignal((n) => n + 1);
-      handleSend(value);
+      void controller.send(value);
     },
-    [handleSend],
+    [controller],
   );
 
-  /* ─── Restart conversation ──────────────────── */
   const handleRestart = useCallback(async () => {
-    // Abandon any in-flight turn first. Without this the old stream kept
-    // writing tokens, conversation state and undo/redo flags into the NEW
-    // conversation.
-    abortRef.current?.abort();
-    abortRef.current = null;
-    generationRef.current += 1;
-    pendingTurnsRef.current.clear();
     setConfirmingRestart(false);
-    dispatch({ type: "CLEAR_MESSAGES" });
-    await openConversation(true);
-  }, [dispatch, openConversation]);
+    await controller.restart();
+  }, [controller]);
 
-  /**
-   * The toolbar's New conversation. It discards the transcript (and, on the
-   * managed route, ends the conversation server-side), and it sits next to
-   * Stop — so when there is something to lose it asks first. An untouched
-   * conversation has nothing to lose and restarts at once.
-   */
   // Cancelling the confirmation unmounts the focused button; give focus back
   // to the control that opened it.
   const closeRestartConfirm = useCallback(() => {
@@ -1685,6 +496,12 @@ export function ChatWidget() {
     );
   }, []);
 
+  /**
+   * The toolbar's New conversation. It discards the transcript (and, on the
+   * managed route, ends the conversation server-side), and it sits next to
+   * Stop — so when there is something to lose it asks first. An untouched
+   * conversation has nothing to lose and restarts at once.
+   */
   const requestRestart = useCallback(() => {
     if (state.messages.some((m) => m.role === "user")) {
       setConfirmingRestart(true);
@@ -1693,48 +510,17 @@ export function ChatWidget() {
     }
   }, [state.messages, handleRestart]);
 
-  /* ─── Failed start: try again ───────────────── */
-  const handleRetryStart = useCallback(async () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    generationRef.current += 1;
-    pendingTurnsRef.current.clear();
-    dispatch({ type: "CLEAR_MESSAGES" });
-    await openConversation(false);
-  }, [dispatch, openConversation]);
-
   /* ─── HITL: watch a paused conversation ─────── */
   const isPaused = isPausedState(state.conversationState);
 
   const handleApprovalStatus = useCallback(
-    (status: ApprovalStatus | null) => {
-      dispatch({ type: "SET_APPROVAL_STATUS", status });
-    },
-    [dispatch],
+    (status: ApprovalStatus | null) => controller.setApprovalStatus(status),
+    [controller],
   );
-
-  const handlePauseResolved = useCallback(async (
-    isStale: () => boolean,
-  ): Promise<boolean> => {
-    // The pause ended — by a reviewer, or automatically by timeout policy.
-    // Nothing was pushed to us, so re-read to pick up the resumed turn.
-    // Returning false keeps the watch alive: a dropped refresh must not strand
-    // the widget in a paused state it can never leave.
-    if (!state.conversationId) return false;
-    try {
-      const snapshot = await readConversation(state.conversationId, true);
-      // The watch may have been torn down while this read was in flight (a
-      // restart, an unmount). Applying the snapshot then would graft the old
-      // conversation's transcript onto the new one.
-      if (isStale()) return true;
-      // Re-reading the step that was already rendered when the turn paused.
-      processSnapshot(snapshot, { dedupe: true });
-      return true;
-    } catch (err) {
-      console.error("Failed to refresh after approval:", err);
-      return false;
-    }
-  }, [state.conversationId, processSnapshot]);
+  const handlePauseResolved = useCallback(
+    (isStale: () => boolean) => controller.refreshAfterPause(isStale),
+    [controller],
+  );
 
   useHitlPolling({
     conversationId: state.conversationId,
@@ -1743,190 +529,11 @@ export function ChatWidget() {
     onResolved: handlePauseResolved,
   });
 
-  const handleCancel = useCallback(async () => {
-    if (!state.conversationId) return;
-    const gen = generationRef.current;
-    try {
-      dispatch({ type: "SET_PROCESSING", value: true });
-      setHistoryBusy(true);
-      await cancelConversation(state.conversationId);
-      // "This request was cancelled." and EXECUTION_INTERRUPTED describe the
-      // conversation that was cancelled, not one started since.
-      if (gen !== generationRef.current) return;
-      dispatch({ type: "SET_APPROVAL_STATUS", status: null });
-      dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: makeNotice(t("send.cancelled")),
-      });
-    } catch (err) {
-      if (gen !== generationRef.current) return;
-      if (err instanceof ApiError && err.status === 409) {
-        // Nothing to cancel — it resolved between render and click.
-        dispatch({ type: "SET_APPROVAL_STATUS", status: null });
-      } else {
-        console.error("Cancel failed:", err);
-      }
-    } finally {
-      if (gen === generationRef.current) {
-        dispatch({ type: "SET_PROCESSING", value: false });
-      }
-    }
-  }, [dispatch, state.conversationId]);
-
-  /* ─── Recovery from a stuck conversation ────── */
-  const isStuck =
-    state.conversationState === "ERROR" ||
-    state.conversationState === "EXECUTION_INTERRUPTED";
-
-  const handleRetry = useCallback(async () => {
-    if (!state.conversationId) return;
-    const gen = generationRef.current;
-    dispatch({ type: "SET_PROCESSING", value: true });
-    setHistoryBusy(true);
-    // A rerun replaces the last step's reply, so a thumb given to the old one
-    // no longer applies. The server keeps it (no hook in the rerun path); the
-    // widget forgets it.
-    const rerunStep = lastStepIndex(state.messages);
-    try {
-      await rerunLastStep(state.conversationId);
-      if (gen === generationRef.current && rerunStep !== null) clearRatedStep(rerunStep);
-      const snapshot = await readConversation(state.conversationId, true);
-      if (gen !== generationRef.current) return;
-      if (snapshot.conversationState) {
-        dispatch({
-          type: "SET_CONVERSATION_STATE",
-          state: snapshot.conversationState,
-          endReason: snapshot.endReason ?? null,
-        });
-      }
-      // Retry re-reads the same step that failed; its output is already shown.
-      processSnapshot(snapshot, { dedupe: true });
-    } catch (err) {
-      // Abandoned by New Conversation: its error is not the new one's.
-      if (gen !== generationRef.current) return;
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: makeNotice(
-          err instanceof ApiError && err.status === 409
-            ? t("retry.nothing")
-            : t("retry.failed"),
-        ),
-      });
-    } finally {
-      if (gen === generationRef.current) {
-        dispatch({ type: "SET_PROCESSING", value: false });
-      }
-    }
-  }, [dispatch, state.conversationId, state.messages, processSnapshot, clearRatedStep]);
-
-  /* ─── Stop generating ───────────────────────── */
-  const handleStop = useCallback(async () => {
-    // Abort the local read first so tokens stop arriving immediately, then ask
-    // the server to stop producing them.
-    abortRef.current?.abort();
+  const handleStop = useCallback(() => {
     // The Stop button unmounts when the turn ends; hand focus to the composer.
     setComposerFocusSignal((n) => n + 1);
-    abortRef.current = null;
-    // Stopping before the first token left an empty bubble rendering
-    // "No response", implying the agent answered with nothing.
-    dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-    dispatch({ type: "FINISH_STREAMING" });
-    dispatch({ type: "SET_PROCESSING", value: false });
-    dispatch({ type: "SET_THINKING", value: false });
-
-    if (!state.conversationId || isDemo) return;
-    const gen = generationRef.current;
-    try {
-      await cancelConversation(state.conversationId);
-      // New Conversation while the cancel was in flight: the fresh
-      // conversation is not interrupted.
-      if (gen !== generationRef.current) return;
-      dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
-    } catch (err) {
-      // 409 = nothing to cancel; the turn finished as we clicked.
-      if (!(err instanceof ApiError && err.status === 409)) {
-        console.error("Stop failed:", err);
-      }
-    }
-  }, [dispatch, state.conversationId, isDemo]);
-
-  /* ─── Auto-scroll ───────────────────────────── */
-  // Follow new content only while the reader is at the bottom. It used to
-  // scroll on every token, smoothly, which fought anyone scrolling up to
-  // re-read mid-reply (and the smooth animation never caught up with the
-  // tokens). Following is an instant jump; leaving the bottom ends it.
-  // A layout effect, so the jump lands before the browser paints the new
-  // content instead of one frame after it.
-  // Where the transcript was last scrolled to, by the reader or by us. Moving
-  // up from here is what tells "the reader left the bottom" apart from a
-  // smooth scroll still on its way down.
-  const lastScrollTopRef = useRef(0);
-  useLayoutEffect(() => {
-    const el = messagesContainerRef.current;
-    if (!el || !stickToBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-    lastScrollTopRef.current = el.scrollTop;
-  }, [state.messages, state.isProcessing]);
-
-  // Content also grows without a state change: the throttled trailing render
-  // of a streaming reply, lazy images, KaTeX and highlight.js arriving late,
-  // the paused card filling in, and the viewport shrinking under an on-screen
-  // keyboard. Re-pin for all of them while the reader is following.
-  useEffect(() => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const repin = () => {
-      if (!stickToBottomRef.current) return;
-      el.scrollTop = el.scrollHeight;
-      lastScrollTopRef.current = el.scrollTop;
-    };
-    const mutations =
-      typeof MutationObserver === "function" ? new MutationObserver(repin) : null;
-    mutations?.observe(el, { childList: true, subtree: true, characterData: true });
-    const resizes = typeof ResizeObserver === "function" ? new ResizeObserver(repin) : null;
-    resizes?.observe(el);
-    // `load` does not bubble, so listen in the capture phase for images.
-    el.addEventListener("load", repin, true);
-    return () => {
-      mutations?.disconnect();
-      resizes?.disconnect();
-      el.removeEventListener("load", repin, true);
-    };
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
-    const atBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
-    const scrolledUp = el.scrollTop < lastScrollTopRef.current - 1;
-    lastScrollTopRef.current = el.scrollTop;
-    // Only the reader moving UP ends following. A smooth scroll towards the
-    // bottom fires scroll events that are "not at bottom yet" all the way
-    // down; treating those as leaving used to turn following off again right
-    // after the Scroll-to-bottom button was pressed.
-    if (atBottom) stickToBottomRef.current = true;
-    else if (scrolledUp) stickToBottomRef.current = false;
-    setShowScrollBtn(!atBottom && !stickToBottomRef.current);
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    const el = messagesContainerRef.current;
-    stickToBottomRef.current = true;
-    setShowScrollBtn(false);
-    if (!el) return;
-    const reduced =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // Scroll the transcript itself: scrollIntoView would also scroll the host
-    // page when the widget is embedded in an iframe.
-    if (typeof el.scrollTo === "function") {
-      el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
-    } else {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, []);
+    void controller.stop();
+  }, [controller]);
 
   /* ─── Composer focus handoff ────────────────── */
   // The agent-requested field replaces the composer, and leaving it (sending or
@@ -1935,9 +542,9 @@ export function ChatWidget() {
   const handleRequestedFieldSend = useCallback(
     (value: string, isSecret: boolean) => {
       setComposerFocusSignal((n) => n + 1);
-      handleSend(value, isSecret);
+      void controller.send(value, isSecret);
     },
-    [handleSend],
+    [controller],
   );
   const handleRequestedFieldCancel = useCallback(() => {
     dispatch({ type: "CLEAR_INPUT_FIELD" });
@@ -1945,6 +552,10 @@ export function ChatWidget() {
   }, [dispatch]);
 
   /* ─── Derived state ─────────────────────────── */
+  const isStuck =
+    state.conversationState === "ERROR" ||
+    state.conversationState === "EXECUTION_INTERRUPTED";
+  const historyBusy = state.historyBusy;
   // Once the reply's text is arriving, the bubble itself shows the agent at
   // work; dots below it would be a second "agent is typing".
   const lastMessage = state.messages[state.messages.length - 1];
@@ -1953,7 +564,8 @@ export function ChatWidget() {
   const isEnded = state.conversationState === "ENDED";
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
-  const showStartRetry = startFailed && !state.conversationId && !isEnded;
+  const showStartRetry = state.startFailed && !state.conversationId && !isEnded;
+  const sentCount = useMemo(() => state.messages.filter((m) => m.role === "user").length, [state.messages]);
   // Shown in the empty state too: an agent with no greeting has no messages yet,
   // and the header's "Rate this conversation" has to open the card for it.
   const ratingCard =
@@ -1981,18 +593,43 @@ export function ChatWidget() {
         </div>
       )}
 
-      <div
+      <MessageList
         className="chat-messages"
-        ref={messagesContainerRef}
-        onScroll={handleScroll}
-        // Without a live region no reply was ever announced to a screen
-        // reader. aria-busy holds the announcement until a streamed reply is
-        // complete, instead of reading it out token by token.
-        role="log"
-        aria-live="polite"
-        aria-label={t("transcript.label")}
-        aria-busy={state.isProcessing}
-        data-testid="chat-transcript"
+        testId="chat-transcript"
+        label={t("conversation.transcript.label")}
+        busy={state.isProcessing}
+        content={state.messages}
+        sentCount={sentCount}
+        between={
+          <>
+            {/* The indicator's announcement. It sits OUTSIDE the transcript
+                because the transcript is aria-busy for the whole turn, and a
+                status inside a busy region may never be announced — which would
+                silence "Using calculator…", a state that only exists mid-turn.
+                Always mounted: a live region added together with its text is
+                often not read. */}
+            <div
+              className="chat-sr-only"
+              role="status"
+              aria-live="polite"
+              data-testid="chat-activity-status"
+            >
+              {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
+                ? indicatorStatusText(state.isEscalating, state.activeTool, t)
+                : ""}
+            </div>
+
+            {/* A refused rating (rolled back) says why. Always mounted, so the
+                message is announced when it appears. */}
+            <div className="chat-toast-region" role="status" aria-live="polite" data-testid="rating-toast-region">
+              {ratings.toast && (
+                <div className="chat-toast" data-testid="rating-toast">
+                  {ratings.toast}
+                </div>
+              )}
+            </div>
+          </>
+        }
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
           <>
@@ -2013,7 +650,7 @@ export function ChatWidget() {
             {state.messages.map((msg, i) => {
               const ratingStep = ratings.profile?.messageRating ? ratableByPosition[i] : null;
               return (
-                <MessageBubble
+                <Message
                   key={msg.id}
                   message={msg}
                   enableMarkdown={state.config.enableMarkdown !== false}
@@ -2035,8 +672,9 @@ export function ChatWidget() {
               // the pause stored yet, and the composer is locked meanwhile.
               <PausedCard
                 status={state.approvalStatus}
-                onCancel={handleCancel}
+                onCancel={() => void controller.cancel()}
                 cancelDisabled={state.isProcessing}
+                locale={getLocale()}
               />
             ) : (
               <>
@@ -2054,41 +692,9 @@ export function ChatWidget() {
                   !replyIsStreaming && <TypingIndicator />}
               </>
             )}
-
-            <div ref={messagesEndRef} />
           </>
         )}
-      </div>
-
-      {/* The indicator's announcement. It sits OUTSIDE the transcript because
-          the transcript is aria-busy for the whole turn, and a status inside a
-          busy region may never be announced — which would silence "Using
-          calculator…", a state that only exists mid-turn. Always mounted: a
-          live region added together with its text is often not read. */}
-      <div
-        className="chat-sr-only"
-        role="status"
-        aria-live="polite"
-        data-testid="chat-activity-status"
-      >
-        {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
-          ? indicatorStatusText(state.isEscalating, state.activeTool)
-          : ""}
-      </div>
-
-      {/* A refused rating (rolled back) says why. Always mounted, so the
-          message is announced when it appears. */}
-      <div className="chat-toast-region" role="status" aria-live="polite" data-testid="rating-toast-region">
-        {ratings.toast && (
-          <div className="chat-toast" data-testid="rating-toast">
-            {ratings.toast}
-          </div>
-        )}
-      </div>
-
-      <div style={{ position: "relative" }}>
-        <ScrollToBottom visible={showScrollBtn} onClick={scrollToBottom} />
-      </div>
+      </MessageList>
 
       {!isEnded && !isPaused &&
         state.config.enableQuickReplies !== false && (
@@ -2109,7 +715,7 @@ export function ChatWidget() {
           <div className="recovery-banner__actions">
             <button
               className="recovery-banner__btn"
-              onClick={handleRetry}
+              onClick={() => void controller.retry()}
               disabled={state.isProcessing}
               data-testid="recovery-retry"
             >
@@ -2132,7 +738,7 @@ export function ChatWidget() {
           <div className="recovery-banner__actions">
             <button
               className="recovery-banner__btn"
-              onClick={handleRetryStart}
+              onClick={() => void controller.retryStart()}
               data-testid="start-retry"
             >
               {t("start.retry")}
@@ -2170,7 +776,7 @@ export function ChatWidget() {
                   {state.config.enableUndo !== false && (
                     <button
                       className="chat-actions__btn"
-                      onClick={handleUndo}
+                      onClick={() => void controller.undo()}
                       disabled={!state.undoAvailable || state.isProcessing}
                       title={t("undo.title")}
                       aria-label={t("undo.title")}
@@ -2183,7 +789,7 @@ export function ChatWidget() {
                   {state.config.enableRedo !== false && (
                     <button
                       className="chat-actions__btn"
-                      onClick={handleRedo}
+                      onClick={() => void controller.redo()}
                       disabled={!state.redoAvailable || state.isProcessing}
                       title={t("redo.title")}
                       aria-label={t("redo.title")}
@@ -2272,11 +878,16 @@ export function ChatWidget() {
                 autoFocus={state.messages.some((m) => m.role === "user")}
               />
             ) : (
-              <ChatInput
+              <Composer
                 onSend={handleSend}
                 disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}
                 focusSignal={composerFocusSignal}
+                placeholder={
+                  state.config.placeholder && state.config.placeholder !== DEFAULT_PLACEHOLDER
+                    ? state.config.placeholder
+                    : undefined
+                }
               />
             )}
           </div>
