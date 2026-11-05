@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffService;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -290,6 +291,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     @Inject
     volatile IAgentGroupStore agentGroupStore;
+
+    /**
+     * Cross-team handoff. Null in tests that build the orchestrator by hand, which
+     * {@code TeamHandoffToolsProvider} reads as "no handoff tool".
+     */
+    @Inject
+    volatile TeamHandoffService teamHandoffService;
 
     /**
      * I17's store, field-injected for the same reason as the two above.
@@ -765,6 +773,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         var contextual = contextualToolsProvider();
         merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
                 new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
+                new TeamHandoffToolsProvider(liveDiscussionRegistry, agentGroupStore, teamHandoffService),
                 new ArtifactToolsProvider(liveDiscussionRegistry, agentGroupStore, sharedArtifactStore),
                 new AttachmentToolsProvider(contextual)), ctx);
 

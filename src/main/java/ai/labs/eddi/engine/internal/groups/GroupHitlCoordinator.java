@@ -25,6 +25,8 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.hitl.review.HitlDecisionRecords;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -210,6 +212,8 @@ public class GroupHitlCoordinator {
         } else {
             gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
         }
+        // Rendered once, here, and persisted with the pause (never fails the commit).
+        gc.setHitlApprovalContext(renderApprovalContext(gc, config, phaseIdx, granularity));
         // H14a: only while still running — a cancel committed elsewhere must win.
         RunningDiscussionWrites.updateWhileRunning(conversationStore, gc);
 
@@ -219,7 +223,24 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt()));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt(), gc.getHitlApprovalContext()));
+        }
+    }
+
+    /**
+     * The pause's {@code approvalContext}, or {@code null} when none is configured,
+     * no renderer is available, or rendering failed — the renderer contains its own
+     * failures, and this guards the lookup.
+     */
+    private RenderedApprovalContext renderApprovalContext(GroupConversation gc, AgentGroupConfiguration config, int phaseIdx,
+                                                          String granularity) {
+        try {
+            GroupApprovalContextRenderer renderer = groupConversationService.approvalContextRenderer();
+            return renderer == null ? null : renderer.render(gc, config, phaseIdx, granularity);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Approval context not rendered for group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
         }
     }
 
@@ -265,6 +286,7 @@ public class GroupHitlCoordinator {
                 TranscriptEntryType.ERROR, Instant.now(), msg, null));
         gc.setState(GroupConversationState.FAILED);
         gc.setPausedAt(null);
+        gc.setHitlApprovalContext(null);
         gc.setHitlLastPauseFingerprint(null);
         gc.setLastModified(Instant.now());
         // H14a: only while still running — a cancel committed elsewhere must win.
@@ -332,6 +354,7 @@ public class GroupHitlCoordinator {
         try {
             gc.setState(GroupConversationState.CANCELLED);
             gc.setPausedAt(null);
+            gc.setHitlApprovalContext(null);
             gc.setPendingHumanInput(null);
             gc.setLastModified(Instant.now());
             conversationStore.updateIfState(gc, pausedState);
@@ -359,7 +382,7 @@ public class GroupHitlCoordinator {
         // change the state the cleanup paths will read. The first two swallow their
         // own exceptions already; the listener is wrapped here for the same reason.
         deleteGroupHitlTimeoutSchedule(gc.getId());
-        auditHitlCancellation(gc, token.getSignal(), cancelledPausedAt);
+        auditHitlCancellation(gc, token.getSignal(), cancelledPausedAt, token.getSignalledBy());
         LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", LogSanitizer.sanitize(gc.getId()));
         try {
             notifyCancelled(gc, listener);
@@ -435,11 +458,15 @@ public class GroupHitlCoordinator {
         // degrading a bounded policy to WAIT_INDEFINITELY.
         var token = discussionControls.get(conversationId);
         if (token != null) {
+            // The running leg audits a cancel that lands mid-pause on its own thread,
+            // which carries no identity of this caller: record it on the token.
+            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+            String signalledBy = caller != null ? caller.userId() : null;
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
-                token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                token.setSignal(ControlSignal.CANCEL_IMMEDIATE, signalledBy);
                 token.cancelActiveFuture();
             } else {
-                token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+                token.setSignal(ControlSignal.CANCEL_GRACEFUL, signalledBy);
             }
             // Do NOT delete the schedule here: a running leg has no armed schedule,
             // and if the leg is mid-pause-commit it converts the pause to CANCELLED
@@ -523,6 +550,7 @@ public class GroupHitlCoordinator {
         final Instant cancelledPausedAt = gc.getPausedAt();
         gc.setState(GroupConversationState.CANCELLED);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
+        gc.setHitlApprovalContext(null);
         gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed
         gc.setLastModified(Instant.now());
         try {
@@ -716,6 +744,7 @@ public class GroupHitlCoordinator {
             // point is the human in the loop.
             gc.setState(GroupConversationState.REJECTED);
             gc.setPausedAt(null);
+            gc.setHitlApprovalContext(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
             conversationStore.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, readPauseId);
             // Delete timeout schedule only after CAS succeeds (Phase 5e)
@@ -763,6 +792,7 @@ public class GroupHitlCoordinator {
         gc.setHitlPauseReason(null);
         gc.setHitlTimeoutPolicy(null);
         gc.setHitlApprovalTimeout(null);
+        gc.setHitlApprovalContext(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
 
         // Zero-match outcomes are distinguished by the store: a concurrent DELETE
@@ -1051,6 +1081,11 @@ public class GroupHitlCoordinator {
                 // policy is not silently disarmed.
                 gc.setHitlTimeoutPolicy(fallbackTimeoutPolicy);
                 gc.setHitlApprovalTimeout(fallbackApprovalTimeout);
+            }
+            // The resume consumed the context with the bookmark; the pause lives on, so
+            // it needs one again (PHASE/TASK pauses only — they are the ones that render).
+            if (gc.getHitlPauseType() == HitlPauseType.PHASE || gc.getHitlPauseType() == HitlPauseType.TASK) {
+                gc.setHitlApprovalContext(renderApprovalContext(gc, config, phaseIndex, gc.getHitlPauseType().name()));
             }
             conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
             scheduleGroupHitlTimeout(gc);
@@ -1380,6 +1415,7 @@ public class GroupHitlCoordinator {
         gc.setHitlPauseReason(null);
         gc.setHitlTimeoutPolicy(null);
         gc.setHitlApprovalTimeout(null);
+        gc.setHitlApprovalContext(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
         gc.setLastModified(Instant.now());
         // Double-submit / concurrent-cancel race → ResourceModifiedException → 409.
@@ -1539,12 +1575,24 @@ public class GroupHitlCoordinator {
      * timeout ABORT, crash recovery).
      */
     public void auditHitlCancellation(GroupConversation gc, ControlSignal mode, Instant pausedAt) {
+        auditHitlCancellation(gc, mode, pausedAt, null);
+    }
+
+    /**
+     * As above; {@code signalledBy}, when not null, is the caller that signalled a
+     * cancel the running leg now audits on its own thread, and wins over the
+     * thread's identity.
+     */
+    void auditHitlCancellation(GroupConversation gc, ControlSignal mode, Instant pausedAt, String signalledBy) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
             return;
         }
         try {
-            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
-            String cancelledBy = caller != null && caller.userId() != null ? caller.userId() : "system:unattributed";
+            String cancelledBy = signalledBy;
+            if (cancelledBy == null) {
+                CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+                cancelledBy = caller != null && caller.userId() != null ? caller.userId() : "system:unattributed";
+            }
             AgentGroupConfiguration.HitlConfig hitlConfig = null;
             try {
                 IResourceStore.IResourceId resId = groupStore.getCurrentResourceId(gc.getGroupId());

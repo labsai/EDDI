@@ -1010,6 +1010,10 @@ public class SlackEventHandler {
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
                 agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
                 pauseType, pendingToolCalls, SlackHitlEditModal.forCard(pauseType, pendingToolCalls, bookmark, platformConfig));
+        // The agent's approvalContext (rendered at pause commit), between the facts and
+        // the buttons.
+        boolean contextShown = SlackApprovalContextBlocks.insertBeforeActions(blocks,
+                bookmark != null ? bookmark.getHitlApprovalContext() : null, SlackApprovalContextBlocks.enabled(platformConfig));
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". Only the originating integration's own token
@@ -1029,7 +1033,13 @@ public class SlackEventHandler {
         }
         String auth = "Bearer " + botToken;
         try {
-            slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            if (contextShown) {
+                // Conversation text on the card: no link or media preview of anything a model
+                // wrote.
+                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback, false);
+            } else {
+                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            }
         } catch (SlackDeliveryException e) {
             // F12: delivery failed — drop the record so a later retry can re-attempt
             // instead of being suppressed until the record expires.
@@ -1098,6 +1108,7 @@ public class SlackEventHandler {
         // binds to THIS integration at the interactivity endpoint (IDOR-safe).
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs,
                 hitlApprovalChannel, hitlApproverUserIds, integrationName, approvalRecords);
+        listener.setShowApprovalContext(SlackApprovalContextBlocks.enabled(integration != null ? integration.getPlatformConfig() : null));
 
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {

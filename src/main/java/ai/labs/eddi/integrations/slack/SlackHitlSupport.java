@@ -35,6 +35,11 @@ public final class SlackHitlSupport {
     // ─── platformConfig keys (see ChannelIntegrationConfiguration Javadoc) ───
     public static final String CFG_HITL_APPROVAL_CHANNEL = "hitlApprovalChannel";
     public static final String CFG_HITL_APPROVER_USER_IDS = "hitlApproverUserIds";
+    /**
+     * {@code "true"} shows the agent's {@code approvalContext} on the card, in the
+     * channel.
+     */
+    public static final String CFG_HITL_APPROVAL_CONTEXT = "hitlApprovalContext";
 
     // ─── Block Kit action ids ───
     public static final String ACTION_APPROVE = "hitl_approve";

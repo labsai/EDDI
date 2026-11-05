@@ -127,6 +127,17 @@ public class SlackWebApiClient {
      */
     public String postBlocksMessage(String authToken, String channelId, String threadTs,
                                     List<?> blocks, String fallbackText) {
+        return postBlocksMessage(authToken, channelId, threadTs, blocks, fallbackText, true);
+    }
+
+    /**
+     * As {@link #postBlocksMessage(String, String, String, List, String)}, with
+     * control over link and media unfurling. An approval card that carries
+     * conversation text passes {@code unfurl=false}: a URL a model chose must not
+     * make Slack fetch it and paste a preview into the approval channel.
+     */
+    public String postBlocksMessage(String authToken, String channelId, String threadTs,
+                                    List<?> blocks, String fallbackText, boolean unfurl) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("channel", channelId);
         // text acts as the notification/accessibility fallback for block messages
@@ -134,6 +145,10 @@ public class SlackWebApiClient {
         body.put("blocks", blocks);
         if (threadTs != null) {
             body.put("thread_ts", threadTs);
+        }
+        if (!unfurl) {
+            body.put("unfurl_links", false);
+            body.put("unfurl_media", false);
         }
 
         JsonNode responseJson = callSlackApi("chat.postMessage", authToken, body);

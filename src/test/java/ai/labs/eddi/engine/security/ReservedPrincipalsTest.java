@@ -57,6 +57,8 @@ class ReservedPrincipalsTest {
             Map.entry("ref:", "cache key"),
             Map.entry("name:", "cache key"),
             Map.entry("httpcall:", "cache key"),
+            Map.entry("http:",
+                    "tool-approval address of an httpcall tool (http:<toolName>, as ToolApprovalGate.addressesOf builds it; ApiAgentSyncService matches exemptions against it)"),
             Map.entry("openai:", "token-estimator cache key"),
             Map.entry("s:", "hash input tag"),
             Map.entry("c:", "hash input tag"),

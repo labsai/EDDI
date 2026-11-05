@@ -4,6 +4,7 @@ import { ratingHandlers } from "./rating-handlers";
 import { oversightHandlers } from "./oversight-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
@@ -3171,6 +3172,7 @@ export const handlers = [
   http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+  ...teamHandoffHandlers,
 
   // ── I10 — packaged group templates ──
 

@@ -18,6 +18,7 @@ import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
+  type ApprovalContextView,
   type DecisionReview,
   type HitlVerdict,
   type PauseDetails,
@@ -25,6 +26,7 @@ import {
   type ToolCallDecision,
 } from "@/lib/api/hitl";
 import { AnswerEditor, ReasonCodeSelect } from "@/components/hitl/answer-editor";
+import { ApprovalContext } from "@/components/hitl/approval-context";
 import { validateEditedAnswer } from "@/lib/hitl-edit";
 
 export interface ApprovalBannerProps {
@@ -47,6 +49,9 @@ export interface ApprovalBannerProps {
   /** Structured pause details from GET …/approval-status. When this is a
    *  TOOL_CALL pause, the per-call tool approval UI is rendered (regular only). */
   pauseDetails?: PauseDetails | null;
+  /** The designer's `approvalContext` for this pause (draft, sources, claims …),
+   *  shown above the decision. Absent/empty = nothing is rendered. */
+  approvalContext?: ApprovalContextView | null;
   /** Whether the mutation is in-flight. */
   isSubmitting?: boolean;
   /** True while the structured pause details are still loading for a paused
@@ -179,6 +184,7 @@ export function ApprovalBanner({
   granularity,
   pendingTaskIds,
   pauseDetails,
+  approvalContext,
   isSubmitting,
   pauseDetailsPending,
   pauseDetailsError,
@@ -292,7 +298,12 @@ export function ApprovalBanner({
     const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
-      const amend = s?.amend?.trim();
+      // An amendment identical to the arguments shown is no amendment: the server
+      // compares it with the stored arguments and would answer a reason code on
+      // that "plain approval" with a 400. Arguments redacted for display differ from
+      // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      const typed = s?.amend?.trim();
+      const amend = typed && typed !== call.arguments ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;
@@ -549,6 +560,8 @@ export function ApprovalBanner({
           </span>
         )}
       </div>
+
+      <ApprovalContext context={approvalContext} />
 
       {/* Tool-call approvals (TOOL_CALL pause) */}
       {toolPause && (

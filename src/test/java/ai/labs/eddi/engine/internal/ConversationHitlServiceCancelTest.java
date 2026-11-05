@@ -311,4 +311,19 @@ class ConversationHitlServiceCancelTest {
         assertEquals(HitlTimeoutPolicy.AUTO_APPROVE, effectivePolicy(List.of(call("http.get:/status"), call("http.get:/status")),
                 autoApprove, toolApprovals, HitlTimeoutPolicy.WAIT_INDEFINITELY));
     }
+
+    @Test
+    @DisplayName("a call whose selected rule states no policy inherits, even when a shadowed rule with the same match states one")
+    void aShadowedRuleWithTheSameMatchDoesNotSpeakForTheCall() {
+        // Strict merge: the task's policy-less rule sorts before the agent's rule for
+        // the same match, so the call selected the task rule and inherits WAIT.
+        var taskRule = rule("mcp:delete_*", null);
+        var shadowedAgentRule = rule("mcp:delete_*", HitlTimeoutPolicy.AUTO_REJECT);
+        var autoApprove = rule("http.get:/status", HitlTimeoutPolicy.AUTO_APPROVE);
+        var toolApprovals = new ToolApprovalsConfig();
+        toolApprovals.setRules(List.of(taskRule, shadowedAgentRule, autoApprove));
+
+        assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, effectivePolicy(List.of(call("http.get:/status"), call("mcp:delete_*")),
+                autoApprove, toolApprovals, HitlTimeoutPolicy.WAIT_INDEFINITELY));
+    }
 }

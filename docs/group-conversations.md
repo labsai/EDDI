@@ -612,8 +612,9 @@ generated id and are still found by their `groupId`.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
-a soft (versioned) delete keeps it, because the group can come back. Not in
-v1: cross-team handoff, Manager UI, reputation weighting.
+a soft (versioned) delete keeps it, because the group can come back. Another
+team or a standalone agent can file tasks into a workspace: see
+[Cross-Team Handoff](team-handoff.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 
@@ -790,7 +791,7 @@ controls that shape *when it stops* and *what it costs*:
   "repeats": 3,
   "requiresApproval": false,
   "allowAbstention": true,
-  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "SERVICE" }
+  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "MODERATOR" }
 }
 ```
 
@@ -798,7 +799,7 @@ controls that shape *when it stops* and *what it costs*:
 mechanism behind DELPHI's rounds.
 
 **`requiresApproval`** pauses the discussion at the phase boundary until a human
-approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). At `TASK` granularity on an `EXECUTE`
+approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
 **`convergence` (I2)** ends a repeating phase early once the round stopped
@@ -808,10 +809,11 @@ scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
 nothing to compare against) guards against calling convergence before there is
 evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
 the judge (in its own conversation, so the judge's JSON-only prompts never leak
-into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
-logs a warning and falls back to the same moderator-agent path, so it currently
-costs the same as `MODERATOR` rather than the cheaper dedicated call the name
-suggests. Either way, a group with no moderator skips the judge and the phase
+into a later SYNTHESIS turn). `SERVICE` with a `service` model makes one cheap
+direct model call instead, needs no moderator, and books its spend as
+`system:judge:*` — see [Group Convergence Judge: SERVICE](group-service-judge.md);
+without a `service` model it falls back to the moderator path with a warning.
+A `MODERATOR` judge in a group with no moderator is skipped and the phase
 simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
@@ -1275,6 +1277,7 @@ speaker and phase pairs.
 | `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
 | `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
 | `artifact_updated` | A shared artifact was created or revised (I17) |
+| `team_handoff` | A handoff attempt to another team, from a member's `handoff_to_team` call or an `onDecision` rule: `{handoffId, targetAlias, targetGroupId, outcome, mode, trigger, subject}`. Refusals that reach the filing service are announced too (`outcome` is e.g. `NOT_ACCEPTED`); a call rejected earlier by the tool itself (unknown alias, per-turn limit exceeded) emits no event. Never carries the description. See [Cross-Team Handoff](team-handoff.md) |
 | `member_tool_call` | A member's tool loop is about to run a tool: `{agentId, displayName, tool}`. Name only, never arguments (the same rule as the 1:1 `tool_call`). A best-effort liveness signal while the member's non-streamed turn is running; the engine skips it for a speaker the orchestrator has cancelled, but cancellation or a timeout can race with the notification, so it may trail `speaker_complete` of a turn already closed |
 | `cost_updated` | A cost attribution landed in the discussion ledger: `{attributionKey, displayName, attributedCost, totalCost}`. `attributedCost` is that key's cumulative cost, so a consumer overwrites per key rather than adding. Also fires for system spend (`system:...` keys that name no member) |
 | `stance_updated` | A member's one-line stance was recomputed at a phase boundary: `{agentId, displayName, stance, llmGenerated, coveredContributions}`. Fires only when the text changed |

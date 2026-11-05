@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -949,6 +950,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             // persisted. Absent entirely once the conversation is no longer
             // paused, same suppression rule as the bookmark fields above.
             summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, tail) : null);
+            // The designer's approvalContext, rendered once at pause commit and
+            // re-redacted here; applies to both pause types, hence outside pauseDetails.
+            summary.put("approvalContext", paused ? ApprovalContextViews.toView(snapshot.getHitlApprovalContext()) : null);
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)

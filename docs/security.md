@@ -852,7 +852,7 @@ primary    → NUMBER | FUNCTION '(' args ')' | '(' expression ')' | CONSTANT
 
 ## Runtime Template Engine
 
-**Applies to:** every Qute template EDDI renders at runtime — system prompts, output texts and quick replies, httpcall URLs/headers/bodies, property instructions, MCP tool arguments, group-discussion prompts and the template preview endpoint.
+**Applies to:** every Qute template EDDI renders at runtime — system prompts, output texts and quick replies, httpcall URLs/headers/bodies, property instructions, MCP tool arguments, group-discussion prompts, the approver-facing `approvalContext` blocks of [HITL](hitl-approval-context.md) and the template preview endpoint.
 
 ### Templates are author text; data is never a template
 

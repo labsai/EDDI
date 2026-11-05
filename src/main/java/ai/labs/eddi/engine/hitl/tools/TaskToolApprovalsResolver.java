@@ -217,6 +217,7 @@ public final class TaskToolApprovalsResolver {
                 demoted.setPauseReason(rule.getPauseReason());
                 demoted.setApprovalCategory(rule.getApprovalCategory());
                 demoted.setPendingMessage(rule.getPendingMessage());
+                demoted.setContext(rule.getContext());
                 merged.add(demoted);
             } else {
                 merged.add(rule);

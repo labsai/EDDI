@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -388,6 +389,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // is to continue, close or delete — a transcript is not less private than
             // the right to append to it.
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // The pause's approvalContext rides on this document: served through the
+            // current filter.
+            gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
             return gc;
         } catch (ForbiddenException e) {
             throw e;
@@ -962,6 +966,8 @@ public class RestGroupConversation implements IRestGroupConversation {
                                     + "conversation is awaiting approval — use the summary view")
                             .build();
                 }
+                // Served to the approver, but through the current filter like the rest.
+                gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
                 return Response.ok(gc).build();
             }
             // Summary (default): pause coordinates only — no transcript. Pause
@@ -996,6 +1002,13 @@ public class RestGroupConversation implements IRestGroupConversation {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
             }
+            // The designer's approvalContext, rendered once at pause commit and
+            // re-redacted here — same audience as the prompt above (owner, admin, an
+            // approver inside the APPROVAL pause), and only while awaiting approval.
+            summary.put("approvalContext",
+                    awaitingApproval && hitlAccessGuard.mayReadPendingHumanPrompt(gc)
+                            ? ApprovalContextViews.toView(gc.getHitlApprovalContext())
+                            : null);
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -1217,6 +1230,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
                 // Not terminal — artifacts are edited throughout the discussion.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
+            }
+
+            @Override
+            public void onTeamHandoff(GroupConversationEventSink.TeamHandoffEvent event) {
+                // Not terminal — a handoff can happen at any turn or at completion.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TEAM_HANDOFF, toJson(event));
             }
 
             @Override
