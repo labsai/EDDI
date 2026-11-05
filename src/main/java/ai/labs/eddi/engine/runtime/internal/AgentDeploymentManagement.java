@@ -5,10 +5,12 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import java.util.Set;
+import java.util.HashMap;
 import java.util.HashSet;
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.TransientDeployments;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -227,6 +229,27 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     IClusterEventBus clusterEvents;
 
     /**
+     * Cluster mode: the shared record of {@code autoDeploy=false} deployments,
+     * which the sweep reconciles like the deployment collection and which decides
+     * whether a deployment event is stale. Field-injected; null in tests.
+     */
+    @Inject
+    TransientDeployments transientDeployments;
+
+    /**
+     * When this node last saw a {@code DEPLOYED} transient record for a key. A
+     * record that vanished (expired: NATS kept nothing for longer than the TTL) is
+     * re-created only for a deployment confirmed within the TTL, so a node that was
+     * cut off long enough to miss the tombstone of an undeploy never brings the
+     * agent back on every node.
+     */
+    private final Map<String, Instant> transientConfirmed = new ConcurrentHashMap<>();
+
+    private boolean transientRecorded() {
+        return clustered() && transientDeployments != null && transientDeployments.enabled();
+    }
+
+    /**
      * Locally deployed agents first seen without a {@code deployed} record — an
      * undeploy needs two consecutive sweeps, so an agent whose REST deploy has not
      * written its record yet is never taken down by the race.
@@ -354,6 +377,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             return;
         }
         if (DeploymentStore.TRANSIENT.equals(status)) {
+            if (transientEventIsStale(event.getString("env"), agentId, event.get("version"))) {
+                LOGGER.debugf("Ignoring a stale transient deployment event for %s version %s: its record says otherwise",
+                        sanitize(agentId), event.get("version"));
+                return;
+            }
             deployTransient(event.getString("env"), agentId, event.get("version"));
             return;
         }
@@ -367,6 +395,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
                     if (agentId.equals(agent.getAgentId())
                             && (version == null || String.valueOf(version).equals(String.valueOf(agent.getAgentVersion())))) {
+                        if (stillMeantToBeDeployed(environment, agent.getAgentId(), agent.getAgentVersion())) {
+                            // The event is older than the record: a redeploy (recorded, or
+                            // autoDeploy=false) followed the undeploy it announces, and its own
+                            // event may have arrived first.
+                            LOGGER.debugf("Ignoring a stale undeploy event for %s version %s: it is deployed again",
+                                    sanitize(agentId), agent.getAgentVersion());
+                            continue;
+                        }
                         undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "undeployed on node " + event.originNode());
                     }
                 }
@@ -374,6 +410,54 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 LOGGER.warnf("Could not apply a remote undeploy of %s: %s", agentId, e.getMessage());
             }
         }
+    }
+
+    /**
+     * A transient-deploy event is stale when the shared record no longer says
+     * {@code DEPLOYED} (a tombstone was written after it, or it was never written —
+     * the record goes in before the event). Unknown (NATS unreachable, single node)
+     * is not stale: the event is applied as before, and the sweep corrects it.
+     */
+    private boolean transientEventIsStale(String env, String agentId, Object version) {
+        if (!transientRecorded() || env == null || version == null) {
+            return false;
+        }
+        try {
+            return transientDeployments.read(env, agentId, version).map(e -> e.state() != TransientDeployments.State.DEPLOYED)
+                    .orElse(true);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the authoritative records — the deployment collection and the
+     * transient record — still want this version deployed, read now. An undeploy
+     * event older than either is stale and dropped. A read that fails answers
+     * false: the event is applied as before, and the sweep redeploys whatever the
+     * records still want.
+     */
+    private boolean stillMeantToBeDeployed(Environment environment, String agentId, Integer agentVersion) {
+        if (!clustered()) {
+            return false;
+        }
+        try {
+            DeploymentInfo record = deploymentStore.getDeploymentInfo(environment.toString(), agentId, agentVersion);
+            if (record != null && record.getDeploymentStatus() == deployed) {
+                return true;
+            }
+        } catch (RuntimeException | ResourceStoreException e) {
+            return false;
+        }
+        if (transientRecorded()) {
+            try {
+                return transientDeployments.read(environment.toString(), agentId, agentVersion)
+                        .map(e -> e.state() == TransientDeployments.State.DEPLOYED).orElse(false);
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**
@@ -491,6 +575,93 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
         }
         missingSince.keySet().retainAll(seenMissing);
+    }
+
+    /**
+     * Cluster mode: brings this node in line with the shared record of
+     * {@code autoDeploy=false} deployments — deploys what it says is
+     * {@code DEPLOYED} and this node lacks (a node that joined later, or missed the
+     * event), takes down what it serves and the record now tombstones (a lost or
+     * out-of-order undeploy event), refreshes the records of what it serves before
+     * they expire, and re-creates a record that expired under a deployment it still
+     * serves and saw confirmed within the TTL. An unreadable bucket changes
+     * nothing: no information is never read as "undeploy".
+     */
+    private void reconcileTransient(List<DeploymentInfo> meantToBeDeployed) {
+        if (!transientRecorded()) {
+            return;
+        }
+        transientDeployments.retryPending();
+        List<TransientDeployments.Entry> entries;
+        try {
+            entries = transientDeployments.list();
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Transient deployments not reconciled this sweep: %s", e.getMessage());
+            return;
+        }
+        Set<String> recorded = new HashSet<>();
+        for (DeploymentInfo info : meantToBeDeployed) {
+            recorded.add(keyOf(info.getEnvironment(), info.getAgentId(), info.getAgentVersion()));
+        }
+        Map<String, TransientDeployments.Entry> byKey = new HashMap<>();
+        Instant now = clock.instant();
+        for (TransientDeployments.Entry entry : entries) {
+            Environment environment;
+            try {
+                environment = Environment.valueOf(entry.environment());
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            String key = keyOf(environment, entry.agentId(), entry.version());
+            byKey.put(key, entry);
+            if (entry.state() != TransientDeployments.State.DEPLOYED || recorded.contains(key)) {
+                continue;
+            }
+            transientConfirmed.put(key, now);
+            IAgent local = null;
+            try {
+                local = agentFactory.getAgent(environment, entry.agentId(), entry.version());
+            } catch (Exception e) {
+                LOGGER.debugf("Could not look up agent %s locally: %s", sanitize(entry.agentId()), e.getMessage());
+            }
+            if (local == null) {
+                deployTransient(entry.environment(), entry.agentId(), entry.version());
+            } else {
+                noteUnrecordedDeployment(environment, entry.agentId(), entry.version());
+                transientDeployments.refreshIfOld(entry, now.toEpochMilli());
+            }
+        }
+        for (Environment environment : Environment.values()) {
+            List<IAgent> served;
+            try {
+                served = agentFactory.getAllDeployedAgents(environment);
+            } catch (ServiceException e) {
+                continue;
+            }
+            for (IAgent agent : served) {
+                String key = keyOf(environment, agent.getAgentId(), agent.getAgentVersion());
+                if (!unrecorded.contains(key) || recorded.contains(key)) {
+                    continue;
+                }
+                TransientDeployments.Entry entry = byKey.get(key);
+                if (entry != null && entry.state() == TransientDeployments.State.UNDEPLOYED) {
+                    transientConfirmed.remove(key);
+                    undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "its autoDeploy=false deployment was undeployed");
+                } else if (entry == null
+                        && !transientDeployments.isPending(environment.toString(), agent.getAgentId(), agent.getAgentVersion())) {
+                    Instant confirmed = transientConfirmed.get(key);
+                    if (confirmed == null) {
+                        // Deployed here before this node ever read its record (this node's own
+                        // REST deploy, whose record may still be in flight): judged next sweep.
+                        transientConfirmed.put(key, now);
+                    } else if (Duration.between(confirmed, now).compareTo(transientDeployments.ttl()) < 0
+                            && transientDeployments.recreate(environment.toString(), agent.getAgentId(), agent.getAgentVersion())) {
+                        LOGGER.infof("Re-created the expired cluster record of agent %s version %d (%s, autoDeploy=false)",
+                                sanitize(agent.getAgentId()), agent.getAgentVersion(), environment);
+                    }
+                }
+            }
+        }
     }
 
     void onStart(@Observes StartupEvent ev) {
@@ -711,6 +882,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             trackedConfigChecks.keySet().retainAll(meantToBeDeployed);
             if (clustered()) {
                 reconcileUndeployed(meantToBeDeployed);
+                reconcileTransient(meantToBeDeployed);
             }
             Instant now = clock.instant();
             meantToBeDeployed.stream()

@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.tools.spi.ToolArgumentValidator;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -220,6 +221,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, String> endpoints = new HashMap<>();
         Map<String, ToolRequestResolver> resolvers = new HashMap<>();
+        Map<String, ToolGroup> groups = new HashMap<>();
 
         try {
             LOGGER.debugf("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -230,6 +232,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             for (var stepConfig : stepConfigs) {
                 ApiCallsConfiguration httpCallsConfig = stepConfig.config();
                 String targetServerUrl = httpCallsConfig.getTargetServerUrl();
+                var group = new ToolGroup(groupId(stepConfig.stepConfig()), httpCallsConfig.getDescription());
 
                 for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
                     if (apiCall.getName() == null || apiCall.getName().isBlank()) {
@@ -254,6 +257,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     }
 
                     toolSpecs.add(specBuilder.build());
+                    groups.putIfAbsent(apiCall.getName(), group);
 
                     // Record what this tool actually calls, so approval patterns can be
                     // written against the endpoint rather than the generated name.
@@ -294,7 +298,29 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }
 
-        return new ToolContribution(toolSpecs, executors, Map.of(), endpoints, List.of(), Map.of(), resolvers);
+        return new ToolContribution(toolSpecs, executors, Map.of(), endpoints, List.of(), Map.of(), resolvers, groups);
+    }
+
+    /**
+     * The group id of one httpcalls step, for LAZY {@code discover_tools}: the id
+     * of the apicalls resource the step points at — stable across turns and
+     * versions, and unique per configuration. {@code "http"} when the step carries
+     * no readable URI.
+     */
+    static String groupId(Map<String, Object> stepConfig) {
+        Object uri = stepConfig != null ? stepConfig.get("uri") : null;
+        if (uri == null) {
+            return "http";
+        }
+        try {
+            String path = URI.create(uri.toString()).getPath();
+            if (path != null && path.lastIndexOf('/') < path.length() - 1) {
+                return path.substring(path.lastIndexOf('/') + 1);
+            }
+        } catch (IllegalArgumentException e) {
+            LOGGER.debugf("httpcalls step URI is not a URI, grouping its tools as 'http': %s", e.getMessage());
+        }
+        return "http";
     }
 
     /**

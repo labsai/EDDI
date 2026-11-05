@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
+import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
+import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -646,9 +648,10 @@ public class RestGroupConversation implements IRestGroupConversation {
     @RunOnVirtualThread
     public Response submitHumanInput(String groupId, String gcId, HumanInputRequest request) {
         if (request == null || request.memberId() == null || request.memberId().isBlank()
-                || request.content() == null || request.content().isBlank()) {
+                || ((request.content() == null || request.content().isBlank())
+                        && (request.choice() == null || request.choice().isBlank()))) {
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Request body must include a non-blank 'memberId' and 'content'").build();
+                    .entity("Request body must include a non-blank 'memberId' and 'content' (or 'choice' for a tie-break)").build();
         }
         // I6: NOT the approve guard — speaking as a member is impersonation unless
         // the caller IS that member (or an admin); an eddi-approver may decide
@@ -658,7 +661,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                 ? identity.getPrincipal().getName()
                 : "anonymous";
         try {
-            var gc = groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
+            var gc = request.choice() != null
+                    ? groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), request.choice(), submittedBy)
+                    : groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
             // The pending member may speak, but the full conversation is not theirs
             // to read (approval-status withholds it from them too).
             return Response.ok(readableSubmission(gc)).build();
@@ -690,9 +695,14 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .build();
         } catch (IllegalArgumentException e) {
             LOGGER.infof("Human input for group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());
+            // A tie-break's option list is the group author's own text, never caller
+            // input, so naming the options back is safe — and the only useful answer.
+            String message = e.getMessage() != null && e.getMessage().startsWith(HumanTieBreakEngine.INVALID_CHOICE_PREFIX)
+                    ? e.getMessage()
+                    : "Invalid submission: the memberId does not match the pending turn, or the content is "
+                            + "blank or too long.";
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Invalid submission: the memberId does not match the pending turn, or the content is "
-                            + "blank or too long.")
+                    .entity(message)
                     .build();
         } catch (Exception e) {
             LOGGER.error("Failed to submit human input for group conversation " + sanitize(gcId), e);
@@ -998,9 +1008,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                boolean mayReadPrompt = hitlAccessGuard.mayReadPendingHumanPrompt(gc);
+                if (mayReadPrompt) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
+                PendingHumanInputView.addTo(summary, gc, mayReadPrompt);
             }
             // The designer's approvalContext, rendered once at pause commit and
             // re-redacted here — same audience as the prompt above (owner, admin, an

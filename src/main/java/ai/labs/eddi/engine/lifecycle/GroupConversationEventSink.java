@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -237,7 +238,13 @@ public final class GroupConversationEventSink {
      * member's UI reads; an SSE frame is the wrong place for a full transcript
      * rendering.
      */
-    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName,
+            HumanRequestDetail detail) {
+
+        /** A plain speaking turn: no {@code detail}. */
+        public HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+            this(memberId, displayName, phaseIndex, phaseName, null);
+        }
     }
 
     /**

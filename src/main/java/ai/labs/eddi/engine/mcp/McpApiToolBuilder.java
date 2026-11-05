@@ -246,6 +246,7 @@ public final class McpApiToolBuilder {
             var config = new ApiCallsConfiguration();
             config.setTargetServerUrl(baseUrl);
             config.setHttpCalls(entry.getValue());
+            config.setDescription(groupDescription(openAPI, entry.getKey()));
             configsByGroup.put(entry.getKey(), config);
         }
 
@@ -259,6 +260,31 @@ public final class McpApiToolBuilder {
         String title = (openAPI.getInfo() != null && openAPI.getInfo().getTitle() != null) ? openAPI.getInfo().getTitle() : "API";
 
         return new ApiBuildResult(title, configsByGroup, apiSummary, endpointCount, unmatchedEndpoints, unusableEndpoints);
+    }
+
+    /** Longest group description kept; a tag description can be a whole page. */
+    static final int MAX_GROUP_DESCRIPTION_CHARS = 200;
+
+    /**
+     * The one-line summary of a tag group, for {@code discover_tools}: the tag
+     * name, then the first line of the tag's description from the spec's top-level
+     * {@code tags} list when it has one. Capped at
+     * {@link #MAX_GROUP_DESCRIPTION_CHARS}.
+     */
+    static String groupDescription(OpenAPI openAPI, String group) {
+        String summary = null;
+        if (openAPI.getTags() != null) {
+            for (var tag : openAPI.getTags()) {
+                if (tag != null && group.equals(tag.getName()) && tag.getDescription() != null && !tag.getDescription().isBlank()) {
+                    summary = tag.getDescription().strip().lines().findFirst().orElse("").strip();
+                    break;
+                }
+            }
+        }
+        String description = summary == null || summary.isEmpty() ? group : group + ": " + summary;
+        return description.length() > MAX_GROUP_DESCRIPTION_CHARS
+                ? description.substring(0, MAX_GROUP_DESCRIPTION_CHARS - 1) + "…"
+                : description;
     }
 
     /**

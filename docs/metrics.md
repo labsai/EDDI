@@ -304,6 +304,7 @@ eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
+eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
 
@@ -317,6 +318,17 @@ eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim
 eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
 eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
 eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
+```
+
+### Team Budget Metrics
+
+Per-team monthly budgets ([Team Budgets](team-budgets.md)). All counters are registered at 0, so a
+panel shows "no refusals" rather than "no data".
+
+```text
+eddi_team_budget_metering_total             # Charges of root-discussion spend to the owning team; tags: outcome (recorded|unavailable|error)
+eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup), reason (exhausted|tenant|unavailable)
+eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
 ### Scheduled Trigger Metrics
@@ -617,6 +629,8 @@ eddi_llm_failure_total                      # Failed model calls by failure clas
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration|spend — the conversation ceiling or tenant budget refused the next step)
 eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
 eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
+eddi_llm_lazy_tools_activated_total         # Tools discover_tools loaded into the request (toolLoadingStrategy LAZY)
+eddi_llm_lazy_tools_refused_total           # Calls to a lazily-loaded tool the model had not loaded, refused NOT_EXECUTED before the gate; tag: source
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
@@ -645,6 +659,7 @@ Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
 eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
+eddi_llm_answer_tool_total                  # answerMode "tool" decisions; tag: outcome (reply|text|duplicate|discarded_by_pause|no_reply|collision_dropped)
 eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
                                             #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
                                             #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_spend|skipped_breaker,
@@ -840,7 +855,8 @@ eddi_counterweight_activation_count_total   # Counterweight activations; tag: le
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
-eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
+eddi_guardrail_triggered_total              # An LLM task's input/output/tool-call guardrail fired; tags: phase (input|output|tool_call), type, action (block|redact|reprompt|warn)
+eddi_guardrail_toolcall_decisions_total     # One tool call screened by toolCallGuardrails; tags: stage (live|resume), outcome (allowed|rewritten|blocked|reprompted|undecided)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout|spend_refused)
 eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout|spend_refused)
 ```
@@ -1115,6 +1131,8 @@ eddi_cluster_nats_connected                 # 1 while this node is connected to 
 eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
 eddi_cluster_nats_reconnects_total          # Reconnects of this node
 eddi_cluster_members                        # Members in the presence bucket (gauge)
+eddi_cluster_node_duplicate                 # 1 while another live JVM uses this node's id; readiness is DOWN (gauge)
+eddi_cluster_versions                       # Distinct EDDI version/payload-protocol pairs among the live members; >1 during a rolling upgrade (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
 eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released|unconfirmed|gone}; unconfirmed = no renewal acknowledged for ttl - 2 x heartbeat
@@ -1134,11 +1152,16 @@ eddi_cluster_events_publish_failed_total    # Events that went to the outbox ins
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
+eddi_cluster_events_dispatch_queue          # Received events waiting to be handled on this node, both lanes (gauge)
+eddi_cluster_events_dropped_total           # Received events a full dispatch lane could not take (each one triggers a resync)
+eddi_cluster_signing_rejected_total         # Cluster messages refused {kind=rpc|rpc-reply|event, reason=unsigned|malformed|unknown_key|bad_signature|expired|replayed}
+eddi_cluster_signing_unsigned_total         # Unsigned cluster messages accepted because eddi.cluster.signing.required=false {kind}
+eddi_cluster_payload_newer_total            # Messages of a newer payload version than this node knows {kind}
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
 eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
 eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}
 eddi_cluster_ratelimit_cas_retries_total    # Lost compare-and-sets on a shared rate-limit bucket (retried)
-eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|unsequenced|conflict}
+eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|seeded|unsequenced|conflict}; seeded = a counter (re)started from the store's highest position
 eddi_agent_nonce_unavailable_total          # Signed envelopes refused: the shared nonce store was unreachable (fail closed)
 eddi_cluster_admin_actions_total            # Recovery actions from the cluster console {action, outcome}
 ```
@@ -1146,7 +1169,8 @@ eddi_cluster_admin_actions_total            # Recovery actions from the cluster 
 Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of
 `eddi_cluster_fence_rejected_total`, a rising
 `eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` and
-`eddi_coordinator_dead_letters > 0` — the rules ship in
+`eddi_coordinator_dead_letters > 0`, `eddi_cluster_node_duplicate == 1`, any increase of
+`eddi_cluster_signing_rejected_total` (someone publishes on NATS without the key) — the rules ship in
 `docs/monitoring/eddi-cluster-alerts.yml`. See [Clustering](clustering.md).
 
 ### JVM & HTTP Server (auto-exposed)

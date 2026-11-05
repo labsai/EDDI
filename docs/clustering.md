@@ -47,16 +47,16 @@ one node. NATS adds:
 | Concern | Mechanism |
 |---|---|
 | Turns of one conversation never overlap anywhere | A conversation **lease** in the `<prefix>_LEASES` KV bucket (a write that succeeds only while the key holds no lease = acquire, heartbeat every `lease.heartbeat-interval`, server-side TTL `lease.ttl`). Turns on one node stay FIFO; the next turn queued on the same node takes the lease over directly, without a release and a new acquire, unless another node is waiting for it. |
-| A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input (`reason: fenced`, both tokens). |
-| A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary — and inside an LLM task's tool loop before its next model call or tool call, so a long agent loop does not keep spending and calling tools for a conversation another node now runs (the one call already in flight finishes). It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
+| A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries — an ordinary turn's write, a pause or resume commit and an undo or redo alike. The refused turn is dead-lettered with its input (`reason: fenced`, both tokens). A turn raises the fence to its own token **before** it reads the conversation, and a turn that cannot raise it does not run (409 + `Retry-After`, input not consumed). No write moves the fence backwards, a write without a token (a degraded-mode turn, a schedule) included. Undo and redo run through the coordinator, under the lease, like a turn. |
+| A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary — and inside an LLM task's tool loop before its next model call or tool call, so a long agent loop does not keep spending and calling tools for a conversation another node now runs (the one call already in flight finishes). The turn asks the lease itself, not only the lease manager's callback, so a lease that can no longer be trusted stops it at once; in particular it then skips the long-term user-memory write, which is not fenced. It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. A turn whose reply went out and whose write then lost to another writer is dead-lettered too (`reason: conflict`). A HITL resume that loses its lease restores the pause at once (only while no newer holder has started on the conversation) and is dead-lettered; the decision has to be given again, and tools it had already executed run a second time on re-approval. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
-| Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. A node that missed events (gap, long disconnect, outbox overflow) flushes everything. |
-| Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not recorded) is announced the same way and deployed, unrecorded, on every node. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
+| Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. Only a change is announced — a cache filled from the database is not. A node that may have missed events (gap, long disconnect, outbox overflow, its first subscription after boot, an event stream that was deleted and recreated) flushes everything. Cache evictions and the other events are handled in two separate bounded queues, so a burst of evictions does not delay a secret rotation. |
+| Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not written to the deployment collection) is recorded in the `<prefix>_DEPLOYMENTS` KV bucket instead — deployed, or a tombstone once undeployed — and the sweep reconciles it like a recorded one, so a node that joins later deploys it and a lost undeploy event is still applied. The record lasts while the cluster runs and is forgotten once no node has served it for `eddi.cluster.deployments.transient-ttl`. An event older than the records (an undeploy that arrives after the redeploy that followed it) is dropped. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
 | Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
-| Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node (the user travels as a hash). Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease. |
-| Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
-| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. A locally kept entry is never forwarded for a conversation that a GDPR erasure marked (`ERASED` bucket) or that no longer exists; if the marker cannot be read (NATS dropped again) the entry stays on the node and is retried. |
-| A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. |
+| Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node; the user travels as a hash — sealed with the cluster signing key when one is set — and the erasure waits up to `eddi.cluster.gdpr-stop-timeout` (10 s) for every member of a fresh member count. Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease; a second node does not start a discussion whose lease a live node holds (only while NATS is unreachable does a discussion run without it). The lease is not a fence, though: a discussion's writes carry no fencing token and a holder that loses its lease is not stopped, so if it is cut off past `lease.ttl` and another node takes the lease, both can act on the discussion until the first one finishes its current leg. |
+| Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event and webhook delivery de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
+| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. That ring is held **in memory only**, capped by `eddi.coordinator.max-dead-letters` (1000, oldest evicted): entries beyond the cap are dropped, and a restart of the node loses all of them. Forward them from the console once NATS is back. A locally kept entry is never forwarded for a conversation that a GDPR erasure marked (`ERASED` bucket) or that no longer exists; if the marker cannot be read (NATS dropped again) the entry stays on the node and is retried. |
+| A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it and having raised the fence, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. A turn the runtime refused after its lease was granted is answered the same way, and its dead letter cannot be replayed (`ANSWERED_RETRY`), so the retry and a replay never both run it. |
 | HITL crash recovery does not hit live turns | No recovery at boot; a leader-elected sweep recovers only conversations without a lease that stayed unchanged for `hitl-recovery.min-age`. A drained node hands its leader lease over at once. |
 | A busy node keeps its leases while NATS answers | Lease heartbeats run on a scheduler thread of their own and renew the leases due side by side, at most 64 at a time, the least recently confirmed first; reconnect work runs on separate threads. A renewal the server applied but whose reply was lost (a timeout, a NATS leader change) is recognised by the lease id in the value and kept, not reported as a takeover. What no heartbeat can do is keep a lease whose renewals are not acknowledged: see the next row. |
 | A holder cut off from NATS stops itself | A lease is trusted for `lease.ttl − 2 × lease.heartbeat-interval` (10 s by default) after the last renewal NATS acknowledged, counted from when that renewal was sent. Past that it counts as lost on its node — whether NATS is unreachable, slow, or answering — and the running turn is cancelled at its next task boundary, before any other node can take the conversation over at `lease.ttl`. |
@@ -69,8 +69,12 @@ one node. NATS adds:
   (the turn reloads a superseded snapshot; its write carries the fence).
 - Turns arriving at one node run in arrival order.
 - Turns sent concurrently to different nodes are serialized in lease
-  acquisition order — any order is a valid serialization; none is interleaved
-  or lost.
+  acquisition order — any order is a valid serialization. A turn raises the
+  conversation's fence before it reads it, so a holder whose lease expired can
+  no longer slip a step in between; undo and redo take the lease like a turn.
+  What the fence does not cover: an unfenced writer (a turn run in degraded mode,
+  see below) and side effects outside the conversation document (tool calls,
+  external APIs) of a holder that lost its lease mid-turn.
 - A client that waits for each response before sending the next gets strict
   program order.
 - A turn that waited longer than `lease.acquire-timeout` for another node is
@@ -83,11 +87,12 @@ out. Longer, each area applies its policy:
 
 | Area | Default | Alternative |
 |---|---|---|
-| Turns | run with node-local ordering only, **unfenced** (no loss — appends merge — but concurrent turns on different nodes may miss each other's context) | `degraded.turns=reject`: 409 + `Retry-After` |
+| Turns | run with node-local ordering only, **unfenced**: steps appended concurrently on different nodes merge, but the conversation properties a turn writes are last-writer-wins, so concurrent turns can overwrite each other's properties and miss each other's context | `degraded.turns=reject`: 409 + `Retry-After` |
 | Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
+| Webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes) | follows `degraded.nonces`: **reject** with 503 + `Retry-After`, the sender retries | `degraded.nonces=local` |
 | Audit chain positions | entries recorded unsequenced (verification: UNAVAILABLE, never BROKEN) | — |
 | Cache events | outbox, flushed on reconnect (and every 2 s while connected, for a publish that failed without a disconnect); overflow ⇒ cluster-wide resync, coalesced per node so N nodes asking at once cause one flush each | — |
 | Cancel / GDPR stop | this node + database CAS only | — |
@@ -101,18 +106,22 @@ NATS is down serves in degraded mode and joins when NATS returns.
 
 A node partitioned from NATS while the others are connected can run unfenced
 turns concurrently with fenced turns elsewhere. Operators who cannot accept
-that set `degraded.turns=reject`. Security state always fails closed.
+that set `degraded.turns=reject`. Replay protection fails closed by default (nonces, webhook
+de-duplication). Cached security state does not: a node that missed an invalidation keeps
+using a rotated secret for up to 5 min (`eddi.vault.cache-ttl-minutes`), a changed connection
+for up to 1 min and a changed global variable for up to 2 min (`eddi.variables.cache-ttl-minutes`).
 
 ## Failure modes
 
 | Event | Effect |
 |---|---|
 | `kill -9` of an EDDI node mid-turn | Its clients see a reset. The conversation's lease expires within `lease.ttl` (or is taken over immediately after the pod restarts under the same name). The next turn runs normally; a late write from the dead node is refused by the fence. |
+| Two replicas started with the same node id (a constant `EDDI_CLUSTER_NODE_ID`, a shared `eddi.schedule.instance-id`) | The second one finds the first one's live presence record, stops announcing itself, logs an ERROR, reports `eddi_cluster_node_duplicate 1` and its readiness (`cluster-node-identity`) goes DOWN until the other one is gone. A pod restarted under its own name is not a duplicate: its previous boot's record stops changing and is taken over after one presence interval. |
 | One NATS node lost (R3) | Nothing visible: JetStream keeps quorum. |
 | All NATS lost | Degraded mode as above; automatic recovery and resync when NATS returns. |
 | NATS accepts connections but stops answering | Calls fail after `eddi.nats.request-timeout` (2 s) each. A failed turn's dead letter tries the stream for at most about 2 s before it is kept node-local; audit positions stop being requested for one timeout after a failure (entries are recorded unsequenced meanwhile), so a turn does not wait out one timeout per entry. |
 | Rolling update | Readiness goes DOWN first, the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases (side by side, within a few NATS timeouts; what it misses expires by TTL) and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
-| Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary (or the next round of an LLM tool loop) and dead-lettered (`lease-lost`). Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). |
+| Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary (or the next round of an LLM tool loop) and dead-lettered (`lease-lost`); it does not write long-term user memory. Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). How soon a partitioned holder notices depends on the lease manager declaring the lease lost (see `lease.ttl`); a model or tool call already in flight finishes. |
 
 ## Sizing
 
@@ -180,7 +189,7 @@ API behind it, and why each action is safe, is in
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
 replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`,
-`A2A_CONTEXTS`, `ERASED` (the GDPR erasure marker of a conversation: written before its dead letters are purged, and checked by a node that forwards a dead letter it kept locally; it expires after `eddi.cluster.erasure-marker-ttl`, `P7D`), `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
+`A2A_CONTEXTS`, `DEPLOYMENTS` (the `autoDeploy=false` deployments and their undeploy tombstones), `ERASED` (the GDPR erasure marker of a conversation: written before its dead letters are purged, and checked by a node that forwards a dead letter it kept locally; it expires after `eddi.cluster.erasure-marker-ttl`, `P7D`), `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
 principal's writes on every node), `A2A_INDEX` (per principal, the task and context ids it
 holds — how a GDPR sweep or export on one node reaches records another node wrote, since
 bucket keys are hashed and cannot be enumerated by principal), `TOOL_PAGES`, `DEDUP` and
@@ -202,13 +211,6 @@ NATS 2.11). To narrow an account shared with other applications, replace
 `$KV.*.>` with one `$KV.<prefix>_<BUCKET>.>` per bucket above, and `$O.*.>` with
 `$O.<prefix>_ARCHIVES.>`.
 
-**NATS is inside the trust boundary.** Every node uses one NATS identity, and nothing on
-the wire is signed: whoever holds those credentials can publish a `deployment.changed`
-event (undeploy an agent everywhere), a cancel or GDPR-stop request, or write the nonce,
-rate-limit and audit-position buckets. Keep the NATS credentials in a Secret, restrict
-NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and turn on
-`nats.tls` when pod traffic is not already encrypted.
-
 **NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
 `true`). Before this check existed, any certificate the trust store accepted was
 accepted for any host. On upgrade, the broker certificate must name every host in
@@ -224,6 +226,67 @@ the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>
 and stays in degraded mode; the TLS cause itself is logged at DEBUG by the NATS client, so look for
 the node's repeated "could not connect" warnings and raise the `io.nats` logger to DEBUG to see it. Reissue the certificate, or set
 `EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour.
+
+### Signed control plane
+
+**NATS is inside the trust boundary unless you set a signing key.** Every node uses one NATS
+identity. Without `eddi.cluster.signing.key`, whoever holds those credentials can publish an
+`admin-drain`, cancel or GDPR-stop request, or a `deployment.changed` or resync event, and
+every node obeys. A WARN at boot says so.
+
+With a key, every node RPC, every RPC reply and every cluster event carries an
+`Eddi-Sig` header: an HMAC-SHA256 over the subject, a timestamp, a random nonce and the
+SHA-256 of the body. A receiving node:
+
+- refuses a message whose signature does not verify (compared in constant time), was made
+  with an unknown key, or is bound to another subject or body;
+- refuses an RPC older (or further in the future) than `eddi.cluster.signing.max-age` (60 s),
+  and an event older than the event retention plus that window;
+- refuses a nonce it has already seen within that window, so a captured message cannot be
+  replayed;
+- drops a reply that is not signed over the nonce of the request it answers.
+
+A refused request gets no reply; the caller sees what an unreachable node looks like.
+Refusals are counted in `eddi_cluster_signing_rejected_total{kind,reason}`.
+
+The key must be the same on every node, at least 32 characters (`openssl rand -base64 48`),
+and kept **outside NATS**: a Kubernetes Secret, a vault, not the NATS credentials. For a
+rotation, set the new key and list the old one in `eddi.cluster.signing.previous-keys` on
+every node, then remove it once every node signs with the new one. The same key also seals
+the user-id hash a GDPR stop sends (AES-GCM), which would otherwise be a plain SHA-256 that
+can be reversed from a list of e-mail addresses. A rotated node also opens hashes sealed with a
+key it lists in `previous-keys`, but a node still on the old key cannot open one sealed with the
+new key. So while the rotation rolls out, a GDPR stop that reaches a node not yet rotated can
+miss that node's running turn and report the erasure step incomplete: **re-run any erasure made
+during the rolling window once every node signs with the new key.**
+
+What signing does not cover: the payloads are not encrypted (turn on `nats.tls`), the KV
+buckets and streams are state rather than messages (restrict them with per-node NATS
+permissions), and NATS can still be flooded. Keep restricting NATS ports with a
+NetworkPolicy (the Helm chart and the `nats` overlay do).
+
+### Rolling upgrades
+
+Each node's presence record carries its EDDI version and its payload protocol; members on
+more than one log a WARN and `eddi_cluster_versions` is above 1 until the rollout finishes.
+Every RPC and event carries its payload version (`Eddi-V` header, event field `v`). A
+message without one comes from an older node and is read as version 1; a newer version is
+handled on a best-effort basis and counted in `eddi_cluster_payload_newer_total`.
+
+Turning signing on without an outage takes three rollouts:
+
+1. **Upgrade every node** to this version with no key. Nothing is signed, nothing is refused.
+2. **Set `eddi.cluster.signing.key`** (the same value everywhere) and roll the nodes. A node
+   with the key signs and still accepts the unsigned messages of nodes that do not have it
+   yet; a node without it accepts signed messages it cannot check.
+3. Once every node signs (no more `eddi_cluster_signing_unsigned_total` increments, no
+   "Accepted an unsigned cluster …" WARN), **set `eddi.cluster.signing.required=true`** and
+   roll again. From then on an unsigned message is refused, and a node without the key
+   refuses to start.
+
+Going back runs the same steps in reverse. During step 2 a GDPR stop from a node with the key
+cannot be read by a node without it; that node answers an error, so the erasure reports its
+cluster step incomplete rather than a clean erasure — run it again after the rollout.
 
 ### Upgrading from the build-profile NATS coordinator
 
@@ -325,13 +388,16 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
 - **Cache coherence is event-driven with a time backstop.** A node that misses an event (NATS
   down, restarting) serves stale data for at most: 60 s (agent triggers, user conversations),
   30 s (conversation state), 15 min (a rotated key in an already built chat model), 5 min
-  (prompt snippets, which have no event of their own), 30 s (the A2A agent roster). A NATS
-  outage longer than the event retention flushes everything on reconnect.
+  (prompt snippets, which have no event of their own), 30 s (the A2A agent roster), 5 min (a
+  rotated secret, `eddi.vault.cache-ttl-minutes`), 1 min (a connection), 2 min (a global
+  variable, `eddi.variables.cache-ttl-minutes`). A NATS outage longer than the event retention
+  flushes everything on reconnect, and so does a node's first subscription after it booted.
 - **An agent undeployed on one node can answer on another for up to ~20 s** if a request
   deployed it there on demand at the very moment of the undeploy (the deployment was started
   from a record that was already being retired); the reconciliation sweep removes it after two
-  passes. An agent that was deployed with `autoDeploy=false` and whose undeploy event is lost
-  (NATS down at that moment) stays deployed on the other nodes until they restart.
+  passes. An `autoDeploy=false` deployment is reconciled from its `DEPLOYMENTS` record; a node
+  cut off from NATS for longer than `eddi.cluster.deployments.transient-ttl` may miss its
+  undeploy tombstone and keeps serving it locally (without re-announcing it) until restarted.
 - **NATS holds some personal data for a short time, and the erasure does not purge all of
   it.** A failed turn's dead letter is purged with the user's conversation, but an audit
   entry the database refused waits, with its input and output, on the

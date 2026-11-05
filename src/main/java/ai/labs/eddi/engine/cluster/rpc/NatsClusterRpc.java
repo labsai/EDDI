@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.cluster.rpc;
 
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
 import ai.labs.eddi.engine.cluster.ClusterStartable;
 import ai.labs.eddi.engine.cluster.ClusterSubjects;
@@ -18,6 +19,7 @@ import io.nats.client.Connection;
 import io.nats.client.Dispatcher;
 import io.nats.client.Message;
 import io.nats.client.Subscription;
+import io.nats.client.impl.Headers;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
@@ -32,11 +34,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
  * {@link IClusterRpc} on core NATS request-reply. Handlers run on virtual
  * threads, never on the NATS dispatcher.
+ * <p>
+ * <b>Signed (C4).</b> With {@code eddi.cluster.signing.key} every request
+ * carries an HMAC over its subject, a timestamp, a nonce and its body
+ * ({@link ClusterMessageSigner}); the receiving node refuses — without a reply
+ * — a request with an invalid signature, one older than
+ * {@code eddi.cluster.signing.max-age}, a nonce it has seen, and, with
+ * {@code eddi.cluster.signing.required=true}, an unsigned one. A reply is
+ * signed over the nonce of the request it answers, and the caller drops a reply
+ * that does not verify, so a forged answer cannot fake, say, a GDPR stop. Every
+ * request and reply carries the payload version ({@value #PAYLOAD_VERSION}) in
+ * the {@code Eddi-V} header.
  */
 @ApplicationScoped
 // ClusterStartable as well: ClusterBootstrap finds what to start through
@@ -50,23 +64,34 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {
     };
+    /** The payload format of requests and replies (C15). */
+    public static final int PAYLOAD_VERSION = 1;
 
     private final NatsConnectionManager connections;
     private final ClusterPresence presence;
     private final MeterRegistry meterRegistry;
     private final ClusterSubjects subjects;
     private final Duration timeout;
+    private final ClusterMessageSigner signer;
     private final Map<String, Function<Map<String, Object>, Map<String, Object>>> handlers = new ConcurrentHashMap<>();
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
+    private final AtomicBoolean newerVersionWarned = new AtomicBoolean();
     private volatile Connection subscribedOn;
 
     @Inject
-    public NatsClusterRpc(NatsConnectionManager connections, ClusterPresence presence, MeterRegistry meterRegistry) {
+    public NatsClusterRpc(NatsConnectionManager connections, ClusterPresence presence, MeterRegistry meterRegistry,
+            ClusterMessageSigner signer) {
         this.connections = connections;
         this.presence = presence;
         this.meterRegistry = meterRegistry;
         this.subjects = new ClusterSubjects(connections.config().natsPrefix());
         this.timeout = connections.config().natsRequestTimeout();
+        this.signer = signer;
+    }
+
+    /** For tests and the in-JVM cluster ITs: unsigned. */
+    public NatsClusterRpc(NatsConnectionManager connections, ClusterPresence presence, MeterRegistry meterRegistry) {
+        this(connections, presence, meterRegistry, ClusterMessageSigner.unsigned());
     }
 
     @Override
@@ -76,6 +101,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
 
     @Override
     public void startCluster() {
+        signer.logMode();
         connections.onConnected(this::subscribe);
     }
 
@@ -109,17 +135,31 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
     }
 
     private void onRequest(Message msg) {
-        String subject = msg.getSubject();
+        handleRequest(msg.getSubject(), msg.getReplyTo(), msg.hasHeaders() ? msg.getHeaders() : null, msg.getData());
+    }
+
+    /**
+     * Handles one request. Package-private for tests.
+     *
+     * @return whether the request was accepted (it verified, or signing allows it)
+     */
+    boolean handleRequest(String subject, String replyTo, Headers headers, byte[] data) {
         String op = subject.substring(subject.lastIndexOf('.') + 1);
-        String replyTo = msg.getReplyTo();
-        byte[] data = msg.getData();
+        ClusterMessageSigner.Verdict verdict = signer.verify("rpc", subject, headers, data, signer.maxAge(), true);
+        if (!verdict.accepted()) {
+            // No reply: an unverified caller learns nothing, and the real caller's
+            // timeout is what an unreachable node looks like anyway.
+            return false;
+        }
+        noteVersion(headers, "rpc");
+        Map<String, Object> reply = new LinkedHashMap<>();
+        reply.put("node", connections.node().nodeId());
+        Function<Map<String, Object>, Map<String, Object>> handler = handlers.get(op);
+        if (handler == null) {
+            reply.put("error", "no handler for " + op);
+        }
         workers.execute(() -> {
-            Map<String, Object> reply = new LinkedHashMap<>();
-            reply.put("node", connections.node().nodeId());
-            Function<Map<String, Object>, Map<String, Object>> handler = handlers.get(op);
-            if (handler == null) {
-                reply.put("error", "no handler for " + op);
-            } else {
+            if (handler != null) {
                 try {
                     Map<String, Object> request = data == null || data.length == 0 ? Map.of() : JSON.readValue(data, MAP);
                     Map<String, Object> result = handler.apply(request);
@@ -132,12 +172,40 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
             }
             if (replyTo != null) {
                 try {
-                    connections.requireConnected().publish(replyTo, JSON.writeValueAsBytes(reply));
+                    byte[] body = JSON.writeValueAsBytes(reply);
+                    Headers replyHeaders = signer.sign(ClusterMessageSigner.replySubject(verdict.nonce()), body, null, PAYLOAD_VERSION);
+                    connections.requireConnected().publish(replyTo, replyHeaders, body);
                 } catch (IOException | ClusterUnavailableException e) {
                     LOGGER.debugf("RPC reply for %s not sent: %s", op, e.getMessage());
                 }
             }
         });
+        return true;
+    }
+
+    private void noteVersion(Headers headers, String kind) {
+        int version = ClusterMessageSigner.versionOf(headers);
+        if (version > PAYLOAD_VERSION) {
+            meterRegistry.counter("eddi.cluster.payload.newer", "kind", kind).increment();
+            if (newerVersionWarned.compareAndSet(false, true)) {
+                LOGGER.warnf("Received a cluster %s of payload version %d; this node understands up to %d. A newer EDDI version is "
+                        + "in the cluster (rolling upgrade?) — handled on a best-effort basis.", kind, version, PAYLOAD_VERSION);
+            }
+        }
+    }
+
+    /**
+     * Verifies a reply against the request it answers; null when it must be
+     * dropped.
+     */
+    private Map<String, Object> readReply(Message reply, Headers request) throws IOException {
+        Headers headers = reply.hasHeaders() ? reply.getHeaders() : null;
+        if (!signer.verify("rpc-reply", ClusterMessageSigner.replySubject(ClusterMessageSigner.nonceOf(request)), headers,
+                reply.getData(), signer.maxAge(), false).accepted()) {
+            return null;
+        }
+        noteVersion(headers, "rpc-reply");
+        return JSON.readValue(reply.getData(), MAP);
     }
 
     @Override
@@ -145,13 +213,20 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
         long start = System.nanoTime();
         String outcome = "ok";
         try {
-            Message reply = connections.requireConnected()
-                    .request(subjects.rpc(nodeId, op), JSON.writeValueAsBytes(request), timeout);
+            String subject = subjects.rpc(nodeId, op);
+            byte[] body = JSON.writeValueAsBytes(request);
+            Headers headers = signer.sign(subject, body, null, PAYLOAD_VERSION);
+            Message reply = connections.requireConnected().request(subject, headers, body, timeout);
             if (reply == null) {
                 outcome = "timeout";
                 return Optional.empty();
             }
-            return Optional.of(JSON.readValue(reply.getData(), MAP));
+            Map<String, Object> verified = readReply(reply, headers);
+            if (verified == null) {
+                outcome = "rejected";
+                return Optional.empty();
+            }
+            return Optional.of(verified);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             outcome = "interrupted";
@@ -167,9 +242,13 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
 
     @Override
     public Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request) {
+        return callAll(op, request, timeout, cachedPeers());
+    }
+
+    @Override
+    public Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request, Duration wait, int expected) {
         long start = System.nanoTime();
         Map<String, Map<String, Object>> replies = new LinkedHashMap<>();
-        int expected = cachedPeers();
         String outcome = "ok";
         Connection connection;
         try {
@@ -181,8 +260,11 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
         String inbox = connection.createInbox();
         Subscription sub = connection.subscribe(inbox);
         try {
-            connection.publish(subjects.rpcAll(op), inbox, JSON.writeValueAsBytes(request));
-            long deadline = System.nanoTime() + timeout.toNanos();
+            String subject = subjects.rpcAll(op);
+            byte[] body = JSON.writeValueAsBytes(request);
+            Headers headers = signer.sign(subject, body, null, PAYLOAD_VERSION);
+            connection.publish(subject, inbox, headers, body);
+            long deadline = System.nanoTime() + wait.toNanos();
             String self = connections.node().nodeId();
             while (true) {
                 long remaining = deadline - System.nanoTime();
@@ -195,11 +277,14 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
                 }
                 Map<String, Object> reply;
                 try {
-                    reply = JSON.readValue(msg.getData(), MAP);
+                    reply = readReply(msg, headers);
                 } catch (IOException unreadable) {
                     // One bad reply must not cost the replies of every other node.
                     LOGGER.debugf("Unreadable RPC scatter reply for %s: %s", op, unreadable.getMessage());
                     continue;
+                }
+                if (reply == null) {
+                    continue; // did not verify: not an answer from a node of this cluster
                 }
                 String from = String.valueOf(reply.get("node"));
                 if (!self.equals(from)) {

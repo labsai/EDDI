@@ -12,7 +12,7 @@ This document describes the security measures applied to EDDI's AI Agent Tooling
 
 EDDI authenticates requests via [Keycloak](https://www.keycloak.org/) (or another OIDC provider) using the Quarkus OIDC extension. Enforcement is switched by `quarkus.oidc.tenant-enabled`, which defaults to `false` — but EDDI does **not** silently run open in production. In production launch mode (the packaged jar and the Docker image; `quarkus:dev` and tests are exempt) two startup guards refuse to boot an unauthenticated instance:
 
-- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR at startup and repeats a WARN every hour.
+- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR once at startup. A periodic WARN reminder is off by default; set `EDDI_SECURITY_UNAUTHENTICATED_REMINDER_INTERVAL` (e.g. `1h`, minimum `5m`) to repeat it.
 - **`HighValueSurfaceGuard`** fails startup when `authorization.enabled` is false (it follows `quarkus.oidc.tenant-enabled`) unless each of the two most sensitive surfaces is opted out on its own: `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` for `/mcp` and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` for `/secretstore`. The general opt-out above does not cover them.
 
 The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick start works, and binds EDDI to `127.0.0.1` for that reason. For anything reachable from another machine, remove them and set `QUARKUS_OIDC_TENANT_ENABLED=true` instead.
@@ -468,6 +468,21 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 - **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
 ---
+
+### Cluster control plane (NATS)
+
+In cluster mode the nodes steer each other over NATS: node RPCs (cancel, drain, GDPR stop,
+forwarding of dead letters) and cluster events (deployments, secret rotations, cache
+evictions). Every node holds the same NATS credentials, so without more those credentials
+alone control every node. Set `eddi.cluster.signing.key` — a random value of at least 32
+characters, the same on every node and kept outside NATS — and every RPC, reply and event is
+signed with HMAC-SHA256 over its subject, a timestamp, a nonce and its body hash; a node
+refuses what does not verify (constant-time comparison), what is older than the window, and a
+nonce it has already seen. `eddi.cluster.signing.required=true` also refuses unsigned
+messages once every node signs. Without a key a WARN is logged at boot and nothing changes
+for existing installs. Webhook delivery de-duplication fails closed while NATS is unreachable
+(`eddi.cluster.degraded.nonces=reject`, the default). Details, the threat model and the
+rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 

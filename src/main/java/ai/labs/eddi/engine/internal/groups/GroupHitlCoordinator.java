@@ -102,6 +102,7 @@ public class GroupHitlCoordinator {
     private final Counter counterGroupHitlPause;
     private final Counter counterGroupHitlResume;
     private final Counter counterGroupFailure;
+    private GroupTieBreakPauses tieBreakPauses;
 
     public GroupHitlCoordinator(IAgentGroupStore groupStore, IGroupConversationStore conversationStore,
             IScheduleStore scheduleStore, AuditLedgerService auditLedgerService, GroupSigningGuard signingGuard,
@@ -121,6 +122,26 @@ public class GroupHitlCoordinator {
         this.counterGroupHitlPause = counterGroupHitlPause;
         this.counterGroupHitlResume = counterGroupHitlResume;
         this.counterGroupFailure = counterGroupFailure;
+    }
+
+    /**
+     * Wires the {@code tiePolicy: HUMAN_DECIDES} pause handling. A setter so the
+     * coordinator's construction sites stay as they are; without it a tie-break
+     * pause cannot be committed or resolved.
+     */
+    public void setTieBreakPauses(GroupTieBreakPauses tieBreakPauses) {
+        this.tieBreakPauses = tieBreakPauses;
+    }
+
+    /**
+     * Commits a tied vote's human tie-break pause — see
+     * {@link GroupTieBreakPauses#commit}.
+     */
+    public void commitTieBreakPause(GroupConversation gc, int phaseIdx, int repeatIdx, DiscussionPhase phase,
+                                    HumanTieBreakEngine.PendingTieBreak tieBreak, int currentTurnCount,
+                                    GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        tieBreakPauses.commit(gc, phaseIdx, repeatIdx, phase, tieBreak, currentTurnCount, listener);
     }
 
     // =================================================================
@@ -1136,7 +1157,7 @@ public class GroupHitlCoordinator {
                         : GroupConversation.RESUME_KIND_HUMAN_TURN));
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput(
                 member.agentId(), member.displayName(), phaseIdx, repeatIdx, turn.speakerIdx(),
-                entryTypeName, turn.renderedPrompt(), humanConfig.onTimeout().name(), Instant.now()));
+                entryTypeName, turn.renderedPrompt(), humanConfig.onTimeout().name(), Instant.now(), turn.detail()));
         gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
         gc.setPausedAt(Instant.now());
         gc.setPausedAtPhaseIndex(phaseIdx);
@@ -1157,7 +1178,7 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHumanInputRequested(new GroupConversationEventSink.HumanInputRequestedEvent(
-                    member.agentId(), member.displayName(), phaseIdx, phase.name()));
+                    member.agentId(), member.displayName(), phaseIdx, phase.name(), turn.detail()));
         }
         LOGGER.infof("Group discussion %s paused for human input from member '%s' at phase %d",
                 LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()), phaseIdx);
@@ -1272,6 +1293,20 @@ public class GroupHitlCoordinator {
                                               String submittedBy, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        return submitHumanInput(groupConversationId, memberId, content, null, submittedBy, listener);
+    }
+
+    /**
+     * As
+     * {@link #submitHumanInput(String, String, String, String, GroupDiscussionEventListener)},
+     * with the {@code choice} a tie-break answer carries. For a tie-break,
+     * {@code choice} is required and {@code content} is an optional rationale; for
+     * every other kind {@code content} is required and {@code choice} is ignored.
+     */
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String choice,
+                                              String submittedBy, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
         if (gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
             throw new GroupDiscussionException("Group conversation is not awaiting human input");
@@ -1284,6 +1319,9 @@ public class GroupHitlCoordinator {
         if (memberId == null || !memberId.equals(pending.memberId())) {
             throw new IllegalArgumentException(
                     "This conversation is waiting on member '" + pending.memberId() + "'");
+        }
+        if (pending.detail() != null && pending.detail().isTieBreak()) {
+            return tieBreakPauses.resolve(gc, pending, choice, content, submittedBy, listener, gc.getPauseId());
         }
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("Content must not be blank");
@@ -1326,6 +1364,10 @@ public class GroupHitlCoordinator {
                 return;
             }
             var pending = gc.getPendingHumanInput();
+            if (pending.detail() != null && pending.detail().isTieBreak()) {
+                tieBreakPauses.onTimeout(gc, pending, gc.getPauseId());
+                return;
+            }
             String reason = "No response from " + pending.displayName()
                     + (gc.getHitlApprovalTimeout() != null ? " within " + gc.getHitlApprovalTimeout() : "");
             // Bound to the pause the timeout read (and just checked against
@@ -1403,6 +1445,8 @@ public class GroupHitlCoordinator {
         final String savedPauseReason = gc.getHitlPauseReason();
 
         gc.getTranscript().add(entry);
+        // A human task-force task: complete, gate or fail it with this answer.
+        final var taskBefore = GroupHumanTasks.applyResult(gc, groupConfig, phases.get(pending.phaseIdx()), pending, content, skipReason);
         // Advance past the answered speaker; RESUME_KIND is preserved so a
         // parallel tail resumes as a parallel tail.
         gc.setResumePoint(new GroupConversation.ResumePoint(pending.phaseIdx(), pending.repeatIdx(),
@@ -1454,6 +1498,7 @@ public class GroupHitlCoordinator {
             synchronized (gc.getTranscript()) {
                 gc.getTranscript().remove(entry);
             }
+            GroupHumanTasks.restore(gc, taskBefore);
             gc.setResumePoint(bookmark);
             gc.setPendingHumanInput(pending);
             gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);

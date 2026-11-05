@@ -256,6 +256,23 @@ class ResourceAccessGuardTest {
         }
 
         @Test
+        @DisplayName("F6: principalMayView needs VIEW, a USE grant is not enough")
+        void viewNeedsViewNotUse() throws Exception {
+            var useOnly = ownedBy("alice");
+            useOnly.setGrants(List.of(new ResourceGrant(Subjects.personalSpace("bob"), AccessLevel.USE.name(), "alice", new Date(0))));
+            DescriptorAccess.rebuildIndex(useOnly);
+            assertTrue(guardReturning(useOnly).principalMayUse(RESOURCE_ID, "bob"));
+            assertFalse(guardReturning(useOnly).principalMayView(RESOURCE_ID, "bob", false));
+
+            var viewer = ownedBy("alice");
+            viewer.setGrants(List.of(new ResourceGrant(Subjects.personalSpace("bob"), AccessLevel.VIEW.name(), "alice", new Date(0))));
+            DescriptorAccess.rebuildIndex(viewer);
+            assertTrue(guardReturning(viewer).principalMayView(RESOURCE_ID, "bob", false));
+            assertTrue(guardReturning(useOnly).principalMayView(RESOURCE_ID, "root", true), "an admin sees everything");
+            assertTrue(guardReturning(ownedBy("alice")).principalMayView(RESOURCE_ID, "alice", false));
+        }
+
+        @Test
         @DisplayName("an unreadable descriptor is a no")
         void storeFailureIsNo() throws Exception {
             var store = mock(IDocumentDescriptorStore.class);

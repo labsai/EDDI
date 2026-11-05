@@ -218,6 +218,27 @@ public class KvLeaseManager implements IConversationLeaseManager {
          * "unknown", never "not present".
          */
         Optional<String> liveBoot(String nodeId);
+
+        /**
+         * True while another live JVM uses this node's id. Its leases then carry this
+         * node id under a boot that is not ours but is not stale either, so neither the
+         * boot sweep nor a takeover may treat them as an earlier incarnation.
+         */
+        default boolean isDuplicateNode() {
+            return false;
+        }
+
+        /**
+         * True once presence has settled who owns this node id: this JVM holds its own
+         * presence record (written fresh or taken over from a dead predecessor), and no
+         * twin was seen. Until then a lease under this node id and another boot may be
+         * a live twin's, which presence tells apart only an interval after the first
+         * connect — so neither the boot sweep nor a takeover may treat it as an earlier
+         * incarnation's.
+         */
+        default boolean isNodeIdentityConfirmed() {
+            return !isDuplicateNode();
+        }
     }
 
     private final ISharedKv kv;
@@ -668,7 +689,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
         if (node.nodeId().equals(info.node())) {
             // Our own earlier incarnation (same node id, different boot). A lease of this
             // boot is never stale: the caller recognises its own writes by the lease id.
-            return !node.bootId().equals(info.boot());
+            // While a live twin shares our id, the other boot may be that twin.
+            return view.isNodeIdentityConfirmed() && !view.isDuplicateNode() && !node.bootId().equals(info.boot());
         }
         Optional<String> liveBoot;
         try {
@@ -1357,9 +1379,25 @@ public class KvLeaseManager implements IConversationLeaseManager {
      * from before this process started, so a reconnect has nothing to add — and
      * every node scanning the whole bucket on every reconnect, all at once, was the
      * cost of an outage. One watch lists the bucket instead of a read per key.
+     * <p>
+     * It runs only once presence has confirmed this node owns its id
+     * ({@link ClusterView#isNodeIdentityConfirmed()}): on a twin's first connect
+     * presence has not yet told a live twin from a dead predecessor, and sweeping
+     * then would delete the live twin's leases. Presence calls this again when it
+     * confirms the id.
      */
     public void sweepOwnStaleLeases() {
         if (swept.get()) {
+            return;
+        }
+        if (view.isDuplicateNode()) {
+            // An earlier boot's leases cannot be told from a live twin's; retried when
+            // presence confirms the id, or on the next connect.
+            LOGGER.warn("Stale-lease sweep skipped: another live JVM uses this node id");
+            return;
+        }
+        if (!view.isNodeIdentityConfirmed()) {
+            LOGGER.debug("Stale-lease sweep deferred until presence confirms this node's id");
             return;
         }
         try {

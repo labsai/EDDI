@@ -48,6 +48,7 @@ class ReservedPrincipalsTest {
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),
             Map.entry("space:", "descriptor access token (Subjects.SPACE_TOKEN_PREFIX)"),
             Map.entry("conversation:", "attachment lock key"),
+            Map.entry("dead-letter-replay:", "Idempotency-Key prefix (ClusterAdminService), not a principal"),
             Map.entry("legacy:", "ChannelTargetRouter warn-once key for a legacy Slack connector's credentials"),
             Map.entry("agent:", "tool-cache scope tag"),
             Map.entry("context:", "cache/template key"),

@@ -534,6 +534,19 @@ public class Conversation implements IConversation {
             // they are, which is the behaviour every turn had before.
             cm.recordPropertyChanges(propertiesAtTurnStart);
         }
+        // Cluster mode (A1): the user-memory upsert is NOT fenced — only the
+        // conversation snapshot is — so it is the one write a node that can no longer
+        // trust its lease must not make: another node may already run this
+        // conversation's next turn. Asked of the lease itself, right before the write,
+        // rather than of the cancel flag its lost-callback raises, which can arrive
+        // later. The owed writes are already recorded on the memory
+        // (recordPendingLongTermWrites), so they are not lost: the turn that commits
+        // next writes them.
+        if (conversationMemory.isLeaseLost()) {
+            LOGGER.warnf("Not writing the long-term properties of conversation %s: this node's lease on it is lost",
+                    conversationMemory.getConversationId());
+            return;
+        }
         storePropertiesPermanently();
     }
 

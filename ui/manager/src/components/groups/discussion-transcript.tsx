@@ -15,6 +15,7 @@ import { hasDisplayableDecision } from "@/lib/group-config";
 import { isAgentFailurePlaceholder, parseTranscriptContent, safeFormatDate } from "./group-utils";
 import { AgentFailedNotice } from "./structured-entry-body";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
+import { pendingHumanTask, pendingTurnTimeout, tieBreakOptions } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@/lib/utils";
@@ -48,7 +49,7 @@ interface DiscussionTranscriptProps {
   /** Whether an approve/reject/cancel decision is currently in-flight. */
   isDeciding?: boolean;
   /** Submit a HUMAN group member's turn (I6). Receives the group conversation id, the pending member id, and their response. */
-  onSubmitHumanInput?: (gcId: string, memberId: string, content: string) => void;
+  onSubmitHumanInput?: (gcId: string, memberId: string, content: string, choice?: string) => void;
   /** Whether a human-turn submission is currently in-flight. */
   isSubmittingHumanInput?: boolean;
   /** The group's `humanMemberConfig.turnTimeout` (I6), for the pending-turn countdown. */
@@ -813,15 +814,18 @@ export function DiscussionTranscript({
               data-testid="human-turn-banner-anchor"
             >
               <HumanTurnBanner
+                pauseKey={`${gcId ?? ""}:${persisted?.requestedAt ?? ""}:${persisted?.memberId ?? pending?.memberId ?? ""}`}
                 displayName={displayName}
                 renderedPrompt={persisted?.renderedPrompt ?? ""}
                 pausedPhaseName={phaseName}
                 requestedAt={persisted?.requestedAt}
-                turnTimeout={humanTurnTimeout}
+                turnTimeout={pendingTurnTimeout(persisted, conversation?.hitlApprovalTimeout, humanTurnTimeout)}
                 isSubmitting={isSubmittingHumanInput}
-                onSubmit={(content) => {
+                options={tieBreakOptions(persisted)}
+                task={pendingHumanTask(conversation)}
+                onSubmit={(content, choice) => {
                   const memberId = persisted?.memberId ?? pending?.memberId;
-                  if (gcId && memberId) onSubmitHumanInput?.(gcId, memberId, content);
+                  if (gcId && memberId) onSubmitHumanInput?.(gcId, memberId, content, choice);
                 }}
               />
             </div>

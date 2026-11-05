@@ -420,7 +420,12 @@ class CascadingModelExecutor {
             LOGGER.debugf("Cascade strategy '%s' is not implemented; running sequentially", strategy);
         }
 
-        boolean useAgentMode = cascade.isEnableInAgentMode() && task.isAgentMode();
+        // answerMode "tool" answers through the reply tool, so every step needs the
+        // tool
+        // loop even when the task has no other tool (isAgentMode() is false then).
+        // enableInAgentMode does not gate it: a task with other tools and
+        // enableInAgentMode=false never reaches the cascade (LlmTask skips it).
+        boolean useAgentMode = (cascade.isEnableInAgentMode() && task.isAgentMode()) || AnswerTool.enabled(task);
         String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
         HeuristicConfig heuristicConfig = cascade.getHeuristic();
 

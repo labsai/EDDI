@@ -340,6 +340,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile GuardrailService guardrailService;
 
     /**
+     * Hands the {@code toolCallGuardrails} engine to the tool loop, which is not a
+     * CDI bean; an initializer rather than a constructor parameter for the same
+     * reason as the fields above. Never called under direct construction, where the
+     * loop runs without argument guardrails as before.
+     */
+    @Inject
+    void setToolCallGuardrails(ToolCallGuardrails toolCallGuardrails) {
+        toolLoopRunner.toolCallGuardrails = toolCallGuardrails;
+    }
+
+    /**
      * Test seam for supplying the attachment services to a directly-constructed
      * orchestrator (CDI populates the fields above in production). Previously this
      * was the sole wiring path, pushed in by {@code LlmTask}'s
@@ -635,12 +646,21 @@ class AgentOrchestrator implements IAgentOrchestrator {
     public ExecutionResult reaskFinalAnswer(ChatModel chatModel, List<ChatMessage> transcript, Integer maxOutputTokens,
                                             LlmConfiguration.Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-        List<ToolSpecification> specs = buildToolSetup(task, memory).toolSpecs();
+        ToolSetup setup = buildToolSetup(task, memory);
+        List<ToolSpecification> specs = setup.toolSpecs();
+        String answerToolName = setup.answerToolName();
         ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(transcript);
         if (!specs.isEmpty()) {
             requestBuilder.toolSpecifications(specs);
         }
-        if (jsonPolicy != null) {
+        if (answerToolName != null) {
+            // answerMode "tool": the re-ask is answered through the reply tool too, so
+            // no response format; the forced call where the provider has one.
+            var toolChoice = AnswerTool.toolChoice(task, jsonPolicy != null ? jsonPolicy.provider() : null);
+            if (toolChoice != null) {
+                requestBuilder.toolChoice(toolChoice);
+            }
+        } else if (jsonPolicy != null) {
             var responseFormat = jsonPolicy.resolve(!specs.isEmpty());
             if (responseFormat != null) {
                 requestBuilder.responseFormat(responseFormat);
@@ -654,7 +674,16 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // A tool request is never executed here (that is the point): an answer that
         // asks for one is simply an unusable reply.
         AiMessage answer = response.aiMessage();
-        String text = answer != null && !answer.hasToolExecutionRequests() && answer.text() != null ? answer.text() : "";
+        // ... except the reply tool of answerMode "tool", which is not executed
+        // either: its arguments are the answer.
+        var extraction = AnswerTool.extract(answer, answerToolName);
+        String text;
+        if (extraction.answered()) {
+            text = extraction.answerText();
+            AnswerTool.count(AnswerTool.OUTCOME_REPLY);
+        } else {
+            text = answer != null && !answer.hasToolExecutionRequests() && answer.text() != null ? answer.text() : "";
+        }
         Map<String, Object> metadata = new HashMap<>();
         if (response.metadata() != null && response.metadata().tokenUsage() != null) {
             metadata.put("tokenUsage", tokenUsageMap(response.metadata().tokenUsage()));
@@ -732,8 +761,12 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * @param toolSources
      *            dispatch name → provenance tag for gate qualified matching
      * @param builtInSpecs
-     *            built-in specs only (copy taken before external merge — LAZY needs
-     *            it to activate discovered built-ins)
+     *            the specs LAZY keeps behind {@code discover_tools} and activates
+     *            from: by default the built-in specs (copy taken before external
+     *            merge); with {@code lazySources} naming http/mcp/a2a, every
+     *            lazily-managed spec of those sources too (see
+     *            {@link LazyToolCatalog#complete}). A call to one of them that is
+     *            not active is refused, not run
      * @param toolCanonicalNames
      *            dispatch name → configuration slug, for built-ins only. Lets the
      *            executor boundary price a call and pick its cache TTL under the
@@ -746,11 +779,28 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            spec actually survived collision resolution, so a builtin that won
      *            a collision can never be pinned against the losing http tool's
      *            request
+     * @param answerTool
+     *            the terminal reply tool of {@code answerMode: "tool"} (also
+     *            present in {@code toolSpecs}, with no executor), or null when the
+     *            task answers in text
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
             Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
-            Map<String, ToolRequestResolver> toolRequestResolvers) {
+            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+
+        /** A setup without a reply tool. */
+        ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+                Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+                Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+                Map<String, ToolRequestResolver> toolRequestResolvers) {
+            this(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers, null);
+        }
+
+        /** The reply tool's name, or null when the task answers in text. */
+        String answerToolName() {
+            return answerTool != null ? answerTool.name() : null;
+        }
     }
 
     /**
@@ -793,8 +843,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // different request shape and a different cost, from a refactor billed as a
         // pure move.
         Boolean builtInsEnabled = task.getEnableBuiltInTools();
-        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
-                && builtInsEnabled != null && builtInsEnabled) {
+        // lazySources naming http/mcp/a2a: the meta-tool's catalog is only known
+        // once phase 2 has merged, so the name is reserved here (a remote tool still
+        // cannot take it) and LazyToolCatalog.complete fills it in. Without such a
+        // source this is the unchanged built-in-only path below.
+        boolean externalLazy = LazyToolCatalog.externalLazy(task);
+        boolean lazyBuiltins = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
+                && builtInsEnabled != null && builtInsEnabled
+                && LazyToolCatalog.lazySources(task).contains(LazyToolCatalog.SOURCE_BUILTIN);
+        Set<String> phaseOneNames = new HashSet<>();
+        if (externalLazy) {
+            merger.specsSoFar().forEach(spec -> phaseOneNames.add(spec.name()));
+            merger.addContribution("builtin", LazyToolCatalog.placeholder());
+        } else if (lazyBuiltins) {
             merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 
@@ -807,9 +868,66 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
-        return new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
+        if (externalLazy) {
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+        }
+        var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
                 assembled.toolEndpoints(), assembled.toolRequestResolvers());
+        return withAnswerTool(setup, task);
+    }
+
+    /**
+     * Adds the terminal reply tool of {@code answerMode: "tool"} to an assembled
+     * setup — last, after every source, so no source can displace it. A tool that a
+     * source contributed under the same name (one discovered only at runtime, e.g.
+     * from an MCP server; save-time validation refuses every name it can see) is
+     * dropped with a WARN: the reply tool's name ends the turn, so it may mean
+     * nothing else. The reply tool gets no executor, so nothing can run it.
+     */
+    static ToolSetup withAnswerTool(ToolSetup setup, LlmConfiguration.Task task) {
+        ToolSpecification answerTool = AnswerTool.specFor(task);
+        if (answerTool == null) {
+            return setup;
+        }
+        String name = answerTool.name();
+        List<ToolSpecification> specs = new ArrayList<>();
+        boolean collided = false;
+        for (ToolSpecification spec : setup.toolSpecs()) {
+            if (name.equals(spec.name())) {
+                collided = true;
+            } else {
+                specs.add(spec);
+            }
+        }
+        boolean onlyTool = specs.isEmpty();
+        specs.add(answerTool);
+        Map<String, ToolExecutor> executors = copyOf(setup.toolExecutors());
+        Map<String, String> sources = copyOf(setup.toolSources());
+        Map<String, String> canonicalNames = copyOf(setup.toolCanonicalNames());
+        Map<String, String> endpoints = copyOf(setup.toolEndpoints());
+        Map<String, ToolRequestResolver> resolvers = copyOf(setup.toolRequestResolvers());
+        List<ToolSpecification> builtIns = setup.builtInSpecs() != null ? new ArrayList<>(setup.builtInSpecs()) : new ArrayList<>();
+        if (collided) {
+            LOGGER.warnf("LLM task '%s': a %s tool is named '%s', the name of the answerMode reply tool; that tool is not offered to "
+                    + "the model. Rename it at its source or set answerToolName.", sanitize(String.valueOf(task.getId())),
+                    sanitize(String.valueOf(sources.get(name))), sanitize(name));
+            AnswerTool.count(AnswerTool.OUTCOME_COLLISION);
+            builtIns.removeIf(spec -> name.equals(spec.name()));
+        }
+        executors.remove(name);
+        sources.remove(name);
+        canonicalNames.remove(name);
+        endpoints.remove(name);
+        resolvers.remove(name);
+        if (onlyTool) {
+            AnswerTool.noteOnlyTool(task);
+        }
+        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool);
+    }
+
+    private static <V> Map<String, V> copyOf(Map<String, V> map) {
+        return map != null ? new HashMap<>(map) : new HashMap<>();
     }
 
     /**
