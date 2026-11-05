@@ -28,14 +28,14 @@ import { useCancelGroupDiscussion, useSubmitHumanInput } from "@eddi/app-kit/hoo
 import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
-import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
-import { TaskBoard, PersistedTaskBoard } from "@eddi/app-kit/components/groups/task-board";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { DiscussionInsights } from "@eddi/conversation/team";
+import { TaskBoard, PersistedTaskBoard } from "@eddi/conversation/team";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { DiscussionActions } from "@eddi/app-kit/components/groups/discussion-actions";
 import { GroupConfigPanel } from "@eddi/app-kit/components/groups/group-config-panel";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
@@ -44,7 +44,7 @@ import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import {
   followupGroupMember,
   closeGroupConversation,
@@ -62,7 +62,7 @@ import {
   type ShownPause,
 } from "@eddi/app-kit/lib/hitl-pause-binding";
 import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
-import { safeFormatDate } from "@eddi/app-kit/components/groups/group-utils";
+import { safeFormatDate } from "@eddi/conversation/team";
 
 /** Discussions fetched per page of the history list. */
 const CONVERSATION_PAGE = 20;

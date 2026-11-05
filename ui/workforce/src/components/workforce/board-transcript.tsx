@@ -3,14 +3,14 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Copy, CheckCircle2, GitMerge } from "lucide-react";
 import { cn, getInitials } from "@eddi/app-kit/lib/utils";
 import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
 import type { DecisionRecord, TaskDefinition, TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 import { entryTypeInfo } from "@eddi/app-kit/lib/api/groups";
 import type { ConvergenceProgress } from "@eddi/app-kit/hooks/use-group-discussion-stream";
-import { isAgentFailurePlaceholder, parseTranscriptContent } from "@eddi/app-kit/components/groups/group-utils";
-import { AgentFailedNotice } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { isAgentFailurePlaceholder, parseTranscriptContent } from "@eddi/conversation/team";
+import { AgentFailedNotice } from "@eddi/conversation/team";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Types ───────────────────────────────────────────────────────
 

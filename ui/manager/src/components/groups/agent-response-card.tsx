@@ -3,13 +3,13 @@ import { useTranslation } from "react-i18next";
 import { sanitizeAgentHtml } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, Fingerprint } from "lucide-react";
 import { cn, hashColor, getInitials } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@eddi/app-kit/lib/api/groups";
 import { entryTypeInfo, hasEnvelopeData } from "@eddi/app-kit/lib/api/groups";
-import { truncateContent, safeFormatDate } from "@eddi/app-kit/components/groups/group-utils";
-import { isStructuredBody, readEntryBody } from "@eddi/app-kit/lib/group-entry-body";
-import { StructuredEntryBody } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { truncateContent, safeFormatDate } from "@eddi/conversation/team";
+import { isStructuredBody, readEntryBody } from "@eddi/conversation/team";
+import { StructuredEntryBody } from "@eddi/conversation/team";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {

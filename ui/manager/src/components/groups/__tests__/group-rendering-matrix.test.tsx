@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { ChatMessage } from "@eddi/app-kit/components/chat/chat-message";
 import {

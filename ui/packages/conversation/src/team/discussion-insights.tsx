@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { cn } from "../../lib/utils";
+import { cn } from "@eddi/ui";
 import { ArtifactsPanel } from "./artifacts-panel";
 import { NegotiationLedger } from "./negotiation-ledger";
 import type {
   ArtifactUpdatedPayload,
   GroupConversation,
   RetroRecordedPayload,
-} from "../../lib/api/groups";
+} from "@eddi/core/groups";
 
 interface DiscussionInsightsProps {
   /**

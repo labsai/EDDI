@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, AlertTriangle, UserCheck, Send } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "../../lib/hitl-config";
+import { cn } from "@eddi/ui";
+import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "./duration";
 
 interface HumanTurnBannerProps {
   /** The pending member's display name. */

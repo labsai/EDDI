@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Gavel, MessageSquareWarning, Scale } from "lucide-react";
-import { cn, hashColor, getInitials } from "../../lib/utils";
-import { Badge } from "../ui/badge";
+import { cn, hashColor, getInitials } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
-import type { DecisionRecord, DecisionType } from "../../lib/api/groups";
-import { describeDecision } from "../../lib/group-decision";
+import type { DecisionRecord, DecisionType } from "@eddi/core/groups";
+import { describeDecision } from "./group-decision";
 import { formatMarkdownText } from "./group-utils";
-import { ConversationMarkdown } from "../chat/conversation-markdown";
+import { ConversationMarkdown } from "../i18next/conversation-markdown";
 
 /**
  * The structured conclusion of a discussion (EDDI Wave 0, F3), rendered next to

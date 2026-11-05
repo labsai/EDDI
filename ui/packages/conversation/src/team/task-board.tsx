@@ -14,9 +14,9 @@ import {
   UserPlus,
   Gavel,
 } from "lucide-react";
-import { cn, hashColor, getInitials } from "../../lib/utils";
-import { Badge } from "../ui/badge";
-import type { AwardedBid, SharedTaskList } from "../../lib/api/groups";
+import { cn, hashColor, getInitials } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
+import type { AwardedBid, SharedTaskList } from "@eddi/core/groups";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

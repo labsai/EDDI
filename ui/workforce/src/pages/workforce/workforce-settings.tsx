@@ -31,7 +31,7 @@ import {
   useGroupVersionLookup,
 } from "@eddi/app-kit/hooks/use-groups";
 import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import {
   MAX_DISCUSSION_ROUNDS,
   MAX_GROUP_MEMBERS,
@@ -65,7 +65,7 @@ import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@eddi/app-kit/components/shared/permanent-delete-option";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { useTemplates } from "@/hooks/use-templates";
 

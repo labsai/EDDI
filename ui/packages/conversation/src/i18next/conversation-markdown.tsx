@@ -1,6 +1,8 @@
 import { useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ConversationTextProvider, MarkdownContent, type MarkdownContentProps, type Translate } from "@eddi/conversation";
+import { ConversationTextProvider } from "../react/hooks";
+import { MarkdownContent, type MarkdownContentProps } from "../markdown/Markdown";
+import type { Translate } from "../i18n/text";
 
 /**
  * The Manager's translator for the shared conversation components, following

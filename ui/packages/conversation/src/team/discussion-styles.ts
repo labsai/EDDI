@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { DISCUSSION_STYLES, STYLE_INFO, type DiscussionStyle } from "./api/groups";
+import { DISCUSSION_STYLES, STYLE_INFO, type DiscussionStyle } from "@eddi/core/groups";
 
 /**
  * Localized display info for a discussion style.

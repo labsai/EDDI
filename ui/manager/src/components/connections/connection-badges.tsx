@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { KeyRound, Lock, Server, UserCheck, HelpCircle, UserRoundKey } from "lucide-react";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { authTypeLabel, bindingLabel, grantStatusLabel } from "@eddi/app-kit/lib/connection-labels";
 import type { AuthType, Binding, GrantStatus } from "@eddi/app-kit/lib/api/connections";
 

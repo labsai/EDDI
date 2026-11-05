@@ -12,7 +12,7 @@ import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 import { useAgentPrompt, useUpdateAgentPrompt } from "@/hooks/use-agent-prompt";
 import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";

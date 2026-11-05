@@ -43,5 +43,7 @@ export {
 // the module, used or not. The Chat UI keeps its own fonts and never imports it.
 
 export { cn } from "./lib/cn";
+export { formatDuration, formatUsd, getInitials, hashColor } from "./lib/format";
 export { Button, buttonVariants, type ButtonProps } from "./primitives/button";
 export { ThemedToaster, type ThemedToasterProps } from "./primitives/toaster";
+export { Badge, badgeVariants, type BadgeProps } from "./primitives/badge";

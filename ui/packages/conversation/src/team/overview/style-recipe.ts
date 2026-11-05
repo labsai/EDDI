@@ -1,4 +1,4 @@
-import type { DiscussionStyle } from "../../../lib/api/groups";
+import type { DiscussionStyle } from "@eddi/core/groups";
 
 /**
  * The stacked sections of the overview dashboard.

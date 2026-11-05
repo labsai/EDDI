@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { cn } from "../../../lib/utils";
-import type { DigestBid, DigestMember } from "../../../hooks/use-discussion-digest";
+import { cn } from "@eddi/ui";
+import type { DigestBid, DigestMember } from "../use-discussion-digest";
 
 interface BidBoardProps {
   bids: DigestBid[];

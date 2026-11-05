@@ -1,17 +1,17 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleDollarSign, Layers, MessageSquare, Users } from "lucide-react";
-import { Badge } from "../../ui/badge";
-import { cn, formatDuration, formatUsd } from "../../../lib/utils";
-import { styleDisplay } from "../../../lib/discussion-styles";
-import type { DiscussionDigest } from "../../../hooks/use-discussion-digest";
+import { Badge } from "@eddi/ui";
+import { cn, formatDuration, formatUsd } from "@eddi/ui";
+import { styleDisplay } from "../discussion-styles";
+import type { DiscussionDigest } from "../use-discussion-digest";
 import { PhaseRail } from "./phase-rail";
 import { MemberRoster } from "./member-roster";
 import { ParticipationMatrix } from "./participation-matrix";
 import { InteractionMap } from "./interaction-map";
 import { BidBoard } from "./bid-board";
 import { bandOrder, rosterIsAnonymous, type OverviewBand } from "./style-recipe";
-import { ConversationMarkdown } from "../../chat/conversation-markdown";
+import { ConversationMarkdown } from "../../i18next/conversation-markdown";
 
 interface DiscussionOverviewProps {
   digest: DiscussionDigest;

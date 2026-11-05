@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { cn } from "../../../lib/utils";
-import type { DigestInteraction, DigestMember } from "../../../hooks/use-discussion-digest";
+import { cn } from "@eddi/ui";
+import type { DigestInteraction, DigestMember } from "../use-discussion-digest";
 
 interface InteractionMapProps {
   interactions: DigestInteraction[];

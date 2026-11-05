@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, LayoutDashboard, MessageSquareText } from "lucide-react";
-import { cn } from "../../../lib/utils";
+import { cn } from "@eddi/ui";
 import { DISCUSSION_VIEW_MODES, type DiscussionViewMode } from "./discussion-view-mode";
 
 interface DiscussionViewToggleProps {

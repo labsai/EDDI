@@ -1,8 +1,8 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Quote, Sparkles, UserX } from "lucide-react";
-import { cn, formatUsd } from "../../../lib/utils";
-import type { DigestMember } from "../../../hooks/use-discussion-digest";
+import { cn, formatUsd } from "@eddi/ui";
+import type { DigestMember } from "../use-discussion-digest";
 
 interface MemberRosterProps {
   members: DigestMember[];

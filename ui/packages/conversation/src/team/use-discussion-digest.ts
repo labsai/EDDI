@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import type { ConvergenceProgress, GroupStreamState } from "./use-group-discussion-stream";
-import { readEntryBody } from "../lib/group-entry-body";
+import type { ConvergenceProgress, GroupStreamState } from "../controller/group-discussion";
+import { readEntryBody } from "./group-entry-body";
 import type {
   DecisionRecord,
   DiscussionPhase,
@@ -10,7 +10,7 @@ import type {
   PhaseType,
   TranscriptEntry,
   TranscriptEntryType,
-} from "../lib/api/groups";
+} from "@eddi/core/groups";
 
 /**
  * The single normalised model the overview dashboard renders.

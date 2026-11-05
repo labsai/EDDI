@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack, ChevronDown, ChevronUp, History } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn } from "@eddi/ui";
 import { formatJsonSafely } from "./group-utils";
-import { Badge } from "../ui/badge";
-import type { SharedArtifact } from "../../lib/api/groups";
-import { ConversationMarkdown } from "../chat/conversation-markdown";
+import { Badge } from "@eddi/ui";
+import type { SharedArtifact } from "@eddi/core/groups";
+import { ConversationMarkdown } from "../i18next/conversation-markdown";
 
 interface ArtifactsPanelProps {
   artifacts: SharedArtifact[];

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
-import { DiscussionOverview } from "@eddi/app-kit/components/groups/overview/discussion-overview";
+import { DiscussionOverview } from "@eddi/conversation/team";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
-import { bandOrder, rosterIsAnonymous } from "@eddi/app-kit/components/groups/overview/style-recipe";
-import { getStoredDiscussionView, setStoredDiscussionView } from "@eddi/app-kit/components/groups/overview/discussion-view-mode";
-import { buildDigest } from "@eddi/app-kit/hooks/use-discussion-digest";
+import { bandOrder, rosterIsAnonymous } from "@eddi/conversation/team";
+import { getStoredDiscussionView, setStoredDiscussionView } from "@eddi/conversation/team";
+import { buildDigest } from "@eddi/conversation/team";
 import type { DiscussionStyle, GroupConversation, TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 
 const A = "agent-architect";

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
-import { NegotiationLedger } from "@eddi/app-kit/components/groups/negotiation-ledger";
+import { NegotiationLedger } from "@eddi/conversation/team";
 import type { NegotiationState } from "@eddi/app-kit/lib/api/groups";
 
 const names = { "agent-a": "Party A", "agent-b": "Party B" };

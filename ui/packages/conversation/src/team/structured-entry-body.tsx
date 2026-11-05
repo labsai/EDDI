@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle2, ListOrdered, XCircle, User } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
+import { cn } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
-import type { EntryBody } from "../../lib/group-entry-body";
+import type { EntryBody } from "./group-entry-body";
 import type { StructuredItem } from "./group-utils";
 import { StructuredTurnCard } from "./structured-turn-card";
 

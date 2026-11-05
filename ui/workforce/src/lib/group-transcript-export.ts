@@ -1,14 +1,14 @@
 import type { GroupConversation, TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
 import { entryTypeInfo } from "@eddi/app-kit/lib/api/groups";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
-import { describeDecision } from "@eddi/app-kit/lib/group-decision";
+import { describeDecision } from "@eddi/conversation/team";
 import {
   entryBodyToMarkdown,
   interpolateFallback,
   readEntryBody,
   type BodyT,
-} from "@eddi/app-kit/lib/group-entry-body";
-import { parseTranscriptContent } from "@eddi/app-kit/components/groups/group-utils";
+} from "@eddi/conversation/team";
+import { parseTranscriptContent } from "@eddi/conversation/team";
 
 /**
  * The caller's translator, narrowed to what this module needs.

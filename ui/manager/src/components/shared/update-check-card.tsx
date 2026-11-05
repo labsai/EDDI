@@ -26,7 +26,7 @@ import {
   type UpdateCheckErrorReason,
 } from "@/lib/api/updates";
 import { cn } from "@eddi/app-kit/lib/utils";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 /**
  * The GitHub mark, drawn as lucide-react 0.x drew it (ISC licence).

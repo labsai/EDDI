@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, Users, Zap, GitMerge } from "lucide-react";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { cn } from "@eddi/app-kit/lib/utils";
 import type { PhaseType, TurnOrder } from "@eddi/app-kit/lib/api/groups";
 import type { ConvergenceProgress } from "@eddi/app-kit/hooks/use-group-discussion-stream";

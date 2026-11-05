@@ -8,7 +8,7 @@ import { formatDuration, leaseFlagHelp, leaseFlagLabel } from "@/lib/cluster-lab
 import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useClusterLeases, useReleaseLease } from "@/hooks/use-cluster";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";

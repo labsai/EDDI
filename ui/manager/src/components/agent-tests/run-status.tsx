@@ -1,6 +1,6 @@
 import { AlertTriangle, Ban, CheckCircle2, Loader2, OctagonX, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import type { AgentTestRun, RunStatus } from "@/lib/api/agent-tests";
 
 const VARIANT: Record<RunStatus, "success" | "destructive" | "warning" | "secondary"> = {

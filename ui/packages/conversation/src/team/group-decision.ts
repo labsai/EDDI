@@ -1,5 +1,5 @@
-import type { DecisionRecord } from "./api/groups";
-import { readableJsonObject, splitVerdictOutcome } from "../components/groups/group-utils";
+import type { DecisionRecord } from "@eddi/core/groups";
+import { readableJsonObject, splitVerdictOutcome } from "./group-utils";
 
 /**
  * A `DecisionRecord` laid out for reading — what the verdict card and the

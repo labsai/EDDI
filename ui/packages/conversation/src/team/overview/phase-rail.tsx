@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Check, CircleDot, Lock, ShieldQuestion } from "lucide-react";
-import { cn } from "../../../lib/utils";
-import type { DigestPhase } from "../../../hooks/use-discussion-digest";
+import { cn } from "@eddi/ui";
+import type { DigestPhase } from "../use-discussion-digest";
 
 interface PhaseRailProps {
   phases: DigestPhase[];

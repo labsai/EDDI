@@ -4,17 +4,17 @@ import { X, AlertCircle, Sparkles, Download, ChevronDown, ChevronUp } from "luci
 import { cn, hashColor, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { useGroupConversation } from "@eddi/app-kit/hooks/use-groups";
 import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
-import { isAgentFailurePlaceholder, parseTranscriptContent, truncateContent } from "@eddi/app-kit/components/groups/group-utils";
+import { isAgentFailurePlaceholder, parseTranscriptContent, truncateContent } from "@eddi/conversation/team";
 import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";
-import { AgentFailedNotice, StructuredEntryBody } from "@eddi/app-kit/components/groups/structured-entry-body";
-import { isStructuredBody, readEntryBody } from "@eddi/app-kit/lib/group-entry-body";
-import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
+import { AgentFailedNotice, StructuredEntryBody } from "@eddi/conversation/team";
+import { isStructuredBody, readEntryBody } from "@eddi/conversation/team";
+import { DiscussionInsights } from "@eddi/conversation/team";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
-import { PersistedTaskBoard } from "@eddi/app-kit/components/groups/task-board";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { PersistedTaskBoard } from "@eddi/conversation/team";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
 import {
   entryTypeInfo,
@@ -23,7 +23,7 @@ import {
   type TranscriptEntry,
   type GroupConversationState,
 } from "@eddi/app-kit/lib/api/groups";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Types ───────────────────────────────────────────────────────
 

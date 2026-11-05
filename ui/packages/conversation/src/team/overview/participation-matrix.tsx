@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Dot, MessageSquare, Minus, X } from "lucide-react";
 import type { TFunction } from "i18next";
-import { cn } from "../../../lib/utils";
-import type { CellKind, DigestCell, DigestMember, DigestPhase } from "../../../hooks/use-discussion-digest";
+import { cn } from "@eddi/ui";
+import type { CellKind, DigestCell, DigestMember, DigestPhase } from "../use-discussion-digest";
 
 interface ParticipationMatrixProps {
   phases: DigestPhase[];

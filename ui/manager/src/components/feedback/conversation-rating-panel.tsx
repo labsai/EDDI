@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { MessageSquareHeart } from "lucide-react";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { RatingScore } from "./rating-score";
 import type { RatingRow } from "@eddi/app-kit/lib/api/ratings";
 

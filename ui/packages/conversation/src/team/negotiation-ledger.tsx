@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Handshake, ArrowLeftRight } from "lucide-react";
-import { cn, hashColor, getInitials } from "../../lib/utils";
-import { Badge } from "../ui/badge";
-import type { NegotiationState } from "../../lib/api/groups";
+import { cn, hashColor, getInitials } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
+import type { NegotiationState } from "@eddi/core/groups";
 
 interface NegotiationLedgerProps {
   negotiation: NegotiationState;

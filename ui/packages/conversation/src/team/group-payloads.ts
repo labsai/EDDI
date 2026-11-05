@@ -1,4 +1,4 @@
-import type { TranscriptEntryType } from "./api/groups";
+import type { TranscriptEntryType } from "@eddi/core/groups";
 
 /**
  * Readers for the four group phases whose transcript entry carries the member's

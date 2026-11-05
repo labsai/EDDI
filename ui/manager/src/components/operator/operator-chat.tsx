@@ -1,7 +1,7 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { formatMarkdownText } from "@eddi/app-kit/components/groups/group-utils";
+import { formatMarkdownText } from "@eddi/conversation/team";
 import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
@@ -23,7 +23,7 @@ import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 export interface OperatorChatProps {
   messages: ChatMessage[];

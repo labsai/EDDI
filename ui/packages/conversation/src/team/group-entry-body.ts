@@ -1,4 +1,4 @@
-import type { TaskDefinition, TranscriptEntryType } from "./api/groups";
+import type { TaskDefinition, TranscriptEntryType } from "@eddi/core/groups";
 import {
   isAgentFailurePlaceholder,
   parseEmojiVerification,
@@ -6,7 +6,7 @@ import {
   parseTranscriptContent,
   stripLoneCodeFence,
   type StructuredItem,
-} from "../components/groups/group-utils";
+} from "./group-utils";
 import {
   detectStructuredPayload,
   parseStructuredPayload,

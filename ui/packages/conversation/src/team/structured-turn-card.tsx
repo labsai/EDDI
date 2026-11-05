@@ -1,16 +1,16 @@
 import { useTranslation } from "react-i18next";
 import { Scale, Gavel, HandCoins, Lightbulb } from "lucide-react";
 import { formatMarkdownText } from "./group-utils";
-import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
+import { cn } from "@eddi/ui";
+import { Badge } from "@eddi/ui";
 import type {
   BargainPayload,
   BidPayload,
   RetroPayload,
   StructuredPayload,
   VotePayload,
-} from "../../lib/group-payloads";
-import { ConversationMarkdown } from "../chat/conversation-markdown";
+} from "./group-payloads";
+import { ConversationMarkdown } from "../i18next/conversation-markdown";
 
 /**
  * The body of a transcript turn whose stored content is a JSON contract rather

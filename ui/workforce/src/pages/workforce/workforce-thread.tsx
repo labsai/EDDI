@@ -30,7 +30,7 @@ import {
   Square,
   MessageSquarePlus,
 } from "lucide-react";
-import { parseTranscriptContent, formatMarkdownText } from "@eddi/app-kit/components/groups/group-utils";
+import { parseTranscriptContent, formatMarkdownText } from "@eddi/conversation/team";
 import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 import { useWorkforceGroup } from "@/hooks/use-workforce-group";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
@@ -72,7 +72,7 @@ import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { cn } from "@eddi/app-kit/lib/utils";
-import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
 
 // ─── Types ───────────────────────────────────────────────────────
 
