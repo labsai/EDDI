@@ -120,6 +120,8 @@
     "workspaces": "Workspaces",
     "breadcrumb": "Breadcrumb",
     "checkingVersion": "Checking version...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} Demo {{version}}",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
     "branding": "Branding",
@@ -7189,6 +7191,7 @@
     "sourceLabel": "Brand in effect comes from:",
     "updated": "Last saved {{when}} by {{who}}, revision {{revision}}",
     "saveFailed": "The brand was not saved: {{reason}}",
+    "writeTimeout": "The server did not answer in time. Reload the page to see whether the change was applied.",
     "warningsTitle": "Saved, with a warning from the server:",
     "toast": {
       "applyFailed": "Saved, but this tab could not load the new brand. Reload the page to see it.",

@@ -14011,7 +14011,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing. `eddi_vault_reseal_failures_total` counts sealed rows (OAuth grants) a DEK rotation could not open and skipped — each is a linked account that may need reconnecting. `eddi_vault_legacy_unbound_opened_count_total` counts values that only opened through the no-AAD legacy fallback; once it stays at zero after a `rotate-dek`, `eddi.vault.accept-unbound-legacy-data=false` can retire the fallback.",
+          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing. `eddi_vault_reseal_failures_total` counts sealed rows (OAuth grants) a DEK rotation could not open and skipped — each is a linked account that may need reconnecting. `eddi_vault_legacy_unbound_opened_count_total` counts fallback attempts for values that only open through the no-AAD legacy fallback (cumulative; a refused one counts too); once its rate stays at zero after a `rotate-dek` on every tenant, `eddi.vault.accept-unbound-legacy-data=false` can retire the fallback.",
           "gridPos": {
             "h": 6,
             "w": 10,

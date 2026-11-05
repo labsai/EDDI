@@ -22,6 +22,11 @@ export interface BrandAssetSlotProps {
   revision: number;
   readOnly: boolean;
   busy: boolean;
+  /**
+   * Another slot is mid-write. Image writes bump the one shared revision, so
+   * they run one at a time; this slot stays inert (without a spinner) meanwhile.
+   */
+  blocked?: boolean;
   /** A translated error from the last attempt, if it failed. */
   error: string | null;
   /** A note under the slot, such as what shows while it is empty. */
@@ -47,6 +52,7 @@ export function BrandAssetSlotCard({
   revision,
   readOnly,
   busy,
+  blocked = false,
   error,
   note,
   onUpload,
@@ -56,10 +62,11 @@ export function BrandAssetSlotCard({
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const inert = busy || blocked;
   const src = revision > 0 ? `/branding/${publicPath}?r=${revision}` : `/branding/${publicPath}`;
 
   const take = (file: File | undefined) => {
-    if (!file || readOnly) return;
+    if (!file || readOnly || inert) return;
     if (file.size > MAX_ASSET_BYTES) {
       onTooLarge();
       return;
@@ -94,11 +101,11 @@ export function BrandAssetSlotCard({
       <div
         role="button"
         tabIndex={readOnly ? -1 : 0}
-        aria-disabled={readOnly || busy}
+        aria-disabled={readOnly || inert}
         aria-label={t("branding.assets.dropLabel", "Upload {{slot}}", { slot: label })}
-        onClick={() => !readOnly && !busy && input.current?.click()}
+        onClick={() => !readOnly && !inert && input.current?.click()}
         onKeyDown={(e) => {
-          if (readOnly || busy) return;
+          if (readOnly || inert) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             input.current?.click();
@@ -172,7 +179,7 @@ export function BrandAssetSlotCard({
           variant="ghost"
           size="sm"
           onClick={onRemove}
-          disabled={busy}
+          disabled={inert}
           data-testid={`brand-asset-${slot}-remove`}
         >
           <Trash2 />

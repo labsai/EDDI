@@ -403,6 +403,18 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("an empty /Filter [] is charged like no filter at all")
+        void repeatedEmptyFilterStreamIsCounted() {
+            // PDFBox reads "/Filter []" as zero filters, so getFilters() is an empty array,
+            // not null: it must not slip past the unfiltered charge.
+            byte[] pdf = loadablePdf(content(900 * 1024), "[]", "\n", 5);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdf, oneMegabyte, false));
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
         @DisplayName("a page with a single small Flate or unfiltered content stream is still read")
         void singleContentStreamsUnderTheBudgetAreRead() {
             byte[] text = "BT /F1 12 Tf 72 700 Td (hello there) Tj ET\n".getBytes(StandardCharsets.US_ASCII);
@@ -522,6 +534,41 @@ class DocumentExtractorsTest {
                         streamWithPredictor(4), 0);
                 assertEquals(8, decoded.size());
                 assertFalse(budget.exceeded());
+            }
+        }
+
+        @Test
+        @DisplayName("a /Filter that is not a name or a non-empty array is zero filters, and charged as such")
+        void repeatedNonNameFilterStreamIsCounted() {
+            byte[] pdf = loadablePdf(content(900 * 1024), "0", "\n", 5);
+
+            var failure = assertThrows(UnreadableDocumentException.class, () -> extractor.extract(pdf, oneMegabyte, false));
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("a predictor with a zero or negative dimension is refused")
+        void nonPositivePredictorDimensionsAreRefused() throws IOException {
+            try (var budget = PdfDecodeBudget.open(1024 * 1024)) {
+                Filter flate = FilterFactory.INSTANCE.getFilter(COSName.FLATE_DECODE);
+                for (int columns : new int[]{0, -1}) {
+                    COSDictionary hostile = streamWithPredictor(columns);
+                    assertThrows(IOException.class, () -> flate.decode(new ByteArrayInputStream(zlib(new byte[16])),
+                            OutputStream.nullOutputStream(), hostile, 0));
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("predictor dimensions whose product overflows a long are refused, not read as negative")
+        void overflowingPredictorRowsAreRefused() throws IOException {
+            try (var budget = PdfDecodeBudget.open(1024 * 1024)) {
+                Filter flate = FilterFactory.INSTANCE.getFilter(COSName.FLATE_DECODE);
+                COSDictionary hostile = streamWithPredictor(1_000_000_001);
+                hostile.getCOSDictionary(COSName.DECODE_PARMS).setInt(COSName.COLORS, 32);
+                hostile.getCOSDictionary(COSName.DECODE_PARMS).setInt(COSName.BITS_PER_COMPONENT, 1_000_000_000);
+                assertThrows(IOException.class, () -> flate.decode(new ByteArrayInputStream(zlib(new byte[16])),
+                        OutputStream.nullOutputStream(), hostile, 0));
             }
         }
 

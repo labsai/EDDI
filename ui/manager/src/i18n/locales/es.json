@@ -120,6 +120,8 @@
     "workspaces": "Espacios de trabajo",
     "breadcrumb": "Ruta de navegación",
     "checkingVersion": "Comprobando la versión...",
+    "versionLabel": "{{productName}} versión {{version}}",
+    "versionLabelDemo": "{{productName}} versión de demostración {{version}}",
     "expandSidebar": "Expandir la barra lateral",
     "collapseSidebar": "Contraer la barra lateral",
     "branding": "Marca",
@@ -7260,6 +7262,7 @@
     "sourceLabel": "La marca activa procede de:",
     "updated": "Guardado por última vez {{when}} por {{who}}, revisión {{revision}}",
     "saveFailed": "La marca no se guardó: {{reason}}",
+    "writeTimeout": "El servidor no respondió a tiempo. Recargue la página para ver si se aplicó el cambio.",
     "warningsTitle": "Guardado, con una advertencia del servidor:",
     "toast": {
       "applyFailed": "Guardado, pero esta pestaña no pudo cargar la nueva marca. Recargue la página para verla.",
