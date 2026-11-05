@@ -404,4 +404,182 @@ class CatalogServiceTest {
             assertTrue(service(identity(BOB, "eddi-user"), workspaces(false)).listGroups().isEmpty());
         }
     }
+
+    // ==================== degraded inputs ====================
+
+    @Nested
+    @DisplayName("degraded inputs never break the catalog")
+    class DegradedInputs {
+
+        private final WorkspaceSettings off = workspaces(false);
+
+        @Test
+        @DisplayName("no deployed agents, or a factory that fails, give an empty agent list")
+        void noDeployedAgents() throws Exception {
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(null);
+            assertTrue(service(identity(BOB, "eddi-user"), off).listAgents().isEmpty());
+
+            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenThrow(new IllegalStateException("down"));
+            assertTrue(service(identity(BOB, "eddi-user"), off).listAgents().isEmpty());
+        }
+
+        @Test
+        @DisplayName("a null entry and a second deployment of the same agent are skipped")
+        void nullAndDuplicateAgentsSkipped() throws Exception {
+            agent("a1", "Support", ALICE, ResourceVisibility.space, true);
+            deployed.add(null);
+            deployed.add(deployed.getFirst());
+
+            assertEquals(List.of("a1"), agentIds(service(identity(BOB, "eddi-user"), off).listAgents()));
+        }
+
+        @Test
+        @DisplayName("an agent without a descriptor is listed by its flag, sorted by id, with no name")
+        void agentWithoutDescriptor() throws Exception {
+            agent("b-agent", "Named", ALICE, ResourceVisibility.space, true);
+            agent("a-agent", "ignored", ALICE, ResourceVisibility.space, true);
+            when(descriptorStore.readCurrentDescriptor("a-agent")).thenThrow(new ResourceNotFoundException("none"));
+
+            List<CatalogAgent> agents = service(identity(BOB, "eddi-user"), off).listAgents();
+
+            assertEquals(List.of("a-agent", "b-agent"), agentIds(agents));
+            assertNull(agents.getFirst().name());
+            assertNull(agents.getFirst().description());
+        }
+
+        @Test
+        @DisplayName("an agent whose configuration reads as null is not listed")
+        void nullAgentConfigHidden() throws Exception {
+            agent("a1", "Support", ALICE, ResourceVisibility.space, true);
+            when(agentStore.read("a1", 3)).thenReturn(null);
+
+            assertTrue(service(identity(BOB, "eddi-user"), off).listAgents().isEmpty());
+        }
+
+        @Test
+        @DisplayName("an unreadable operator variable means no operator, so nothing is excluded")
+        void operatorVariableUnreadable() throws Exception {
+            agent("op", "Operator", ALICE, ResourceVisibility.space, true);
+            CatalogService catalog = service(identity(BOB, "eddi-user"), off);
+
+            when(variableStore.get(GlobalVariable.DEFAULT_TENANT, OperatorRevisionCheck.OPERATOR_VARIABLE)).thenReturn(null);
+            assertNull(catalog.operatorAgentId());
+
+            when(variableStore.get(GlobalVariable.DEFAULT_TENANT, OperatorRevisionCheck.OPERATOR_VARIABLE))
+                    .thenReturn(new GlobalVariable(OperatorRevisionCheck.OPERATOR_VARIABLE, " "));
+            assertNull(catalog.operatorAgentId());
+
+            when(variableStore.get(GlobalVariable.DEFAULT_TENANT, OperatorRevisionCheck.OPERATOR_VARIABLE))
+                    .thenReturn(new GlobalVariable(OperatorRevisionCheck.OPERATOR_VARIABLE, "{not json"));
+            assertNull(catalog.operatorAgentId());
+
+            when(variableStore.get(GlobalVariable.DEFAULT_TENANT, OperatorRevisionCheck.OPERATOR_VARIABLE))
+                    .thenReturn(new GlobalVariable(OperatorRevisionCheck.OPERATOR_VARIABLE, "{\"agentId\":42}"));
+            assertNull(catalog.operatorAgentId());
+
+            when(variableStore.get(GlobalVariable.DEFAULT_TENANT, OperatorRevisionCheck.OPERATOR_VARIABLE))
+                    .thenReturn(new GlobalVariable(OperatorRevisionCheck.OPERATOR_VARIABLE, "{\"agentId\":\"\"}"));
+            assertNull(catalog.operatorAgentId());
+
+            assertEquals(List.of("op"), agentIds(catalog.listAgents()));
+        }
+
+        @Test
+        @DisplayName("isListed: no descriptor under enforcement, and a visibility that does not list")
+        void isListedEdges() {
+            CatalogService enforcing = service(identity(BOB, "eddi-user"), workspaces(true));
+
+            assertTrue(!enforcing.isListed(null, null, false));
+            assertTrue(!enforcing.isListed(false,
+                    descriptor("x", ALICE, ResourceVisibility.space, URI.create("eddi://ai.labs.agent/agentstore/agents/x?version=1")),
+                    false));
+            assertTrue(enforcing.isListed(true, null, true));
+        }
+
+        @Test
+        @DisplayName("a null page, null or unparsable descriptors are skipped")
+        void unusableGroupDescriptorsSkipped() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean(), any())).thenReturn(null);
+            assertTrue(service(identity(BOB, "eddi-user"), off).listGroups().isEmpty());
+
+            group(G1, 1, "Team", ALICE, ResourceVisibility.space, true);
+            List<DocumentDescriptor> page = new ArrayList<>();
+            page.add(null);
+            page.add(descriptor("Broken", ALICE, ResourceVisibility.space, URI.create("eddi://ai.labs.group/groupstore/groups/not-an-id")));
+            page.addAll(groupDescriptors);
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean(), any()))
+                    .thenAnswer(invocation -> (int) invocation.getArgument(2) == 0 ? page : List.of());
+
+            assertEquals(List.of(G1), groupIds(service(identity(BOB, "eddi-user"), off).listGroups()));
+        }
+
+        @Test
+        @DisplayName("an older version seen after a newer one does not replace it")
+        void olderVersionAfterNewerIgnored() throws Exception {
+            group(G1, 3, "New name", ALICE, ResourceVisibility.space, true);
+            group(G1, 1, "Old name", ALICE, ResourceVisibility.space, true);
+
+            List<CatalogGroup> groups = service(identity(BOB, "eddi-user"), off).listGroups();
+
+            assertEquals(1, groups.size());
+            assertEquals(3, groups.getFirst().version());
+        }
+
+        @Test
+        @DisplayName("a full page asks for the next one")
+        void fullPageContinues() throws Exception {
+            group(G1, 1, "Team", ALICE, ResourceVisibility.space, true);
+            DocumentDescriptor only = groupDescriptors.getFirst();
+            List<DocumentDescriptor> fullPage = new ArrayList<>();
+            for (int i = 0; i < CatalogService.GROUP_PAGE_SIZE; i++) {
+                fullPage.add(only);
+            }
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean(), any()))
+                    .thenAnswer(invocation -> (int) invocation.getArgument(2) == 0 ? fullPage : List.of());
+
+            assertEquals(List.of(G1), groupIds(service(identity(BOB, "eddi-user"), off).listGroups()));
+        }
+
+        @Test
+        @DisplayName("a group with blank name and description, no style and a null member falls back to its descriptor")
+        void sparseGroupFallsBack() throws Exception {
+            group(G1, 1, "Descriptor name", ALICE, ResourceVisibility.space, true);
+            var config = new AgentGroupConfiguration();
+            config.setName(" ");
+            config.setDescription("");
+            config.setListed(true);
+            List<GroupMember> members = new ArrayList<>();
+            members.add(null);
+            members.add(new GroupMember("m1", "Helper", 1, null, null));
+            config.setMembers(members);
+            when(groupStore.read(G1, 1)).thenReturn(config);
+
+            CatalogGroup entry = service(identity(BOB, "eddi-user"), off).listGroups().getFirst();
+
+            assertEquals("Descriptor name", entry.name());
+            assertEquals("Descriptor name description", entry.description());
+            assertNull(entry.style());
+            assertEquals(1, entry.members().size());
+            // GroupMember defaults a null member type to AGENT.
+            assertEquals("AGENT", entry.members().getFirst().memberType());
+        }
+
+        @Test
+        @DisplayName("a group without members, a null configuration, or a failing read")
+        void groupConfigEdges() throws Exception {
+            group(G1, 1, "No members", ALICE, ResourceVisibility.space, true);
+            var config = new AgentGroupConfiguration();
+            config.setName("No members");
+            config.setListed(true);
+            config.setMembers(null);
+            when(groupStore.read(G1, 1)).thenReturn(config);
+            assertTrue(service(identity(BOB, "eddi-user"), off).listGroups().getFirst().members().isEmpty());
+
+            when(groupStore.read(G1, 1)).thenReturn(null);
+            assertTrue(service(identity(BOB, "eddi-user"), off).listGroups().isEmpty());
+
+            when(groupStore.read(G1, 1)).thenThrow(new ResourceNotFoundException("gone"));
+            assertTrue(service(identity(BOB, "eddi-user"), off).listGroups().isEmpty());
+        }
+    }
 }
