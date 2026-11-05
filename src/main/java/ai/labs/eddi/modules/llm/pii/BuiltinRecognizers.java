@@ -375,17 +375,17 @@ public final class BuiltinRecognizers {
 
     private static boolean plausibleDate(Matcher date) {
         if (date.group(1) != null) {
-            int a = Integer.parseInt(date.group(1));
-            int b = Integer.parseInt(date.group(2));
+            long a = NationalChecksums.value(date.group(1));
+            long b = NationalChecksums.value(date.group(2));
             // Day-month or month-day: either reading must be a date.
             return a >= 1 && b >= 1 && (a <= 31 && b <= 12 || a <= 12 && b <= 31) && plausibleYear(date.group(3));
         }
         if (date.group(4) != null) {
-            int month = Integer.parseInt(date.group(5));
-            int day = Integer.parseInt(date.group(6));
+            long month = NationalChecksums.value(date.group(5));
+            long day = NationalChecksums.value(date.group(6));
             return month >= 1 && month <= 12 && day >= 1 && day <= 31 && plausibleYear(date.group(4));
         }
-        int day = Integer.parseInt(date.group(7));
+        long day = NationalChecksums.value(date.group(7));
         return day >= 1 && day <= 31 && plausibleYear(date.group(9));
     }
 
@@ -393,7 +393,7 @@ public final class BuiltinRecognizers {
         if (year.length() == 2) {
             return true;
         }
-        int y = Integer.parseInt(year);
+        long y = NationalChecksums.value(year);
         return y >= 1900 && y <= 2100;
     }
 

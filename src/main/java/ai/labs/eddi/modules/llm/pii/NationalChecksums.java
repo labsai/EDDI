@@ -538,10 +538,11 @@ public final class NationalChecksums {
     }
 
     /**
-     * The number {@code digits} spells. Callers check {@link #allDigits} first;
-     * computed digit by digit, so nothing here can throw on odd input.
+     * The number {@code digits} spells. Callers pass ASCII digits (a pattern or
+     * {@link #allDigits} guarantees them); computed digit by digit, so nothing here
+     * can throw on odd input.
      */
-    private static long value(String digits) {
+    static long value(String digits) {
         long n = 0;
         for (int i = 0; i < digits.length(); i++) {
             n = n * 10 + digit(digits, i);

@@ -181,8 +181,8 @@ public final class PiiChecksums {
         if (!allDigits(head) || !allDigits(tail) || letter < 'A' || letter > 'Z') {
             return false;
         }
-        int day = Integer.parseInt(head.substring(2, 4));
-        int month = Integer.parseInt(head.substring(4, 6));
+        long day = NationalChecksums.value(head.substring(2, 4));
+        long month = NationalChecksums.value(head.substring(4, 6));
         if (day < 1 || day > 31 || month < 1 || month > 12) {
             return false;
         }
