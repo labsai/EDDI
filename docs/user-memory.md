@@ -108,7 +108,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 |---|---|---|---|
 | `enabled` | `boolean` | `false` | Enable background consolidation |
 | `pruneStaleAfterDays` | `int` | `90` | Remove entries whose `updatedAt` (last write) is older than N days. Recalling an entry does **not** refresh this — only a write does. Set to 0 to disable. |
-| `detectContradictions` | `boolean` | `true` | Flag entries with same key but different values |
+| `detectContradictions` | `boolean` | `true` | Detect entries with the same key but different values; what happens to them is `contradictionResolution` |
 | `summarizeInteractions` | `boolean` | `false` | Enable LLM-driven memory consolidation |
 | `summarizeMinEntries` | `int` | `5` | Minimum entries in a group before summarization triggers |
 | `summarizeTargetEntries` | `int` | `2` | Target number of entries per group after consolidation. It is passed to the model; an answer above it (but below the original count) is kept whole — never truncated, because the originals are deleted |
@@ -124,7 +124,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
 | `parameters` | `Map<String,String>` | `{}` | Model parameters for the consolidation LLM — `apiKey`, `baseUrl`, `temperature`, … — passed to the model registry exactly like an LLM task's `parameters` block, so `${vault:…}` and `${vars:…}` resolve. **Required when `summarizeInteractions` is `true`**: a background dream cycle has no parent LLM task to inherit credentials from, so without it every summarization step fails with a provider 401 while stale pruning keeps working. |
 | `schedule` | `String` | `"0 3 * * *"` | Cron expression the dream schedule should use |
-| `contradictionResolution` | `String` | `"keep_newest"` | Reserved. The current detector counts and logs contradictions without resolving them. |
+| `contradictionResolution` | `String` | `"keep_newest"` | What a cycle does with a detected contradiction: `keep_newest` (count and log only — the default and the behaviour of earlier releases), `mark_contested` (flag both sides `CONTESTED`, keep both) or `supersede_older` (retire the older side as `SUPERSEDED` where the newer one reaches all of its readers, otherwise contested). No value deletes an entry. An unknown value logs a WARN and acts as `keep_newest`. See [Contradiction resolution](#contradiction-resolution) |
 
 `rememberFact` resolves which stored entry a write lands on before writing: re-stating an unchanged fact answers `✅ Already remembered (unchanged)` without writing, and an update of an existing entry never counts against `maxEntriesPerUser`.
 
@@ -295,11 +295,62 @@ The Dream service performs background maintenance on user memories:
 
 1. **Stale Pruning** — Removes entries whose `updatedAt` (last write) is older than `pruneStaleAfterDays` days. Recalling an entry does **not** refresh `updatedAt`, so a fact read in every conversation is still pruned if nothing has rewritten it. This is a deterministic operation with zero LLM cost.
 
-2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). Detection is read-only, so unlike pruning and summarization it looks past the firing agent's own entries: every entry is considered for a key the firing agent holds (a disagreement between two *other* agents is not its to report). The log names the key and agents at INFO; the conflicting values are logged at DEBUG only. V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
+2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). Unlike pruning and summarization, detection looks past the firing agent's own entries: every entry is considered for a key the firing agent holds (a disagreement between two *other* agents is not its to report). The log names the key and agents at INFO; the conflicting values are logged at DEBUG only. What happens next is `contradictionResolution` — by default nothing; see [Contradiction resolution](#contradiction-resolution). Matching is by key; LLM-driven semantic detection is future work.
 
-3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled toward `summarizeTargetEntries` entries. Safety guarantees: every write target is resolved before anything is written; new entries are inserted before originals are deleted; an original that receives a consolidated entry (the model reused its key) is updated in place and **not** deleted; a key that would overwrite a memory outside the group skips the group untouched; duplicate keys in the answer are merged; a failed insert restores any original it overwrote; an answer that only repeats originals verbatim may drop an original only when it duplicated a kept value (otherwise it merged nothing and the group is skipped); LLM failures or invalid responses preserve the original entries.
+3. **Interaction Summarization** — Contested and superseded entries are held back: consolidating a disputed value would pick a winner after all, and consolidating a superseded one would bring the retired value back. When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled toward `summarizeTargetEntries` entries. Safety guarantees: every write target is resolved before anything is written; new entries are inserted before originals are deleted; an original that receives a consolidated entry (the model reused its key) is updated in place and **not** deleted; a key that would overwrite a memory outside the group skips the group untouched; duplicate keys in the answer are merged; a failed insert restores any original it overwrote; an answer that only repeats originals verbatim may drop an original only when it duplicated a kept value (otherwise it merged nothing and the group is skipped); LLM failures or invalid responses preserve the original entries.
 
 4. **Concurrent writes win.** A cycle reads the user's memories, then spends seconds in the LLM call before it writes. Every write it makes is therefore conditional on the memory being exactly as it was read — a compare-and-set on `updatedAt`, one atomic statement on MongoDB and PostgreSQL: a stale entry the conversation rewrote in the meantime is not pruned; a group any of whose originals changed during the LLM call is skipped untouched; an original rewritten after the consolidation was written is kept rather than deleted (the duplicate is reconciled by the next cycle). Each skip is counted as `conflictsSkipped` in the cycle's completion log line and on `eddi.dream.conflicts.skipped`. Earlier releases deleted and overwrote by id, so a fact the user stated during the cycle could be lost.
+
+### Contradiction resolution
+
+The store's upsert identity is `(userId, key, sourceAgentId)` for `self` and `group` entries and `(userId, key)` for `global` ones, so one key can be held by several entries at once — one per agent, plus the shared global row — and they can disagree. Each entry carries an `assessment`:
+
+| Assessment | Meaning | Loaded as `{properties.<key>}`? |
+|---|---|---|
+| `ACCEPTED` | The default. Every entry stored before this field existed reads as `ACCEPTED` | Yes |
+| `CONTESTED` | Another entry for the key holds a different value and neither was chosen | Yes, plus the `contestedMemories` marker below |
+| `SUPERSEDED` | A newer entry (`supersededBy`) replaced it for every one of its readers. Kept as evidence, never deleted by Dream | No, while the replacement is visible to the reader — it is still loaded if it is the reader's only entry for the key (a recall window that cut the replacement off, say), because losing the fact would be worse |
+
+`userMemoryConfig.dream.contradictionResolution` decides which assessments a cycle writes:
+
+| Value | What a cycle does with a disputed key |
+|---|---|
+| `keep_newest` *(default)* | Nothing: the contradiction is counted (`eddi.dream.contradictions.found`) and logged. Which value an agent sees is the loader's own precedence — the most specific scope (`self`, then `group`, then `global`), then the newest write. The name is historical: Dream chooses nothing. This is exactly what earlier releases did |
+| `mark_contested` | Every entry of the key that this cycle may write is marked `CONTESTED`, and all are kept |
+| `supersede_older` | The newest entry wins **only where it reaches every reader of the older one**: a newer `global` entry supersedes anything; a newer `group` entry supersedes an older `group` entry whose groups it includes; a `self` entry supersedes nothing (no other agent can read it). The older entry becomes `SUPERSEDED` with `supersededBy` pointing at the newest. Whatever still disagrees afterwards — including a tie on the newest `updatedAt` — is marked `CONTESTED` |
+
+Rules that hold for every value:
+
+- **Ownership is the pruning rule.** A cycle writes assessments only onto the entries it may maintain: the firing agent's own (`sourceAgentId`) unless `crossAgentMaintenance: true`, and never a `_gdpr_` entry. With the default, agent A's cycle marks A's entry `CONTESTED` and leaves agent B's alone; B's own cycle marks B's.
+- **Concurrent writes win.** Every assessment is a compare-and-set on `updatedAt`; one that loses to a conversation's write is skipped and counted in `conflictsSkipped`. Writing an assessment does **not** change `updatedAt` — it is Dream's verdict about the fact, not a new statement of it, so a contested memory still ages out under `pruneStaleAfterDays` and does not jump to the top of a `most_recent` recall.
+- **A rewrite resolves the contest.** Any ordinary write of a key — the conversation persisting a changed `longTerm` property, the `rememberFact` tool (even with the same value: re-stating a contested fact is the user confirming it), the REST and MCP upserts, `PUT /propertiesstore/properties/{userId}` — stores it `ACCEPTED`. A conversation that rewrites a contested key also drops it from `contestedMemories` for its remaining turns.
+- **Stale verdicts are lifted, whatever the value.** A `CONTESTED` entry whose key no longer disagrees, and a `SUPERSEDED` entry whose replacement was deleted or itself superseded, are set back to `ACCEPTED` by the next cycle (`eddi.dream.contradictions.cleared`) — even under `keep_newest`, so switching back to the default strands no flag.
+- **The other agent may still disagree.** Without `crossAgentMaintenance`, the user's correction in agent A's conversation makes A's entry `ACCEPTED`; if agent B still holds the old value, A's next cycle marks A's entry `CONTESTED` again. That is the evidence as it stands, not a bug: only B (or a cross-agent cycle) can retire B's entry.
+
+**How an agent sees a contest.** Contested entries are loaded as properties as usual, and the conversation also gets a conversation-scoped property `contestedMemories` — a map of `key → true`, present only when at least one loaded memory is contested:
+
+```text
+{#if properties.contestedMemories}
+Some things I remember about the user are disputed ({properties.contestedMemories.keys}).
+Ask the user to confirm them before relying on them.
+{/if}
+{#if properties.contestedMemories.preferred_language}
+Confirm the user's preferred language before answering in it.
+{/if}
+```
+
+The competing value is deliberately not exposed — it may be another agent's private `self` memory. The `recallMemories` and `searchMemory` tools mark such lines `(contested: … confirm with the user)` and superseded ones `(superseded by a newer memory)`; an `ACCEPTED` entry reads exactly as before. A memory that is itself named `contestedMemories` keeps its name: the marker is not set and a WARN is logged.
+
+One limit: a property setter that re-sets a contested property to the value it already holds writes nothing (an unchanged `longTerm` property is never rewritten), so it does not resolve the contest. Have the agent call `rememberFact`, or set the value through the REST or MCP surface.
+
+```json
+"dream": {
+  "enabled": true,
+  "detectContradictions": true,
+  "contradictionResolution": "mark_contested",
+  "crossAgentMaintenance": false
+}
+```
 
 ### Scheduling a Dream Cycle
 
@@ -330,10 +381,13 @@ The Dream service exposes Micrometer metrics (Prometheus names at `/q/metrics` r
 | `eddi.dream.users.processed` | Counter | Users processed across all dream cycles |
 | `eddi.dream.entries.pruned` | Counter | Total entries pruned |
 | `eddi.dream.contradictions.found` | Counter | Contradictions detected |
+| `eddi.dream.contradictions.contested` | Counter | Entries marked `CONTESTED` |
+| `eddi.dream.contradictions.superseded` | Counter | Entries marked `SUPERSEDED` |
+| `eddi.dream.contradictions.cleared` | Counter | Contested or superseded entries set back to `ACCEPTED` because the disagreement was gone |
 | `eddi.dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
 | `eddi.dream.cycles.failed` | Counter | Cycles that were rejected or ended with an error |
 | `eddi.dream.summarization.failed` | Counter | Consolidation LLM calls that failed |
-| `eddi.dream.conflicts.skipped` | Counter | Prunes, overwrites and deletes skipped because the memory was written after the cycle read it — the newer fact is kept |
+| `eddi.dream.conflicts.skipped` | Counter | Prunes, overwrites, deletes and assessments skipped because the memory was written after the cycle read it — the newer fact is kept |
 | `eddi.dream.duration` | Timer | Duration of dream cycles |
 
 ## Migration from Legacy Properties
@@ -388,8 +442,12 @@ Each memory entry contains:
   "groupIds": ["group-1"],
   "sourceConversationId": "conv-789",
   "conflicted": false,
+  "assessment": "ACCEPTED",
+  "supersededBy": null,
   "accessCount": 12,
   "createdAt": "2026-01-15T10:30:00Z",
   "updatedAt": "2026-03-29T14:22:00Z"
 }
 ```
+
+`assessment` is `ACCEPTED`, `CONTESTED` or `SUPERSEDED` (see [Contradiction resolution](#contradiction-resolution)); `supersededBy` is set only on a `SUPERSEDED` entry. `conflicted` mirrors `assessment == "CONTESTED"` for clients that already read it. Entries stored before these fields existed read as `ACCEPTED`: MongoDB documents simply lack the fields, and PostgreSQL adds the `assessment` and `superseded_by` columns on startup with `ACCEPTED` as the default for existing rows.
