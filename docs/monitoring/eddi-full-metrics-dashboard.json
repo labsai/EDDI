@@ -9562,7 +9562,7 @@
           }
         },
         {
-          "id": 444,
+          "id": 445,
           "type": "timeseries",
           "title": "Team outcomes by result",
           "datasource": {
@@ -15443,6 +15443,114 @@
             }
           },
           "description": "Entries waiting to be written to the audit store. Entries are dropped (and counted on eddi_audit_entries_dropped_total) once the queue is full; alert EddiAuditQueueFilling fires at half."
+        },
+        {
+          "id": 444,
+          "type": "timeseries",
+          "title": "Tenant cost reservations (hard ceiling)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_tenant_cost_reservation_total` by `outcome` (opt-in `eddi.tenant.quota.cost-reservation.enabled`): `reserved` calls held their maximum cost, `refused` were stopped because the hold did not fit the monthly budget, `unavailable` were refused because the quota store could not answer (fail closed), `release_failed` holds that waited out their TTL. A rising `refused` while `eddi_tenant_usage_cost_total` is far below the limit means holds are larger than real turns - lower `maxTokens` or `maxToolIterations`. The `USD` series (right axis, dollars per second) is the amount held and given back.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 28
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_tenant_cost_reservation_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (direction) (rate(eddi_tenant_cost_reservation_usd_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "USD {{direction}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "currencyUSD"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "custom.axisLabel",
+                    "value": "USD / s"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },

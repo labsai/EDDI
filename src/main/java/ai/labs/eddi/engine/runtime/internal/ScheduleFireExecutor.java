@@ -298,6 +298,10 @@ public class ScheduleFireExecutor {
 
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
+        // What a window:"RUN" tool quota counts within: stable across the retries of
+        // one due fire, unlike fireLogId (one per attempt), so a retry cannot run again
+        // the tools a failed attempt already ran.
+        String runId = runIdOf(schedule);
         String conversationId = null;
         String errorMessage = null;
         String status;
@@ -309,7 +313,7 @@ public class ScheduleFireExecutor {
             Environment env = resolveEnvironment(schedule.getEnvironment());
 
             // 1. Resolve conversation
-            ResolvedConversation resolved = resolveConversation(schedule, env);
+            ResolvedConversation resolved = resolveConversation(schedule, env, runId);
             conversationId = resolved.id();
 
             // The fire log's cost column was hard-wired to 0.0 on this path, so the
@@ -322,6 +326,7 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            addFireId(inputData, runId);
             // A conversation this fire started already ran its startup workflow under
             // the allowance (createNewConversation); the turn gets what is left, so
             // startup and turn share ONE maxCostPerFire instead of each getting it.
@@ -1006,7 +1011,7 @@ public class ScheduleFireExecutor {
     record ResolvedConversation(String id, boolean created) {
     }
 
-    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         String strategy = schedule.getConversationStrategy();
         if (strategy == null) {
             // Default: heartbeats use persistent, cron uses new
@@ -1014,8 +1019,8 @@ public class ScheduleFireExecutor {
         }
 
         return switch (strategy) {
-            case "persistent" -> resolveOrCreatePersistent(schedule, env);
-            default -> new ResolvedConversation(createNewConversation(schedule, env), true); // "new" or unknown
+            case "persistent" -> resolveOrCreatePersistent(schedule, env, runId);
+            default -> new ResolvedConversation(createNewConversation(schedule, env, runId), true); // "new" or unknown
         };
     }
 
@@ -1024,9 +1029,10 @@ public class ScheduleFireExecutor {
      * context: the agent's startup workflow (a CONVERSATION_START LLM task, say)
      * runs here, and with an empty context it spent outside the fire's allowance.
      */
-    private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private String createNewConversation(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         var userId = scheduleUserId(schedule);
         Map<String, Context> context = new HashMap<>();
+        context.put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, runId));
         double allowance = schedule.getMaxCostPerFire();
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
@@ -1108,7 +1114,7 @@ public class ScheduleFireExecutor {
         }
     }
 
-    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         // Before the reuse path below, which returns an existing conversation without
         // ever starting one.
         requireUnreservedUserId(schedule);
@@ -1153,7 +1159,7 @@ public class ScheduleFireExecutor {
         // the next poll (15s by default, while a fire may run for minutes) matched it
         // again, claimed it again, and pushed a second concurrent turn into this very
         // same persistent conversation.
-        String newConversationId = createNewConversation(schedule, env);
+        String newConversationId = createNewConversation(schedule, env, runId);
         if (!carriedProperties.isEmpty()) {
             carryProperties(schedule, newConversationId, carriedProperties);
         }
@@ -1293,6 +1299,31 @@ public class ScheduleFireExecutor {
             return;
         }
         inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
+    }
+
+    /**
+     * The run a scheduled fire belongs to, for {@code toolQuotas} rules with
+     * {@code window: "RUN"}: the schedule plus its last COMPLETED fire. Only
+     * {@code markCompleted} moves {@code lastFired}; a failed attempt, its retries
+     * and a manual retry of it all leave it where it was, so they count as one run
+     * and a retry cannot re-run the tools an earlier attempt already ran. The next
+     * due fire after a completion is a new run. (A per-attempt id - the fire log id
+     * - gave every retry a fresh counter.)
+     */
+    static String runIdOf(ScheduleConfiguration schedule) {
+        Instant lastFired = schedule.getLastFired();
+        return schedule.getId() + "@" + (lastFired == null ? "first" : Long.toString(lastFired.toEpochMilli()));
+    }
+
+    /**
+     * Names the run on its turn, so a {@code toolQuotas} rule with
+     * {@code window: "RUN"} counts per run even on a persistent conversation.
+     */
+    static void addFireId(InputData inputData, String fireId) {
+        if (fireId == null || fireId.isBlank()) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, fireId));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

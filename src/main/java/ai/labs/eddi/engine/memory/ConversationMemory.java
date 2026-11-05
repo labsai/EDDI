@@ -111,6 +111,7 @@ public class ConversationMemory implements IConversationMemory {
      * In-flight paid calls held against the ceiling; transient, never persisted.
      */
     private final transient SpendReservations spendReservations = new SpendReservations();
+    private final transient TenantCostHolds tenantCostHolds = new TenantCostHolds();
     /** The agent's self-continuation settings; NOT persisted. */
     private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
@@ -598,6 +599,11 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public SpendReservations getSpendReservations() {
         return spendReservations;
+    }
+
+    @Override
+    public TenantCostHolds getTenantCostHolds() {
+        return tenantCostHolds;
     }
 
     @Override
