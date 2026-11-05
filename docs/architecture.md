@@ -539,7 +539,7 @@ Two services modify the system prompt before it is sent to the LLM. Both are con
 
 **Execution order**: Identity masking → Counterweight → LLM call.
 
-Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight-cautious`, `counterweight-strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
+Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight_cautious`, `counterweight_strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
 
 See [LLM Integration — Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking) for configuration details.
 
@@ -806,7 +806,7 @@ graph TD
 
 | Level          | Purpose                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Agent**      | List of workflow URIs + channels. The top-level container.                                                                      |
+| **Agent**      | List of workflow URIs (plus channel integrations, configured separately). The top-level container.                                                                      |
 | **Workflow**   | Ordered list of workflow extensions — each extension = one lifecycle task type. **Order matters**: tasks execute sequentially. |
 | **Extension**  | The actual configuration that drives each `ILifecycleTask`. Referenced by URI from the workflow.                                |
 | **Descriptor** | Metadata (name, description, timestamps) for any resource. Not functional, purely for UI/management.                           |
@@ -1042,10 +1042,10 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Dev mode** | No | Allowed — info log on startup |
 | **Dev mode** | Yes | Full auth with configured Keycloak |
 | **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
-| **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
+| **Production** | No + explicit opt-out | Starts, but always logs an ERROR at startup; a periodic WARN reminder only when `eddi.security.unauthenticated-reminder-interval` is set (off by default) |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
-The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The hourly WARN reminder ensures operators remain aware.
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The startup ERROR keeps operators aware; a periodic WARN reminder is opt-in via `eddi.security.unauthenticated-reminder-interval`.
 
 ### CI Security Scanning
 

@@ -8,7 +8,7 @@ The **LLM Lifecycle Task** (formerly "Langchain") is EDDI's unified integration 
 
 By default, it provides **simple chat** with any LLM provider. Optionally, you can enable **agent mode** to give your LLM access to built-in tools (calculator, web search, weather, etc.).
 
-EDDI supports **19 named LLM providers** out of the box — eleven model builders (OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face and Jlama) plus eight first-class OpenAI-compatible providers (xAI Grok, DeepSeek, Moonshot Kimi, Alibaba Qwen, Z.ai GLM, MiniMax, OpenRouter and Groq; see [OpenAI-compatible providers](#openai-compatible-providers)). Any other OpenAI-compatible endpoint works through the `openai` type and a `baseUrl`.
+EDDI supports **19 named LLM providers** (plus the generic `openai-compatible` type) out of the box — eleven model builders (OpenAI, Anthropic, Google Gemini (`gemini`), Google Vertex AI (`gemini-vertex`), Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Ollama, Hugging Face and Jlama) plus eight first-class OpenAI-compatible providers (xAI Grok, DeepSeek, Moonshot Kimi, Alibaba Qwen, Z.ai GLM, MiniMax, OpenRouter and Groq; see [OpenAI-compatible providers](#openai-compatible-providers)). Any other OpenAI-compatible endpoint works through the `openai` type and a `baseUrl`.
 
 The task automatically detects which mode to use based on your configuration—no manual switching required.
 
@@ -31,10 +31,10 @@ EDDI doesn't just forward messages to LLMs—it **orchestrates** them:
 
 ## Role in the Lifecycle
 
-The Langchain task is a lifecycle task that executes when triggered by Behavior Rules:
+The LLM task is a lifecycle task that executes when triggered by Behavior Rules:
 
 ```
-User Input → Parser → Behavior Rules → [LangChain Task] → Output Generation
+User Input → Parser → Behavior Rules → [LLM Task] → Output Generation
                            ↓
                     Action: "send_to_llm"
 ```
@@ -43,7 +43,7 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 ## Supported LLM Providers
 
-The Langchain task integrates with multiple LLM providers via the langchain4j library:
+The LLM task integrates with multiple LLM providers via the langchain4j library:
 
 - **OpenAI** (ChatGPT, GPT-4, GPT-4o)
 - **OpenAI-compatible providers** with their own type: `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `minimax`, `openrouter`, `groq` ([details](#openai-compatible-providers))
@@ -66,7 +66,7 @@ The Langchain task integrates with multiple LLM providers via the langchain4j li
 
 ### Default: Simple Chat
 
-By default, the Langchain task provides straightforward LLM chat functionality. Just configure your LLM provider and start chatting.
+By default, the LLM task provides straightforward LLM chat functionality. Just configure your LLM provider and start chatting.
 
 ### Optional: Agent Mode with Tools
 
@@ -74,13 +74,13 @@ To give your LLM access to tools (calculator, web search, weather, etc.), set `e
 
 The task automatically switches to agent mode when tools are enabled.
 
-**Note**: Custom HTTP call tools (via the `tools` parameter) are also supported. You can provide a list of EDDI HTTP call URIs to give the agent access to your own APIs.
+**Note**: Custom HTTP call tools are discovered from the workflow (`enableHttpCallTools`), not listed in the task; see [Custom HTTP Tools](#custom-http-tools). The legacy `tools` parameter only switches the task into agent mode and its entries are ignored.
 
 ---
 
 ## Simple Chat Configuration
 
-This is the standard way to use the Langchain task - just connect to an LLM and start chatting.
+This is the standard way to use the LLM task - just connect to an LLM and start chatting.
 
 ### Basic Example
 
@@ -915,8 +915,8 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | -------------------------- | -------- | ------------------------------------------------ | ---------------------- |
 | **Tool Configuration**     |          |                                                  |                        |
 | `enableBuiltInTools`       | boolean  | Enable built-in tools                            | false                  |
-| `builtInToolsWhitelist`    | string[] | Specific tools to enable                         | (all if not specified) |
-| `tools`                    | string[] | Custom HTTP call tool URIs to enable             | (none)                 |
+| `builtInToolsWhitelist`    | string[] | Specific tools to enable (keys: see [Built-in Tools](#built-in-tools) and [Context-bound tools](#context-bound-tools-and-their-whitelist-keys)) | the standard built-in tools, plus user memory and recall when configured |
+| `tools`                    | string[] | Legacy: entries are ignored, a non-empty list only switches the task into agent mode. HTTP call tools come from `enableHttpCallTools` | (none)                 |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
 | `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
@@ -930,6 +930,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
+| `toolDisplay`              | map      | What a streaming client may show of a tool call: `{"<tool>": {"label": "Creating an action", "fields": ["title"]}}`. `label` is a static string (max 120 chars); `fields` allow-lists up to 3 top-level argument names whose scalar values are shown (redacted, cut to 80 chars). Emitted on the SSE `tool_call` event only. See [Showing a tool call to a watching client](#showing-a-tool-call-to-a-watching-client-tooldisplay) | (none: name and call id only) |
 | `teamHandoff`              | object   | Cross-team handoff: the teams this agent may file tasks into with the `handoff_to_team` tool: `{"targets": [{"alias": "account-desk", "groupId": "…", "description": "…"}], "maxPerTurn": 2, "maxPerConversation": 5}`. A target only receives if its own `handoffConfig.accept` lists this agent. See [Cross-Team Handoff](team-handoff.md) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment. Unset prices, and cache and long-context prices (`pricing`), come from the [price catalog](model-pricing.md) | (catalog, else unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
@@ -938,7 +939,9 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
 | `defaultToolTimeoutMs`     | int      | Wall-clock ceiling in milliseconds on a single tool execution. On expiry the call is abandoned and the model gets an error result; the turn continues. `-1` or `0` disables the bound — see [Execution timeouts](#execution-timeouts) | 120000 |
 | `toolTimeoutsMs`           | map      | Per-tool execution timeouts in milliseconds, keyed on the built-in slug (`{"websearch": 15000}`) or on a single dispatch name, which takes precedence. `-1` exempts one tool without unbounding the task | (all `defaultToolTimeoutMs`) |
-| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
+| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` hides the sources named in `lazySources` behind a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window — see [Lazy tool loading](#lazy-tool-loading) | `EAGER` |
+| `lazySources`              | list     | Which sources `LAZY` hides: any of `builtin`, `http`, `mcp`, `a2a`. Unlisted sources are sent in full. Ignored under `EAGER` | `["builtin"]` |
+| `lazyRetention`            | string   | How long a tool `discover_tools` loaded stays in the request: `turn` (the rest of the turn, across cascade steps and approval pauses) or `conversation` (also later turns, at most `maxToolsInContext` of them) | `turn` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
 | `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onInvalidJson`, `onSchemaMismatch`, `onContextTooLong`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror); the `retry` action re-asks the model — see [Recovery policies](#recovery-policies-retry-where-it-helps) | (none) |
@@ -999,7 +1002,7 @@ Counterweights append behavioral safety instructions to the system prompt. Three
 
 > **Note**: Both `enabled: true` **and** a `level` other than `normal` are required for counterweight to have any effect.
 
-**Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (keys `counterweight-cautious` and `counterweight-strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
+**Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (names `counterweight_cautious` and `counterweight_strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
 
 #### Identity Masking
 
@@ -1385,6 +1388,45 @@ When `enableBuiltInTools: true`, you can use these tools:
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
 
+### Context-bound tools and their whitelist keys
+
+These tools are assembled from the conversation or the group rather than from the built-in catalog above. Each is selected by its own whitelist key and has its own availability condition.
+
+| Whitelist key | Tool | Available when |
+| --- | --- | --- |
+| `usermemory` | Persistent user memory tool | `enableMemoryTools` is on; see [User Memory](user-memory.md) |
+| `conversationRecall` | Recall of turns the rolling summary compressed | `conversationSummary.enabled` is true |
+| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`, and `enableBuiltInTools` is on; see [Group Conversations](group-conversations.md) |
+| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true`, and `enableBuiltInTools` is on |
+| `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted |
+
+An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact and group-task tools when the group policy enables them (and dynamic-agent tools under a governing group policy). If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
+
+### Tool response limits
+
+`toolResponseLimits` caps how much of one tool response reaches the model.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `defaultMaxChars` | `50000` (about 12k tokens) | Maximum characters per tool response |
+| `perToolLimits` | none | Map of tool name to its own character limit |
+| `truncationStrategy` | `headTail` | `headTail` keeps the start and the end and drops the middle with a note; `truncate` cuts hard at the limit with a note; `paginate` returns the first page plus a `responseId` to fetch the rest with `fetch_page`; `summarize` routes the response through `summarizerModel` and falls back to truncation |
+| `summarizerModel` | none | Model for the `summarize` strategy |
+
+### Tool result guardrails
+
+`toolResultGuardrails` controls what happens to a tool result on its way back to the model. The defaults protect an existing config without making it fail:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Master switch |
+| `markProvenance` | `true` | Wrap each result in a delimiter naming the tool and source, marked as data rather than instructions |
+| `directiveAction` | `redact` | For directive-shaped content: `warn` (log and count), `redact` (replace the directive spans) or `block` (replace the whole result) |
+| `directiveAppliesToSources` | all | Narrow directive handling to provenance tags (`builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`); provenance marking is never narrowed |
+| `exemptTools` | none | Dispatch names exempt from directive handling |
+
+See also [MCP Client](mcp-client.md).
+
 Every built-in parameter carries a description in the tool schema the model receives (for example
 `calculate.expression`: *"Arithmetic expression to evaluate, e.g. 'sqrt(16) + 2^3 * PI'"*), and
 optional parameters — `searchWeb.maxResults`, `getCurrentWeather.units`,
@@ -1463,6 +1505,28 @@ eddi.tools.weather.openweathermap.api-key=YOUR_OWM_API_KEY
 
 - `EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=...`
 
+### Lazy tool loading
+
+An agent whose tools are an API of 60 or more operations sends every tool description on every model call under `EAGER` — often more text than the rest of the prompt, and enough to degrade a small model's tool choice. `toolLoadingStrategy: "LAZY"` sends a `discover_tools` meta-tool instead, and only the tools the model asks for after that:
+
+```json
+{
+  "toolLoadingStrategy": "LAZY",
+  "lazySources": ["http"],
+  "lazyRetention": "turn",
+  "maxToolsInContext": 20
+}
+```
+
+- **`lazySources`** picks what is hidden. The default, `["builtin"]`, hides the built-in tools only (the behaviour before the field existed). `http`, `mcp` and `a2a` hide those sources; a source not listed is sent in full, as under `EAGER`.
+- **Groups.** With an external source listed, `discover_tools` takes a `group` or `keywords` (or both), and its description lists the groups with a one-line summary each, so the model knows what exists without seeing every tool. An http group is one apicalls configuration (its resource id; the summary is the configuration's [`description`](httpcalls.md#description-of-the-model), which the OpenAPI generator fills from the tag); an MCP group is one server (its `name`, else its host); built-in and A2A tools are grouped as `builtin` and `a2a`. A group may also be named by a word of its summary.
+- **`maxToolsInContext`** caps what one discovery call loads; the result tells the model to narrow with keywords to reach the rest.
+- **Safety is unchanged.** A loaded tool runs through exactly the same approval gate, quotas, rate limits, result guardrails, caching, cost tracking and trace as an eager one. A call to a lazily-hidden tool the model has *not* loaded is refused with a `NOT_EXECUTED` result telling it to call `discover_tools` first — it is never executed and never shown to an approver (trace entry `tool_not_activated`, metric `eddi.llm.lazy_tools.refused`).
+- **Approval pauses.** A paused batch's approved calls run on resume by name, whether or not the resumed turn has discovered them again: every tool's executor is registered regardless of what is loaded.
+- **`lazyRetention`** — `turn` keeps loaded tools until the turn ends (also across cascade steps and pauses); `conversation` carries them into later turns, at most `maxToolsInContext`. The names are kept on the conversation step, not in the task.
+
+Measured on a synthetic 66-tool HTTP agent (six groups of eleven, OpenAPI-generated shape): the tool part of the first request drops from ~9,400 tokens (40,600 characters, 66 specs) to ~260 tokens (`discover_tools` alone), and to ~1,830 after one group of eleven is loaded (GPT-4o tokenizer). The cost is one extra model call (the discovery) per turn that needs a tool.
+
 ### Example: Selective Tool Enablement
 
 ```json
@@ -1518,7 +1582,7 @@ The same applies to MCP calls via `enableMcpCallTools` (also default `true`), wh
 ### How it Works
 
 1.  **Configuration**: You add httpcall steps to the agent's workflow, as you would for `ApiCallsTask`.
-2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
+2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map — or, when the call declares an [`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), with parameters typed from it (integer, boolean, array, object), and every call checked against it before the approval gate: a call that violates it gets a `NOT_EXECUTED` result listing each violation and is never paused or executed. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
 3.  **Execution**: When the agent decides to use a tool, it calls that tool by name (e.g. `get_stock_price`) with the arguments the schema declares.
 4.  **Security**: The agent can **only** execute the HTTP calls present in its workflow. It cannot make arbitrary HTTP requests to the internet. To narrow the agent's reach, narrow the httpcalls configuration in its workflow — or set `enableHttpCallTools: false`.
 
@@ -1526,7 +1590,7 @@ The same applies to MCP calls via `enableMcpCallTools` (also default `true`), wh
 
 ## Extended Configuration Options
 
-The Langchain task supports advanced pre-request and post-response processing for fine-tuned control over task behavior.
+The LLM task supports advanced pre-request and post-response processing for fine-tuned control over task behavior.
 
 ### Complete Configuration Example
 
@@ -1986,7 +2050,7 @@ An unknown strategy name is treated as `truncate`.
 
 ## API Endpoints
 
-The Langchain task configurations can be managed via REST API endpoints.
+The LLM task configurations (still stored under the `langchain` config type) can be managed via REST API endpoints.
 
 ### Endpoints Overview
 
@@ -2061,6 +2125,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
 | `toolQuotas.tools`           | slug **or** dispatch name — dispatch name wins       |
+| `toolDisplay`                | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -2092,6 +2157,23 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Showing a tool call to a watching client (`toolDisplay`)
+
+The SSE `tool_call` event carries the tool name and the model's call id, never the arguments: they may hold user data. An app that wants plain-language activity lines ("Creating an action: Renew the contract") opts in per tool, with `toolDisplay` on the LLM task:
+
+```json
+"toolDisplay": {
+  "createAction": { "label": "Creating an action", "fields": ["title"] }
+}
+```
+
+- `label` is static text, at most 120 characters; it is sent as `displayName`.
+- `fields` is an allow-list of at most 3 **top-level** argument names. A value is shown only if it is a string, number or boolean (an object or array never is), is run through the secret redaction filter, and is cut to 80 characters with an ellipsis. They are sent as `display: {"title": "..."}`.
+- Keys follow the other per-tool settings: the dispatch name the model invoked wins over the built-in slug.
+- Validated when the configuration is saved: a blank or over-long label or name, more than 3 fields, a duplicate or blank field, or an entry that shows nothing is a `400`.
+- A field whose name looks like a credential (`password`, `apiKey`, `token`, `secret` and the like) is refused at save with a `400`, and is skipped at runtime even if a stored configuration still lists it: it is never shown, whatever its value.
+- It affects the `tool_call` event only. `tool_result`, `task_complete.toolTrace` and everything stored are unchanged; note that `toolTrace` still carries redacted arguments and results.
 
 #### Per-subject tool quotas (`toolQuotas`)
 
@@ -2173,6 +2255,22 @@ the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of
 expire on their own an hour after their window ends. If your `subject` template derives an identifier
 that differs from the conversation's user id, erasure deletes the counters whose subject equals the
 **erased user id**; erase by the derived identifier too, or let them expire.
+
+#### Argument schema refusals
+
+A call to a tool whose configuration declares an argument schema (an httpcall with
+[`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), generated for every OpenAPI tool) is
+checked **before the approval gate** classifies the batch. A call that violates it is answered
+
+```json
+{"status":"NOT_EXECUTED","reason":"The arguments do not match this tool's schema, so the call was not run and no approval was requested. Fix every listed violation and call the tool again.","violations":["$.requestBody.emails: required","$.requestBody.role: must be one of manager, curator"]}
+```
+
+and is neither executed nor shown to a human; the rest of the batch goes on to the gate as usual. The
+trace records `tool_error` with `error: "argument_schema"`, and `eddi.tool.arguments.refused`
+(tag `source`) counts it. Tools without a schema are never refused here. The check is a pure function
+of the tool's schema and the arguments, kept separate so it can later become a configurable
+tool-call guardrail.
 
 #### Repeated failing tool calls
 
@@ -2586,7 +2684,7 @@ This agent can:
 
 ## Integration with Behavior Rules
 
-To trigger the Langchain task, configure Behavior Rules to emit the appropriate action:
+To trigger the LLM task, configure Behavior Rules to emit the appropriate action:
 
 ```json
 {
@@ -3018,7 +3116,7 @@ not a provider requirement.
 ### Timeout Issues
 
 - **Problem**: Requests timing out
-- **Solution**: Increase the `timeout` parameter value (in milliseconds). Default is often 15000 (15 seconds).
+- **Solution**: Increase the `timeout` parameter value (in milliseconds). If unset, the provider SDK default applies.
 - **Problem**: A *streaming* turn is cut off after ~120s even though `timeout` is larger
 - **Solution**: This was the behaviour before the `timeout`/`streamingTimeoutSeconds` unification; the backstop now follows a longer `timeout` automatically. Set `streamingTimeoutSeconds` explicitly if you need a bound that differs from the derived one — see [Timeouts and Streaming](#timeouts-and-streaming).
 
@@ -3110,7 +3208,7 @@ This means:
 The LLM Lifecycle Task provides a flexible, unified interface for integrating LLMs into EDDI agents:
 
 1. ✅ **Simple by Default** - Start with basic chat, add tools when needed
-2. ✅ **19 Provider Support** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + xAI, DeepSeek, Kimi, Qwen, GLM, MiniMax, OpenRouter, Groq (and any other OpenAI-compatible endpoint via `baseUrl`)
+2. ✅ **19 Provider Support (plus generic `openai-compatible`)** - OpenAI, Anthropic, Google Gemini, Google Vertex AI, Mistral, Azure, Bedrock, Oracle, Ollama, Hugging Face, Jlama + xAI, DeepSeek, Kimi, Qwen, GLM, MiniMax, OpenRouter, Groq (and any other OpenAI-compatible endpoint via `baseUrl`)
 3. ✅ **Built-in Tools** - 9 tools available when you enable agent mode
 4. ✅ **Tool Execution Pipeline** - Rate limiting, caching, cost tracking for every tool call
 5. ✅ **Security Hardened** - SSRF protection, sandboxed math evaluation, input validation

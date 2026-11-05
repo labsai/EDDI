@@ -247,6 +247,33 @@ class GroupSigningGuardTest {
     }
 
     @Test
+    void verifyPriorEntriesIfRequired_onlyAnEngineMarkedReviewerEditIsExempt() throws Exception {
+        var receiverResId = mockResourceId();
+        var receiverConfig = new AgentConfiguration();
+        var receiverSecurity = new SecurityConfig();
+        receiverSecurity.setRequirePeerVerification(true);
+        receiverConfig.setSecurity(receiverSecurity);
+        when(agentStore.getCurrentResourceId("receiver")).thenReturn(receiverResId);
+        when(agentStore.read("receiver", receiverResId.getVersion())).thenReturn(receiverConfig);
+
+        long now = Instant.now().toEpochMilli();
+        // the engine's reviewer edit: unsigned by design, marked
+        var reviewerEdit = new TranscriptEntry("hitl:bob", "Reviewer", "edited", 0, "P", TranscriptEntryType.SYNTHESIS, Instant.now(),
+                GroupReviewEditor.REVIEWER_EDIT_MARKER, null);
+        // a member merely NAMED like a reviewer, carrying a signature: must be verified
+        var lookalike = new TranscriptEntry("hitl:agent", "Agent", "hello", 0, "P", TranscriptEntryType.OPINION, Instant.now(), null, null,
+                "sig", "nonce", now, 1);
+        var g = gc();
+        g.getTranscript().add(reviewerEdit);
+        g.getTranscript().add(lookalike);
+
+        guard().verifyPriorEntriesIfRequired("receiver", g);
+
+        verify(agentStore, never()).getCurrentResourceId("hitl:bob");
+        verify(agentStore).getCurrentResourceId("hitl:agent");
+    }
+
+    @Test
     void signOutgoingMessage_selfVerify_usesExactSignedKeyVersion_notWhicheverIsValidNow() throws Exception {
         var resId = mockResourceId();
         var config = new AgentConfiguration();

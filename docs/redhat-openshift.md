@@ -148,7 +148,7 @@ spec:
 The operator creates a route automatically. With the CR above, the route would be:
 `eddi-route-$NAMESPACE.apps.ocp.example.com`
 
-> **Note**: The EDDI operator is being updated for v6 to support both MongoDB and PostgreSQL storage backends. Stay tuned for the updated operator release.
+> **Note**: The operator and the CR above describe the MongoDB-only layout and are not verified against the current 6.x release. For OpenShift on 6.x, prefer the Helm chart (see [Kubernetes](kubernetes.md)), which supports both MongoDB and PostgreSQL.
 
 ---
 
@@ -193,7 +193,7 @@ docker run -d \
   -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
-  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend 
+  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
   labsai/eddi:6.6.0
 ```
 

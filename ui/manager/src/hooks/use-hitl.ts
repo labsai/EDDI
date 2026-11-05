@@ -380,12 +380,15 @@ export function useSubmitHumanInput() {
       gcId,
       memberId,
       content,
+      choice,
     }: {
       groupId: string;
       gcId: string;
       memberId: string;
       content: string;
-    }) => submitHumanInput(groupId, gcId, memberId, content),
+      /** A tie-break's chosen option. */
+      choice?: string;
+    }) => submitHumanInput(groupId, gcId, memberId, content, choice),
     // The turn is the user's to hand over, so it leaves them at once: the
     // cached conversation moves off AWAITING_HUMAN_INPUT before the request is
     // even answered, and the banner goes with it. (This used to await two

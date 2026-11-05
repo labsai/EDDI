@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
+import ai.labs.eddi.configs.hitl.model.GroupHitlReviewConfig;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
@@ -540,10 +542,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents, nested groups, or
-     * humans (I6). Whether members may create and co-edit shared artifacts
-     * mid-discussion (I17). {@code null} means the artifact tools are absent
-     * entirely.
+     * Whether members may create and co-edit shared artifacts mid-discussion (I17).
+     * {@code null} means the artifact tools are absent entirely.
      */
     private ArtifactConfig artifactConfig;
 
@@ -616,7 +616,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents or nested groups.
+     * A member of the group. Members can be individual agents, nested groups, or
+     * humans (I6).
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its
@@ -976,12 +977,15 @@ public class AgentGroupConfiguration {
      * @param tiePolicy
      *            what resolves a tie or a quorum failure: {@code MODERATOR_DECIDES}
      *            (one moderator turn choosing among the tied options),
-     *            {@code HUMAN_DECIDES} (reserved for I6 human members — rejected at
-     *            save time until that ships), or {@code NO_DECISION} (default:
-     *            record {@code type=NONE} and carry on)
+     *            {@code HUMAN_DECIDES} (the discussion pauses until the
+     *            {@code humanTieBreak} decider chooses), or {@code NO_DECISION}
+     *            (default: record {@code type=NONE} and carry on)
+     * @param humanTieBreak
+     *            who decides under {@code HUMAN_DECIDES}, how long they have and
+     *            what a timeout resolves to. See {@link HumanTieBreakConfig}
      */
     public record VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
-            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy, HumanTieBreakConfig humanTieBreak) {
 
         public static final double DEFAULT_QUORUM = 0.5;
 
@@ -995,6 +999,12 @@ public class AgentGroupConfiguration {
             }
             weights = weights == null ? Map.of() : Map.copyOf(weights);
             tiePolicy = tiePolicy == null ? TiePolicy.NO_DECISION : tiePolicy;
+        }
+
+        /** Backward-compatible constructor without {@code humanTieBreak}. */
+        public VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
+                Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            this(method, optionsSource, options, quorum, weights, weightByConfidence, tiePolicy, null);
         }
 
         /**
@@ -1720,6 +1730,39 @@ public class AgentGroupConfiguration {
 
         public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
             this.onTaskRejection = onTaskRejection != null ? onTaskRejection : HitlRejectionPolicy.FAIL;
+        }
+
+        /**
+         * Result edits on approval and the audit taxonomy — see
+         * {@link GroupHitlReviewConfig}. Absent = approve/reject only.
+         *
+         * @since 6.7.0
+         */
+        private GroupHitlReviewConfig review;
+
+        public GroupHitlReviewConfig getReview() {
+            return review;
+        }
+
+        public void setReview(GroupHitlReviewConfig review) {
+            this.review = review;
+        }
+
+        /**
+         * Context rendered for the approver when a phase or task pauses (see
+         * {@link ApprovalContextBlock}); {@code group.*} is available. Rendered once
+         * when the pause is committed. Absent = no context.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> approvalContext;
+
+        public List<ApprovalContextBlock> getApprovalContext() {
+            return approvalContext;
+        }
+
+        public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
+            this.approvalContext = approvalContext;
         }
     }
 

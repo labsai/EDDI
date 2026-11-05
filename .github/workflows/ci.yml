@@ -3461,6 +3461,10 @@ jobs:
 
           # Sanitize commit message: first line only, truncate, sourced from env (not inline interpolation)
           COMMIT_MSG=$(printf '%s' "$COMMIT_MSG_RAW" | head -1 | cut -c1-80)
+          # The text lands in a Slack mrkdwn field, where <url|label> is a link: a PR title
+          # could otherwise show the CI bot's message with a link of its own choosing. Slack's
+          # documented escaping is these three characters (& first, so it is not doubled).
+          COMMIT_MSG=$(printf '%s' "$COMMIT_MSG" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 
           # Build JSON payload safely with jq to prevent any injection via user-controlled values
           #

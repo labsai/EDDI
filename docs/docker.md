@@ -68,7 +68,7 @@ To expose an **unauthenticated** instance on purpose — an isolated network
 only you can reach — set `EDDI_I_UNDERSTAND_PUBLIC=true` as well; the GCP
 provisioner's `--i-understand-public` does exactly that. Every API endpoint,
 the secrets vault and the MCP server are then open to whoever can reach the
-port, and EDDI's own `AuthStartupGuard` says so in its log every hour.
+port, and EDDI's own `AuthStartupGuard` says so in its log at startup.
 
 ### With Keycloak Authentication
 

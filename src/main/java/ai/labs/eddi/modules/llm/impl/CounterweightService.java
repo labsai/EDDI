@@ -25,7 +25,7 @@ import java.util.Map;
  * strict-mode handling.
  * <p>
  * Preset text is resolved from {@link PromptSnippetService} first (snippet
- * names: {@code counterweight-cautious}, {@code counterweight-strict}). If no
+ * names: {@code counterweight_cautious}, {@code counterweight_strict}). If no
  * snippet is configured, built-in defaults are used as fallback. Users override
  * presets entirely via {@code customInstructions}.
  * <p>
@@ -42,9 +42,11 @@ public class CounterweightService {
     private static final Logger LOGGER = Logger.getLogger(CounterweightService.class);
 
     // === Snippet keys for Prompt Snippet resolution ===
-    static final String SNIPPET_KEY_CAUTIOUS = "counterweight-cautious";
-    static final String SNIPPET_KEY_STRICT = "counterweight-strict";
-
+    // Snippet names must match [a-z0-9_]+ (PromptSnippetStore), so the keys use
+    // underscores. The hyphenated names are read as a legacy fallback only; they
+    // cannot be created through the REST API.
+    static final String SNIPPET_KEY_CAUTIOUS = "counterweight_cautious";
+    static final String SNIPPET_KEY_STRICT = "counterweight_strict";
     // === Fallback presets (used when no Prompt Snippet is configured) ===
     static final String CAUTIOUS_FALLBACK = """
             ## BEHAVIORAL GUIDELINES (engine-injected)
@@ -112,7 +114,7 @@ public class CounterweightService {
      * agents only) or a legacy snippet can replace the built-in preset. A snippet
      * granted or published from another workspace never can, so another workspace
      * cannot override this agent's safety text by naming a snippet
-     * {@code counterweight-strict}. A {@code null} agent gets the legacy snippets
+     * {@code counterweight_strict}. A {@code null} agent gets the legacy snippets
      * only.
      *
      * @param agentId
@@ -167,8 +169,8 @@ public class CounterweightService {
      * Resolve the injection text. Priority order:
      * <ol>
      * <li>Custom instructions (override everything)</li>
-     * <li>Prompt Snippet ({@code counterweight-cautious} /
-     * {@code counterweight-strict})</li>
+     * <li>Prompt Snippet ({@code counterweight_cautious} /
+     * {@code counterweight_strict})</li>
      * <li>Built-in fallback preset</li>
      * </ol>
      */
@@ -196,6 +198,9 @@ public class CounterweightService {
     private String resolveFromSnippetsOrFallback(String snippetKey, String fallback, String agentId) {
         Map<String, Object> snippets = promptSnippetService.getForAgent(agentId);
         Object snippetValue = snippets.get(snippetKey);
+        if (!(snippetValue instanceof String s && !s.isBlank())) {
+            snippetValue = snippets.get(snippetKey.replace('_', '-'));
+        }
         if (snippetValue instanceof String text && !text.isBlank()) {
             LOGGER.debugf("Counterweight preset resolved from Prompt Snippet '%s'", snippetKey);
             return text;

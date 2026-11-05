@@ -43,6 +43,7 @@ for anything this page does not cover.
 | `POST /agents/{agentId}/start` | Start a conversation (optionally with a context map) | `201` + `Location` |
 | `POST /agents/{conversationId}` | Send a message (text or JSON), wait for the reply | `200` snapshot |
 | `POST /agents/{conversationId}/stream` | Send a message, receive the turn as Server-Sent Events | `200` `text/event-stream` |
+| `POST /agents/{conversationId}/resume/stream` | Decide a paused conversation and receive the resumed turn as Server-Sent Events | `200` `text/event-stream` |
 | `GET /agents/{conversationId}` | Read the conversation | `200` snapshot |
 | `GET /agents/{conversationId}/status` | Read the conversation state | `200` `"READY"` |
 | `GET /agents/{conversationId}/log` | Conversation history as chat messages | `200` |
@@ -61,6 +62,7 @@ for anything this page does not cover.
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
 | `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |
+| `POST /conversationstore/conversations/end-inactive` | End conversations idle for `inactiveForDays` (admin; optional `agentId`, `dryRun`) | `200` |
 
 The agent must be **deployed** to the environment you start in — see
 [Deployment management](deployment-management-of-agents.md).
@@ -105,6 +107,8 @@ key, on this call and on every `say`. The usual cause is wrapping the map in
 deployed and `READY` in that environment.
 
 ## Sending a message
+
+**Retrying safely.** Send an `Idempotency-Key` (or `X-EDDI-Request-Id`; the former wins) header on `POST /agents/{conversationId}` and its `/stream` twin so a retried request does not run the turn twice. A duplicate of a turn still in flight answers `409` with `Retry-After`. The protection has limits: a failed turn is not remembered, and a completed turn is replayed only within `eddi.turns.idempotency.ttl-seconds` and while its step is among the conversation's latest 50. A retry outside those conditions runs the turn again and can repeat side-effecting tools. See [conversations.md](conversations.md#idempotent-turns).
 
 The same path takes plain text or JSON.
 
@@ -164,7 +168,7 @@ the turn produced any, sits next to it. Query parameters, shared by this call,
 
 | Parameter | Default | Effect |
 | --- | --- | --- |
-| `returnDetailed` | `false` | `true` returns every memory entry of the step. By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
+| `returnDetailed` | `false` | `true` returns the step's other memory entries too, except `audit:*`, `*:trace:*` and `*Error` keys, which are withheld (values are redacted). By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
 | `returnCurrentStepOnly` | `true` | `false` returns all turns since the start |
 | `returningFields` | — | Repeatable; restricts the snapshot to the named top-level fields |
 
@@ -237,13 +241,25 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_complete` | `{"taskId","taskType","durationMs"}` plus, when present, `actions` (the actions in memory after the task), `toolTrace` (the LLM task's tool calls, arguments redacted) and `confidence` | A task finished |
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
-| `tool_call` | `{"tool":"<name>"}` | Sent right before a tool runs — the name only. There is no "tool finished" event |
+| `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
+| `tool_result` | `{"tool","callId","status","durationMs"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval) or `rejected` (a human declined it) | Sent exactly once for every `tool_call`, always after it in the same stream, whichever way the call ends; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the result** |
+| `hitl_resume` | `{"pauseId","verdict"}` | `/resume/stream` only. The decision was committed; sent once, before any event of the continued turn |
+| `approval_required` | `{"pauseId","pauseType","callCount"}` — `pauseType` is `TOOL_CALL` or `RULE`; `callCount` the number of gated tool calls awaiting a decision (`0` for a rule pause) | The turn ends waiting for a human. Sent immediately before `done` on `/stream` and `/resume/stream`; pass `pauseId` back in the decision |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
 | `cascade_escalation` | `{"fromStep","toStep","confidence","threshold","reason","durationMs"}` | The cascade escalates to the next model |
 | `llm_retry` | `{"reason","attempt"}` | The LLM task asks the same model again after an unusable reply ([recovery policies](langchain.md#recovery-policies-retry-where-it-helps)) |
 | `guardrail_triggered` | `{"type","phase","action","taskId"}` — `phase` is `input` or `output`, `action` one of `block`, `redact`, `reprompt`, `warn` | An LLM task's [input or output guardrail](langchain.md#input-and-output-guardrails) fired. Sent before the answer; after a `block` the answer that follows is the block message |
 | `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, and `hitlPausedAt` when the turn paused | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags) |
 | `error` | `{"message", …}` | **Terminal.** The turn could not run or failed |
+
+> **`task_complete.toolTrace` carries arguments and results.** The `tool_call` and
+> `tool_result` events are argument-free and result-free by design, but the
+> `toolTrace` on an LLM task's `task_complete` lists every call with its arguments
+> and results, redacted by the secret filter and not reduced further. A client
+> that forwards these events to end users must drop `toolTrace` (and `done`'s
+> `conversationOutputs` if it should not show them) and build its activity lines
+> from `tool_call`/`tool_result` alone. The stored trace of a finished turn keeps
+> each call's `callId`, so receipts can be rebuilt after a reload.
 
 Rules for clients:
 
@@ -287,8 +303,33 @@ Rules for clients:
   the correlation id is in the server log next to the real cause.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
+- **`/resume/stream` does not cancel on disconnect by default.** A resume is a
+  deliberate human decision whose approved tool calls may already have run, so a
+  dropped connection must not discard the turn and its trace. The resumed turn
+  finishes and persists; read the conversation after reconnecting.
+  `eddi.streaming.resume-cancel-on-client-disconnect` (default `false`) turns
+  cancellation on for the resume stream only.
+- **`POST /agents/{conversationId}/resume/stream`** takes the body and the
+  `returnDetailed` / `returnCurrentStepOnly` / `returningFields` query flags of
+  [`/resume`](hitl.md#reply-and-approver-on-resume), needs the same roles and
+  runs the same checks, and shares the stream's event contract and keep-alive. A
+  reply is a read, so it needs the owner-or-admin access `say` needs, as a
+  `/resume` with reply flags does: an approver-only caller (`eddi-approver`,
+  neither owner nor admin) gets `403` and the pause is not consumed - such
+  callers use the plain `/resume`. Every refusal `/resume` has — `400`
+  (malformed decision, bad `toolDecisions`, bad secret context), `403`, `404`,
+  `409` (not `AWAITING_HUMAN`, agent not deployed, `pauseId` no longer current)
+  and `503` (shutting down) — is the same plain HTTP error **before any event is
+  written**. Once the decision is accepted the stream is `hitl_resume`, the
+  resumed turn's events, then `approval_required` + `done` if it paused again or
+  `done` if it settled. A resume that was accepted and then dropped
+  (cancelled, ended, busy) ends with `error` and a `code`
+  (`conversation_ended`, `awaiting_approval`, `conversation_busy` or
+  `resume_dropped`); a failure, or losing the cluster lease, ends with `error`
+  too.
 - **Disconnecting cancels the turn** by default
-  (`eddi.streaming.cancel-on-client-disconnect=true`). Set it to `false` to let
+  (`eddi.streaming.cancel-on-client-disconnect=true`; this governs `/stream`
+  only, `/resume/stream` has its own switch, below). Set it to `false` to let
   the turn finish and persist when the client goes away; the reply is then there
   when the conversation is read again.
 - **Silent stretches carry a keep-alive.** A model can work for a minute before
@@ -502,7 +543,9 @@ admin endpoints, described under
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
+| `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
+| `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |
 
 For symptoms and fixes beyond the status code, see

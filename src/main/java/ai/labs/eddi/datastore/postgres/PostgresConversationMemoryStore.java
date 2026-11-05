@@ -155,25 +155,30 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // the conversation itself: ending is a narrow state write that does not
                 // move _rev, so the revision guard alone would let a turn already in flight
                 // resurrect it — see ConversationMemoryStore.fullReplaceFilter.
-                String sql = """
-                        UPDATE conversation_memories
-                        SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
-                        WHERE id = ?::uuid AND COALESCE((data->>'_rev')::bigint, 0) = ?
-                          AND (conversation_state IS DISTINCT FROM 'ENDED' OR ? = 'ENDED')
-                        """;
+                // `_fence` never comes from the body (A4): see fencedData.
+                String sql = "UPDATE conversation_memories SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = "
+                        + fencedData(fenceToken) + """
+
+                                WHERE id = ?::uuid AND COALESCE((data->>'_rev')::bigint, 0) = ?
+                                  AND (conversation_state IS DISTINCT FROM 'ENDED' OR ? = 'ENDED')
+                                """;
                 if (fenceToken != null) {
                     sql = sql.stripTrailing() + FENCE_CLAUSE;
                 }
                 try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, snapshot.getAgentId());
-                    ps.setInt(2, snapshot.getAgentVersion());
-                    ps.setString(3, snapshot.getConversationState().name());
-                    ps.setString(4, json);
-                    ps.setString(5, conversationId);
-                    ps.setLong(6, expectedRevision);
-                    ps.setString(7, snapshot.getConversationState().name());
+                    int i = 1;
+                    ps.setString(i++, snapshot.getAgentId());
+                    ps.setInt(i++, snapshot.getAgentVersion());
+                    ps.setString(i++, snapshot.getConversationState().name());
+                    ps.setString(i++, json);
                     if (fenceToken != null) {
-                        ps.setLong(8, fenceToken);
+                        ps.setLong(i++, fenceToken);
+                    }
+                    ps.setString(i++, conversationId);
+                    ps.setLong(i++, expectedRevision);
+                    ps.setString(i++, snapshot.getConversationState().name());
+                    if (fenceToken != null) {
+                        ps.setLong(i, fenceToken);
                     }
                     // No upsert on purpose: zero affected rows means either the row was
                     // deleted while the turn was running (GDPR erasure, retention sweep) or
@@ -248,24 +253,28 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             // NON-terminal writer — a say turn that appended a step while an undo was in
             // flight — is not overwritten either, which the state filter alone cannot see
             // because both writers leave the same state behind.
-            String sql = """
-                    UPDATE conversation_memories
-                    SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
-                    WHERE id = ?::uuid AND conversation_state = ? AND COALESCE((data->>'_rev')::bigint, 0) = ?
-                    """;
+            String sql = "UPDATE conversation_memories SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = "
+                    + fencedData(fenceToken) + """
+
+                            WHERE id = ?::uuid AND conversation_state = ? AND COALESCE((data->>'_rev')::bigint, 0) = ?
+                            """;
             if (fenceToken != null) {
                 sql = sql.stripTrailing() + FENCE_CLAUSE;
             }
             try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, snapshot.getAgentId());
-                ps.setInt(2, snapshot.getAgentVersion());
-                ps.setString(3, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
-                ps.setString(4, json);
-                ps.setString(5, conversationId);
-                ps.setString(6, expectedState.name());
-                ps.setLong(7, expectedRevision);
+                int i = 1;
+                ps.setString(i++, snapshot.getAgentId());
+                ps.setInt(i++, snapshot.getAgentVersion());
+                ps.setString(i++, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
+                ps.setString(i++, json);
                 if (fenceToken != null) {
-                    ps.setLong(8, fenceToken);
+                    ps.setLong(i++, fenceToken);
+                }
+                ps.setString(i++, conversationId);
+                ps.setString(i++, expectedState.name());
+                ps.setLong(i++, expectedRevision);
+                if (fenceToken != null) {
+                    ps.setLong(i, fenceToken);
                 }
                 if (ps.executeUpdate() > 0) {
                     snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
@@ -274,6 +283,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 snapshot.setRevision(expectedRevision);
                 snapshot.setHistoryRevision(loadedHistoryRevision);
                 snapshot.setFence(loadedFence);
+                // A6: a miss caused by the fence is a fenced write, not a state handover —
+                // reported so the turn is dead-lettered instead of silently discarded.
+                if (fenceToken != null && conversationNotWritten(conn, conversationId, expectedRevision,
+                        fenceToken) instanceof ConversationFencedException fenced) {
+                    throw fenced;
+                }
                 return false;
             }
         } catch (IOException | SQLException e) {
@@ -353,9 +368,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // value would move the stored fence backwards. A fenced write raises it with
         // GREATEST; an unfenced one keeps whatever is stored (nothing, on a single
         // node).
-        String fenceValue = fenceToken != null
-                ? "jsonb_build_object('_fence', GREATEST(COALESCE((data->>'_fence')::bigint, 0), ?))"
-                : "(CASE WHEN data->'_fence' IS NOT NULL THEN jsonb_build_object('_fence', data->'_fence') ELSE '{}'::jsonb END)";
+        String fenceValue = fenceValue(fenceToken);
         String sql = """
                 UPDATE conversation_memories
                 SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?,
@@ -435,6 +448,32 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to append the conversation turn", e);
         }
+    }
+
+    /**
+     * The {@code _fence} a write leaves on the row, as a one-key jsonb object: a
+     * fenced write raises the stored value to its token with {@code GREATEST}; an
+     * unfenced one keeps whatever is stored (nothing, on a single node). Takes one
+     * parameter, the token, when {@code fenceToken} is set.
+     */
+    private static String fenceValue(Long fenceToken) {
+        return fenceToken != null
+                ? "jsonb_build_object('_fence', GREATEST(COALESCE((data->>'_fence')::bigint, 0), ?))"
+                : "(CASE WHEN data->'_fence' IS NOT NULL THEN jsonb_build_object('_fence', data->'_fence') ELSE '{}'::jsonb END)";
+    }
+
+    /**
+     * The new {@code data} of a full-row write: the serialized snapshot without its
+     * own {@code _fence}, which carries the value LOADED with the turn, plus
+     * {@link #fenceValue}. Writing the body's value verbatim moved the fence
+     * backwards whenever a newer lease holder had raised it since the load: a raise
+     * does not touch {@code _rev}, so an unfenced writer (a degraded-mode turn, a
+     * schedule carrying properties) still passed the revision guard, and the stale
+     * holder the raise had shut out could write again (A4). Takes the snapshot JSON
+     * parameter, then the token when {@code fenceToken} is set.
+     */
+    private static String fencedData(Long fenceToken) {
+        return "((?::jsonb) - '_fence') || " + fenceValue(fenceToken);
     }
 
     /** States a say turn's append must never be applied over. */
@@ -1235,6 +1274,28 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence)
+            throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET conversation_state = ?, "
+                + "data = jsonb_set(data, '{conversationState}', to_jsonb(?::text)) "
+                + "WHERE id = ?::uuid AND conversation_state = ?" + FENCE_CLAUSE;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, target.name());
+            ps.setString(2, target.name());
+            ps.setString(3, conversationId);
+            ps.setString(4, expected.name());
+            ps.setLong(5, fence);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to compare-and-set conversation state", e);
+        }
+    }
+
+    @Override
     public List<String> findConversationIdsByState(ConversationState state) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
@@ -1279,7 +1340,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // hitlPauseType / pending batch lingers on an ended or cancelled document.
         String sql = "UPDATE conversation_memories SET data = data "
                 + "- 'hitlPausedWorkflowId' - 'hitlPausedAbsoluteTaskIndex' - 'hitlPausedAt' "
-                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' "
+                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' - 'hitlApprovalContext' "
                 + "- 'hitlPauseType' - 'hitlPendingToolCalls' "
                 + "WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {

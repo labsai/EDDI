@@ -485,6 +485,36 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("stream keywords inside one object do not each copy its dictionary")
+        void streamKeywordsInOneObjectReadTheDictionaryOnce() {
+            // One object header, then nothing but the word "stream": every occurrence
+            // copied the (up to 64 KB) text back to the header and searched it for a
+            // filter, so the file cost the square of its size. The dictionary has no
+            // /Filter, so nothing is decoded and no terminator is searched for.
+            // Many objects: each keyword copies at most its own object's 64 KB window,
+            // so the cost shows once there are enough windows to add up.
+            String object = "1 0 obj << /Length 5 >>\n" + "stream ".repeat(9_000);
+            byte[] pdf = object.repeat(40).getBytes(StandardCharsets.US_ASCII);
+
+            assertTimeoutPreemptively(Duration.ofSeconds(3),
+                    () -> PdfStreamBudget.requireWithin(pdf, 1024 * 1024, Instant.now().plusSeconds(60)));
+        }
+
+        @Test
+        @DisplayName("the word 'stream' inside a dictionary string does not hide the object's real stream")
+        void streamWordInsideDictionaryDoesNotSuppressTheRealStream() {
+            byte[] bomb = zlib(content(4 * 1024 * 1024));
+            var out = new ByteArrayOutputStream();
+            out.writeBytes(("%PDF-1.4\n1 0 obj\n<< /Title (stream) /Length " + bomb.length
+                    + " /Filter /FlateDecode >>\nstream\n").getBytes(StandardCharsets.US_ASCII));
+            out.writeBytes(bomb);
+            out.writeBytes("\nendstream\nendobj\n".getBytes(StandardCharsets.US_ASCII));
+
+            assertThrows(UnreadableDocumentException.class,
+                    () -> PdfStreamBudget.requireWithin(out.toByteArray(), 1024 * 1024, Instant.now().plusSeconds(30)));
+        }
+
+        @Test
         @DisplayName("a predictor asking for enormous rows is refused before PDFBox allocates them")
         void hugePredictorRowsAreRefused() throws IOException {
             // PDFBox allocates two row buffers from /Columns x /Colors x /BitsPerComponent

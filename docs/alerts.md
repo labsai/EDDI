@@ -101,7 +101,7 @@ user blanks the comment excerpt in every alert event about their ratings.
 
 ## Writing a rule
 
-`POST /alerts/rules` (the Manager has no Alerts page yet, so rules are written over REST):
+Rules are written in the Manager under **Alerts** (rule editor and event inbox), or over REST with `POST /alerts/rules`:
 
 ```json
 {

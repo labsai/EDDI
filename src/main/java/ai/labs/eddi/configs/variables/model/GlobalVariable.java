@@ -12,11 +12,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * <p>
  * Global variables are resolved in two ways:
  * <ul>
- * <li><b>Template layer</b>: {@code {{vars.<key>}}} — in LlmTask system
- * prompts</li>
+ * <li><b>Template layer</b>: {@code {vars.<key>}} — in template renders (always
+ * the default tenant)</li>
  * <li><b>Late-binding layer</b>: {@code ${vars:<key>}} (default tenant) or
- * {@code ${vars:tenantId/<key>}} (explicit tenant) — everywhere (LLM params,
- * httpCalls, MCP, A2A, embeddings, Slack, the {@code type} field)</li>
+ * {@code ${vars:tenantId/<key>}} (explicit tenant) — in LLM params, httpCalls,
+ * MCP, A2A, embeddings, connections and the {@code type} field</li>
  * </ul>
  * <p>
  * Unlike vault secrets, global variables are <b>not encrypted</b> and are

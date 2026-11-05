@@ -25,7 +25,7 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 - **Rules are grouped**: Multiple rules can be organized into groups for better structure
 - **Sequential execution**: Rules within a group execute in order until one succeeds
 - **First match wins**: Once a rule in a group succeeds, remaining rules in that group are skipped
-- **Actions trigger other lifecycle tasks**: Actions like `httpcall(weather-api)` or `send_to_llm` activate other parts of the pipeline
+- **Actions trigger other lifecycle tasks**: Actions like `get_weather` or `send_to_llm` (arbitrary strings, matched by equality against each task's own `actions` list) activate other parts of the pipeline
 
 ## Behavior Rules Structure
 
@@ -120,7 +120,7 @@ The `inputmatcher` is used to match **user inputs**. Not directly the real input
 | Element | Value          | Description                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | type    | `inputmatcher` |                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| configs | `expressions`  | <p>comma separated list of</p><p><code>expressions</code> such as:</p><p><code>expression(value),expression2(value2),</code></p><p><code>yetAnotherExpressions(anotherValue(withASubValue))</code></p>                                                                                                                                                                                                                         |
+| configs | `expressions`  | <p>comma separated list (matched as an ordered, adjacent sublist, like <code>actionmatcher</code>) of</p><p><code>expressions</code> such as:</p><p><code>expression(value),expression2(value2),</code></p><p><code>yetAnotherExpressions(anotherValue(withASubValue))</code></p>                                                                                                                                                                                                                         |
 |         | `occurrence`   | <p><code>currentStep</code> - used in case if the user said it in this <code>conversationStep</code></p><p><code>lastStep</code> - used in case if the user said it in the previous <code>conversationStep</code></p><p><code>anyStep</code> - used in case if the user said it in any step if this whole conversation</p><p><code>never</code> - used in case if the user has never said that, including the current step</p> |
 
 If the **user** would type "hello", and the parser resolves this as expressions "`greeting(hello)`" _\[assuming it has been defined in one of the dictionaries]_, then a `condition` could look as following in order to match this user input meaning:
@@ -297,7 +297,7 @@ Defines the occurrence/frequency of an action in a `Behavior Rule`.
 
 ### Dependency
 
-Check if another `Behavior Rule` has met it's condition or not in the same `conversationStep`. Sometimes you need to know if a rule has succeeded , `dependency` will take that rule that hasn't been executed yet in a sandbox environment as a `reference` for an other behavior rule.
+Check if another `Behavior Rule` has met it's condition or not in the same `conversationStep`. Sometimes you need to know if a rule has succeeded , `dependency` evaluates the rule with that name (once per evaluation, whichever group it is in) and succeeds if that rule does. Circular references are rejected.
 
 ```javascript
 (...)
@@ -426,12 +426,13 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 
 | HTTP Method | API Endpoint                                      | Request Body                | Response                             |
 | ----------- | ------------------------------------------------- | --------------------------- | ------------------------------------ |
-| **GET**     | `/rulestore/rulesets/descriptors`                 | N/A                         | **DocumentDescriptor[]**             |
+| **GET**     | `/rulestore/rulesets/descriptors`                 | N/A                         | **DocumentDescriptor[]** (query: `filter`, `index`, `limit`) |
+| **GET**     | `/rulestore/rulesets/jsonSchema`                  | N/A                         | JSON Schema of **RuleSetConfiguration** |
 | **POST**    | `/rulestore/rulesets`                             | **RuleSetConfiguration**    | `201 Created` + `Location` and `X-Resource-URI` headers naming the new id and version |
 | **GET**     | `/rulestore/rulesets/{id}?version=N`              | N/A                         | **RuleSetConfiguration**             |
 | **PUT**     | `/rulestore/rulesets/{id}?version=N`              | **RuleSetConfiguration**    | `200 OK` + `Location` of the **new** version |
 | **POST**    | `/rulestore/rulesets/{id}?version=N`              | N/A                         | Duplicates the ruleset               |
-| **DELETE**  | `/rulestore/rulesets/{id}?version=N`              | N/A                         | N/A                                  |
+| **DELETE**  | `/rulestore/rulesets/{id}?version=N`              | N/A                         | N/A (add `permanent=true` to remove the history too) |
 | **GET**     | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | **`text/plain` integer** — the version number, *not* the ruleset |
 | **POST**    | `/rulestore/rulesets/{id}/currentversion`         | N/A                         | `303 See Other` → `/rulestore/rulesets/{id}?version=N` |
 
@@ -450,6 +451,8 @@ The **`{id}`** is a path parameters that indicate which behavior rule you want t
 ### Example
 
 We will demonstrate here the creation of a `RuleSetConfiguration`
+
+This sample is a small-talk rule set: its rules are global intents, so they deliberately have only `inputmatcher` conditions. Rules that belong to a multi-step flow should also gate on the previous step's action (`actionmatcher` on `lastStep`).
 
 _Request URL_
 
