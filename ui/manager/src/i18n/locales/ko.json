@@ -6116,13 +6116,15 @@
       "static": "API 키",
       "basic": "아이디와 비밀번호",
       "clientCredentials": "OAuth 서비스 계정",
-      "authorizationCode": "OAuth 사용자 로그인"
+      "authorizationCode": "OAuth 사용자 로그인",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "모두에게 동일한 고정 헤더 하나 — X-Api-Key 또는 Authorization: Bearer …",
       "basicBody": "HTTP Basic. 인코딩은 {{productName}}(이)가 처리하므로 비밀번호는 볼트의 별도 항목으로 남아 따로 교체할 수 있습니다.",
       "clientCredentialsBody": "에이전트가 자기 자신으로 로그인합니다. 모두가 공유하는 액세스 토큰 하나가 자동으로 갱신됩니다.",
-      "authorizationCodeBody": "각자 자기 계정을 연결하고 에이전트가 그 사람으로서 행동합니다. 로그인 활성화와 볼트가 필요합니다."
+      "authorizationCodeBody": "각자 자기 계정을 연결하고 에이전트가 그 사람으로서 행동합니다. 로그인 활성화와 볼트가 필요합니다.",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "사용자별",
@@ -6242,7 +6244,8 @@
       "paramReserved": "이 매개변수 중 하나는 {{productName}}(이)가 직접 설정합니다(client_id, redirect_uri, response_type, state, code_challenge…). 덮어쓰면 흐름이 깨집니다.",
       "paramValueReference": "매개변수 값은 쓴 그대로 전송됩니다. 여기의 ${…} 참조는 해석되지 않으며 볼트 포인터가 URL에 실리게 됩니다. 일반 프로토콜 값만 사용하세요.",
       "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
-      "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다."
+      "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다.",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "이 연결을 통해 연동된 계정은 더 이상 확인되지 않습니다. 권한 부여는 그것을 만든 흐름에 속하기 때문입니다. 계정이 하나라도 연동되어 있는 동안 {{productName}}은(는) 변경을 거부하고 그 수를 알려줍니다. 먼저 연동을 해제하거나, 새 연결을 만들어 그쪽에 연동하게 하세요.",
     "confirmAuthChangeAccept": "변경",
     "deleted": "연결 \"{{name}}\"을(를) 삭제했습니다",
-    "confirmDeleteNamed": "연결 \"{{name}}\"을(를) 삭제하시겠습니까?"
+    "confirmDeleteNamed": "연결 \"{{name}}\"을(를) 삭제하시겠습니까?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "입력 파서",

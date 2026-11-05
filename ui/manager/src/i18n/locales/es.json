@@ -6176,13 +6176,15 @@
       "static": "Clave de API",
       "basic": "Usuario y contraseña",
       "clientCredentials": "Cuenta de servicio OAuth",
-      "authorizationCode": "Inicio de sesión OAuth"
+      "authorizationCode": "Inicio de sesión OAuth",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "Una cabecera fija, la misma para todos — X-Api-Key, o Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se encarga de la codificación, así la contraseña sigue siendo una entrada aparte de la bóveda que puede rotar por su cuenta.",
       "clientCredentialsBody": "El agente se identifica como sí mismo. Un token de acceso compartido por todos, renovado automáticamente.",
-      "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda."
+      "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda.",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "Por persona",
@@ -6302,7 +6304,8 @@
       "paramReserved": "Uno de estos parámetros lo establece el propio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Sobrescribirlo rompería el flujo.",
       "paramValueReference": "Los valores de los parámetros se envían tal cual: una referencia ${…} aquí no se resuelve y pondría un puntero de la bóveda en una URL. Use solo valores de protocolo simples.",
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
-      "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos."
+      "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos.",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "Volver a Conexiones",
     "headerSecret": "Secreto guardado",
@@ -6325,7 +6328,20 @@
     "confirmAuthChangeDesc": "Las cuentas vinculadas a través de esta conexión dejarán de resolverse: una concesión pertenece al flujo que la produjo. {{productName}} rechaza el cambio mientras quede alguna cuenta vinculada e indica cuántas; desvincúlelas primero, o cree una conexión nueva y deje que la gente vincule esa.",
     "confirmAuthChangeAccept": "Cambiar",
     "deleted": "Conexión \"{{name}}\" eliminada",
-    "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?"
+    "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "Analizador de entrada",

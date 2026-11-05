@@ -6176,13 +6176,15 @@
       "static": "Clé d'API",
       "basic": "Identifiant & mot de passe",
       "clientCredentials": "Compte de service OAuth",
-      "authorizationCode": "Connexion utilisateur OAuth"
+      "authorizationCode": "Connexion utilisateur OAuth",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "Un en-tête fixe, identique pour tout le monde — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se charge de l'encodage : le mot de passe reste une entrée distincte du coffre, que vous pouvez renouveler seule.",
       "clientCredentialsBody": "L'agent se connecte en son propre nom. Un jeton d'accès partagé par tous, renouvelé automatiquement.",
-      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre."
+      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre.",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "Par personne",
@@ -6302,7 +6304,8 @@
       "paramReserved": "L'un de ces paramètres est défini par {{productName}} lui-même (client_id, redirect_uri, response_type, state, code_challenge…). Le remplacer casserait le flux.",
       "paramValueReference": "Les valeurs de paramètres sont envoyées telles quelles — une référence ${…} n'est pas résolue ici et placerait un pointeur de coffre dans une URL. N'utilisez que des valeurs de protocole simples.",
       "paramValueTooLong": "Une valeur de paramètre fait au plus 512 caractères.",
-      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici."
+      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici.",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "Retour aux connexions",
     "headerSecret": "Secret enregistré",
@@ -6325,7 +6328,20 @@
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. {{productName}} refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
     "confirmAuthChangeAccept": "Changer",
     "deleted": "Connexion \"{{name}}\" supprimée",
-    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",

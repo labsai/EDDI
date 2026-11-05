@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   ChevronLeft,
   ChevronRight,
+  FileKey,
   KeyRound,
   Lock,
   Server,
@@ -34,6 +35,7 @@ import {
   type StaticAuth,
 } from "@/lib/api/connections";
 import { validateConnection } from "@/lib/connection-validation";
+import { CONNECTION_PRESETS, applyPreset } from "@/lib/connection-presets";
 
 interface CreateConnectionDialogProps {
   open: boolean;
@@ -53,7 +55,7 @@ const STEPS: Step[] = ["basics", "credentials", "origins"];
  * optional — scopes, extra parameters, timeouts, the discovery URL — is left to
  * the editor, which is where a config is refined anyway.
  *
- * The auth type is offered as four described choices rather than an enum
+ * The auth type is offered as five described choices rather than an enum
  * select, because it is the one decision on this screen with consequences the
  * author cannot undo later: it fixes whether the connection resolves one shared
  * credential or one per person.
@@ -82,6 +84,8 @@ export function CreateConnectionDialog({
   /** Errors are shown once a step has been left, not while it is being typed into. */
   const [touched, setTouched] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  /** The preset the draft was last filled from, for the chooser's value only. */
+  const [presetId, setPresetId] = useState("");
 
   /**
    * What will actually be sent — the draft with any uncommitted text folded
@@ -123,6 +127,7 @@ export function CreateConnectionDialog({
     setPendingOrigin("");
     setTouched(false);
     setConfirmDiscard(false);
+    setPresetId("");
   }, []);
 
   const close = useCallback(() => {
@@ -152,6 +157,7 @@ export function CreateConnectionDialog({
    * longer has an OAuth flow.
    */
   const changeAuthType = (authType: AuthType) => {
+    setPresetId("");
     setDraft((prev) => ({
       ...emptyConnection(authType),
       name: prev.name,
@@ -159,6 +165,19 @@ export function CreateConnectionDialog({
       baseUrlAllowlist: prev.baseUrlAllowlist,
     }));
   };
+
+  /**
+   * Fills the draft from a preset — a JSON file, not code. Like a type switch it
+   * replaces the auth block wholesale, keeping the name and description.
+   */
+  const choosePreset = (id: string) => {
+    setPresetId(id);
+    const preset = CONNECTION_PRESETS.find((candidate) => candidate.id === id);
+    if (!preset) return;
+    setDraft((prev) => applyPreset(preset, prev));
+  };
+
+  const selectedPreset = CONNECTION_PRESETS.find((preset) => preset.id === presetId);
 
   /**
    * Shared key or caller-supplied — the STATIC-only choice.
@@ -320,6 +339,39 @@ export function CreateConnectionDialog({
                   />
                 </div>
 
+                {CONNECTION_PRESETS.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label
+                      className="text-sm font-medium text-foreground"
+                      htmlFor="create-connection-preset"
+                    >
+                      {t("connections.preset", "Start from a template")}
+                    </label>
+                    <select
+                      id="create-connection-preset"
+                      data-testid="create-connection-preset"
+                      className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"
+                      value={presetId}
+                      onChange={(e) => choosePreset(e.target.value)}
+                    >
+                      <option value="">{t("connections.presetNone", "None — fill in every field")}</option>
+                      {CONNECTION_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedPreset && (
+                      <p
+                        className="text-xs text-muted-foreground"
+                        data-testid="create-connection-preset-description"
+                      >
+                        {selectedPreset.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <AuthTypeChooser
                   value={draft.authType}
                   onChange={changeAuthType}
@@ -413,11 +465,12 @@ const AUTH_TYPE_ICONS: Record<AuthType, LucideIcon> = {
   STATIC: KeyRound,
   BASIC: Lock,
   OAUTH2_CLIENT_CREDENTIALS: Server,
+  OAUTH2_JWT_BEARER: FileKey,
   OAUTH2_AUTHORIZATION_CODE: UserCheck,
 };
 
 /**
- * The four auth types as a real radio group.
+ * The five auth types as a real radio group.
  *
  * `role="radio"` without an owning `radiogroup` is invalid ARIA: the options
  * are announced as four unrelated toggles with no group name and no "1 of 4",

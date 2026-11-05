@@ -29,6 +29,8 @@ export function authTypeLabel(t: TFunction, authType: AuthType): string {
       return t("connections.authType.basic", "Username & password");
     case "OAUTH2_CLIENT_CREDENTIALS":
       return t("connections.authType.clientCredentials", "OAuth service account");
+    case "OAUTH2_JWT_BEARER":
+      return t("connections.authType.jwtBearer", "Signed-key service account");
     case "OAUTH2_AUTHORIZATION_CODE":
       return t("connections.authType.authorizationCode", "OAuth user login");
   }
@@ -51,6 +53,11 @@ export function authTypeDescription(t: TFunction, authType: AuthType): string {
       return t(
         "connections.choice.clientCredentialsBody",
         "The agent signs in as itself. One access token shared by everyone, refreshed automatically.",
+      );
+    case "OAUTH2_JWT_BEARER":
+      return t(
+        "connections.choice.jwtBearerBody",
+        "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone.",
       );
     case "OAUTH2_AUTHORIZATION_CODE":
       return t(

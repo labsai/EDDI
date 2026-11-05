@@ -6116,13 +6116,15 @@
       "static": "API キー",
       "basic": "ユーザー名とパスワード",
       "clientCredentials": "OAuth サービスアカウント",
-      "authorizationCode": "OAuth ユーザーログイン"
+      "authorizationCode": "OAuth ユーザーログイン",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "全員に共通の固定ヘッダー — X-Api-Key、または Authorization: Bearer …",
       "basicBody": "HTTP Basic。エンコードは {{productName}} が行うため、パスワードは Vault の独立した項目として単独でローテーションできます。",
       "clientCredentialsBody": "エージェント自身としてログインします。全員で共有する 1 つのアクセストークンが自動更新されます。",
-      "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。"
+      "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "ユーザーごと",
@@ -6242,7 +6244,8 @@
       "paramReserved": "これらのパラメーターのいずれかは {{productName}} 自身が設定します（client_id、redirect_uri、response_type、state、code_challenge…）。上書きするとフローが壊れます。",
       "paramValueReference": "パラメーター値は書かれたとおりに送信されます。ここでの ${…} 参照は解決されず、ボールトへのポインターが URL に載ってしまいます。プレーンなプロトコル値のみを使用してください。",
       "paramValueTooLong": "パラメーター値は 512 文字以内です。",
-      "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。"
+      "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "接続一覧に戻る",
     "headerSecret": "保存済みシークレット",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、{{productName}} は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
     "confirmAuthChangeAccept": "変更する",
     "deleted": "接続「{{name}}」を削除しました",
-    "confirmDeleteNamed": "接続「{{name}}」を削除しますか？"
+    "confirmDeleteNamed": "接続「{{name}}」を削除しますか？",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "入力パーサー",

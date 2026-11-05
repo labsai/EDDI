@@ -152,6 +152,11 @@ function messageFor(
         "connections.validation.clientIdRequired",
         "The provider's client ID is required. It is public, not a secret.",
       );
+    case "thumbprintFormat":
+      return t(
+        "connections.validation.thumbprintFormat",
+        "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url.",
+      );
     case "endpointRequired":
       return t("connections.validation.endpointRequired", "This URL is required.");
     case "endpointNotHttps":

@@ -6116,13 +6116,15 @@
       "static": "API कुंजी",
       "basic": "उपयोगकर्ता नाम और पासवर्ड",
       "clientCredentials": "OAuth सेवा खाता",
-      "authorizationCode": "OAuth उपयोगकर्ता लॉगिन"
+      "authorizationCode": "OAuth उपयोगकर्ता लॉगिन",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "एक निश्चित हेडर, सबके लिए एक जैसा — X-Api-Key, या Authorization: Bearer …",
       "basicBody": "HTTP Basic. एन्कोडिंग {{productName}} करता है, इसलिए पासवर्ड वॉल्ट में अलग प्रविष्टि बना रहता है जिसे अकेले बदला जा सकता है।",
       "clientCredentialsBody": "एजेंट स्वयं के रूप में साइन इन करता है। सबके लिए साझा एक ऐक्सेस टोकन, जो अपने आप नवीनीकृत होता है।",
-      "authorizationCodeBody": "हर व्यक्ति अपना खाता जोड़ता है और एजेंट उसी के रूप में कार्य करता है। इसके लिए साइन-इन चालू होना और एक वॉल्ट चाहिए।"
+      "authorizationCodeBody": "हर व्यक्ति अपना खाता जोड़ता है और एजेंट उसी के रूप में कार्य करता है। इसके लिए साइन-इन चालू होना और एक वॉल्ट चाहिए।",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "प्रति व्यक्ति",
@@ -6242,7 +6244,8 @@
       "paramReserved": "इनमें से एक पैरामीटर {{productName}} स्वयं सेट करता है (client_id, redirect_uri, response_type, state, code_challenge…)। इसे ओवरराइड करने से फ़्लो टूट जाएगा।",
       "paramValueReference": "पैरामीटर मान ठीक वैसे ही भेजे जाते हैं जैसे लिखे गए हैं — यहाँ ${…} संदर्भ हल नहीं होता और वॉल्ट पॉइंटर को URL में डाल देगा। केवल सादे प्रोटोकॉल मान उपयोग करें।",
       "paramValueTooLong": "पैरामीटर मान अधिकतम 512 अक्षरों का हो सकता है।",
-      "paramValueCredentialShaped": "इनमें से एक मान कुंजी या टोकन जैसा दिखता है। यह मैप सादे पाठ में संग्रहीत होता है और URL में भेजा जाता है — यहाँ केवल गैर-गुप्त प्रोटोकॉल पैरामीटर ही होने चाहिए।"
+      "paramValueCredentialShaped": "इनमें से एक मान कुंजी या टोकन जैसा दिखता है। यह मैप सादे पाठ में संग्रहीत होता है और URL में भेजा जाता है — यहाँ केवल गैर-गुप्त प्रोटोकॉल पैरामीटर ही होने चाहिए।",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "कनेक्शन सूची पर लौटें",
     "headerSecret": "संग्रहीत गुप्त मान",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "इस कनेक्शन के ज़रिए जुड़े खाते हल होना बंद हो जाएँगे — अनुदान उसी फ़्लो का होता है जिसने उसे बनाया। जब तक कोई खाता जुड़ा है, {{productName}} बदलाव अस्वीकार करता है और बताता है कितने हैं; पहले उन्हें अनलिंक करें, या नया कनेक्शन बनाकर लोगों को उससे जुड़ने दें।",
     "confirmAuthChangeAccept": "बदलें",
     "deleted": "कनेक्शन \"{{name}}\" हटा दिया गया",
-    "confirmDeleteNamed": "कनेक्शन \"{{name}}\" हटाएँ?"
+    "confirmDeleteNamed": "कनेक्शन \"{{name}}\" हटाएँ?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "इनपुट पार्सर",

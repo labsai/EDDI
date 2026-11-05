@@ -36,7 +36,7 @@ async function toCredentials(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CreateConnectionDialog — the auth type chooser", () => {
-  it("is a real radio group, not four unrelated radios", async () => {
+  it("is a real radio group, not five unrelated radios", async () => {
     // `role="radio"` with no owning radiogroup is invalid ARIA: the options are
     // announced with no group name and no "1 of 4", on the one decision the
     // wizard itself calls unchangeable afterwards.
@@ -44,7 +44,7 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
 
     const group = screen.getByRole("radiogroup");
     expect(group).toBeInTheDocument();
-    expect(within(group).getAllByRole("radio")).toHaveLength(4);
+    expect(within(group).getAllByRole("radio")).toHaveLength(5);
   });
 
   it("moves the selection with the arrow keys", async () => {

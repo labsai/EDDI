@@ -6116,13 +6116,15 @@
       "static": "คีย์ API",
       "basic": "ชื่อผู้ใช้และรหัสผ่าน",
       "clientCredentials": "บัญชีบริการ OAuth",
-      "authorizationCode": "การเข้าสู่ระบบผู้ใช้แบบ OAuth"
+      "authorizationCode": "การเข้าสู่ระบบผู้ใช้แบบ OAuth",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "ส่วนหัวคงที่หนึ่งค่า เหมือนกันทุกคน — X-Api-Key หรือ Authorization: Bearer …",
       "basicBody": "HTTP Basic โดย {{productName}} จัดการการเข้ารหัสให้ รหัสผ่านจึงยังเป็นรายการแยกในห้องนิรภัยที่หมุนเปลี่ยนได้ตามลำพัง",
       "clientCredentialsBody": "เอเจนต์เข้าสู่ระบบในนามของตัวเอง โทเคนเข้าถึงหนึ่งชุดใช้ร่วมกันทุกคนและต่ออายุอัตโนมัติ",
-      "authorizationCodeBody": "แต่ละคนเชื่อมบัญชีของตัวเอง และเอเจนต์ทำงานในนามของคนนั้น ต้องเปิดการเข้าสู่ระบบและมีห้องนิรภัย"
+      "authorizationCodeBody": "แต่ละคนเชื่อมบัญชีของตัวเอง และเอเจนต์ทำงานในนามของคนนั้น ต้องเปิดการเข้าสู่ระบบและมีห้องนิรภัย",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "รายบุคคล",
@@ -6242,7 +6244,8 @@
       "paramReserved": "พารามิเตอร์ตัวหนึ่งในนี้ {{productName}} เป็นผู้ตั้งค่าเอง (client_id, redirect_uri, response_type, state, code_challenge…) การเขียนทับจะทำให้โฟลว์พัง",
       "paramValueReference": "ค่าพารามิเตอร์ถูกส่งตามที่เขียนไว้ทุกประการ การอ้างอิง ${…} ตรงนี้จะไม่ถูกแปลง และจะทำให้ตัวชี้ห้องนิรภัยไปอยู่ใน URL ใช้ค่าโปรโตคอลธรรมดาเท่านั้น",
       "paramValueTooLong": "ค่าพารามิเตอร์ยาวได้ไม่เกิน 512 อักขระ",
-      "paramValueCredentialShaped": "ค่าตัวหนึ่งในนี้ดูเหมือนคีย์หรือโทเค็น แมปนี้ถูกเก็บเป็นข้อความธรรมดาและส่งใน URL ควรมีเฉพาะพารามิเตอร์โปรโตคอลที่ไม่เป็นความลับเท่านั้น"
+      "paramValueCredentialShaped": "ค่าตัวหนึ่งในนี้ดูเหมือนคีย์หรือโทเค็น แมปนี้ถูกเก็บเป็นข้อความธรรมดาและส่งใน URL ควรมีเฉพาะพารามิเตอร์โปรโตคอลที่ไม่เป็นความลับเท่านั้น",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "กลับไปที่การเชื่อมต่อ",
     "headerSecret": "ความลับที่เก็บไว้",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "บัญชีที่ผูกผ่านการเชื่อมต่อนี้จะหยุดทำงาน เพราะสิทธิ์ที่ได้รับผูกกับโฟลว์ที่สร้างมันขึ้นมา {{productName}} จะปฏิเสธการเปลี่ยนแปลงตราบใดที่ยังมีบัญชีผูกอยู่และบอกจำนวน ให้ยกเลิกการผูกก่อน หรือสร้างการเชื่อมต่อใหม่แล้วให้ผู้ใช้ผูกกับอันนั้นแทน",
     "confirmAuthChangeAccept": "เปลี่ยน",
     "deleted": "ลบการเชื่อมต่อ \"{{name}}\" แล้ว",
-    "confirmDeleteNamed": "ลบการเชื่อมต่อ \"{{name}}\" หรือไม่?"
+    "confirmDeleteNamed": "ลบการเชื่อมต่อ \"{{name}}\" หรือไม่?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "ตัวแยกวิเคราะห์อินพุต",

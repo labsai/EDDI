@@ -6116,13 +6116,15 @@
       "static": "API 密钥",
       "basic": "用户名与密码",
       "clientCredentials": "OAuth 服务账户",
-      "authorizationCode": "OAuth 用户登录"
+      "authorizationCode": "OAuth 用户登录",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "一个固定请求头，对所有人相同 —— X-Api-Key，或 Authorization: Bearer …",
       "basicBody": "HTTP Basic。编码由 {{productName}} 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
       "clientCredentialsBody": "智能体以自身身份登录。一个访问令牌供所有人共享，并自动续期。",
-      "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。"
+      "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "按用户",
@@ -6242,7 +6244,8 @@
       "paramReserved": "其中一个参数由 {{productName}} 自行设置（client_id、redirect_uri、response_type、state、code_challenge……）。覆盖它会破坏流程。",
       "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
       "paramValueTooLong": "参数值最多 512 个字符。",
-      "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。"
+      "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，{{productName}} 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
     "confirmAuthChangeAccept": "更改",
     "deleted": "连接“{{name}}”已删除",
-    "confirmDeleteNamed": "删除连接“{{name}}”？"
+    "confirmDeleteNamed": "删除连接“{{name}}”？",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field"
   },
   "extensionTypes": {
     "parser": "输入解析器",

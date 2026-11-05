@@ -6116,13 +6116,15 @@
       "static": "API-Schlüssel",
       "basic": "Benutzername & Passwort",
       "clientCredentials": "OAuth-Dienstkonto",
-      "authorizationCode": "OAuth-Benutzeranmeldung"
+      "authorizationCode": "OAuth-Benutzeranmeldung",
+      "jwtBearer": "Dienstkonto mit Signaturschlüssel"
     },
     "choice": {
       "staticBody": "Ein fester Header, für alle gleich — X-Api-Key oder Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} übernimmt die Kodierung, dadurch bleibt das Passwort ein eigener Vault-Eintrag, den Sie separat wechseln können.",
       "clientCredentialsBody": "Der Agent meldet sich als er selbst an. Ein Access-Token für alle, das automatisch erneuert wird.",
-      "authorizationCodeBody": "Jede Person verknüpft ihr eigenes Konto und der Agent handelt in ihrem Namen. Erfordert aktivierte Anmeldung und einen Vault."
+      "authorizationCodeBody": "Jede Person verknüpft ihr eigenes Konto und der Agent handelt in ihrem Namen. Erfordert aktivierte Anmeldung und einen Vault.",
+      "jwtBearerBody": "Der Agent meldet sich mit einem privaten Schlüssel statt eines Geheimnisses als er selbst an — zum Beispiel ein Google-Dienstkonto. Ein Access-Token für alle."
     },
     "binding": {
       "perUser": "Pro Person",
@@ -6242,7 +6244,8 @@
       "paramReserved": "Einen dieser Parameter setzt {{productName}} selbst (client_id, redirect_uri, response_type, state, code_challenge …). Ihn zu überschreiben würde den Ablauf zerstören.",
       "paramValueReference": "Parameterwerte werden genau so gesendet, wie sie geschrieben sind – eine ${…}-Referenz wird hier nicht aufgelöst und würde einen Tresorverweis in eine URL setzen. Verwenden Sie nur einfache Protokollwerte.",
       "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
-      "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter."
+      "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter.",
+      "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -6265,7 +6268,20 @@
     "confirmAuthChangeDesc": "Über diese Verbindung verknüpfte Konten werden nicht mehr aufgelöst – eine Berechtigung gehört zu dem Ablauf, der sie erzeugt hat. {{productName}} lehnt die Änderung ab, solange noch ein Konto verknüpft ist, und nennt die Anzahl; heben Sie die Verknüpfungen zuerst auf, oder legen Sie eine neue Verbindung an und lassen Sie die Leute stattdessen diese verknüpfen.",
     "confirmAuthChangeAccept": "Ändern",
     "deleted": "Verbindung \"{{name}}\" gelöscht",
-    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?"
+    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?",
+    "privateKey": "Privater Schlüssel",
+    "privateKeyHint": "Ein Vault-Eintrag mit einem unverschlüsselten RSA-Schlüssel im PKCS#8-PEM-Format (BEGIN PRIVATE KEY) oder einer vollständigen JSON-Schlüsseldatei eines Google-Dienstkontos. Der Schlüssel verlässt {{productName}} nie; gesendet wird nur eine kurzlebige signierte Assertion.",
+    "certificateThumbprint": "Zertifikat-Fingerabdruck",
+    "certificateThumbprintHint": "Des beim Identitätsanbieter hochgeladenen Zertifikats — als Hex, wie das Portal ihn zeigt, oder base64url. Öffentlich, kein Geheimnis.",
+    "certificateThumbprintHeader": "Fingerabdruck-Header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra-Standard)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Dienstkonto (Aussteller)",
+    "serviceAccountEmailHint": "z. B. agent@project.iam.gserviceaccount.com. Optional, wenn der private Schlüssel eine JSON-Schlüsseldatei ist, die ihr eigenes Konto nennt.",
+    "audience": "Assertion-Zielgruppe (optional)",
+    "audienceHint": "Der aud-Claim der signierten Assertion. Leer lassen, um die Token-URL zu verwenden — das erwartet Google.",
+    "preset": "Mit einer Vorlage beginnen",
+    "presetNone": "Keine — alle Felder selbst ausfüllen"
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",
