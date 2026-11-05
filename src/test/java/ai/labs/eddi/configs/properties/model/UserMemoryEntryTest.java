@@ -6,8 +6,11 @@ package ai.labs.eddi.configs.properties.model;
 
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry.Assessment;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -235,5 +238,69 @@ class UserMemoryEntryTest {
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("fact"));
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("context"));
         assertEquals(3, UserMemoryEntry.DEFAULT_CATEGORIES.size());
+    }
+
+    // === assessment ===
+
+    @Test
+    void legacyConstructor_isAccepted() {
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null);
+        assertEquals(Assessment.ACCEPTED, entry.assessment());
+        assertNull(entry.supersededBy());
+    }
+
+    @Test
+    void nullAssessment_isAccepted() {
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null, null, "x");
+        assertEquals(Assessment.ACCEPTED, entry.assessment());
+        assertNull(entry.supersededBy(), "a pointer is only kept on a SUPERSEDED entry");
+    }
+
+    @Test
+    void supersededBy_keptOnlyWhenSuperseded() {
+        var superseded = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null,
+                Assessment.SUPERSEDED, "2");
+        assertEquals("2", superseded.supersededBy());
+        assertNull(superseded.withAssessment(Assessment.CONTESTED, "2").supersededBy());
+    }
+
+    @Test
+    void withAssessment_keepsEverythingElse_andMirrorsConflicted() {
+        Instant at = Instant.parse("2026-10-01T00:00:00Z");
+        var entry = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.group, "a", List.of("g"), "c", false, 3, at, at);
+
+        var contested = entry.withAssessment(Assessment.CONTESTED, null);
+        assertEquals(Assessment.CONTESTED, contested.assessment());
+        assertTrue(contested.conflicted());
+        assertEquals(at, contested.updatedAt());
+        assertEquals(3, contested.accessCount());
+        assertEquals(List.of("g"), contested.groupIds());
+
+        assertFalse(contested.withAssessment(Assessment.ACCEPTED, null).conflicted());
+    }
+
+    @Test
+    void parse_isLenient() {
+        assertEquals(Assessment.ACCEPTED, Assessment.parse(null));
+        assertEquals(Assessment.ACCEPTED, Assessment.parse(""));
+        assertEquals(Assessment.ACCEPTED, Assessment.parse("DISPUTED"));
+        assertEquals(Assessment.CONTESTED, Assessment.parse("contested"));
+        assertEquals(Assessment.SUPERSEDED, Assessment.parse(" SUPERSEDED "));
+    }
+
+    @Test
+    void json_withoutAssessment_readsAsAccepted_andNewFieldsRoundTrip() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var legacy = mapper.readValue("""
+                {"id":"1","userId":"u","key":"k","value":"v","category":"fact","visibility":"self","sourceAgentId":"a",
+                 "groupIds":[],"conflicted":false,"accessCount":0}
+                """, UserMemoryEntry.class);
+        assertEquals(Assessment.ACCEPTED, legacy.assessment());
+
+        var superseded = legacy.withAssessment(Assessment.SUPERSEDED, "2");
+        String json = mapper.writeValueAsString(superseded);
+        assertTrue(json.contains("\"assessment\":\"SUPERSEDED\""), json);
+        assertTrue(json.contains("\"supersededBy\":\"2\""), json);
+        assertEquals(superseded, mapper.readValue(json, UserMemoryEntry.class));
     }
 }

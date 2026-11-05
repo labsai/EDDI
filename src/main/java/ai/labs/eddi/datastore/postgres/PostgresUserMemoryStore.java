@@ -64,10 +64,23 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 group_ids JSONB DEFAULT '[]'::jsonb,
                 source_conversation_id VARCHAR(255),
                 conflicted BOOLEAN DEFAULT FALSE,
+                assessment VARCHAR(20) NOT NULL DEFAULT 'ACCEPTED',
+                superseded_by VARCHAR(64),
                 access_count INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+            """;
+
+    /**
+     * Columns added after the table first shipped. {@code CREATE TABLE IF NOT
+     * EXISTS} leaves an existing table as it is, so they are added separately; the
+     * {@code DEFAULT} fills every existing row, which is what makes a row written
+     * before contradiction resolution read as {@code ACCEPTED}.
+     */
+    private static final String UPGRADE_COLUMNS = """
+            ALTER TABLE usermemories ADD COLUMN IF NOT EXISTS assessment VARCHAR(20) NOT NULL DEFAULT 'ACCEPTED';
+            ALTER TABLE usermemories ADD COLUMN IF NOT EXISTS superseded_by VARCHAR(64);
             """;
 
     private static final String CREATE_INDEXES = """
@@ -110,13 +123,14 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      */
     private static final String UPSERT_GLOBAL_IF_OWNED = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, 'global', ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, assessment, superseded_by)
+            VALUES (?, ?, ?::jsonb, ?, 'global', ?, ?::jsonb, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) WHERE visibility = 'global'
             DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                 group_ids = EXCLUDED.group_ids,
                 source_conversation_id = EXCLUDED.source_conversation_id,
-                conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                conflicted = EXCLUDED.conflicted, assessment = EXCLUDED.assessment,
+                superseded_by = EXCLUDED.superseded_by, updated_at = CURRENT_TIMESTAMP
             WHERE usermemories.source_agent_id = EXCLUDED.source_agent_id
             RETURNING id
             """;
@@ -137,7 +151,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
-            for (String sql : CREATE_INDEXES.split(";")) {
+            for (String sql : (UPGRADE_COLUMNS + CREATE_INDEXES).split(";")) {
                 sql = sql.trim();
                 if (!sql.isEmpty()) {
                     stmt.execute(sql);
@@ -187,7 +201,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 INSERT INTO usermemories (user_id, key, value, category, visibility)
                 VALUES (?, ?, ?::jsonb, 'property', 'global')
                 ON CONFLICT (user_id, key) WHERE visibility = 'global'
-                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                DO UPDATE SET value = EXCLUDED.value, assessment = 'ACCEPTED', superseded_by = NULL,
+                    conflicted = FALSE, updated_at = CURRENT_TIMESTAMP
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (Map.Entry<String, Object> entry : properties.entrySet()) {
@@ -237,8 +252,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     private static final String INSERT_IF_ABSENT_GLOBAL = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, assessment, superseded_by)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
             ON CONFLICT (user_id, key) WHERE visibility = 'global'
             DO NOTHING
             RETURNING id
@@ -246,8 +261,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     private static final String INSERT_IF_ABSENT_SCOPED = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, assessment, superseded_by)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
             ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
             DO NOTHING
             RETURNING id
@@ -273,6 +288,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
+            ps.setString(10, entry.assessment().name());
+            ps.setString(11, entry.supersededBy());
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getString("id") : null;
             }
@@ -294,6 +311,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(6, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(7, entry.sourceConversationId());
             ps.setBoolean(8, entry.conflicted());
+            ps.setString(9, entry.assessment().name());
+            ps.setString(10, entry.supersededBy());
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
@@ -341,25 +360,27 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             // source_agent_id is part of the identity and updating it is correct.
             upsertSql = """
                     INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                        group_ids, source_conversation_id, conflicted)
-                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                        group_ids, source_conversation_id, conflicted, assessment, superseded_by)
+                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
                     ON CONFLICT (user_id, key) WHERE visibility = 'global'
                     DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                         group_ids = EXCLUDED.group_ids,
                         source_conversation_id = EXCLUDED.source_conversation_id,
-                        conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                        conflicted = EXCLUDED.conflicted, assessment = EXCLUDED.assessment,
+                        superseded_by = EXCLUDED.superseded_by, updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                     """;
         } else {
             upsertSql = """
                     INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                        group_ids, source_conversation_id, conflicted)
-                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                        group_ids, source_conversation_id, conflicted, assessment, superseded_by)
+                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
                     ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
                     DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                         visibility = EXCLUDED.visibility, group_ids = EXCLUDED.group_ids,
                         source_conversation_id = EXCLUDED.source_conversation_id,
-                        conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                        conflicted = EXCLUDED.conflicted, assessment = EXCLUDED.assessment,
+                        superseded_by = EXCLUDED.superseded_by, updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                     """;
         }
@@ -374,6 +395,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
+            ps.setString(10, entry.assessment().name());
+            ps.setString(11, entry.supersededBy());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString("id");
@@ -420,7 +443,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         IUserMemoryStore.rejectReservedKey(entry.key());
         ensureSchema();
         String sql = "UPDATE usermemories SET value = ?::jsonb, category = ?, visibility = ?, group_ids = ?::jsonb,"
-                + " source_conversation_id = ?, conflicted = ?, updated_at = CURRENT_TIMESTAMP"
+                + " source_conversation_id = ?, conflicted = ?, assessment = ?, superseded_by = ?, updated_at = CURRENT_TIMESTAMP"
                 + " WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, MAPPER.writeValueAsString(entry.value()));
@@ -429,11 +452,39 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(4, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(5, entry.sourceConversationId());
             ps.setBoolean(6, entry.conflicted());
-            ps.setString(7, entryId);
-            ps.setTimestamp(8, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
+            ps.setString(7, entry.assessment().name());
+            ps.setString(8, entry.supersededBy());
+            ps.setString(9, entryId);
+            ps.setTimestamp(10, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
             return ps.executeUpdate() == 1;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to conditionally replace memory entry", e);
+        }
+    }
+
+    /**
+     * One conditional {@code UPDATE} that leaves {@code updated_at} alone — the
+     * only write here that does.
+     */
+    @Override
+    public boolean setAssessmentIfUnchanged(String entryId, UserMemoryEntry.Assessment assessment, String supersededBy,
+                                            Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        if (assessment == null) {
+            throw new IllegalArgumentException("assessment must not be null");
+        }
+        ensureSchema();
+        String sql = "UPDATE usermemories SET assessment = ?, superseded_by = ?, conflicted = ?"
+                + " WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, assessment.name());
+            ps.setString(2, assessment == UserMemoryEntry.Assessment.SUPERSEDED ? supersededBy : null);
+            ps.setBoolean(3, assessment == UserMemoryEntry.Assessment.CONTESTED);
+            ps.setString(4, entryId);
+            ps.setTimestamp(5, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set the assessment of a memory entry", e);
         }
     }
 
@@ -828,6 +879,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
         return new UserMemoryEntry(rs.getString("id"), rs.getString("user_id"), rs.getString("key"), value, rs.getString("category"), vis,
                 rs.getString("source_agent_id"), groupIds, rs.getString("source_conversation_id"), rs.getBoolean("conflicted"),
-                rs.getInt("access_count"), createdTs != null ? createdTs.toInstant() : null, updatedTs != null ? updatedTs.toInstant() : null);
+                rs.getInt("access_count"), createdTs != null ? createdTs.toInstant() : null, updatedTs != null ? updatedTs.toInstant() : null,
+                UserMemoryEntry.Assessment.parse(rs.getString("assessment")), rs.getString("superseded_by"));
     }
 }

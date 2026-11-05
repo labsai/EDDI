@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A structured memory entry stored in the {@code usermemories} collection.
@@ -20,12 +21,90 @@ import java.util.List;
  * <li>{@code self/group}: {@code (userId, key, sourceAgentId)}</li>
  * <li>{@code global}: {@code (userId, key)}</li>
  * </ul>
+ * So the same key can be held by several entries at once — one per agent for
+ * {@code self}/{@code group}, plus the shared {@code global} one — and those
+ * can disagree. Dream's contradiction detection records that disagreement in
+ * {@link #assessment()} instead of picking a winner.
  *
+ * @param conflicted
+ *            mirror of {@code assessment == CONTESTED}, kept because existing
+ *            clients (the Manager's memory page) already read it
+ * @param assessment
+ *            where this entry stands against other entries for the same key;
+ *            {@code null} (a document stored before the field existed) is
+ *            {@link Assessment#ACCEPTED}
+ * @param supersededBy
+ *            id of the entry that replaced this one; only kept when
+ *            {@code assessment} is {@link Assessment#SUPERSEDED}
  * @author ginccc
  * @since 6.0.0
  */
 public record UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
-        List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
+        List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
+        Assessment assessment, String supersededBy) {
+
+    /**
+     * Where an entry stands against the other entries holding the same key. Only
+     * Dream's contradiction resolution sets anything but {@link #ACCEPTED}; every
+     * ordinary write (conversation, LLM tool, REST, MCP) stores {@link #ACCEPTED},
+     * so rewriting a key resolves its contest.
+     */
+    public enum Assessment {
+        /** The default: nothing disputes this entry. */
+        ACCEPTED,
+        /**
+         * Another entry for the same key holds a different value, and neither was
+         * chosen. Both are kept and still loaded; the agent sees a marker so it can ask
+         * the user.
+         */
+        CONTESTED,
+        /**
+         * A newer entry for the same key, readable by everyone who can read this one,
+         * replaced it. Kept as evidence, never deleted by Dream; not loaded as a
+         * property while the replacement is visible.
+         */
+        SUPERSEDED;
+
+        /**
+         * Lenient parse for stored values: {@code null}, blank or unknown text is
+         * {@link #ACCEPTED}, so a document written by a newer release with a value this
+         * one does not know never fails a recall.
+         */
+        public static Assessment parse(String value) {
+            if (value == null || value.isBlank()) {
+                return ACCEPTED;
+            }
+            try {
+                return valueOf(value.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                return ACCEPTED;
+            }
+        }
+    }
+
+    public UserMemoryEntry {
+        assessment = assessment != null ? assessment : Assessment.ACCEPTED;
+        supersededBy = assessment == Assessment.SUPERSEDED ? supersededBy : null;
+    }
+
+    /**
+     * The shape before {@code assessment} and {@code supersededBy}: an
+     * {@link Assessment#ACCEPTED} entry.
+     */
+    public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
+            List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
+        this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
+                updatedAt, Assessment.ACCEPTED, null);
+    }
+
+    /**
+     * This entry with another assessment; {@code conflicted} follows it. Nothing
+     * else changes, {@code updatedAt} included.
+     */
+    public UserMemoryEntry withAssessment(Assessment newAssessment, String newSupersededBy) {
+        return new UserMemoryEntry(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId,
+                newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy);
+    }
 
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");
