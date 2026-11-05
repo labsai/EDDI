@@ -40,4 +40,10 @@ Cross-team lesson sharing (explicit grants) and the scheduled, cost-capped conso
 PR. Not run locally: the `*IT` store tests (Docker) and the Playwright suite; CI is the gate for those.
 
 Docs: [`docs/team-learning-loop.md`](../team-learning-loop.md).
-- Final Platform Operator revision for 6.7.0 after merging main, #1259, #1260 and #1265 into this branch: **59** (the revisions 55–58 named in those PRs' fragments were intermediate).
+- Final Platform Operator revision for 6.7.0 after merging main, #1259, #1260 and #1265 into this branch: **60** (the revisions 55–59 named in those PRs' fragments and earlier on this branch were intermediate).
+- Platform Operator: closes the remaining gaps of the ten 6.7 follow-up notes; final revision 60. The prompt now names the
+  oversight deployment properties (sampling switch, retentions, maintenance interval, suspension cache TTL), the served
+  `approvalContext` shape and its render outcomes, human task results under TASK-granularity approval, the free human
+  tie-break, Slack's edit limits and `hitlShareRuleDrafts`, reason-code and category rules, `hitl.edit.refused`, the
+  human-only backlog delete, and the tool-call guardrails' `disclosure` parameters, could-not-decide reasons, trace step
+  and budget accounting.

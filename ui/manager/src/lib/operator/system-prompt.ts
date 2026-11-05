@@ -829,7 +829,10 @@ const BODY_TEAM_HANDOFF = `Cross-team handoff (one team or agent files work into
 - Metric \`eddi_team_handoff_total\` by outcome; a steady not_accepted means a
   source lists a team that has not accepted it.
 - You cannot accept, decline or delete a backlog task: an intake decision is a
-  person's, on the group's workspace page in the manager.`;
+  person's, on the group's workspace page in the manager. Deleting is
+  \`DELETE /groupstore/groups/<groupId>/workspace/backlog/<taskId>\` (EDIT on the
+  group; the only way to shrink a full backlog; 409 while a cadence discussion
+  works the task) — human-only, not a call you can make.`;
 
 /**
  * Team learning loop — gated on {@link grantsTeamLearningReads}.
@@ -976,6 +979,14 @@ const BODY_OVERSIGHT = `Approval oversight (how human decisions turn out, and ea
   SAMPLE_ALREADY_REVIEWED; 400 UNKNOWN_REASON_CODE, NOT_APPLICABLE (advisory),
   WINDOW_TOO_LONG; 403 AGENT_ORIGINATED (an agent's tool call tried an
   oversight write).
+- Deployment properties (all optional): \`eddi.hitl.samples.enabled\` (true;
+  false stops all sampling, cluster-wide), \`eddi.hitl.samples.retention\` (P180D),
+  \`eddi.hitl.analytics.retention\` (P400D, decision facts),
+  \`eddi.hitl.autonomy.maintenance-interval\` (PT1H, at least 60 s: expires
+  overdue samples, evaluates autonomy for at most
+  \`eddi.hitl.autonomy.max-agents-per-run\` (500) agents, deletes past
+  retention), \`eddi.hitl.autonomy.suspension-cache-ttl\` (PT15S: a suspension
+  reaches every pod within this time).
 - You cannot review samples, apply or dismiss a recommendation, suspend or
   lift, and you cannot read the samples themselves (they carry users' tool
   arguments). Those are a person's acts on the manager's Oversight page
@@ -1570,14 +1581,17 @@ your tool schemas do not cover it, not as a routine first step:
   ABORT. A tie pauses the discussion AWAITING_HUMAN_INPUT with pendingKind
   TIE_BREAK and pendingOptions; only the decider or an admin answers, with
   choice = one option (content = optional rationale); the decision method is
-  vote+human-tiebreak. A pod older than this release refuses to resume such a
+  vote+human-tiebreak. A human choice makes no model call and costs no turn;
+  the MODERATOR_DECIDES fallback costs one. A pod older than this release refuses to resume such a
   discussion (schema v5, by design).
 - HUMAN members in task forces (PLAN/EXECUTE/VERIFY): only by explicit
   assignment (assignToRole "ROLE:<role>", the person's principal id, an
   agent-filed task, or the planner naming them) — round-robin "ALL" and bids
   never pick a human. One AWAITING_HUMAN_INPUT pause per task, after the agents'
   waves, with pendingKind TASK and pendingTaskId; the member answers with
-  content. A SKIP_TURN timeout fails the task, ABORT cancels the discussion;
+  content. That result completes the task — or, when the EXECUTE phase gates
+  tasks (hitlConfig.granularity TASK and requiresApproval), goes to approval
+  exactly as an agent's result would. A SKIP_TURN timeout fails the task, ABORT cancels the discussion;
   maxReworks skips human tasks. Still refused at save: a HUMAN planner or
   verifier, targetEachPeer phases with humans, nested groups containing humans.
   For a standing team keep humanMemberConfig.turnTimeout well inside
@@ -1595,12 +1609,20 @@ your tool schemas do not cover it, not as a routine first step:
   the redacted arguments. On resume every approved call is re-screened block-only
   (an edited call by every type, an unedited one by the deterministic types).
   Every built-in type runs on arguments, plus disclosure (adds a fixed label;
-  redact only). Save-time 400s: unknown action, empty tools, a bad pattern or
+  redact only; parameters text (required, <=500), position append (default) or
+  prepend, separator (default a blank line); a label already there is left
+  alone). Save-time 400s: unknown action, empty tools, a bad pattern or
   pointer, disclosure without redact, onExhausted deliver-best, more than 32
   entries/patterns or 16 fields; an unknown type refuses the deploy. "Could not
-  decide" follows failMode (closed by default). Judge and classifier checks are
-  charged as the tool call toolCallGuardrail. Audit
-  audit:guardrail:tool_call:<type>, metric
+  decide" follows failMode (closed by default for block/reprompt): the model is
+  unreachable, its spend is refused (cost ceiling or tenant budget),
+  arguments_unparseable (not JSON), arguments_too_large (over 256 fields or
+  256 KiB), or tool_guardrail_model_cap (over 20 judge/classifier checks per
+  tool-loop run). Judge and classifier checks are charged as the tool call
+  toolCallGuardrail, so they count toward maxBudgetPerConversation — only
+  with inputPricePer1M/outputPricePer1M in the entry's parameters. Audit
+  audit:guardrail:tool_call:<type> (tool, field, stage live|resume, reason,
+  action), a tool_call_guardrail step in the tool trace, metric
   eddi_guardrail_toolcall_decisions_total by stage and outcome. You cannot write
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
@@ -1613,16 +1635,25 @@ your tool schemas do not cover it, not as a routine first step:
   tool:<pattern>); a group's hitlConfig.review (allowResultEdits, maxEditChars,
   phaseCategories, reasonCodes). Approvers edit through the REST resume body
   (editedAnswer, reasonCode, toolDecisions[].reasonCode), the group approve body
-  (taskDecisions, exclusive with taskApprovals), MCP, the manager banner or
-  Slack's Edit & approve. Failure modes: 400 "this agent does not allow approving
+  (taskDecisions; sending it with taskApprovals is a 400), MCP, the manager
+  banner or Slack's Edit & approve (regular conversations only: a tool pause
+  with exactly one call whose redacted arguments fit 3000 characters; a rule
+  pause only with allowAnswerEdits, platformConfig.hitlShareRuleDrafts "true"
+  on the integration — drafts reach Slack only then — and a draft that fits
+  3000 characters and holds no secret). Save-time 400s: a reasonCodes key is 2-40
+  characters, an upper-case letter then A-Z, 0-9 or _; at most 30 codes, labels <=120 characters; a
+  category must be lower-case letters, digits and . _ : / -, starting with a
+  letter or digit, <=128 characters (e.g. "github.reply"). Failure modes: 400 "this agent does not allow approving
   with an edited answer"; "there is no model answer to edit" (put the pause rule
   directly after the LLM task); a refused edit re-pauses with
   pauseDetails.lastEditRefused (SCREENED_OUT or CONFIG_DRIFT); only a synthesis
   phase's output is editable; a reason code on a plain approval is refused.
   Audit: hitl.approval entries (schema 2) carry decisionOutcome (APPROVED,
   APPROVED_EDITED, REJECTED, AUTO_APPROVED, AUTO_REJECTED, ABORTED; none for a
-  group human turn), approvalCategory, reasonCode, channel (REST, MANAGER, MCP,
-  SLACK, TIMEOUT, SYSTEM), latencyMs and per-unit edit metrics. You still never
+  group human turn), approvalCategory, approvalCategorySource (CONFIG or
+  DERIVED), reasonCode, channel (REST, MANAGER, MCP, SLACK, TIMEOUT, SYSTEM),
+  latencyMs and per-unit edit metrics; a refused edit adds a hitl.edit.refused
+  entry (unitKind, reason, guardrail) joined to its decision by decisionId. You still never
   approve, reject or edit. Docs "hitl-review-and-audit".
 - Approval card context: hitlConfig.approvalContext (agent, at most 8 blocks),
   toolApprovals.rules[].context (at most 4, call.* available) and a group's
@@ -1639,10 +1670,18 @@ your tool schemas do not cover it, not as a routine first step:
   "does not parse", the vault:, eddivault:, connection: and caller: namespaces,
   call.* outside a rule. Shown to the owner, an admin or an approver in the
   manager, REST approval-status and MCP; in Slack only with
-  platformConfig.hitlApprovalContext "true". An item with error render_failed
+  platformConfig.hitlApprovalContext "true". Never carried by the
+  pending-approvals list, the email notification or the in-thread Slack
+  notice. REST/MCP serve it as approvalContext: items[] (label, text,
+  truncated, source = agent, group or rule:<match>, callId, error), truncated
+  and digest (SHA-256 of what was shown); null when none is configured or the
+  conversation is not paused. An item with error render_failed
   or too_large means the template threw or was too big — the pause still
-  happened; metric eddi_hitl_approval_context_render_total with
-  outcome empty usually means a wrong path. Total is capped at 8000 characters
+  happened; metric eddi_hitl_approval_context_render_total counts these as
+  outcome failed and too_large, and outcome empty usually means a wrong path.
+  Example: a writer agent with convertToObject and a responseSchema
+  (draft, sources, claims), stored by a postResponse fromObjectPath as the
+  property gtm, gets blocks reading properties.gtm.draft. Total is capped at 8000 characters
   (eddi.hitl.approval-context.max-total-chars). You cannot change it on an
   existing agent or group (their hitlConfig is not yours to write). Docs
   "hitl-approval-context".
