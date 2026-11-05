@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.attachments.MimeValidator;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.MongoWriteException;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.gridfs.GridFSBucket;
@@ -79,6 +80,14 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     static final long INDEX_TIMEOUT_SECONDS = 10;
 
     private final GridFSBucket gridFSBucket;
+    /**
+     * The same bucket, read from the PRIMARY, for the two reads that must see every
+     * upload already committed: the quota usage and the erasure sweep. The client
+     * reads {@code nearest} ({@code PersistenceModule}); a lagging secondary
+     * undercounted the uploads a quota had admitted, and left committed blobs out
+     * of a conversation's erasure while its discovery records were deleted.
+     */
+    private final GridFSBucket primaryReadBucket;
     private final MongoCollection<Document> filesCollection;
     private final MongoCollection<Document> locksCollection;
 
@@ -100,6 +109,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     @Inject
     public GridFsAttachmentStore(MongoDatabase database) {
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
+        this.primaryReadBucket = gridFSBucket.withReadPreference(ReadPreference.primary());
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
     }
@@ -300,7 +310,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     @Override
     public long deleteByConversation(String conversationId) {
         long count = 0;
-        for (GridFSFile file : gridFSBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
+        for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
             gridFSBucket.delete(file.getObjectId());
             count++;
         }
@@ -347,7 +357,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     private long[] usage(Bson filter) {
         long count = 0;
         long totalBytes = 0;
-        for (GridFSFile file : gridFSBucket.find(filter)) {
+        for (GridFSFile file : primaryReadBucket.find(filter)) {
             count++;
             totalBytes += file.getLength();
         }

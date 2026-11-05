@@ -197,6 +197,7 @@ eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
 eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
+eddi_tool_arguments_refused_total          # Calls refused before the approval gate because their arguments violate the tool's argumentSchema (tag: source)
 eddi_tool_quota_decisions_total            # toolQuotas decisions per call (tags: tool, outcome = allowed | refused | precheck_refused | unavailable | released)
 eddi_tool_quota_store_failures_total      # toolQuotas counter-store operations that failed, calls refused fail closed (tag: operation = reserve | precheck | release)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
@@ -300,6 +301,7 @@ eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
+eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
 ```
 
 ### Standing Team (Cadence) Metrics
@@ -309,6 +311,9 @@ eddi_team_cadence_runs_started_total        # Cadence fires that started a discu
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
+eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
+eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
 
 ### Scheduled Trigger Metrics
@@ -387,6 +392,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_conversation_titles_total{outcome}     # Conversation titles: auto / auto_skipped (already titled) / llm / llm_skipped (owner renamed meanwhile) / llm_empty / llm_busy / llm_refused_budget / llm_refused_unpriced / llm_error / error
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
 ```
 
@@ -536,7 +542,14 @@ agent, produced no LLM latency, token or error signal at all.
 
 ```text
 eddi_llm_request_duration_seconds           # Provider call latency (timer); tags: provider, model, outcome (success|error)
-eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output)
+eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output|cache_read|cache_write|reasoning) — cache_* are subsets of input, reasoning of output
+eddi_llm_cost_usd_total                     # Priced LLM spend in USD per model phase; tags: provider, model, source (task|catalog|mixed|unpriced)
+eddi_llm_calls_unpriced_total               # Model calls with no price ($0); tags: provider, model, site (llm_task|group_system|…)
+eddi_llm_pricing_refused_total              # Calls refused by the strict unpriced policy; tags: site, reason (the policy)
+eddi_llm_price_catalog_entries              # Entries in the deployment price catalog (gauge)
+eddi_llm_price_catalog_oldest_asof_days     # Age of the oldest asOf in the catalog (gauge)
+eddi_llm_price_catalog_load_failures_total  # Failed catalog reads; the last good catalog is kept
+
 eddi_llm_request_errors_total               # Failed calls; tags: provider, model, error (exception simple name)
 ```
 
@@ -683,6 +696,10 @@ eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdic
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
 eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
+eddi_hitl_decision_total                    # Decided HITL units (answer, tool call, phase, task); tags: surface, outcome, channel
+eddi_hitl_edit_chars                        # Summary: characters an approver changed per edit; tag: kind
+eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift, redacted_content)
+eddi_hitl_approval_context_render_total     # approvalContext blocks rendered at pause commit; tags: outcome (ok, empty, failed, too_large), surface (regular, group)
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
@@ -915,6 +932,8 @@ eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
+eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
+eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
@@ -1078,9 +1097,14 @@ eddi_cluster_nats_reconnects_total          # Reconnects of this node
 eddi_cluster_members                        # Members in the presence bucket (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
-eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released|unconfirmed|gone}; unconfirmed = no renewal acknowledged for ttl - 2 x heartbeat
 eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
 eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
+eddi_cluster_lease_adopted_total            # Writes of this node applied by NATS although the reply was lost, recognised and kept {op=create|renew}
+eddi_cluster_lease_orphans_deleted_total    # Leases this node wrote but never took (the reply was lost), deleted
+eddi_cluster_lease_handoffs_total           # Leases handed to the next turn queued on the same node, without a release
+eddi_cluster_lease_renew_failures_total     # Lease renewals that could not reach NATS (the lease stays valid until ttl - 2 x heartbeat)
+eddi_cluster_kv_reopens_total               # KV bucket handles (re)opened {bucket}; a steady rise means calls keep failing on stale handles
 eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
 eddi_cluster_kv_seconds                     # KV calls {bucket, op, outcome} (timer)
 eddi_cluster_kv_cas_conflicts_total         # Lost compare-and-sets {bucket}

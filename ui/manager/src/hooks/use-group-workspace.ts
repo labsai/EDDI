@@ -8,7 +8,7 @@ import {
   type AddCadenceRequest,
 } from "@/lib/api/group-workspace";
 
-const WORKSPACE_KEY = ["group-workspace"] as const;
+export const WORKSPACE_KEY = ["group-workspace"] as const;
 
 /** A group's standing-team workspace — read-repairs on every fetch (see `getGroupWorkspace`'s doc). */
 export function useGroupWorkspace(groupId: string | undefined) {

@@ -1129,6 +1129,30 @@ your tool schemas do not cover it, not as a routine first step:
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;
   both resolve to the same step, so leave a stored one as it is. (A \`rag\` step
   is covered in its own section, which states what can be done with one.)
+- How chat windows show an agent is set in the agent document, all optional:
+  \`appearance\` (\`displayName\` up to 80 characters, \`avatar\` an https URL or a
+  small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
+  6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
+  quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
+  false = HTML in replies is shown as TEXT, true renders it). The rawHtml
+  default is a change: the Chat UI used to render HTML for every agent, so an
+  agent whose replies contain HTML needs \`rawHtml: true\` (docs page
+  "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
+  400 naming the field. Clients read both from the agent profile
+  (/agents/{agentId}/profile, deployed version). You do not edit agent
+  documents: point the admin at the agent's "Presentation & titles" section.
+- Conversations carry \`title\`, \`titleSource\` (AUTO, LLM or USER) and \`pinned\`
+  on the conversation listing. The default title is the first user message that
+  was not secret (never a secretInput turn, a vaulted input or a guardrail-
+  withheld one), cut to eddi.conversations.title-max-length (default 80). An
+  agent's \`titleGeneration\` (\`enabled\`, default false; \`llmProvider\`,
+  \`llmModel\` required when on; \`parameters\` for credentials as vault
+  references; \`maxLength\` default 60) asks a model once per conversation, in
+  the background, charged to the tenant cost budget (spend kind
+  CONVERSATION_TITLE); a failure leaves the default title. Renaming and pinning
+  belong to the conversation's owner (PATCH on the conversation, not one of your
+  tools), and a title the owner set is never replaced. Metric:
+  eddi_conversation_titles_total{outcome}.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

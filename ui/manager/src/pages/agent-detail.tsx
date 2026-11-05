@@ -1,4 +1,5 @@
 import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
+import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
 import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
@@ -581,6 +582,7 @@ export function AgentDetailPage() {
     touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
     touched("ratingConfig"),
+    touched("appearance", "conversationControls", "titleGeneration"),
     touched("hitlConfig"),
     touched("channels"),
   ].filter(Boolean).length;
@@ -1100,6 +1102,14 @@ export function AgentDetailPage() {
         disabled={isSaving}
         modified={touched("ratingConfig")}
         onValidityChange={setRatingInvalid}
+      />
+
+      {/* Appearance, chat controls and conversation titles */}
+      <AgentPresentationSection
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("appearance", "conversationControls", "titleGeneration")}
       />
 
       {/* Spend limits */}

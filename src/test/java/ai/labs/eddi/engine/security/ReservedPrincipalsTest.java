@@ -57,6 +57,8 @@ class ReservedPrincipalsTest {
             Map.entry("ref:", "cache key"),
             Map.entry("name:", "cache key"),
             Map.entry("httpcall:", "cache key"),
+            Map.entry("http:",
+                    "tool-approval address of an httpcall tool (http:<toolName>, as ToolApprovalGate.addressesOf builds it; ApiAgentSyncService matches exemptions against it)"),
             Map.entry("openai:", "token-estimator cache key"),
             Map.entry("s:", "hash input tag"),
             Map.entry("c:", "hash input tag"),
@@ -69,6 +71,8 @@ class ReservedPrincipalsTest {
             Map.entry("event:", "webhook event dedup fallback key"),
             Map.entry("tool:", "tool quota counter name (ToolQuotaRules)"),
             Map.entry("pool:", "tool quota counter name (ToolQuotaRules)"),
+            Map.entry("rule:", "derived HITL approval category of a rule pause (ApprovalCategories)"),
+            Map.entry("hitl:", "transcript speaker id of a reviewer's SYNTHESIS edit (GroupReviewEditor)"),
             Map.entry("v2:", "ciphertext/HMAC format version"),
             Map.entry("v3:", "ciphertext/HMAC format version"),
             Map.entry("v4:", "ciphertext/HMAC format version"),
@@ -97,7 +101,8 @@ class ReservedPrincipalsTest {
             Map.entry("loop:", "inbound mail refusal reason"),
             Map.entry("unauthenticated:", "inbound mail refusal reason"),
             Map.entry("failed:", "inbound mail refusal reason"),
-            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"));
+            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"),
+            Map.entry("p:", "in-memory route step into a named property (ArtifactSchemaComplexity's recursion check)"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")

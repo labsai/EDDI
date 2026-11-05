@@ -554,6 +554,10 @@ altogether. The shipped defaults cover
 > `checksum/secret` annotations, so a ConfigMap or Secret change alters the
 > Deployment spec and `helm upgrade` rolls the pod.
 
+### Update check (Helm)
+
+`eddi.updateCheck.enabled` (default `true`) becomes `EDDI_UPDATE_CHECK_ENABLED`. The check — one anonymous request a day to `api.github.com`, and a notification for the administrators when a newer release exists — is on unless you set it to `false`, which stops it entirely, even the first check after the first start, and locks the switch on the Manager's Updates page. See [Docker → Update check](docker.md#update-check).
+
 ### White-labeling (Helm)
 
 `eddi.branding.*` in `values.yaml` seeds the deployment's brand: product name, tagline, colours, the Powered-by and update-check toggles, `locked` (the values become the whole brand and the Manager's Branding page turns read-only) and `assets.configMap`, an existing ConfigMap of images mounted read-only as `eddi.branding.assets-dir`. Everything is empty by default and an empty value is not rendered. The chart does not mount a login theme into its in-cluster Keycloak; the theme ZIP the Branding page offers has to reach Keycloak the way you manage it. See [White-Labeling → Helm](white-labeling.md#helm).
@@ -793,6 +797,15 @@ namespaced `Role`/`RoleBinding` instead of a cluster-wide `ClusterRole`. On an
 existing install delete the old objects by hand — `kubectl apply -k` does not
 prune: `kubectl delete clusterrolebinding eddi-prometheus` and
 `kubectl delete clusterrole eddi-prometheus`.
+
+Prometheus has no login of its own, so the component also ships a `NetworkPolicy`
+(`prometheus-network-policy`) that admits only the Grafana pod on port 9090; other pods
+in the cluster cannot query it or list its scrape targets (`kubectl port-forward` still
+works). To let another client in, such as a federating Prometheus, patch its pod selector
+into that policy's `from` list. A client in another namespace needs a
+`namespaceSelector` **in the same `from` entry** as its `podSelector` (a `podSelector`
+alone selects pods in the policy's own namespace only). It takes effect only where the
+CNI enforces NetworkPolicy.
 
 With the auth component, `/q/metrics` requires a token and an anonymous scrape
 answers 401 — see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on).

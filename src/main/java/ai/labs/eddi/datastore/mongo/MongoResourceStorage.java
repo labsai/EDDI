@@ -12,6 +12,7 @@ import ai.labs.eddi.utils.StringUtilities;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
+import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -30,6 +31,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -72,6 +74,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     protected MongoCollection<Document> historyCollection;
     protected IDocumentBuilder documentBuilder;
 
+    /** Lazily built {@link #primaryReads()} view; {@code null} until asked for. */
+    private volatile MongoResourceStorage<T> primaryView;
+
     public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this(database, collectionName, documentBuilder, documentType, new String[0]);
     }
@@ -99,6 +104,33 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             ensureIndex(database, currentCollection, Indexes.ascending(index), false);
             ensureIndex(database, historyCollection, Indexes.ascending(index), false);
         });
+    }
+
+    /**
+     * The view returned by {@link #primaryReads()}: same documents, other read
+     * preference.
+     */
+    private MongoResourceStorage(MongoResourceStorage<T> source) {
+        this.documentType = source.documentType;
+        this.documentBuilder = source.documentBuilder;
+        this.currentCollection = source.currentCollection.withReadPreference(ReadPreference.primary());
+        this.historyCollection = source.historyCollection.withReadPreference(ReadPreference.primary());
+        this.primaryView = this;
+    }
+
+    /**
+     * The same collections read with {@link ReadPreference#primary()}. The client
+     * default is {@code nearest()} (PersistenceModule), which can serve a lagging
+     * secondary. Indexes are not re-ensured: the source already did.
+     */
+    @Override
+    public IResourceStorage<T> primaryReads() {
+        MongoResourceStorage<T> view = primaryView;
+        if (view == null) {
+            view = new MongoResourceStorage<>(this);
+            primaryView = view;
+        }
+        return view;
     }
 
     /**
@@ -398,6 +430,28 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         }
         // One updateOne $set on the live row: no read, and no other field is rewritten.
         return currentCollection.updateOne(Filters.eq(ID_FIELD, new ObjectId(id)), Updates.set(fieldName, value)).getMatchedCount() > 0;
+    }
+
+    @Override
+    public boolean setFieldsIf(String id, Map<String, Object> fields, String guardField, Collection<String> allowedGuardValues) {
+        checkNotNull(id, "id");
+        IResourceStorage.requireSettableFields(fields, guardField);
+        if (!ObjectId.isValid(id)) {
+            return false;
+        }
+        Bson filter = Filters.eq(ID_FIELD, new ObjectId(id));
+        if (guardField != null) {
+            // eq(field, null) matches an absent field as well as an explicit null.
+            Bson unset = Filters.eq(guardField, null);
+            filter = Filters.and(filter, allowedGuardValues == null || allowedGuardValues.isEmpty()
+                    ? unset
+                    : Filters.or(unset, Filters.in(guardField, allowedGuardValues)));
+        }
+        List<Bson> updates = new ArrayList<>(fields.size());
+        fields.forEach((name, value) -> updates.add(Updates.set(name, value)));
+        // One updateOne on the live row: the condition and the write are one atomic
+        // step.
+        return currentCollection.updateOne(filter, Updates.combine(updates)).getMatchedCount() > 0;
     }
 
     @Override

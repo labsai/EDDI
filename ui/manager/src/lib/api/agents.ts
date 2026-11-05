@@ -51,6 +51,43 @@ export interface AgentDescriptor {
   originId?: string;
 }
 
+/** `appearance` on the agent (backend: AgentAppearance). */
+export interface AgentAppearance {
+  /** At most 80 characters; absent shows the agent's name. */
+  displayName?: string;
+  /** An https URL or a data:image/(png|jpeg|gif|webp);base64 URI of at most 64 KB. */
+  avatar?: string;
+  /** `#rgb` or `#rrggbb`. */
+  accentColor?: string;
+  /** Up to 6 starters of at most 200 characters each. */
+  starters?: string[];
+}
+
+/** `conversationControls` on the agent (backend: ConversationControls). */
+export interface ConversationControls {
+  undo?: boolean;
+  redo?: boolean;
+  attachments?: boolean;
+  rating?: boolean;
+  quickReplies?: boolean;
+  streaming?: boolean;
+  /** Off unless `true`: HTML in replies is shown as text. */
+  rawHtml?: boolean;
+}
+
+/** `titleGeneration` on the agent (backend: TitleGeneration). */
+export interface TitleGeneration {
+  enabled?: boolean;
+  llmProvider?: string;
+  llmModel?: string;
+  parameters?: Record<string, string>;
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+  /** 10..200, default 60. */
+  maxLength?: number;
+  instructions?: string;
+}
+
 export interface Agent {
   workflows?: string[];
   channels?: ChannelConnector[];
@@ -83,6 +120,15 @@ export interface Agent {
    * off. See `RatingConfigSection` and docs/conversation-ratings.md.
    */
   ratingConfig?: AgentRatingConfig;
+  /** How chat windows present the agent. All optional; validated on save. */
+  appearance?: AgentAppearance;
+  /**
+   * Which chat controls are offered. Absent switches keep the control, except
+   * `rawHtml`, which is off unless `true`.
+   */
+  conversationControls?: ConversationControls;
+  /** Model-written conversation titles; off unless `enabled: true`. */
+  titleGeneration?: TitleGeneration;
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**

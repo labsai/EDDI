@@ -22,6 +22,7 @@ the GIL has not scheduled yet.
 """
 import argparse
 import asyncio
+import codecs
 import json
 import os
 import re
@@ -30,6 +31,9 @@ import time
 import urllib.parse
 
 TIMEOUT_S = 180
+# Longest SSE frame held while its blank line has not arrived: the 1 MiB the connection's reader
+# already allows a header line (open_connection's limit). Longer, and the turn fails as a protocol error.
+MAX_SSE_FRAME = 1 << 20
 
 
 def percentiles(values):
@@ -64,9 +68,14 @@ class Response:
                 if size == 0:
                     await self.reader.readline()
                     return
-                data = await self.reader.readexactly(size)
+                # In bounded pieces: reading the whole declared chunk at once would allocate a
+                # peer-chosen size before text() or the SSE parser could stop reading.
+                left = size
+                while left > 0:
+                    data = await self.reader.readexactly(min(65536, left))
+                    left -= len(data)
+                    yield data
                 await self.reader.readline()  # CRLF after the chunk
-                yield data
         elif self.remaining is not None:
             while self.remaining > 0:
                 data = await self.reader.read(min(65536, self.remaining))
@@ -81,11 +90,17 @@ class Response:
                     return
                 yield data
 
-    async def text(self):
-        out = b""
+    async def text(self, limit=65536):
+        """The body, read until it ends or `limit` bytes are held. The pieces are joined once (a
+        growing bytes object is copied whole on every append), and the rest of an oversized body is
+        not read: the callers only look at an error body or discard it."""
+        parts, size = [], 0
         async for c in self.chunks():
-            out += c
-        return out.decode("utf-8", "replace")
+            parts.append(c)
+            size += len(c)
+            if size >= limit:
+                break
+        return b"".join(parts)[:limit].decode("utf-8", "replace")
 
 
 async def request(base, method, path, body=None, headers=None):
@@ -119,11 +134,35 @@ async def request(base, method, path, body=None, headers=None):
 async def sse_events(resp):
     """(arrival time, event name, data) per SSE event, timestamped when its last byte was read."""
     buf = ""
+    # chunks() hands over body pieces of at most 64 KiB, cut wherever the size falls. A CRLF
+    # (or a multi-byte character) can be split across two of them, so a trailing "\r" is held
+    # back until the next piece shows whether a "\n" follows, and the decoder is incremental.
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    held_cr = False
     async for chunk in resp.chunks():
         t = time.perf_counter()
-        buf += chunk.decode("utf-8", "replace").replace("\r\n", "\n")
-        while "\n\n" in buf:
-            raw, buf = buf.split("\n\n", 1)
+        text = ("\r" if held_cr else "") + decoder.decode(chunk)
+        held_cr = text.endswith("\r")
+        if held_cr:
+            text = text[:-1]
+        # The held tail contains no complete "\n\n" (the last scan found none), so the scan resumes
+        # one character before the new text: a delimiter split across two pieces is still found,
+        # and an incomplete frame is not rescanned from its start for every 64 KiB piece.
+        scan = max(0, len(buf) - 1)
+        buf += text.replace("\r\n", "\n")
+        # An advancing offset, with the unconsumed tail cut once per chunk: splitting the buffer
+        # per frame copies the whole remainder each time, which a chunk packed with empty frames
+        # turns into quadratic work on the loop every virtual user shares.
+        pos = 0
+        while True:
+            end = buf.find("\n\n", max(pos, scan))
+            if end < 0:
+                break
+            if end - pos > MAX_SSE_FRAME:
+                # The same limit for a frame whose end arrived in this piece, so the verdict does
+                # not depend on where the 64 KiB boundaries fell.
+                raise ValueError(f"SSE frame longer than {MAX_SSE_FRAME} characters")
+            raw, pos = buf[pos:end], end + 2
             name, data = "message", []
             for line in raw.split("\n"):
                 if line.startswith(":"):
@@ -136,6 +175,10 @@ async def sse_events(resp):
                     data.append(value)
             if data or name != "message":
                 yield t, name, "\n".join(data)
+        buf = buf[pos:]
+        if len(buf) > MAX_SSE_FRAME:
+            # vu_loop counts a ValueError as a "protocol" error, like any other malformed stream.
+            raise ValueError(f"SSE frame longer than {MAX_SSE_FRAME} characters")
 
 
 class Stats:

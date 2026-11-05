@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
@@ -122,6 +123,7 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlApprovalTimeout(conversationMemory.getHitlApprovalTimeout());
         snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
         snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
+        snapshot.setHitlApprovalContext(conversationMemory.getHitlApprovalContext());
         return snapshot;
     }
 
@@ -186,6 +188,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlApprovalTimeout(snapshot.getHitlApprovalTimeout());
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
+        conversationMemory.setHitlApprovalContext(snapshot.getHitlApprovalContext());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
 
@@ -903,6 +906,9 @@ public class ConversationMemoryUtilities {
         if (snapshot.getHitlPendingToolCalls() != null) {
             snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
         }
+        // Approver-facing card context (draft, sources, tool arguments): served by
+        // approval-status to the roles that may decide, never by the raw read.
+        snapshot.setHitlApprovalContext(null);
         redactRevisionCandidateTranscripts(snapshot.getConversationSteps());
         redactRevisionCandidateTranscripts(snapshot.getRedoCache());
         return snapshot;
@@ -1067,6 +1073,10 @@ public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
         stripRequestFingerprintsForRead(snapshot);
         stripRevisionCandidates(snapshot);
+        if (snapshot != null) {
+            // Served to the approver, but through the current filter like the arguments.
+            snapshot.setHitlApprovalContext(ApprovalContextViews.reRedacted(snapshot.getHitlApprovalContext()));
+        }
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
             return snapshot;
         }

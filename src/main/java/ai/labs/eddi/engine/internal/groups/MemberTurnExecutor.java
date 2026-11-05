@@ -162,6 +162,7 @@ public class MemberTurnExecutor {
             // a timeout or cancellation after the write must not swallow the event.
             // Drained even with a null listener so the queue never grows unbounded.
             announceArtifactChanges(gc, listener);
+            HandoffAnnouncer.announce(gc, listener);
         }
     }
 
@@ -490,7 +491,7 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId);
+                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
                         if (graceful != null) {
                             return graceful;
                         }
@@ -667,20 +668,26 @@ public class MemberTurnExecutor {
      * infrastructure failure likewise returns {@code null} so the fallback still
      * terminates the turn cleanly.
      *
-     * {@code input} is unused and stays: static analysis flags it every run, but
-     * the caller passes the member's turn input positionally alongside eight other
-     * arguments, and this method is the natural home for a retry that re-sends it —
-     * which the plan's I7 (delegation hardening) will need. Dropping one parameter
-     * from the middle of a nine-argument call is also the shape of change most
-     * likely to be silently mis-applied at the call site.
-     *
      * @return a real contribution entry on graceful success, or {@code null} to
      *         signal "fall back to SKIP + cancel"
      */
     public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                     String input, int timeoutSeconds, int phaseIdx,
+                                                     int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId) {
+        return tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId,
+                member.agentId());
+    }
+
+    /**
+     * As above, with the key the member turn attributes its cost under
+     * ({@code GroupCostLedger}) — the member's agent id unless the turn runs in a
+     * separately keyed conversation.
+     */
+    public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                     int timeoutSeconds, int phaseIdx,
+                                                     DiscussionPhase phase, TranscriptEntryType entryType,
+                                                     String targetAgentId, String costKey) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
@@ -692,6 +699,9 @@ public class MemberTurnExecutor {
 
         var resumeFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
         try {
+            // Detailed, as the member's say: the default summary projection drops the
+            // dynamic-agent tracking keys, so agents created during the resumed run
+            // would never reach the group's cleanup registry.
             conversationService.resumeConversation(convId, decision,
                     new ConversationResponseHandler() {
                         @Override
@@ -705,7 +715,7 @@ public class MemberTurnExecutor {
                             // "could not complete" so the caller falls back.
                             resumeFuture.complete(null);
                         }
-                    });
+                    }, true, true, List.of());
         } catch (Exception e) {
             LOGGER.warnf("Graceful tool-pause resume failed to start for member '%s' (conv %s): %s — falling back to SKIP+cancel",
                     member.agentId(), convId, e.getMessage());
@@ -725,14 +735,21 @@ public class MemberTurnExecutor {
             return null;
         }
 
+        // Whatever the resumed run did — answered, abstained or paused again — it
+        // created what it created and spent what it spent: the same bookkeeping as
+        // the ordinary turn, before any return, so the next member's ceiling check
+        // sees this spend.
+        if (resumed != null) {
+            GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
+            GroupCostLedger.accumulateMemberCost(gc, costKey, resumed);
+        }
+
         // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
         if (resumed == null || resumed.getConversationState() == ConversationState.AWAITING_HUMAN) {
             LOGGER.warnf("Member '%s' re-paused after graceful tool rejection (conv %s) — falling back to SKIP+cancel",
                     member.agentId(), convId);
             return null;
         }
-
-        GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
 
         String response = contextBuilder.extractResponse(resumed);
         if ((response == null || response.isEmpty())

@@ -23,9 +23,33 @@ public class DiscussionControlToken {
     /** For IMMEDIATE cancel — optional handle to the currently-blocking future. */
     private volatile CompletableFuture<?> activeFuture;
 
+    /**
+     * Who signalled the cancel, for the audit the running leg writes on its own
+     * thread (which carries no identity of the canceller); null when unknown.
+     */
+    private volatile String signalledBy;
+
     /** Set the control signal. Thread-safe, idempotent. */
     public void setSignal(ControlSignal signal) {
         this.signal.set(signal);
+    }
+
+    /**
+     * Set the control signal and record who sent it.
+     *
+     * @param signalledBy
+     *            the caller's user id, or null when there is none
+     */
+    public void setSignal(ControlSignal signal, String signalledBy) {
+        if (signalledBy != null) {
+            this.signalledBy = signalledBy;
+        }
+        this.signal.set(signal);
+    }
+
+    /** The caller that signalled the cancel, or null. */
+    public String getSignalledBy() {
+        return signalledBy;
     }
 
     /** Read the current signal. Thread-safe. */

@@ -1457,6 +1457,11 @@ class PostgresResourceStorageTest {
         }
     }
 
+    @Test
+    void primaryReadsIsTheSameStorageBecausePostgresHasNoReplicas() {
+        assertSame(storage, storage.primaryReads());
+    }
+
     // Simple test POJO
     record TestConfig(String name) {
     }

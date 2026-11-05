@@ -754,6 +754,7 @@ class McpAdminToolsBranchCoverageTest {
             when(scheduleStore.createSchedule(any())).thenReturn("id");
             when(jsonSerialization.serialize(any())).thenReturn("{}");
 
+            tools.minScheduleIntervalSeconds = 1; // the default floor (60s) would refuse a 30s heartbeat
             tools.createSchedule("agent1", "HEARTBEAT", null, 30L, null, "test", null, null, null, null);
             // 30 seconds → "Every 30 seconds"
             verify(scheduleStore).createSchedule(any());

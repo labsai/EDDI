@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.groups.model.HandoffPolicies;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
@@ -14,6 +15,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -337,6 +339,12 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Double outputPricePer1M;
 
+        /**
+         * Cache and long-context prices for this task's model (docs/model-pricing.md).
+         * Null = from the catalog.
+         */
+        private ModelPricing pricing;
+
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
 
@@ -361,6 +369,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.5.0
          */
         private ToolQuotaConfig toolQuotas;
+
+        /**
+         * Cross-team handoff: the teams this agent may file tasks into through the
+         * {@code handoff_to_team} tool. Absent means the tool is never assembled. A
+         * target only receives when its own {@code handoffConfig.accept} lists this
+         * agent (two-sided consent) — see {@code docs/team-handoff.md}.
+         *
+         * @since 6.7.0
+         */
+        private HandoffPolicies.TeamHandoffConfig teamHandoff;
 
         /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
@@ -539,6 +557,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.6.0
          */
         private List<String> nonBlankFields;
+
+        /**
+         * Renames applied to the top-level keys of a parsed {@code convertToObject}
+         * reply before the shape is validated: <code>{"htmlResponseStr":
+         * "htmlResponseText"}</code> renames {@code htmlResponseStr} to
+         * {@code htmlResponseText} when the target key is absent (when both exist the
+         * target wins and nothing is renamed). Explicit and designer-controlled; there
+         * is no fuzzy matching. Null or empty (default) renames nothing; it is
+         * independent of {@code responseValidation.enabled}. Names must be plain
+         * top-level property names (checked at save time).
+         *
+         * @since 6.7.0
+         */
+        private Map<String, String> fieldAliases;
 
         // === Multi-Model Cascade ===
 
@@ -974,6 +1006,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.outputPricePer1M = outputPricePer1M;
         }
 
+        public ModelPricing getPricing() {
+            return pricing;
+        }
+
+        public void setPricing(ModelPricing pricing) {
+            this.pricing = pricing;
+        }
+
         public Boolean getEnableCostTracking() {
             return enableCostTracking;
         }
@@ -1020,6 +1060,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {
+            return teamHandoff;
+        }
+
+        public void setTeamHandoff(HandoffPolicies.TeamHandoffConfig teamHandoff) {
+            this.teamHandoff = teamHandoff;
         }
 
         public Integer getDefaultToolTimeoutMs() {
@@ -1108,6 +1156,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setNonBlankFields(List<String> nonBlankFields) {
             this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
+        }
+
+        public Map<String, String> getFieldAliases() {
+            return fieldAliases;
+        }
+
+        public void setFieldAliases(Map<String, String> fieldAliases) {
+            this.fieldAliases = fieldAliases != null ? new LinkedHashMap<>(fieldAliases) : null;
         }
 
         public ModelCascadeConfig getModelCascade() {
@@ -1378,10 +1434,47 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Action when a {@code convertToObject} reply is not valid JSON even after the
          * local repair ({@code ModelOutputParser}: fence stripping, extraction).
-         * {@code "retry"} re-asks the same model with a corrective message. Default:
-         * "ignore" — the raw reply is stored as a string, as before.
+         * {@code "retry"} re-asks the same model with a corrective message.
+         * {@code "wrap"} (needs {@link #wrapField}) wraps a plain-text reply into an
+         * object instead, with no second model call; a reply that cannot be wrapped
+         * (broken JSON, over {@link #wrapMaxChars}) gets {@link #fallbackAction}.
+         * Default: "ignore" — the raw reply is stored as a string, as before.
          */
         private String onInvalidJson = "ignore";
+
+        /** Default of {@link #wrapMaxChars}. */
+        public static final int DEFAULT_WRAP_MAX_CHARS = 20_000;
+
+        /**
+         * Used with {@code onInvalidJson: "wrap"} (required then): the top-level
+         * property a non-JSON reply is wrapped into, for example
+         * {@code htmlResponseText}, giving <code>{ "htmlResponseText": "&lt;the
+         * text&gt;" }</code>. The wrapped object is validated like any parsed reply (so
+         * {@code nonBlankFields} still applies) and recorded as outcome
+         * {@code wrapped}. Text that starts with <code>{</code> or <code>[</code> is
+         * broken JSON, not prose, and is never wrapped ({@link #fallbackAction}
+         * applies). Null (default) = no wrapping, today's behaviour.
+         *
+         * @since 6.7.0
+         */
+        private String wrapField;
+
+        /**
+         * Optional object merged into a wrapped reply for the other fields, for example
+         * <code>{"quickReplies": []}</code>, so the client still gets a valid shape.
+         * Never overrides {@link #wrapField}. Null (default) merges nothing.
+         *
+         * @since 6.7.0
+         */
+        private Map<String, Object> wrapDefaults;
+
+        /**
+         * Longest reply, in characters, that {@code onInvalidJson: "wrap"} wraps; a
+         * longer one counts as not wrappable. Default 20000.
+         *
+         * @since 6.7.0
+         */
+        private int wrapMaxChars = DEFAULT_WRAP_MAX_CHARS;
 
         /**
          * Action when a reply parses as JSON but breaks the response shape
@@ -1455,6 +1548,30 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setOnInvalidJson(String onInvalidJson) {
             this.onInvalidJson = onInvalidJson;
+        }
+
+        public String getWrapField() {
+            return wrapField;
+        }
+
+        public void setWrapField(String wrapField) {
+            this.wrapField = wrapField;
+        }
+
+        public Map<String, Object> getWrapDefaults() {
+            return wrapDefaults;
+        }
+
+        public void setWrapDefaults(Map<String, Object> wrapDefaults) {
+            this.wrapDefaults = wrapDefaults != null ? new LinkedHashMap<>(wrapDefaults) : null;
+        }
+
+        public int getWrapMaxChars() {
+            return wrapMaxChars;
+        }
+
+        public void setWrapMaxChars(int wrapMaxChars) {
+            this.wrapMaxChars = wrapMaxChars;
         }
 
         public String getOnSchemaMismatch() {
@@ -1855,9 +1972,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> perToolLimits;
 
         /**
-         * Truncation strategy: "truncate" (default), "paginate", or "summarize".
+         * Truncation strategy: "headTail" (default), "truncate", "paginate", or
+         * "summarize". Matched case-insensitively.
          * <ul>
-         * <li>{@code truncate} — hard cut at limit with note (backward compatible)</li>
+         * <li>{@code headTail} — keep the start and the end, drop the middle; the
+         * default when unset, because errors and exit codes sit at the end</li>
+         * <li>{@code truncate} — hard cut at limit with note, keeping the start only
+         * (the default before 6.7)</li>
          * <li>{@code paginate} — split into pages, return first page + responseId</li>
          * <li>{@code summarize} — route through cheap model, fallback to truncate</li>
          * </ul>
@@ -2162,6 +2283,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private JudgeModelConfig judgeModel;
 
         /**
+         * Optional sentence telling the judge model what an acceptable answer must do,
+         * e.g. "The answer gives concrete steps and does not tell the user to contact
+         * support". Added to the judge's instructions; the judge then rates the
+         * probability that the answer addresses the user's request <em>and</em> meets
+         * it. Only the judge reads it, so it has no effect on the {@code heuristic},
+         * {@code structured_output} or {@code none} strategies. Null = no criterion.
+         */
+        private String acceptanceCriterion;
+
+        /**
          * Optional overrides for the {@code heuristic} evaluation strategy. When null,
          * the built-in English defaults are used. Enables per-deployment localization
          * of hedging/refusal phrases and thresholds.
@@ -2256,6 +2387,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJudgeModel(JudgeModelConfig judgeModel) {
             this.judgeModel = judgeModel;
+        }
+
+        public String getAcceptanceCriterion() {
+            return acceptanceCriterion;
+        }
+
+        public void setAcceptanceCriterion(String acceptanceCriterion) {
+            this.acceptanceCriterion = acceptanceCriterion;
         }
 
         public HeuristicConfig getHeuristic() {
@@ -2355,6 +2494,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Double outputPricePer1M;
 
         /**
+         * Cache and long-context prices for this step's model. Null = from the catalog.
+         */
+        private ModelPricing pricing;
+
+        /**
          * Overrides {@code responseValidation.maxRetries} for this step: how many
          * corrective same-model re-asks it gets before the cascade escalates. 0 for an
          * expensive last-resort model. Null inherits the task's value. Clamped to 0..3.
@@ -2413,6 +2557,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public Double getOutputPricePer1M() {
             return outputPricePer1M;
+        }
+
+        public ModelPricing getPricing() {
+            return pricing;
+        }
+
+        public void setPricing(ModelPricing pricing) {
+            this.pricing = pricing;
         }
 
         public void setOutputPricePer1M(Double outputPricePer1M) {
