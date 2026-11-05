@@ -5,7 +5,8 @@
    ────────────────────────────────────────────── */
 
 import { Brain, Wrench } from "lucide-react";
-import { t } from "@/i18n";
+import { englishText, type Translate } from "../i18n/text";
+import { useConversationText } from "../react/hooks";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
@@ -55,9 +56,9 @@ export function TypingIndicator() {
  * state here exists only mid-turn — so the widget announces this text from a
  * status region outside the transcript instead.
  */
-export function indicatorStatusText(escalating: boolean, tool: string | null): string {
-  if (tool) return t("indicator.tool", { tool });
-  return escalating ? t("indicator.escalating") : t("indicator.thinking");
+export function indicatorStatusText(escalating: boolean, tool: string | null, t: Translate = englishText): string {
+  if (tool) return t("conversation.indicator.tool", { tool });
+  return escalating ? t("conversation.indicator.escalating") : t("conversation.indicator.thinking");
 }
 
 export function ThinkingIndicator({
@@ -67,6 +68,7 @@ export function ThinkingIndicator({
   escalating?: boolean;
   tool?: string | null;
 }) {
+  const t = useConversationText();
   const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
   // Hidden from assistive technology: the transcript is aria-busy while this is
   // on screen, so ChatWidget announces indicatorStatusText() from a status
@@ -83,7 +85,7 @@ export function ThinkingIndicator({
           ) : (
             <Brain className="indicator__brain" size="1em" />
           )}
-          <span>{indicatorStatusText(escalating, tool)}</span>
+          <span>{indicatorStatusText(escalating, tool, t)}</span>
         </div>
       </div>
     </div>

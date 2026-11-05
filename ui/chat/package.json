@@ -14,19 +14,12 @@
     "lint": "eslint src/ --max-warnings 0"
   },
   "dependencies": {
+    "@eddi/conversation": "*",
     "@eddi/core": "*",
     "@eddi/ui": "*",
-    "katex": "^0.19.1",
     "lucide-react": "^1.59.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-markdown": "^10.1.0",
-    "rehype-highlight": "^7.0.2",
-    "rehype-katex": "^7.0.1",
-    "rehype-raw": "^7.0.0",
-    "rehype-sanitize": "^6.0.0",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

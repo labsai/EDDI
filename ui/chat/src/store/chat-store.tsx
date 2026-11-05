@@ -1,55 +1,48 @@
 /* ──────────────────────────────────────────────
    EDDI Chat — State Management
-   Lightweight Context + useReducer (no zustand).
+
+   The conversation itself is an `AgentConversation` from @eddi/conversation:
+   the turn state machine, its state and its reducer are shared with every
+   other agent surface. This provider owns one controller, and keeps beside it
+   what is the widget's own: the embedding config, the agent's name, the review
+   notice and the rating profile. `useChatState()` reads both as one object and
+   `useChatDispatch()` routes each action to its owner, so components keep one
+   way to read and one way to write.
    ────────────────────────────────────────────── */
 
 import {
   createContext,
+  useCallback,
   useContext,
+  useMemo,
   useReducer,
-  useRef,
+  useState,
   type Dispatch,
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
-import type { AttachmentResult } from "@eddi/core";
-import type { ApprovalStatus } from "@eddi/core";
+import {
+  AgentConversation,
+  ConversationProvider,
+  ConversationTextProvider,
+  conversationReducer,
+  initialConversationState,
+  isConversationAction,
+  useAgentConversation,
+  useConversationContext,
+  type AgentConversationState,
+  type AgentTransport,
+  type ConversationAction,
+} from "@eddi/conversation";
+import type { ChatConfig } from "@/types";
 import { agentAppearanceLayer, brandConfigLayer } from "@/api/brand";
 import type { RatingProfile } from "@eddi/core";
+import { t } from "@/i18n";
 
 /* ─── State ───────────────────────────────────── */
 
-export interface ChatState {
-  messages: ChatMessage[];
-  conversationId: string | null;
-  conversationState: ConversationState | null;
-  /**
-   * Why an ENDED conversation ended, when the backend said (snapshot
-   * `endReason`). Null while the conversation is not ended, or when no reason
-   * is known.
-   */
-  endReason: string | null;
-  quickReplies: QuickReply[];
-  isProcessing: boolean;
-  isThinking: boolean;
-  /**
-   * True between a `cascade_escalation` event and the next token. The cascade
-   * has given up on a cheaper model and moved to a more capable one; the user
-   * sees only that the agent is working harder, never the model, confidence or
-   * cost — those stay admin-side in EDDI-Manager.
-   */
-  isEscalating: boolean;
-  /**
-   * Name of the tool the agent is running right now, from the live `tool_call`
-   * event, or null. There is no "tool finished" event, so resumed output is the
-   * completion signal: the next token clears it, as does anything that ends the
-   * turn. Transient by design — it drives the status line only and never
-   * becomes part of the transcript.
-   */
-  activeTool: string | null;
-  undoAvailable: boolean;
-  redoAvailable: boolean;
+/** What the widget keeps beside the conversation. */
+export interface ChatHostState {
   agentName: string | null;
   /**
    * Shown before the first message when the agent's maintainers may read this
@@ -62,27 +55,9 @@ export interface ChatState {
    */
   ratingProfile: RatingProfile | null;
   config: ChatConfig;
-  /** Set when the backend requests a specific input field (e.g. password). */
-  activeInputField: InputField | null;
-  /** Set when the user toggles the 🔒 secret mode on the chat input. */
-  isSecretMode: boolean;
-  /**
-   * Files uploaded but not yet attached to a turn. They travel with the NEXT
-   * message as attachment_N context entries — uploading alone does not send
-   * them to the agent.
-   */
-  pendingAttachments: AttachmentResult[];
-  /**
-   * Set while the conversation is AWAITING_HUMAN. There is no push channel on
-   * the 1:1 surface, so this is refreshed by polling approval-status.
-   */
-  approvalStatus: ApprovalStatus | null;
-  /**
-   * Text put back into the composer after the server refused the turn
-   * (409 — never consumed). Null once the composer has picked it up.
-   */
-  restoreDraft: string | null;
 }
+
+export type ChatState = AgentConversationState & ChatHostState;
 
 /**
  * The title a header shows when nobody overrode it and nothing is branded. A
@@ -116,375 +91,60 @@ const defaultConfig: ChatConfig = {
 };
 
 export const initialState: ChatState = {
-  messages: [],
-  conversationId: null,
-  conversationState: null,
-  endReason: null,
-  quickReplies: [],
-  isProcessing: false,
-  isThinking: false,
-  isEscalating: false,
-  activeTool: null,
-  undoAvailable: false,
-  redoAvailable: false,
+  ...initialConversationState,
   agentName: null,
   reviewNotice: null,
   ratingProfile: null,
   config: defaultConfig,
-  activeInputField: null,
-  isSecretMode: false,
-  pendingAttachments: [],
-  approvalStatus: null,
-  restoreDraft: null,
 };
 
 /* ─── Actions ─────────────────────────────────── */
 
-export type ChatAction =
-  | { type: "SET_CONVERSATION_ID"; id: string | null }
-  | {
-      type: "SET_CONVERSATION_STATE";
-      state: ConversationState;
-      /**
-       * The snapshot's `endReason`, from a read that carries one (`null` when
-       * it had none). Omit it from sources that never do — the trimmed `done`
-       * payload — so a reason already learned is kept.
-       */
-      endReason?: string | null;
-    }
-  | { type: "ADD_MESSAGE"; message: ChatMessage }
-  | { type: "ADD_SNAPSHOT_MESSAGE"; message: ChatMessage }
-  | { type: "APPEND_TO_LAST_AGENT"; token: string }
-  | { type: "FINISH_STREAMING" }
-  | { type: "SET_QUICK_REPLIES"; replies: QuickReply[] }
-  | { type: "SET_PROCESSING"; value: boolean }
-  | { type: "SET_THINKING"; value: boolean }
-  | { type: "SET_ESCALATING"; value: boolean }
-  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
-  | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
-  | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
-  | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
+type HostAction =
   | { type: "SET_AGENT_NAME"; name: string | null }
   | { type: "SET_REVIEW_NOTICE"; notice: string | null }
   | { type: "SET_RATING_PROFILE"; profile: RatingProfile | null }
-  | { type: "CLEAR_MESSAGES" }
-  | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
-  | { type: "SET_INPUT_FIELD"; field: InputField }
-  | { type: "CLEAR_INPUT_FIELD" }
-  | { type: "TOGGLE_SECRET_MODE" }
-  | { type: "ADD_ATTACHMENT"; attachment: AttachmentResult }
-  | { type: "REMOVE_ATTACHMENT"; storageRef: string }
-  | { type: "CLEAR_ATTACHMENTS" }
-  | { type: "SET_APPROVAL_STATUS"; status: ApprovalStatus | null }
-  | {
-      type: "WITHDRAW_LAST_USER_MESSAGE";
-      /** Id of the exact message to withdraw — NOT merely the most recent one. */
-      messageId?: string;
-      /** The raw composer text. The bubble may be masked or carry 📎 lines. */
-      draft?: string;
-      /** Attachments staged for the refused turn, to put back. */
-      attachments?: AttachmentResult[];
-      /** True when the withdrawn turn was secret; its text must not be restored. */
-      wasSecret?: boolean;
-    }
-  | { type: "CLEAR_RESTORE_DRAFT" }
-  | { type: "RECONCILE_LAST_AGENT"; content: string };
+  | { type: "SET_CONFIG"; config: Partial<ChatConfig> };
 
-/**
- * Index of the agent bubble currently being streamed into.
- *
- * Position is not a safe proxy: a local notice (an upload failure, a cap
- * warning) can be appended while a turn is in flight, after which "the last
- * message" is the notice and every subsequent token would land in it.
- * Falls back to a trailing agent message so a finished bubble is still
- * reconcilable.
- */
-function streamingIndex(messages: ChatMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "agent" && messages[i].isStreaming) return i;
-  }
-  const last = messages.length - 1;
-  return last >= 0 && messages[last].role === "agent" ? last : -1;
-}
+export type ChatAction = ConversationAction | HostAction;
 
-/* ─── Reducer ─────────────────────────────────── */
-
-export function chatReducer(state: ChatState, action: ChatAction): ChatState {
+function hostReducer<S extends ChatHostState>(state: S, action: HostAction): S {
   switch (action.type) {
-    case "SET_CONVERSATION_ID":
-      return { ...state, conversationId: action.id };
-
-    case "SET_CONVERSATION_STATE":
-      return {
-        ...state,
-        conversationState: action.state,
-        // A reason only ever describes an ENDED conversation.
-        endReason:
-          action.state !== "ENDED"
-            ? null
-            : action.endReason !== undefined
-              ? action.endReason
-              : state.endReason,
-      };
-
-    case "ADD_MESSAGE":
-      return { ...state, messages: [...state.messages, action.message] };
-
-    case "ADD_SNAPSHOT_MESSAGE": {
-      // Used ONLY by reads that deliberately revisit an already-rendered step
-      // (retry, post-approval refresh).
-      //
-      // Matching is on agent-message CONTENT, because the text being re-read may
-      // have first reached the transcript via the streaming `done` handler,
-      // which stamps no identifier of any kind.
-      //
-      // The comparison is scoped to the TRAILING run of agent messages — those
-      // after the last user bubble. Both real duplication cases put the
-      // duplicate there, whereas a repeated utterance from an earlier turn is
-      // always separated by an intervening user message. Scanning the whole
-      // transcript swallowed legitimate repeats (a fallback said twice, a
-      // re-asked prompt).
-      const incoming = action.message.content.trim();
-      if (!incoming) return state;
-
-      // The window is the trailing turn: agent messages after the last user
-      // bubble, plus that bubble itself. Including it matters because a
-      // snapshot re-read also carries the user's own input, and a role-blind
-      // window could never suppress that echo.
-      let start = state.messages.length;
-      while (start > 0 && state.messages[start - 1].role === "agent") start -= 1;
-      if (start > 0 && state.messages[start - 1].role === "user") start -= 1;
-
-      for (let i = start; i < state.messages.length; i++) {
-        // Compare like with like: a user echo may only suppress a user bubble.
-        if (state.messages[i].role !== action.message.role) continue;
-        const existing = state.messages[i].content.trim();
-        // Equality, or containment as a blank-line-delimited segment: the
-        // `done` handler joins a step's whole output list into ONE bubble,
-        // while this path receives one entry at a time, so the two producers
-        // would otherwise never compare equal for a multi-entry step.
-        if (
-          existing === incoming ||
-          existing.split("\n\n").some((seg) => seg.trim() === incoming)
-        ) {
-          return state;
-        }
-      }
-      return { ...state, messages: [...state.messages, action.message] };
-    }
-
-    case "APPEND_TO_LAST_AGENT": {
-      const idx = streamingIndex(state.messages);
-      if (idx === -1) return state;
-      const msgs = [...state.messages];
-      msgs[idx] = { ...msgs[idx], content: msgs[idx].content + action.token };
-      return { ...state, messages: msgs };
-    }
-
-    case "FINISH_STREAMING": {
-      const idx = streamingIndex(state.messages);
-      const msgs = [...state.messages];
-      if (idx !== -1) msgs[idx] = { ...msgs[idx], isStreaming: false };
-      // Clearing escalation here rather than at each call site is what makes it
-      // safe across every way a turn can end — done, error, stop-generating, a
-      // stream that closed without a done event, and a HITL pause all funnel
-      // through this action.
-      return {
-        ...state,
-        messages: msgs,
-        isProcessing: false,
-        isThinking: false,
-        isEscalating: false,
-        activeTool: null,
-      };
-    }
-
-    case "SET_QUICK_REPLIES":
-      return { ...state, quickReplies: action.replies };
-
-    case "SET_PROCESSING":
-      return { ...state, isProcessing: action.value };
-
-    // Both are dispatched unconditionally on every token, so bail out when the
-    // value is unchanged rather than allocating a new state object (and
-    // re-rendering every consumer) once per token.
-    case "SET_THINKING":
-      return state.isThinking === action.value
-        ? state
-        : { ...state, isThinking: action.value };
-
-    case "SET_ESCALATING": {
-      // An escalation abandons the model that was calling tools, so a tool
-      // named before it is no longer what the agent is doing.
-      const activeTool = action.value ? null : state.activeTool;
-      return state.isEscalating === action.value && state.activeTool === activeTool
-        ? state
-        : { ...state, isEscalating: action.value, activeTool };
-    }
-
-    // Cleared on every token, so the same unchanged-value bail-out applies.
-    case "SET_ACTIVE_TOOL":
-      return state.activeTool === action.tool
-        ? state
-        : { ...state, activeTool: action.tool };
-
-    case "CLEAR_MESSAGES":
-      return {
-        ...state,
-        messages: [],
-        conversationId: null,
-        quickReplies: [],
-        conversationState: null,
-        endReason: null,
-        // A cleared conversation is not processing anything. This used to be
-        // lowered only as a side effect of the abandoned stream's
-        // FINISH_STREAMING safety net, which meant New Conversation mid-stream
-        // left the FRESH conversation with a disabled composer, a dead Enter
-        // key and a Stop button for a turn that was not running.
-        isProcessing: false,
-        isThinking: false,
-        isEscalating: false,
-        activeTool: null,
-        undoAvailable: false,
-        redoAvailable: false,
-        activeInputField: null,
-        isSecretMode: false,
-        pendingAttachments: [],
-        approvalStatus: null,
-        restoreDraft: null,
-      };
-
-    case "SET_UNDO_REDO":
-      return { ...state, undoAvailable: action.undoAvailable, redoAvailable: action.redoAvailable };
-
-    case "REMOVE_EMPTY_STREAMING_MESSAGE": {
-      // A turn dropped server-side leaves a placeholder agent bubble that
-      // never received tokens; left in place it renders as "No response".
-      const idx = streamingIndex(state.messages);
-      if (idx === -1 || state.messages[idx].content !== "") return state;
-      return { ...state, messages: state.messages.filter((_, i) => i !== idx) };
-    }
-
-    case "REPLACE_MESSAGES":
-      return { ...state, messages: action.messages };
-
     case "SET_AGENT_NAME":
       return { ...state, agentName: action.name };
-
     case "SET_REVIEW_NOTICE":
       return { ...state, reviewNotice: action.notice };
-
     case "SET_RATING_PROFILE":
       return { ...state, ratingProfile: action.profile };
-
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };
-
-    case "SET_INPUT_FIELD":
-      return { ...state, activeInputField: action.field };
-
-    case "CLEAR_INPUT_FIELD":
-      return { ...state, activeInputField: null };
-
-    case "TOGGLE_SECRET_MODE":
-      return { ...state, isSecretMode: !state.isSecretMode };
-
-    case "ADD_ATTACHMENT":
-      return {
-        ...state,
-        pendingAttachments: [...state.pendingAttachments, action.attachment],
-      };
-
-    case "REMOVE_ATTACHMENT":
-      return {
-        ...state,
-        pendingAttachments: state.pendingAttachments.filter(
-          (a) => a.storageRef !== action.storageRef,
-        ),
-      };
-
-    case "CLEAR_ATTACHMENTS":
-      return { ...state, pendingAttachments: [] };
-
-    case "SET_APPROVAL_STATUS":
-      return { ...state, approvalStatus: action.status };
-
-    case "WITHDRAW_LAST_USER_MESSAGE": {
-      let msgs = [...state.messages];
-      // Drop the empty agent placeholder this turn created, if any.
-      const placeholder = streamingIndex(msgs);
-      if (placeholder !== -1 && msgs[placeholder].content === "") {
-        msgs = msgs.filter((_, i) => i !== placeholder);
-      }
-
-      // Target the EXACT turn. Falling back to "the most recent user message"
-      // let a late-failing turn delete a newer, unrelated one.
-      const targetIndex = action.messageId
-        ? msgs.findIndex((m) => m.id === action.messageId)
-        : msgs.map((m) => m.role).lastIndexOf("user");
-
-      const restored = { ...state, messages: msgs };
-      if (action.attachments?.length) {
-        restored.pendingAttachments = [
-          ...state.pendingAttachments,
-          ...action.attachments,
-        ];
-      }
-      if (targetIndex === -1) return restored;
-
-      const withdrawn = msgs[targetIndex];
-      restored.messages = msgs.filter((_, i) => i !== targetIndex);
-      // A secret is never handed back as plain text: it goes back into the
-      // composer with secret mode ON, so it stays masked and is re-sent with
-      // `secretInput`. Dropping it instead (the earlier behaviour) made the
-      // user retype a key the server had refused without ever seeing.
-      if (action.wasSecret) {
-        restored.restoreDraft = action.draft ?? null;
-        restored.isSecretMode = action.draft ? true : state.isSecretMode;
-        return restored;
-      }
-      restored.restoreDraft = action.draft ?? withdrawn.content;
-      return restored;
-    }
-
-    case "CLEAR_RESTORE_DRAFT":
-      return { ...state, restoreDraft: null };
-
-    case "RECONCILE_LAST_AGENT": {
-      // The final snapshot is authoritative. responseValidation `fallback`
-      // substitutes its own text AFTER tokens were streamed, so what the user
-      // is looking at may be a response the backend decided not to give.
-      const incoming = action.content.trim();
-      if (!incoming) return state;
-
-      const idx = streamingIndex(state.messages);
-      if (idx === -1) return state;
-      if (state.messages[idx].content.trim() === incoming) return state;
-
-      const msgs = [...state.messages];
-      msgs[idx] = { ...msgs[idx], content: action.content };
-      return { ...state, messages: msgs };
-    }
-
     default:
       return state;
   }
 }
 
+/* ─── Reducer ─────────────────────────────────── */
+
+/** The whole widget state, one action at a time: the conversation's rules, then the widget's. */
+export function chatReducer(state: ChatState, action: ChatAction): ChatState {
+  return isConversationAction(action) ? conversationReducer(state, action) : hostReducer(state, action);
+}
+
 /* ─── Context ─────────────────────────────────── */
+
+/** Until ChatWidget names the route, nothing can be opened or sent. */
+const NO_ROUTE: AgentTransport = {
+  mode: "conversation",
+  read: () => Promise.reject(new Error("no conversation route yet")),
+  undo: () => Promise.resolve(),
+  redo: () => Promise.resolve(),
+  rerun: () => Promise.resolve(),
+  cancel: () => Promise.resolve(),
+};
 
 const ChatStateContext = createContext<ChatState>(initialState);
 const ChatDispatchContext = createContext<Dispatch<ChatAction>>(() => {});
-/**
- * The conversation the composer was last mounted for. It is owned by the
- * provider rather than by ChatInput, so that it outlives one ChatInput
- * instance. ChatWidget swaps the composer out for SecretInput while an agent's
- * input field is open, and mounts a fresh one afterwards. An upload started
- * by an instance that has since unmounted must still be judged against the
- * conversation the composer is on NOW. A ref owned by the dead instance would
- * stay on its own conversation forever.
- */
-const ComposerConversationContext = createContext<MutableRefObject<string | null | undefined> | null>(null);
+const ChatControllerContext = createContext<AgentConversation | null>(null);
 
 export function ChatProvider({
   children,
@@ -493,24 +153,41 @@ export function ChatProvider({
   children: ReactNode;
   config?: Partial<ChatConfig>;
 }) {
+  const [controller] = useState(() => new AgentConversation({ transport: NO_ROUTE, t }));
+  const conversation = useAgentConversation(controller);
   // Lowest to highest: built-in defaults, the deployment brand, the agent's
   // appearance (a seam, empty today), the embedder's config. URL parameters
   // come last, dispatched by ChatWidget on mount. Computed once, at mount.
-  const [state, dispatch] = useReducer(chatReducer, config, (embedderConfig) => ({
-    ...initialState,
+  const [host, hostDispatch] = useReducer(hostReducer<ChatHostState>, config, (embedderConfig) => ({
+    agentName: null,
+    reviewNotice: null,
+    ratingProfile: null,
     config: { ...defaultConfig, ...brandConfigLayer(), ...agentAppearanceLayer(), ...embedderConfig },
   }));
-  const composerConversation = useRef<string | null | undefined>(undefined);
+  const state = useMemo<ChatState>(() => ({ ...conversation, ...host }), [conversation, host]);
+  const dispatch = useCallback<Dispatch<ChatAction>>(
+    (action) => (isConversationAction(action) ? controller.dispatch(action) : hostDispatch(action)),
+    [controller],
+  );
 
   return (
-    <ChatStateContext.Provider value={state}>
-      <ChatDispatchContext.Provider value={dispatch}>
-        <ComposerConversationContext.Provider value={composerConversation}>
-          {children}
-        </ComposerConversationContext.Provider>
-      </ChatDispatchContext.Provider>
-    </ChatStateContext.Provider>
+    <ChatControllerContext.Provider value={controller}>
+      <ChatStateContext.Provider value={state}>
+        <ChatDispatchContext.Provider value={dispatch}>
+          <ConversationProvider state={conversation} dispatch={controller.dispatch}>
+            <ConversationTextProvider t={t}>{children}</ConversationTextProvider>
+          </ConversationProvider>
+        </ChatDispatchContext.Provider>
+      </ChatStateContext.Provider>
+    </ChatControllerContext.Provider>
   );
+}
+
+/** The provider's AgentConversation. */
+export function useChatController(): AgentConversation {
+  const controller = useContext(ChatControllerContext);
+  if (!controller) throw new Error("useChatController needs a <ChatProvider>");
+  return controller;
 }
 
 /**
@@ -518,7 +195,7 @@ export function ChatProvider({
  * outside a provider, where the caller keeps its own.
  */
 export function useComposerConversationRef(): MutableRefObject<string | null | undefined> | null {
-  return useContext(ComposerConversationContext);
+  return useConversationContext().composerConversation;
 }
 
 export function useChatState(): ChatState {

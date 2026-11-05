@@ -9,8 +9,9 @@
 import { useEffect, useState } from "react";
 import { Hand } from "lucide-react";
 import { approvalDeadline, gatedToolNames, type ApprovalStatus } from "@eddi/core";
-import { pauseHeadline } from "@/api/hitl-api";
-import { t, getLocale } from "@/i18n";
+import { pauseHeadline } from "../controller/notices";
+import type { Translate } from "../i18n/text";
+import { useConversationText } from "../react/hooks";
 
 interface PausedCardProps {
   /**
@@ -22,11 +23,13 @@ interface PausedCardProps {
   status: ApprovalStatus | null;
   onCancel: () => void;
   cancelDisabled?: boolean;
+  /** The locale a deadline's clock time is written in (the app's language). */
+  locale?: string;
 }
 
 /** Coarse "time left" text — seconds precision is noise at approval timescales. */
-function formatRemaining(ms: number): string {
-  if (ms <= 0) return t("paused.anyMoment");
+function formatRemaining(ms: number, t: Translate): string {
+  if (ms <= 0) return t("conversation.paused.anyMoment");
   const totalMinutes = Math.floor(ms / 60_000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -36,20 +39,21 @@ function formatRemaining(ms: number): string {
 }
 
 /** What happens when the timeout expires, in plain language. */
-function describePolicy(policy: string): string {
+function describePolicy(policy: string, t: Translate): string {
   switch (policy) {
     case "AUTO_APPROVE":
-      return t("paused.policy.approve");
+      return t("conversation.paused.policy.approve");
     case "AUTO_REJECT":
-      return t("paused.policy.reject");
+      return t("conversation.paused.policy.reject");
     case "ABORT":
-      return t("paused.policy.abort");
+      return t("conversation.paused.policy.abort");
     default:
-      return t("paused.policy.other");
+      return t("conversation.paused.policy.other");
   }
 }
 
-export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps) {
+export function PausedCard({ status, onCancel, cancelDisabled, locale }: PausedCardProps) {
+  const t = useConversationText();
   const deadline = status ? approvalDeadline(status) : null;
   const [now, setNow] = useState(() => Date.now());
 
@@ -60,7 +64,7 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
   }, [deadline]);
 
   const tools = status ? gatedToolNames(status) : [];
-  const policy = describePolicy(status?.timeoutPolicy ?? "");
+  const policy = describePolicy(status?.timeoutPolicy ?? "", t);
 
   return (
     // No live region of its own: the card lands inside the transcript's log,
@@ -72,13 +76,13 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
           {/* A raised hand: the same "waiting on a human" icon the Manager uses
               for a paused conversation, so both UIs say it the same way. */}
           <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
-          <span className="paused-card__title">{t("paused.title")}</span>
+          <span className="paused-card__title">{t("conversation.paused.title")}</span>
         </div>
-        {!status && <p className="paused-card__text">{t("paused.pending")}</p>}
+        {!status && <p className="paused-card__text">{t("conversation.paused.pending")}</p>}
       </div>
 
       <p className="paused-card__text" data-testid="paused-headline">
-        {status ? pauseHeadline(status) : t("paused.headline")}
+        {status ? pauseHeadline(status, t) : t("conversation.paused.headline")}
       </p>
 
       {tools.length > 0 && (
@@ -100,15 +104,15 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
             aria-hidden="true"
             data-testid="paused-deadline"
           >
-            {t("paused.deadline", {
+            {t("conversation.paused.deadline", {
               policy,
-              remaining: formatRemaining(deadline - now),
+              remaining: formatRemaining(deadline - now, t),
             })}
           </p>
           <p className="chat-sr-only" data-testid="paused-deadline-sr">
-            {t("paused.deadlineAt", {
+            {t("conversation.paused.deadlineAt", {
               policy,
-              time: new Date(deadline).toLocaleTimeString(getLocale(), {
+              time: new Date(deadline).toLocaleTimeString(locale, {
                 hour: "2-digit",
                 minute: "2-digit",
               }),
@@ -125,7 +129,7 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
           disabled={cancelDisabled}
           data-testid="paused-cancel"
         >
-          {t("paused.cancel")}
+          {t("conversation.paused.cancel")}
         </button>
       </div>
     </div>

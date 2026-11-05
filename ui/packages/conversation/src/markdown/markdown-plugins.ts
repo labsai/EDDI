@@ -16,22 +16,9 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useState } from "react";
-import type { Options } from "react-markdown";
+import type { HighlightPlugins, MathPlugins, RawHtmlPlugins } from "./plugin-types";
 
-type Pluggable = NonNullable<Options["rehypePlugins"]>[number];
-
-export interface MathPlugins {
-  remarkMath: Pluggable;
-  rehypeKatex: Pluggable;
-}
-
-export interface HighlightPlugins {
-  rehypeHighlight: Pluggable;
-}
-
-export interface RawHtmlPlugins {
-  rehypeRaw: Pluggable;
-}
+export type { HighlightPlugins, MathPlugins, RawHtmlPlugins };
 
 let mathLoaded: MathPlugins | null = null;
 let highlightLoaded: HighlightPlugins | null = null;

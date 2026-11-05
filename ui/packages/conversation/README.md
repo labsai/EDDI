@@ -16,7 +16,14 @@ kinds follow in phase 6.
 | `controller/transport.ts` | `AgentTransport` — `conversation`, `managed` or `local` — and `createConversationTransport` / `createManagedTransport` on @eddi/core's API |
 | `controller/notices.ts` | What a client says about a dropped turn, a failed start, a pause |
 | `i18n/text.ts` | The shared `conversation.*` strings in the eleven locales, `withConversationLocales` for an app's i18next setup, the English fallback |
-| `react/hooks.tsx` | `useAgentConversation(controller)` (`useSyncExternalStore`), `ConversationTextProvider` / `useConversationText` |
+| `react/hooks.tsx`, `react/context.tsx` | `useAgentConversation(controller)` (`useSyncExternalStore`), `ConversationTextProvider` / `useConversationText`, `ConversationProvider` (the state and dispatch the composer acts on) |
+| `markdown/` | **The one markdown renderer** (`MarkdownContent`, §2.5): images in model text become links, raw HTML only through rehype-sanitize (the parser a lazy chunk, rendered for every agent until D9's per-agent setting), KaTeX (`$$…$$`, `trust: false`) and highlight.js as lazy chunks, links in a new tab, GFM parsed without its serialiser (`remark-gfm-parse.ts`) |
+| `components/` | `Message` (markdown, designer images, copy, reply rating, an `actions` slot), `MessageList` (live region, follows new content while at the bottom), `Composer` (IME-safe, attachments with picker, drop and paste, secret mode, restored drafts), `SecretInput` (the field an agent requested), `QuickReplies`, `ThinkingIndicator` / `TypingIndicator` (typing, tool, cascade), `PausedCard` (read-only, cancel), `RatingCard`, `StepRating`, `ScrollToBottom` |
+
+The components carry the Chat UI's BEM class names (`message--user`,
+`chat-input__textarea`, …); the Chat UI's `chat.css` styles them. The Manager uses
+`MarkdownContent` inside its own message bubble; the rest of its chat moves onto the
+controller and these components in a later step.
 
 ## Using it
 

@@ -67,8 +67,11 @@ export function withConversationLocales<L extends Record<string, ConversationLoc
   loaders: L,
 ): { english: Record<string, unknown>; loaders: L } {
   const merged = {} as Record<string, ConversationLocaleLoader>;
-  for (const [lng, load] of Object.entries(loaders)) {
+  for (const lng of Object.keys(loaders)) {
     const shared = CONVERSATION_LOCALE_LOADERS[lng];
+    // The app's loader is looked up when the locale is needed, not captured
+    // now, so the map stays the one place a locale's chunk comes from.
+    const load = () => (loaders[lng] as ConversationLocaleLoader)();
     merged[lng] = shared
       ? () => Promise.all([shared(), load()]).then(([a, b]) => ({ default: { ...a.default, ...b.default } }))
       : load;

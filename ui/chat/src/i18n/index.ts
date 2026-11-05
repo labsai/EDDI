@@ -24,10 +24,12 @@ import {
   type LocaleLoader,
   type SupportedLanguage,
 } from "@eddi/ui";
+import { withConversationLocales, type ConversationTextKey } from "@eddi/conversation";
 import { getBrand } from "@/api/brand";
 import en from "./locales/en.json";
 
-export type MessageKey = keyof typeof en;
+/** A widget string, or one of the shared `conversation.*` strings it renders. */
+export type MessageKey = keyof typeof en | ConversationTextKey;
 
 /** One chunk per locale; the record's type makes a missing locale a compile error. */
 export const LOCALE_LOADERS: Record<Exclude<SupportedLanguage, "en">, LocaleLoader> = {
@@ -45,13 +47,16 @@ export const LOCALE_LOADERS: Record<Exclude<SupportedLanguage, "en">, LocaleLoad
 
 const i18n = createInstance();
 
+// The shared conversation.* strings ride along in each locale's bundle.
+const bundles = withConversationLocales(en, LOCALE_LOADERS);
+
 // Synchronous for English (`initAsync: false`), so the first t() — and every
 // test that renders in English — never waits for a chunk.
 void setupI18n({
   i18n,
   languages: SUPPORTED_LANGUAGES,
-  english: en,
-  loaders: LOCALE_LOADERS,
+  english: bundles.english,
+  loaders: bundles.loaders,
   lng: "en",
   defaultVariables: (() => {
     const brand = getBrand();
