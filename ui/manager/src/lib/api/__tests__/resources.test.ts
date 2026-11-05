@@ -9,7 +9,7 @@ import {
   deleteResource,
   duplicateResource,
   getResourceVersions,
-} from "@/lib/api/resources";
+} from "@eddi/app-kit/lib/api/resources";
 
 const behavior = RESOURCE_TYPES.find((rt) => rt.slug === "rules")!;
 

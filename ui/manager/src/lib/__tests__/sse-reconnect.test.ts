@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createReconnectScheduler, reconnectDelayMs } from "../sse-reconnect";
+import { createReconnectScheduler, reconnectDelayMs } from "@eddi/app-kit/lib/sse-reconnect";
 import {
   SSE_RECONNECT_BASE_MS,
   SSE_RECONNECT_MAX_ATTEMPTS,
   SSE_RECONNECT_MAX_DELAY_MS,
-} from "../constants";
+} from "@eddi/app-kit/lib/constants";
 
 beforeEach(() => {
   vi.useFakeTimers();

@@ -1,6 +1,6 @@
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { usePendingApprovals, useAllGroupPendingApprovals } from "@/hooks/use-hitl";
+import { usePendingApprovals, useAllGroupPendingApprovals } from "@eddi/app-kit/hooks/use-hitl";
 import { useAttentionCount } from "@/hooks/use-ratings";
 import { useUnacknowledgedAlerts } from "@/hooks/use-alerts";
 import {
@@ -18,8 +18,8 @@ import {
   Languages,
   Info,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useAuth, useIsAdminOrUnknown, useMayOpenScreen } from "@/hooks/use-auth";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useAuth, useIsAdminOrUnknown, useMayOpenScreen } from "@eddi/app-kit/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -27,13 +27,13 @@ import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onb
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
 import { useEddiVersion } from "@/hooks/use-update-check";
 import { UNKNOWN_VERSION } from "@/lib/api/system";
-import { ModeSwitcher } from "@/components/shared/mode-switcher";
+import { ModeSwitcher } from "@eddi/app-kit/components/shared/mode-switcher";
 import { useLanguageSwitcher } from "@/hooks/use-language-switcher";
 import { NAV_SECTIONS, pageLabel } from "@/lib/route-registry";
-import { BrandIcon, BrandWordmark } from "./brand-logo";
+import { BrandIcon, BrandWordmark } from "@eddi/app-kit/components/layout/brand-logo";
 import { AboutDialog } from "./about-dialog";
-import { useBrand } from "@/hooks/use-brand";
-import { isUpdateUiVisible, UPDATES_PATH } from "@/lib/brand";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { isUpdateUiVisible, UPDATES_PATH } from "@eddi/app-kit/lib/brand";
 
 const externalLinks = [
   {

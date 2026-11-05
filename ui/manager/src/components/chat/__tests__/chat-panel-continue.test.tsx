@@ -2,10 +2,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { ChatPanel } from "../chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 /**
  * "Continue in Chat" on the conversation page navigates to

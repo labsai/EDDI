@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { type SSEEvent } from "@/lib/api/chat";
+import { type SSEEvent } from "@eddi/app-kit/lib/api/chat";
 
 const h = vi.hoisted(() => ({ frames: [] as Array<{ type: string; data: string }> }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* () {
@@ -18,8 +18,8 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({

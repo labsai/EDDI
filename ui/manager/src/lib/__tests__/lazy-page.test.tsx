@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Suspense } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
-import { lazyPage } from "../lazy-page";
+import { lazyPage } from "@eddi/app-kit/lib/lazy-page";
 
 function Ok() {
   return <div data-testid="loaded">loaded</div>;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   parseConversationIdFromLocation,
@@ -13,7 +13,7 @@ import {
   redoConversation,
   rerunLastStep,
   type SSEEvent,
-} from "../chat";
+} from "@eddi/app-kit/lib/api/chat";
 import { OPERATOR_PROBE_USER_ID } from "../operator";
 
 // ─── Pure function tests ──────────────────────────────────────────

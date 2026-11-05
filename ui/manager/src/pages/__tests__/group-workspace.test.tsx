@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderPage } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { GroupWorkspacePage } from "@/pages/group-workspace";
 
 const ROUTE = "/manage/groups/g1/workspace";

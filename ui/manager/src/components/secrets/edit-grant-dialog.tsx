@@ -2,26 +2,26 @@ import { useCallback, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Bot, Globe, Info, Loader2, Server, X } from "lucide-react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { AgentPicker } from "@/components/shared/agent-picker";
-import { ChipInput } from "@/components/shared/chip-input";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import {
   useSecretGrantImpact,
   useUpdateSecretGrant,
-} from "@/hooks/use-secrets";
+} from "@eddi/app-kit/hooks/use-secrets";
 import {
   ALL_AGENTS,
   grantsAllAgents,
   validateAllowedHost,
   type AllowedHostProblem,
   type SecretMetadata,
-} from "@/lib/api/secrets";
-import { commitPending } from "@/lib/chip-values";
-import { getErrorMessage } from "@/lib/api-client";
+} from "@eddi/app-kit/lib/api/secrets";
+import { commitPending } from "@eddi/app-kit/lib/chip-values";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 interface EditGrantDialogProps {
   /** The secret being edited; `null` closes the dialog. */

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ProviderRegionSelect, ProviderSelect } from "../provider-select";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ProviderRegionSelect, ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 
 describe("ProviderSelect", () => {
   it("groups the providers and labels them by display name", () => {

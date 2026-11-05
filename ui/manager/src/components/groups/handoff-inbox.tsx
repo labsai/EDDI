@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Inbox, Check, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@eddi/ui";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useAcceptTeamHandoff, useDeclineTeamHandoff } from "@/hooks/use-team-handoffs";
-import { describeHandoffSource, type InboxItem } from "@/lib/api/team-handoffs";
+import { describeHandoffSource, type InboxItem } from "@eddi/app-kit/lib/api/team-handoffs";
 import {
   WORKSPACE_MAX_TASK_SUBJECT_LENGTH,
   WORKSPACE_MAX_TASK_DESCRIPTION_LENGTH,

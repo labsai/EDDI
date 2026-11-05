@@ -3,8 +3,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { ResourceDetailPage } from "@/pages/resource-detail";
-import { renderPage } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 const toastError = vi.fn();
 vi.mock("sonner", () => ({

@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
 // The facilitator picker needs a stable agent list; the real hook would hit MSW
 // and reorder by lastModifiedOn, which says nothing about this component.
-vi.mock("@/hooks/use-agents", () => ({
+vi.mock("@eddi/app-kit/hooks/use-agents", () => ({
   useAgentDescriptors: () => ({
     data: [{ resource: "eddi://ai.labs.agent/agentstore/agents/agent-a?version=1", name: "Agent A" }],
   }),
   groupAgentsByName: () => [{ id: "agent-a", name: "Agent A" }],
 }));
 
-import { GroupAdvancedEditor } from "@/components/groups/group-advanced-editor";
-import type { AgentGroupConfiguration } from "@/lib/api/groups";
+import { GroupAdvancedEditor } from "@eddi/app-kit/components/groups/group-advanced-editor";
+import type { AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
 
 function makeConfig(overrides: Partial<AgentGroupConfiguration> = {}): AgentGroupConfiguration {
   return {

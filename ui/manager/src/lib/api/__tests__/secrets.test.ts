@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { api } from "../../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 import {
   listSecrets,
   storeSecret,
@@ -13,7 +13,7 @@ import {
   newAllowedHostsDraft,
   resolveAllowedHostsDraft,
   allowedHostsMissing,
-} from "../secrets";
+} from "@eddi/app-kit/lib/api/secrets";
 
 describe("secrets API — uses ApiClient (C2 fix)", () => {
   it("api.getBaseUrl() returns a valid URL", () => {

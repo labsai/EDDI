@@ -1,29 +1,29 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { formatMarkdownText } from "@/components/groups/group-utils";
+import { formatMarkdownText } from "@eddi/app-kit/components/groups/group-utils";
 import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { ChatActivity } from "@/components/chat/chat-activity";
-import { InputHint } from "@/components/chat/input-hint";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import { InputHint } from "@eddi/app-kit/components/chat/input-hint";
 import { ApprovalCard } from "@/components/hitl/approval-card";
-import { FileDropOverlay, PendingAttachmentChip } from "@/components/chat/attachment-chip";
-import { MessageAttachments } from "@/components/chat/chat-message";
+import { FileDropOverlay, PendingAttachmentChip } from "@eddi/app-kit/components/chat/attachment-chip";
+import { MessageAttachments } from "@eddi/app-kit/components/chat/chat-message";
 import {
   filesFromClipboard,
   useAttachmentStaging,
   useFileDrop,
   type ReadyAttachment,
-} from "@/hooks/use-attachment-staging";
-import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
+} from "@eddi/app-kit/hooks/use-attachment-staging";
+import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
-import type { ChatMessage } from "@/lib/api/chat";
-import type { SentAttachment } from "@/hooks/use-chat";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
-import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
-import { cn } from "@/lib/utils";
-import { isImeComposing } from "@/lib/ime";
-import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
+import type { ChatMessage } from "@eddi/app-kit/lib/api/chat";
+import type { SentAttachment } from "@eddi/app-kit/hooks/use-chat";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
+import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
+import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
 
 export interface OperatorChatProps {
   messages: ChatMessage[];

@@ -1,4 +1,4 @@
-import { setBrand } from "./brand";
+import { setBrand } from "@eddi/app-kit/lib/brand";
 
 /**
  * Apply a brand the settings page just saved, without a reload (white-label

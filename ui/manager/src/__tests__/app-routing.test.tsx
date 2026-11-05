@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { App } from "@/app";
 
 /**
@@ -102,20 +102,6 @@ describe("App routing (code-split)", () => {
     expect(await screen.findByTestId("not-found-page")).toBeInTheDocument();
   });
 
-  it("says so for an unknown /workforce path, linking back to Workforce", async () => {
-    renderWithProviders(<App />, { initialRoute: "/workforce/board-1/not-a-page/extra" });
-    const home = await screen.findByTestId("not-found-home", undefined, { timeout: 5000 });
-    expect(home).toHaveAttribute("href", "/workforce");
-  });
-
-  it("redirects the legacy capital-W /Workforce path, sub-path intact", async () => {
-    renderWithProviders(<App />, { initialRoute: "/Workforce/some-board" });
-    // Lands in the Workforce shell rather than the Manager one.
-    await waitFor(
-      () => {
-        expect(document.querySelector("#workforce-main")).not.toBeNull();
-      },
-      { timeout: 5000 },
-    );
-  });
+  // /workforce/** is Workforce's own app (ui/workforce, src/__tests__/app-routing.test.tsx);
+  // EDDI never serves the Manager there, so this router has no route for it.
 });

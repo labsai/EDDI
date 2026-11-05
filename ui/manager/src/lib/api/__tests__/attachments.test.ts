@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { api } from "../../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 import {
   uploadAttachment,
   listAttachments,
@@ -16,7 +16,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_TURN,
   type AttachmentRef,
-} from "../attachments";
+} from "@eddi/app-kit/lib/api/attachments";
 
 describe("attachments API", () => {
   describe("uploadAttachment", () => {

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
 import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows, Rocket } from "lucide-react";

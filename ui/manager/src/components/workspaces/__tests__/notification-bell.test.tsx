@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { NotificationBell } from "@/components/workspaces/notification-bell";
 import * as workspacesApi from "@/lib/api/workspaces";
 import type { WorkspaceInfo, WorkspaceNotification } from "@/lib/api/workspaces";

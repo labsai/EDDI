@@ -1,17 +1,17 @@
-import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
+import { CatalogListingToggle } from "@eddi/app-kit/components/shared/catalog-listing-toggle";
 import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
 import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
 import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
-import { useBrand } from "@/hooks/use-brand";
-import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
-import type { Environment } from "@/lib/constants";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@eddi/app-kit/lib/deployment-environments";
+import type { Environment } from "@eddi/app-kit/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
@@ -44,12 +44,12 @@ import {
   Undo2,
   GitCompareArrows,
 } from "lucide-react";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { Button } from "@eddi/ui";
 import {
   useAgent,
@@ -61,10 +61,10 @@ import {
   useAgentVersions,
   useUpdateAgent,
   useUpdateAgentDescriptor,
-} from "@/hooks/use-agents";
+} from "@eddi/app-kit/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -72,22 +72,22 @@ import {
   isAgentDraftDirty,
   type AgentEdit,
 } from "@/lib/agent-draft";
-import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { agentKeys, chatKeys } from "@/lib/query-keys";
+import { parseVersionFromLocation } from "@eddi/app-kit/lib/api/location-version";
+import { agentKeys, chatKeys } from "@eddi/app-kit/lib/query-keys";
 import { MAX_CONTINUATIONS } from "@/lib/continuation";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
 import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { useWorkflowDescriptors } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus, type Agent } from "@/lib/api/agents";
-import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
-import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@/lib/deploy-outcome";
+import { parseResourceUri, type EnvironmentStatus, type Agent } from "@eddi/app-kit/lib/api/agents";
+import { useDeployWithGrants, isGrantFailure } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
-import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { useChatStore, useStartConversation } from "@eddi/app-kit/hooks/use-chat";
 import {
   SecurityIdentitySection,
   CapabilitiesSection,

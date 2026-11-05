@@ -13,8 +13,8 @@ import {
   Database,
 } from "lucide-react";
 import { useTemplatePreview } from "@/hooks/use-template-preview";
-import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
-import { cn } from "@/lib/utils";
+import { getConversationDescriptors, parseConversationUri } from "@eddi/app-kit/lib/api/conversations";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

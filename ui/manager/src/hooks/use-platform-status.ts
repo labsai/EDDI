@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { api } from "@/lib/api-client";
-import { useIsAdminOrUnknown } from "@/hooks/use-auth";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
 
 // ─── Types ───────────────────────────────────────────────────────
 

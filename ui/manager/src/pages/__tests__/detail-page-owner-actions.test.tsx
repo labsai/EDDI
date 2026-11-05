@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
-import { renderPage } from "@/test/test-utils";
-import { agentKeys } from "@/lib/query-keys";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 import { AgentDetailPage } from "@/pages/agent-detail";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 import { ResourceDetailPage } from "@/pages/resource-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 /**

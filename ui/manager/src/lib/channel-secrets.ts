@@ -1,4 +1,4 @@
-import { isSecretReference, isVaultScheme } from "@/lib/secret-reference";
+import { isSecretReference, isVaultScheme } from "@eddi/app-kit/lib/secret-reference";
 
 /**
  * The channel platform-config keys that hold credentials.

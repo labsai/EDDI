@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { NotebookPen, Tags, MessagesSquare, UserRoundSearch } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { UserMemoryPage } from "./user-memory";
 import { PropertiesPage } from "./properties";
 import { UserConversationsPage } from "./user-conversations";

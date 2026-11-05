@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { discoverEndpoints, LiteralCredentialError } from "../openapi-discover";
+import { discoverEndpoints, LiteralCredentialError } from "@eddi/app-kit/lib/api/openapi-discover";
 
 const ENDPOINT = "*/apicallstore/apicalls/discover-endpoints";
 

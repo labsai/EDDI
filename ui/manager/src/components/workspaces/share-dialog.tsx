@@ -15,12 +15,12 @@ import {
   Users,
   UserPlus,
 } from "lucide-react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { ApiClientError, getErrorMessage } from "@/lib/api-client";
-import { agentKeys } from "@/lib/query-keys";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { ApiClientError, getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 import {
   ACCESS_LEVELS,
   getShareInfo,
@@ -39,7 +39,7 @@ import {
 } from "@/lib/api/sharing";
 import { publicChatLinkFor } from "@/lib/resource-links";
 import { describeSpace, isUserSubject, parseSubjectInput } from "@/lib/spaces";
-import { useHasRole } from "@/hooks/use-auth";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import { useSpaces } from "@/hooks/use-spaces";
 import { ShareSubjectInput } from "@/components/workspaces/share-subject-input";
 

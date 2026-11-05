@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse, type JsonBodyType } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 
 // The sibling import-agent-dialog.test.tsx mocks the whole backup hook module.

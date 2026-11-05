@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 
 describe("AgentPicker", () => {
   const defaultProps = {

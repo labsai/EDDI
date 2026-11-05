@@ -1,4 +1,5 @@
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+import { AppLink, AppNavigate } from "@eddi/app-kit/components/shared/app-link";
 import { useTranslation } from "react-i18next";
 import {
   Settings2,
@@ -6,10 +7,10 @@ import {
   Sparkles,
   Briefcase,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useTheme } from "@eddi/ui";
-import { BrandIcon } from "@/components/layout/brand-logo";
-import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
+import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -59,8 +60,10 @@ function ModeCard({
   features,
   onNavigate,
 }: ModeCardProps) {
+  // AppLink: the Workforce card leaves this app (a page load); the Manager card
+  // stays in it.
   return (
-    <Link
+    <AppLink
       to={to}
       onClick={onNavigate}
       className={cn(
@@ -114,7 +117,7 @@ function ModeCard({
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 rtl:group-hover:-translate-x-1" />
         </div>
       </div>
-    </Link>
+    </AppLink>
   );
 }
 
@@ -136,15 +139,16 @@ export function LandingPage() {
   // building screens they cannot use, so it is skipped — even with `?choose`
   // and whatever preference an older visit stored. `/` reaches this page for
   // everyone but a remembered Workforce visitor (`landing-redirect.js` cannot
-  // read roles), so this is where the role decides.
+  // read roles), so this is where the role decides. Workforce is another app
+  // (ui/workforce), so getting there is a page load, not a router redirect.
   if (!canAuthor) {
-    return <Navigate to="/workforce" replace />;
+    return <AppNavigate to="/workforce" />;
   }
 
   // Synchronous redirect — no flash
   const pref = getStoredPreference();
   if (!forceChooser && (pref === "manage" || pref === "workforce")) {
-    return <Navigate to={`/${pref}`} replace />;
+    return <AppNavigate to={`/${pref}`} />;
   }
 
   return (

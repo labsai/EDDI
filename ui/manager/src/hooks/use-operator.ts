@@ -33,10 +33,10 @@ import {
   type OperatorConfig,
   type FetchedSpec,
 } from "@/lib/api/operator";
-import { getAgentCurrentVersion } from "@/lib/api/agents";
-import { getDescriptor } from "@/lib/api/descriptors";
+import { getAgentCurrentVersion } from "@eddi/app-kit/lib/api/agents";
+import { getDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 import { hasOperatorMarker } from "@/lib/api/operator-marker";
-import { ApiClientError, getErrorMessage } from "@/lib/api-client";
+import { ApiClientError, getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   adoptOperatorAgent,
   findUnregisteredOperators,
@@ -47,7 +47,7 @@ import {
   runDeployWithGrants,
   isGrantFailure,
   type DeployWithGrantsOutcome,
-} from "@/hooks/use-deploy-with-grants";
+} from "@eddi/app-kit/hooks/use-deploy-with-grants";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
 import { assessOperatorTrust, type OperatorTrust } from "@/lib/operator/operator-trust";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";

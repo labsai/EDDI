@@ -2,9 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Plus, Trash2, X } from "lucide-react";
-import { ProviderSelect } from "@/components/shared/provider-select";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { NumberInput } from "../number-input";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import { modelParamSpec } from "./model-params";
 import {
   DEFAULT_REPROMPT_RETRIES,
@@ -42,7 +42,7 @@ import {
   type JudgeIssue,
   type JudgeIssuesProblem,
 } from "./guardrails";
-import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "./types";
+import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "@eddi/app-kit/components/editors/llm/types";
 
 const FIELD =
   "h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60";

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
 import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
-import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 import { RulesEditor } from "@/components/editors/rules-editor";
-import { ApiCallsEditor } from "@/components/editors/apicalls-editor";
+import { ApiCallsEditor } from "@eddi/app-kit/components/editors/apicalls-editor";
 import { LlmEditor } from "@/components/editors/llm-editor";
 import { OutputEditor } from "@/components/editors/output-editor";
 import { PropertySetterEditor } from "@/components/editors/propertysetter-editor";

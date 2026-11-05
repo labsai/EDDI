@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { OutputMatchBuilder } from "../output-match-builder";
-import type { AlertCondition } from "@/lib/api/alerts";
+import type { AlertCondition } from "@eddi/app-kit/lib/api/alerts";
 
 function renderBuilder(condition: AlertCondition) {
   const onChange = vi.fn();

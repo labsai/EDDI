@@ -574,7 +574,7 @@ export const WRITE_ENDPOINTS: readonly string[] = [
  * (backend `toolApprovals.rules`) can tighten this later without this function
  * ever being able to loosen it.
  */
-export function buildToolApprovals(): import("@/lib/api/hitl").ToolApprovalsConfig {
+export function buildToolApprovals(): import("@eddi/app-kit/lib/api/hitl").ToolApprovalsConfig {
   return {
     requireApproval: ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"],
     exempt: ["http.get:*"],

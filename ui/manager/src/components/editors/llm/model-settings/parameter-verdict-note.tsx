@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowRightLeft, Ban, CircleSlash } from "lucide-react";
 import { Button } from "@eddi/ui";
 import type { ParameterVerdict } from "@/lib/llm-parameter-catalog";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /**
  * What the configured model does with one parameter, in words: "Rejected by

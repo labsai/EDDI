@@ -22,7 +22,7 @@ import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
 } from "@/hooks/use-backup";
-import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import type {
   BatchSyncExecution,
   DocumentDescriptor,
@@ -31,7 +31,7 @@ import type {
   SyncRequest,
 } from "@/lib/api/backup";
 import { hasFailures, parseResourceUri } from "@/lib/api/backup";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 interface AgentMapping {
   remoteAgent: DocumentDescriptor;

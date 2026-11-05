@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
+import { Input } from "@eddi/app-kit/components/ui/input";
 import { joinPath, opsFor, outputMatchProblems, pathProblem, splitPath, valueTypeOf, type PathSource, type ValueType } from "@/lib/alert-rules";
-import type { AlertCondition, MatchOp } from "@/lib/api/alerts";
+import type { AlertCondition, MatchOp } from "@eddi/app-kit/lib/api/alerts";
 
 const selectClass =
   "h-10 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";

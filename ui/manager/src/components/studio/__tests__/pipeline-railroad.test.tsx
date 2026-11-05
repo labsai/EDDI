@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 const mockSteps = [
   { type: "eddi://ai.labs.parser", extensions: {}, config: { uri: "eddi://ai.labs.parser/parsers/p1?version=1" } },

@@ -3,9 +3,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
-import { createTestQueryClient, userEvent } from "@/test/test-utils";
+import { createTestQueryClient, userEvent } from "@eddi/app-kit/test/test-utils";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 const toastSuccess = vi.fn();

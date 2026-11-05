@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import type { AgentDescriptor } from "@/lib/api/agents";
-import { parseResourceUri } from "@/lib/api/agents";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Given a list of eddi:// resource URIs, fetch the latest version available

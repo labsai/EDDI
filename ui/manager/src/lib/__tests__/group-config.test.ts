@@ -14,8 +14,8 @@ import {
   uncoveredRolePhases,
   normalizeConvergence,
   normalizeGroupTaskConfig,
-} from "../group-config";
-import type { AgentGroupConfiguration, DecisionRecord } from "../api/groups";
+} from "@eddi/app-kit/lib/group-config";
+import type { AgentGroupConfiguration, DecisionRecord } from "@eddi/app-kit/lib/api/groups";
 
 type ConfigSlice = Pick<
   AgentGroupConfiguration,

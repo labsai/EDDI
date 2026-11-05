@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageCircle } from "lucide-react";
-import { ChatPanel } from "@/components/chat/chat-panel";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useOnboarding } from "@/hooks/use-onboarding";
 

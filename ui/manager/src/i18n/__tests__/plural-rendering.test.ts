@@ -4,6 +4,15 @@ import en from "@/i18n/locales/en.json";
 import de from "@/i18n/locales/de.json";
 import ar from "@/i18n/locales/ar.json";
 import zh from "@/i18n/locales/zh.json";
+import kitEn from "@eddi/app-kit/i18n/locales/en.json";
+import kitDe from "@eddi/app-kit/i18n/locales/de.json";
+import kitAr from "@eddi/app-kit/i18n/locales/ar.json";
+import kitZh from "@eddi/app-kit/i18n/locales/zh.json";
+import { mergeBundles } from "@eddi/app-kit/i18n/app-i18n";
+
+// The Manager's bundle for a locale is its own file merged with @eddi/app-kit's
+// (setupAppI18n): the shared components' strings live in the package.
+const bundle = (kit: Record<string, unknown>, own: Record<string, unknown>) => mergeBundles(kit, own);
 
 /**
  * The key-parity and plural-completeness tests check that the KEYS exist. They
@@ -17,7 +26,12 @@ describe("plural rendering", () => {
     await i18next.init({
       lng: "en",
       fallbackLng: false,
-      resources: { en: { translation: en }, de: { translation: de }, ar: { translation: ar }, zh: { translation: zh } },
+      resources: {
+        en: { translation: bundle(kitEn, en) },
+        de: { translation: bundle(kitDe, de) },
+        ar: { translation: bundle(kitAr, ar) },
+        zh: { translation: bundle(kitZh, zh) },
+      },
       interpolation: { escapeValue: false },
     });
   });

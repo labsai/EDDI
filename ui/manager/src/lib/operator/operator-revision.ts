@@ -9,9 +9,9 @@ import {
   safetyPreambleForScope,
 } from "./system-prompt";
 import { toVaultRef } from "./vault-ref";
-import { DEFAULT_BRAND } from "@/lib/brand";
-import { getProviderConfig } from "@/lib/api/agent-setup";
-import { isBaseUrlRequired, isProvisionableBySetup } from "@/lib/model-suggestions";
+import { DEFAULT_BRAND } from "@eddi/app-kit/lib/brand";
+import { getProviderConfig } from "@eddi/app-kit/lib/api/agent-setup";
+import { isBaseUrlRequired, isProvisionableBySetup } from "@eddi/app-kit/lib/model-suggestions";
 import type { OperatorConfig } from "@/lib/api/operator";
 
 /**

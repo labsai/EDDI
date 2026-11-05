@@ -1,0 +1,542 @@
+/**
+ * Types and constants for the LLM editor components.
+ * Shared between llm-editor.tsx and its sub-components.
+ */
+
+import type {
+  PropertyInstruction,
+  OutputBuildingInstruction,
+  QuickRepliesBuildingInstruction,
+} from "../apicalls-editor";
+import type { ToolApprovalsConfig } from "../../../lib/api/hitl";
+import { LLM_PROVIDERS } from "../../../lib/api/agent-setup";
+
+// ─── Types matching LlmConfiguration backend model ───────────────────────────
+
+export interface A2AAgentConfig {
+  url?: string;
+  name?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  skillsFilter?: string[];
+}
+
+export interface CascadeStep {
+  type?: string;
+  parameters?: Record<string, string>;
+  confidenceThreshold?: number | null;
+  timeoutMs?: number;
+  /** Per-step token pricing overrides (USD per 1M tokens). Must be ≥ 0. */
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+  /**
+   * Overrides `responseValidation.maxRetries` for this step: how many
+   * corrective same-model re-asks it gets before the cascade escalates
+   * (`0..3`; 0 for an expensive last-resort model). Omitted inherits the task.
+   */
+  maxFormatRetries?: number;
+}
+
+/** Judge model for the `judge_model` confidence-evaluation strategy. */
+export interface CascadeJudgeModel {
+  type?: string;
+  parameters?: Record<string, string>;
+}
+
+/**
+ * Overrides for the `heuristic` confidence-evaluation strategy. Every field is
+ * optional; an omitted field falls back to the backend's built-in English
+ * default. Scores are clamped to [0, 1] by the backend.
+ */
+export interface CascadeHeuristic {
+  lowConfidencePhrases?: string[];
+  refusalPhrases?: string[];
+  shortLengthThreshold?: number;
+  shortScore?: number;
+  refusalScore?: number;
+  hedgingScore?: number;
+  defaultScore?: number;
+}
+
+export interface ModelCascadeConfig {
+  enabled?: boolean;
+  strategy?: string;
+  evaluationStrategy?: string;
+  enableInAgentMode?: boolean;
+  steps?: CascadeStep[];
+  /** Judge model config — used when evaluationStrategy is "judge_model". */
+  judgeModel?: CascadeJudgeModel;
+  /** One sentence the judge checks besides the request; only the judge reads it. */
+  acceptanceCriterion?: string;
+  /** Overrides for the "heuristic" evaluation strategy. */
+  heuristic?: CascadeHeuristic;
+  /** Wall-clock ceiling across the whole cascade (ms). Must be > 0 when set. */
+  maxTotalDurationMs?: number;
+  /** Dollar ceiling for a single run. Must be ≥ 0 when set. */
+  maxCostPerRun?: number;
+  /** Cascade-level default token pricing (USD per 1M tokens); steps may override. Must be ≥ 0. */
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+  /** Return the highest-scoring step's response even if a later step was finally accepted. */
+  returnBestAcrossSteps?: boolean;
+}
+
+/** Pre-request instructions — same model as HttpCalls PreRequest on the backend */
+export interface LlmPreRequest {
+  propertyInstructions?: PropertyInstruction[];
+}
+
+/** Post-response instructions — same model as HttpCalls PostResponse on the backend */
+export interface LlmPostResponse {
+  propertyInstructions?: PropertyInstruction[];
+  outputBuildInstructions?: OutputBuildingInstruction[];
+  qrBuildInstructions?: QuickRepliesBuildingInstruction[];
+}
+
+/**
+ * Cache and long-context prices for a task's model (docs/model-pricing.md).
+ * Absent fields come from the deployment price catalog; a blank cache price is
+ * charged at the input price. The long-context threshold comes from the catalog.
+ */
+export interface TaskModelPricing {
+  cacheReadPricePer1M?: number | null;
+  cacheWritePricePer1M?: number | null;
+  longContext?: {
+    inputPricePer1M?: number | null;
+    outputPricePer1M?: number | null;
+    cacheReadPricePer1M?: number | null;
+    cacheWritePricePer1M?: number | null;
+  } | null;
+}
+
+export interface LlmTask {
+  actions?: string[];
+  id?: string;
+  type?: string;
+  description?: string;
+  parameters?: Record<string, string>;
+  responseObjectName?: string;
+  responseMetadataObjectName?: string;
+  preRequest?: LlmPreRequest;
+  postResponse?: LlmPostResponse;
+  tools?: string[];
+  a2aAgents?: A2AAgentConfig[];
+  enableBuiltInTools?: boolean;
+  enableHttpCallTools?: boolean;
+  enableMcpCallTools?: boolean;
+  builtInToolsWhitelist?: string[];
+  conversationHistoryLimit?: number;
+  // Token-aware context window (Strategy 1)
+  maxContextTokens?: number;
+  anchorFirstSteps?: number;
+  /** @deprecated Use knowledgeBases, enableWorkflowRag, or httpCallRag instead */
+  retrievalAugmentor?: {
+    httpCall?: string;
+    embeddingModel?: string;
+    embeddingStore?: string;
+    maxResults?: number;
+    minScore?: number;
+  };
+  // Phase 8c RAG fields
+  knowledgeBases?: KnowledgeBaseReference[];
+  enableWorkflowRag?: boolean;
+  ragDefaults?: {
+    maxResults?: number;
+    minScore?: number;
+  };
+  httpCallRag?: string;
+  retry?: {
+    maxAttempts?: number;
+    backoffDelayMs?: number;
+    backoffMultiplier?: number;
+    maxBackoffDelayMs?: number;
+    honorRetryAfter?: boolean;
+    maxRetryAfterMs?: number;
+    jitterRatio?: number;
+  };
+  maxBudgetPerConversation?: number;
+  enableCostTracking?: boolean;
+  enableToolCaching?: boolean;
+  enableRateLimiting?: boolean;
+  defaultRateLimit?: number;
+  toolRateLimits?: Record<string, number>;
+  maxToolIterations?: number;
+  /**
+   * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).
+   * Calls past it are answered `NOT_EXECUTED` and never reach the approval gate.
+   * `-1` or `0` removes the cap. Absent = the server default; never sent unless set,
+   * because an older backend's strict config parser refuses an unknown field.
+   */
+  maxToolCallsPerIteration?: number;
+  /**
+   * Most tool calls executed across a whole turn, HITL resumes included
+   * (EDDI 6.6+, default 100). Same refusal and same `-1`/`0` rule as above.
+   */
+  maxToolCallsPerTurn?: number;
+  /**
+   * Refuses a tool call that already failed identically with nothing succeeding
+   * since (EDDI 6.6+). Absent means enabled with defaults; `{ enabled: false }`
+   * turns it off. No editor control yet: edit it in the JSON view.
+   */
+  toolRepeatGuard?: {
+    enabled?: boolean;
+    maxIdenticalFailures?: number;
+    maxIdenticalCalls?: number;
+    maxRefusalsPerTurn?: number;
+    exemptTools?: string[];
+  };
+  modelCascade?: ModelCascadeConfig;
+
+  // Conversation Summary (Rolling Summary Strategy)
+  conversationSummary?: ConversationSummaryConfig;
+
+  // Tool Response Truncation
+  toolResponseLimits?: ToolResponseLimitsConfig;
+
+  // Behavioral Counterweight & Identity Masking (Wave 1)
+  counterweight?: CounterweightConfig;
+  identityMasking?: IdentityMaskingConfig;
+
+  // Response Validation & Recovery
+  /**
+   * Response validation policies. When enabled, the engine validates each LLM
+   * turn against per-signal policies and applies the configured remediation.
+   */
+  responseValidation?: ResponseValidation;
+  /**
+   * Top-level or dotted fields (`"htmlResponseText"`, `"answer.text"`) of the
+   * parsed `convertToObject` reply that must hold a non-blank string. A
+   * violation is outcome `schema_mismatch`; the parsed object is still stored.
+   * Independent of `responseValidation.enabled`.
+   */
+  nonBlankFields?: string[];
+  /**
+   * Renames applied to top-level keys of the parsed `convertToObject` reply:
+   * `{ "htmlResponseStr": "htmlResponseText" }` renames the key when the target
+   * is absent (the target wins when both exist). Independent of
+   * `responseValidation.enabled`.
+   */
+  fieldAliases?: Record<string, string>;
+  /**
+   * What the task does when its model phase fails outright. `fallback` serves
+   * the configured fallback (see `ResponseValidation.fallbackMessage`) and
+   * completes the turn; `error` (the default) fails it.
+   */
+  onError?: TaskOnError;
+  /**
+   * Opt-in per-model circuit breaker (off by default): skips a model that
+   * keeps failing with the same permanent class — invalid output, bad request,
+   * model not found; auth or quota at once — for `coolDownMs`, then probes once.
+   */
+  circuitBreaker?: TaskCircuitBreaker;
+  /**
+   * Timeout (seconds) for streaming chat completions. Overrides the engine
+   * default (120s). Only applies while streaming is active.
+   */
+  streamingTimeoutSeconds?: number;
+
+  /**
+   * Per-task tool-approval override (tool-level HITL). A FULL REPLACE of the
+   * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
+   */
+  toolApprovals?: ToolApprovalsConfig | null;
+
+  /**
+   * Token pricing (USD per 1M tokens) for this task's ORDINARY (non-cascade)
+   * model calls (N1). `null`/absent = unpriced, contributes $0 to tracked cost.
+   * Distinct from `modelCascade`'s own pricing pair — a cascade run is priced by
+   * its steps alone; these apply only when the cascade is off (or a call simply
+   * isn't cascaded), since cascade steps may target different models than this
+   * task's own. Must be ≥ 0 (validated at agent DEPLOY time, not at LLM-config
+   * save time — a negative value can be saved and only rejected later).
+   */
+  inputPricePer1M?: number | null;
+  outputPricePer1M?: number | null;
+  /** Cache and long-context prices; see {@link TaskModelPricing}. */
+  pricing?: TaskModelPricing | null;
+
+  /**
+   * Guardrails that screen the user's message before the model is called
+   * (EDDI 6.6+). Absent or empty = no screening and no guardrail code runs.
+   * Never sent unless set: an older backend's strict config parser refuses an
+   * unknown field.
+   */
+  inputGuardrails?: GuardrailConfig[];
+  /**
+   * Guardrails that screen the model's answer before it is stored or delivered
+   * (EDDI 6.6+). A `block`/`redact`/`reprompt` entry makes the task buffer its
+   * answer instead of streaming it; `warn` keeps streaming.
+   */
+  outputGuardrails?: GuardrailConfig[];
+}
+
+/** What a guardrail finding does. Mirrors the backend `GuardrailAction`. */
+export type GuardrailActionName = "block" | "redact" | "reprompt" | "warn";
+
+/** What a `reprompt` guardrail does once its retries are spent. */
+export type GuardrailOnExhausted = "block" | "deliver-best";
+
+/**
+ * One input or output guardrail of an LLM task. Mirrors the backend
+ * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
+ * (input), `pii-redaction`, `regex-filter`, `max-length`, `classifier` (both),
+ * `judge`, `json-object`, `expression` (output); an unknown type is skipped by
+ * the engine with a WARN. `expression` takes `expr`, `issue` and `fix`
+ * parameters. `classifier` calls an author-configured safety-classifier model,
+ * `judge` a model that grades the answer with author-declared issue codes;
+ * their `parameters` take `provider` plus that provider's own model parameters.
+ */
+export interface GuardrailConfig {
+  type: string;
+  /** Default `block`; an unknown value is treated as `block`. */
+  action?: GuardrailActionName;
+  /** `reprompt` only: extra model calls allowed. Default 2, clamped 0–5. */
+  maxRetries?: number;
+  /**
+   * Output `reprompt` only (EDDI 6.7+): what happens once the retries are spent.
+   * Absent = `block`; `deliver-best` delivers the attempt this guardrail rated
+   * best, still screened by every other guardrail.
+   */
+  onExhausted?: GuardrailOnExhausted;
+  /** The answer when this guardrail blocks; used verbatim (never templated). */
+  blockMessage?: string;
+  /** Per-type settings as plain strings, e.g. `{ patterns: "email,ssn" }`. */
+  parameters?: Record<string, string>;
+}
+
+/**
+ * Remediation action applied by a response-validation policy. Mirrors the
+ * backend `LlmConfiguration.ResponseValidation` action strings (case-insensitive
+ * on the engine side).
+ * - `ignore`   — do nothing
+ * - `warn`     — log a warning, store validation metadata, continue
+ * - `fallback` — substitute a static fallback message
+ * - `error`    — throw a LifecycleException (fails the turn)
+ */
+export type ResponseValidationAction = "ignore" | "warn" | "fallback" | "error";
+
+/**
+ * The policies that can also `retry`: re-ask the same model (up to
+ * `maxRetries`), then escalate to the next cascade step, then apply
+ * `fallbackAction`. `refusal` and `streamingTimeout` do not take it.
+ */
+export type RetryableResponseValidationAction =
+  | ResponseValidationAction
+  | "retry";
+
+/** Ordered action options for response-validation policy selectors. */
+export const RESPONSE_VALIDATION_ACTIONS = [
+  "ignore",
+  "warn",
+  "fallback",
+  "error",
+] as const satisfies readonly ResponseValidationAction[];
+
+/**
+ * Response validation policies for LLM outputs — one policy per anomaly signal.
+ * Field names match the backend `LlmConfiguration.Task.responseValidation`
+ * nested type exactly. Every field is optional; an omitted field falls back to
+ * the backend default (onRefusal defaults to `ignore`, all others to `warn`).
+ */
+export interface ResponseValidation {
+  /** Master switch — validation is only applied when enabled. */
+  enabled?: boolean;
+  /** Action when the LLM returns an empty or null response. */
+  onEmpty?: RetryableResponseValidationAction;
+  /**
+   * Action when the response was truncated (finishReason=LENGTH). `retry`
+   * re-asks once with `maxOutputTokens` × `truncationRetryFactor`.
+   */
+  onTruncation?: RetryableResponseValidationAction;
+  /** Action when the response was blocked by a content filter. */
+  onContentFilter?: RetryableResponseValidationAction;
+  /**
+   * Action when a `convertToObject` reply is not valid JSON after the local
+   * repair. `retry` re-asks the same model with `correctiveMessage`.
+   * Default `ignore`.
+   */
+  onInvalidJson?: RetryableResponseValidationAction;
+  /**
+   * Action when a reply parses but breaks the response shape (`responseSchema`
+   * or `nonBlankFields`). `retry` re-asks with the violation as the reason;
+   * `ignore`/`warn` keep the parsed object. Default `ignore`.
+   */
+  onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * With `onInvalidJson: "wrap"` (set it in the JSON view; the policy select does
+   * not offer it yet): the top-level property a plain-text reply is wrapped into.
+   * Required for `wrap`.
+   */
+  wrapField?: string;
+  /** Object merged next to `wrapField` in a wrapped reply, e.g. `{ "quickReplies": [] }`. */
+  wrapDefaults?: Record<string, unknown>;
+  /** Longest reply, in characters, that `wrap` wraps. Default 20000. */
+  wrapMaxChars?: number;
+  /**
+   * Action when the prompt exceeds the model's context window. `retry` re-sends
+   * once with the history window halved. Default `error`.
+   */
+  onContextTooLong?: "retry" | "error";
+  /** Same-model re-asks per model / cascade step, 0..3. Default 1. */
+  maxRetries?: number;
+  /** Factor applied to the output-token cap for the truncation re-ask, 1..4. Default 2. */
+  truncationRetryFactor?: number;
+  /**
+   * User message of an invalid-JSON re-ask. `{reason}` is replaced literally
+   * with EDDI's own reason (never model output). Not a template.
+   */
+  correctiveMessage?: string;
+  /** Dollar cap on the re-asks of one model (needs per-1M prices configured). */
+  maxRetryCostUsd?: number;
+  /** A re-ask only starts if at least this many ms remain. Default 3000. */
+  minAttemptMs?: number;
+  /** After every re-ask and cascade step failed: `fallback` (default), `error` or `warn`. */
+  fallbackAction?: "fallback" | "error" | "warn";
+  /** Action when the LLM refused to respond (heuristic detection). */
+  onRefusal?: ResponseValidationAction;
+  /** Action when a streaming response timed out. */
+  onStreamingTimeout?: ResponseValidationAction;
+  /**
+   * Template (Qute) rendered with the task's template data and served by the
+   * `fallback` action and by `onError: fallback`. Blank = the default sentence.
+   */
+  fallbackMessage?: string;
+  /**
+   * Under convertToObject, the fallback is stored as
+   * `{"<fallbackField>": "<message>"}` so existing output templates render it.
+   */
+  fallbackField?: string;
+  /** Quick replies added next to the fallback; value/expressions are templates. */
+  fallbackQuickReplies?: FallbackQuickReply[];
+}
+
+export interface FallbackQuickReply {
+  value?: string;
+  expressions?: string;
+  isDefault?: boolean;
+}
+
+/** Mirrors backend `LlmConfiguration.CircuitBreakerConfig`. */
+export interface TaskCircuitBreaker {
+  /** Default false: without it a task behaves exactly as before. */
+  enabled?: boolean;
+  /** How many of the latest counted turns are looked at. Default 10, 1..1000. */
+  window?: number;
+  /** How many of them must fail with the same class to open it. Default 8. */
+  threshold?: number;
+  /** Milliseconds an open circuit is skipped before one probe. Default 60000. */
+  coolDownMs?: number;
+}
+
+/** Task-level failure policy — mirrors backend `LlmConfiguration.OnError`. */
+export interface TaskOnError {
+  action?: "fallback" | "error";
+}
+
+export interface ConversationSummaryConfig {
+  enabled?: boolean;
+  llmProvider?: string;
+  llmModel?: string;
+  maxSummaryTokens?: number;
+  excludePropertiesFromSummary?: boolean;
+  recentWindowSteps?: number;
+  maxRecallTurns?: number;
+  summarizationPrompt?: string;
+}
+
+export interface ToolResponseLimitsConfig {
+  defaultMaxChars?: number;
+  perToolLimits?: Record<string, number>;
+  /** Truncation strategy: "truncate" (default), "paginate", or "summarize" */
+  truncationStrategy?: string;
+  /** Model for summarize strategy (falls back to truncate when absent) */
+  summarizerModel?: string;
+}
+
+/**
+ * Behavioral counterweight configuration. Controls engine-level safety
+ * injection into LLM system prompts.
+ *
+ * Levels: "normal" (no injection), "cautious", "strict"
+ */
+export interface CounterweightConfig {
+  enabled?: boolean;
+  level?: string;     // "normal" | "cautious" | "strict"
+  placement?: string; // "prefix" | "suffix"
+  customInstructions?: string[];
+}
+
+/**
+ * Identity masking rules. Prepended to the system prompt to prevent the agent
+ * from revealing its nature, model names, or internal infrastructure.
+ */
+export interface IdentityMaskingConfig {
+  enabled?: boolean;
+  rules?: string[];
+}
+
+/** @deprecated Use LlmTask instead */
+export type LangchainTask = LlmTask;
+
+export interface KnowledgeBaseReference {
+  name?: string;
+  maxResults?: number;
+  minScore?: number;
+  contextTemplate?: string;
+}
+
+export interface LlmConfig {
+  tasks: LlmTask[];
+}
+
+/** @deprecated Use LlmConfig instead */
+export type LangchainConfig = LlmConfig;
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+/** Parameter keys that have dedicated UI controls and should not appear in the generic key-value grid */
+export const HIDDEN_PARAM_KEYS = new Set(["systemMessage"]);
+
+export const MODEL_TYPES: readonly string[] = LLM_PROVIDERS.map((p) => p.id);
+
+/**
+ * Built-in tool names the backend recognises in `builtInToolsWhitelist`
+ * (see `AgentOrchestrator.collectAllBuiltInTools`).
+ *
+ * Switching an agent to whitelist mode replaces the "all built-in tools"
+ * default with exactly this list, so anything missing here is a capability the
+ * user can no longer enable. Three of the last four are additionally
+ * self-gating server-side — `readattachment` only appears when the conversation
+ * has files, `conversationRecall` only with a rolling summary, `usermemory`
+ * only when the agent has persistent memory — so listing them cannot switch on
+ * something the agent isn't configured for. `fetch_page` is not gated: it is a
+ * plain tool for paging through an oversized tool response, and was simply
+ * missing from this list.
+ *
+ * `artifacts` and `group_tasks` admit a group's shared-artifact and task tools
+ * to a member with a whitelist. Both are self-gating as well: they only appear
+ * in a group discussion whose configuration enables them, so listing them
+ * enables nothing outside one — but leaving them out withholds them from a
+ * whitelisted member even when the group asks for them.
+ *
+ * Dynamic-agent tools (create_sub_agent, converse_with_agent,
+ * find_agents_by_capability, teardown_agent) are deliberately absent: they let
+ * an agent spawn other agents and belong to the Dynamic Agents configuration,
+ * not a generic tool picker.
+ */
+export const BUILT_IN_TOOLS = [
+  "calculator",
+  "datetime",
+  "websearch",
+  "dataformatter",
+  "webscraper",
+  "textsummarizer",
+  "pdfreader",
+  "weather",
+  "fetch_page",
+  "readattachment",
+  "conversationRecall",
+  "usermemory",
+  "artifacts",
+  "group_tasks",
+] as const;

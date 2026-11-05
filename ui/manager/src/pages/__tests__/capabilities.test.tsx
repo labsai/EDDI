@@ -7,7 +7,7 @@ import { ThemeProvider } from "@eddi/ui";
 import { CapabilitiesPage } from "@/pages/capabilities";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 function renderPage() {
   const queryClient = new QueryClient({

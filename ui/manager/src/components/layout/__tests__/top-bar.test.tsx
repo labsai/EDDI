@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { screen, fireEvent, render, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { TopBar } from "@/components/layout/top-bar";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@eddi/ui";

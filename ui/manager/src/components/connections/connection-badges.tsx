@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { KeyRound, Lock, Server, UserCheck, HelpCircle, UserRoundKey } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { authTypeLabel, bindingLabel, grantStatusLabel } from "@/lib/connection-labels";
-import type { AuthType, Binding, GrantStatus } from "@/lib/api/connections";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { authTypeLabel, bindingLabel, grantStatusLabel } from "@eddi/app-kit/lib/connection-labels";
+import type { AuthType, Binding, GrantStatus } from "@eddi/app-kit/lib/api/connections";
 
 /**
  * The three chips that describe a connection, in one file so the vocabulary

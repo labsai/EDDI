@@ -14,7 +14,7 @@ import {
   type RawParameterCatalog,
 } from "@/lib/llm-parameter-catalog";
 import { LLM_PARAMETER_CATALOG_DATA } from "@/lib/llm-parameter-catalog.data";
-import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
+import { LLM_PROVIDERS } from "@eddi/app-kit/lib/api/agent-setup";
 
 // Resolved from this file, not the working directory the runner starts in.
 const ROOT = resolve(__dirname, "../../../../..");

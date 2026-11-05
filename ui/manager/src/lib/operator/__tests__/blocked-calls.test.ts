@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { findBlockedCalls } from "../blocked-calls";
-import type { PendingToolCallView, ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { PendingToolCallView, ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * `self-guard` and `gate-guard` have their own tests. What was untested is the

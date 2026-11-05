@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import type { Ownership } from "@/lib/api/agents";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { Ownership } from "@eddi/app-kit/lib/api/agents";
 import {
   getWorkspaceInfo,
   principalOf,

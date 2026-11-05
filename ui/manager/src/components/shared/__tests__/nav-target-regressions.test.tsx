@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 import { CommandPalette } from "../command-palette";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { useCommandPalette } from "@/hooks/use-command-palette";
-import { parseResourceUri } from "@/lib/api/agents";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Agent detail lives at /manage/agentview/:id. Two places built

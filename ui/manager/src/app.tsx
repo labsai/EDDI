@@ -1,26 +1,28 @@
 import { Suspense } from "react";
-import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
-import { PageLoader } from "@/components/layout/page-loader";
-import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { PageLoader } from "@eddi/app-kit/components/layout/page-loader";
+import { ErrorBoundary } from "@eddi/app-kit/components/ui/error-boundary";
 import { CommandPalette } from "@/components/shared/command-palette";
-import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
-import { WorkforceLayout } from "@/components/workforce/workforce-layout";
-import { AuthorRoute } from "@/components/workforce/author-route";
+import { NavigationGuardDialog } from "@eddi/app-kit/components/shared/navigation-guard-dialog";
 import { LandingPage } from "@/pages/landing-page";
-import { NotFoundPage } from "@/pages/not-found";
-import { lazyPage } from "@/lib/lazy-page";
-import { isUpdateUiVisible } from "@/lib/brand";
-import { useBrand } from "@/hooks/use-brand";
+import { NotFoundPage } from "@eddi/app-kit/pages/not-found";
+import { lazyPage } from "@eddi/app-kit/lib/lazy-page";
+import { isUpdateUiVisible } from "@eddi/app-kit/lib/brand";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
 
 /**
  * Route components are code-split; the layouts, the landing page and the command
  * palette are not.
  *
  * The three eager imports are deliberate, not oversights:
- *  - `AppLayout` / `WorkforceLayout` are the chrome every child route renders
- *    into. Splitting them would put a chunk fetch in front of the first paint of
- *    the shell itself, and they are small.
+ *  - `AppLayout` is the chrome every child route renders into. Splitting it
+ *    would put a chunk fetch in front of the first paint of the shell itself,
+ *    and it is small.
+ *
+ * Workforce (`/workforce/**`) is not routed here: it is its own app, `ui/workforce`,
+ * with its own shell and router. A link to it from the Manager is a full page
+ * navigation (`<a href>`), never a `<Link>`.
  *  - `LandingPage` is where `/` redirects, so it is on the critical path for a
  *    cold visit. Lazy-loading the very first thing rendered trades a smaller
  *    bundle for a slower first paint — the wrong side of the trade.
@@ -93,41 +95,6 @@ const GroupWizardPage = lazyPage(() => import("@/pages/group-wizard"), "GroupWiz
 const GroupTemplatesPage = lazyPage(() => import("@/pages/group-templates"), "GroupTemplatesPage");
 const GroupWorkspacePage = lazyPage(() => import("@/pages/group-workspace"), "GroupWorkspacePage");
 
-// ── Workforce ────────────────────────────────────────────────────────
-const WorkforceDashboard = lazyPage(
-  () => import("@/pages/workforce/workforce-dashboard"),
-  "WorkforceDashboard",
-);
-const WorkforceWizard = lazyPage(
-  () => import("@/pages/workforce/workforce-wizard"),
-  "WorkforceWizard",
-);
-const WorkforceBoard = lazyPage(() => import("@/pages/workforce/workforce-board"), "WorkforceBoard");
-const WorkforceThread = lazyPage(
-  () => import("@/pages/workforce/workforce-thread"),
-  "WorkforceThread",
-);
-const WorkforceSettings = lazyPage(
-  () => import("@/pages/workforce/workforce-settings"),
-  "WorkforceSettings",
-);
-const WorkforceHistory = lazyPage(
-  () => import("@/pages/workforce/workforce-history"),
-  "WorkforceHistory",
-);
-const WorkforceAnalytics = lazyPage(
-  () => import("@/pages/workforce/workforce-analytics"),
-  "WorkforceAnalytics",
-);
-const WorkforceChat = lazyPage(() => import("@/pages/workforce/workforce-chat"), "WorkforceChat");
-
-/** Redirect /Workforce/* (capital W) → /workforce/* preserving sub-paths */
-function WorkforceRedirect() {
-  const { "*": rest } = useParams();
-  const sub = rest ? `/${rest}` : "";
-  return <Navigate to={`/workforce${sub}`} replace />;
-}
-
 export function App() {
   const brand = useBrand();
   const location = useLocation();
@@ -147,23 +114,6 @@ export function App() {
 
           {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
           <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
-
-          {/* Workforce — standalone app, no Manager chrome */}
-          <Route path="/workforce" element={<WorkforceLayout />}>
-            <Route index element={<WorkforceDashboard />} />
-            <Route path="new" element={<AuthorRoute><WorkforceWizard /></AuthorRoute>} />
-            <Route path="analytics" element={<AuthorRoute><WorkforceAnalytics /></AuthorRoute>} />
-            <Route path="chat" element={<WorkforceChat />} />
-            <Route path=":boardId" element={<WorkforceBoard />} />
-            <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
-            <Route path=":boardId/settings" element={<AuthorRoute><WorkforceSettings /></AuthorRoute>} />
-            <Route path=":boardId/history" element={<WorkforceHistory />} />
-            <Route path="*" element={<NotFoundPage scope="workforce" />} />
-          </Route>
-
-          {/* Legacy /Workforce (capital W) redirect → /workforce */}
-          <Route path="/Workforce/*" caseSensitive element={<WorkforceRedirect />} />
-          <Route path="/Workforce" caseSensitive element={<Navigate to="/workforce" replace />} />
 
           <Route element={<AppLayout />}>
             <Route path="/manage" element={<DashboardPage />} />

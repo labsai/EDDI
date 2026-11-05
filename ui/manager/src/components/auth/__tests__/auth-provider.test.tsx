@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { BrowserRouter } from "react-router-dom";
-import { AuthProvider } from "../auth-provider";
-import { useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "@eddi/app-kit/components/auth/auth-provider";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 
 /** Test component that displays auth state */
 function AuthDisplay() {

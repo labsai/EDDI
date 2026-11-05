@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { MessageSquareHeart } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { RatingScore } from "./rating-score";
-import type { RatingRow } from "@/lib/api/ratings";
+import type { RatingRow } from "@eddi/app-kit/lib/api/ratings";
 
 /** "Reviewed" / "New" — the triage state of a rating. */
 export function ReviewStatusBadge({ row }: { row: RatingRow }) {

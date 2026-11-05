@@ -3,14 +3,14 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
-import { createTestQueryClient, renderPage } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { createTestQueryClient, renderPage } from "@eddi/app-kit/test/test-utils";
 import { ThemeProvider } from "@eddi/ui";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { Sidebar } from "@/components/layout/sidebar";
-import { renderWithProviders } from "@/test/test-utils";
-import { FAILING_CHANNEL, alertEventFixtures } from "@/test/mocks/alert-handlers";
-import type { AlertRule } from "@/lib/api/alerts";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { FAILING_CHANNEL, alertEventFixtures } from "@eddi/app-kit/test/mocks/alert-handlers";
+import type { AlertRule } from "@eddi/app-kit/lib/api/alerts";
 import { AlertsPage } from "../alerts";
 
 const editorAuth: AuthContextValue = {

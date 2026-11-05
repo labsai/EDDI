@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { FileText } from "lucide-react";
-import type { ApprovalContextView } from "@/lib/api/hitl";
+import type { ApprovalContextView } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * The designer's `approvalContext` for a pause — the draft, its sources, the

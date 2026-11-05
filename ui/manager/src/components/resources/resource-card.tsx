@@ -5,13 +5,13 @@ import {
   MoreVertical,
   ExternalLink,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import { cn } from "@eddi/app-kit/lib/utils";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { accessFor } from "@/lib/access";
-import { getResourceType } from "@/lib/api/resources";
-import { getResourceTypeIcon } from "@/lib/resource-type-icons";
+import { getResourceType } from "@eddi/app-kit/lib/api/resources";
+import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
 
 interface ResourceCardProps {
   item: AgentDescriptor & { id: string; version: number };

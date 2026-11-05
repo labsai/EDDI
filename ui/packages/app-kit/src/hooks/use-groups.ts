@@ -1,0 +1,339 @@
+import { useCallback, useMemo } from "react";
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  DISCUSSION_STYLES,
+  type DiscussionStyle,
+  getGroupDescriptors,
+  getEnrichedGroupDescriptors,
+  getGroup,
+  getGroupCurrentVersion,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+  duplicateGroup,
+  getDiscussionStyles,
+  getGroupConversation,
+  listGroupConversations,
+  deleteGroupConversation,
+  deleteGroupWithMembers,
+  type AgentGroupConfiguration,
+  type GroupConversationState,
+} from "../lib/api/groups";
+import { parseVersionFromLocation } from "../lib/api/location-version";
+
+const GROUPS_KEY = ["groups"] as const;
+export const GROUP_CONVERSATIONS_KEY = ["groupConversations"] as const;
+
+/** Conversation states in which the backend is still working on the discussion,
+ *  so the UI should keep polling and show it as ongoing. */
+export function isActiveConversationState(
+  state: GroupConversationState | undefined,
+): boolean {
+  return state === "IN_PROGRESS" || state === "SYNTHESIZING";
+}
+
+/**
+ * States a page should keep re-reading even though the backend is not working:
+ * a discussion waiting on a human (approval or a member's turn) is decided from
+ * ANOTHER screen or user, and without the re-read this one stays on "awaiting"
+ * for good. Slower than the active-state poll — nothing is progressing.
+ */
+export function isAwaitingHumanConversationState(
+  state: GroupConversationState | undefined,
+): boolean {
+  return state === "AWAITING_APPROVAL" || state === "AWAITING_HUMAN_INPUT";
+}
+
+// ─── Group Config Hooks ──────────────────────────────────────────
+
+export function useGroupDescriptors(limit = 20, index = 0, filter = "") {
+  return useQuery({
+    queryKey: [...GROUPS_KEY, "descriptors", { limit, index, filter }],
+    queryFn: () => getGroupDescriptors(limit, index, filter),
+  });
+}
+
+/**
+ * `enabled: false` for a caller the group store refuses (`eddi-user`) — Workforce
+ * reads the catalog for them instead (see `useWorkforceAccess`).
+ */
+export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "", enabled = true) {
+  return useQuery({
+    queryKey: [...GROUPS_KEY, "enriched", { limit, index, filter }],
+    queryFn: () => getEnrichedGroupDescriptors(limit, index, filter),
+    enabled,
+    // A new filter keeps showing the previous results until its own arrive,
+    // instead of blanking the list to a skeleton on every search.
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useGroup(id: string, version?: number) {
+  return useQuery({
+    queryKey: [...GROUPS_KEY, id, version],
+    queryFn: () => getGroup(id, version),
+    enabled: !!id,
+  });
+}
+
+/**
+ * The version a page should read, given what its URL says.
+ *
+ * An explicit, valid `?version=` wins — a link can deliberately point at an
+ * older version. Without one, the group's CURRENT version is looked up rather
+ * than assumed to be 1: several Workforce links (the history page's way back,
+ * an advisor's thread) carried no version, and the pages behind them read the
+ * group's first version — its original name, members and phases — and linked
+ * onward to it, so one version-less hop pinned the whole session to history.
+ *
+ * `undefined` while the lookup is in flight, so callers leave `useGroup`
+ * disabled instead of fetching version 1 in the meantime. A failed lookup falls
+ * back to 1, the old behaviour, rather than blocking the page on it — pages
+ * that edit or delete the group use {@link useGroupVersionLookup} instead and
+ * show the failure.
+ */
+export function useResolvedGroupVersion(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): number | undefined {
+  const { version, lookupFailed } = useGroupVersionLookup(groupId, urlVersion);
+  if (version !== undefined) return version;
+  return lookupFailed ? 1 : undefined;
+}
+
+/**
+ * As {@link useResolvedGroupVersion}, but a failed current-version lookup is
+ * reported (`lookupFailed`, with `retry`) instead of being turned into version
+ * 1. Loading version 1 of a group that is on version 4 shows a stale document,
+ * and every save or delete from it 409s — a page that writes must say the
+ * lookup failed and offer a retry, not guess.
+ */
+export function useGroupVersionLookup(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): { version: number | undefined; lookupFailed: boolean; retry: () => void } {
+  const explicit = urlVersion != null && /^[1-9]\d*$/.test(urlVersion) ? Number(urlVersion) : undefined;
+  const { data, isError, refetch } = useQuery({
+    queryKey: [...GROUPS_KEY, groupId, "currentVersion"],
+    queryFn: () => getGroupCurrentVersion(groupId!),
+    enabled: !!groupId && explicit === undefined,
+    staleTime: 30_000,
+  });
+  const retry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+  if (explicit !== undefined) return { version: explicit, lookupFailed: false, retry };
+  if (typeof data === "number" && data > 0) return { version: data, lookupFailed: false, retry };
+  return { version: undefined, lookupFailed: isError, retry };
+}
+
+export function useDiscussionStyles() {
+  return useQuery({
+    queryKey: [...GROUPS_KEY, "styles"],
+    queryFn: () => getDiscussionStyles(),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * The discussion styles this UI should offer, reconciled with what the backend
+ * actually supports (`GET /groupstore/groups/styles`).
+ *
+ * The static `DISCUSSION_STYLES` list was the only source before, so a style the
+ * backend dropped (or an older backend never had) was still offered and then
+ * failed at save time. While the request is in flight — or fails — the static
+ * list stands, so pickers never render empty.
+ *
+ * Narrowed to styles this build KNOWS: everything that makes a style usable —
+ * its localized name and flow text, phase expansion for the HITL approval
+ * picker, the wizard hint, the transcript breadcrumb — is keyed off
+ * `DiscussionStyle`, so a backend-only name would be an option the UI cannot
+ * describe or configure. Such a style is simply not offered; one already SAVED
+ * on a group still renders, via `styleDisplay`'s raw-value fallback.
+ */
+export function useAvailableStyles(): DiscussionStyle[] {
+  const { data } = useDiscussionStyles();
+  return useMemo(() => {
+    const fallback = [...DISCUSSION_STYLES];
+    // The wire format is an array of descriptors, so read each entry's `style`
+    // field. Treating the payload as a map keyed by the enum — as this hook
+    // first did — yields the array indices "0", "1", "2"… instead, matches
+    // nothing, and silently disables the whole check against the real API.
+    if (!Array.isArray(data)) return fallback;
+    const supported = new Set(
+      data
+        .map((entry) => (entry && typeof entry === "object" ? entry.style : null))
+        .filter((style): style is string => typeof style === "string"),
+    );
+    if (supported.size === 0) return fallback;
+
+    const known = DISCUSSION_STYLES.filter((s) => supported.has(s));
+    // A response with none of the known styles is far more likely a contract
+    // change than a backend with zero presets — don't blank every picker over it.
+    return known.length > 0 ? known : fallback;
+  }, [data]);
+}
+
+/** Whether a style can still be created against the running backend. */
+export function isStyleSupported(
+  style: DiscussionStyle | null | undefined,
+  supported: readonly DiscussionStyle[],
+): boolean {
+  return !style || supported.includes(style);
+}
+
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: AgentGroupConfiguration) => createGroup(config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+    },
+  });
+}
+
+/**
+ * Save a group config. Resolves with the version the save CREATED.
+ *
+ * Every PUT makes a new version and the backend refuses a write to one that is
+ * no longer current, so the caller must move onto `version` — a page that kept
+ * the version it was opened with showed the pre-save document on the next
+ * refetch (the edit "reverted") and 409'd on its next save or delete.
+ *
+ * The saved document is seeded into the cache under the new version, so a page
+ * that switches to it renders the edit at once instead of a loading state.
+ */
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      version,
+      config,
+    }: {
+      id: string;
+      version: number;
+      config: AgentGroupConfiguration;
+    }): Promise<{ location: string; version: number | null }> => {
+      const result = await updateGroup(id, version, config);
+      // `null` only when the server named no version — the save itself worked,
+      // so it is not failed over that; the caller just cannot move forward.
+      return { location: result.location, version: parseVersionFromLocation(result.location) };
+    },
+    onSuccess: (result, { id, config }) => {
+      if (result.version !== null) {
+        queryClient.setQueryData([...GROUPS_KEY, id, result.version], config);
+      }
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      permanent,
+    }: {
+      id: string;
+      version: number;
+      /** Hard delete (also removes the group's workspace) — only when the user explicitly chose it. */
+      permanent?: boolean;
+    }) => deleteGroup(id, version, permanent),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+    },
+  });
+}
+
+export function useDuplicateGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      duplicateGroup(id, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+    },
+  });
+}
+
+// ─── Group Conversation Hooks ────────────────────────────────────
+
+export function useGroupConversations(groupId: string, limit = 20, index = 0) {
+  return useQuery({
+    queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, { limit, index }],
+    queryFn: () => listGroupConversations(groupId, limit, index),
+    enabled: !!groupId,
+    // Asking for a longer list ("load more") keeps the shorter one on screen
+    // until it lands, instead of blanking to a skeleton — but only within the
+    // SAME group: another group's list must never stand in for this one.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === groupId ? previous : undefined,
+    // Keep the list live while any discussion is still running, so its state
+    // badge flips on its own instead of needing a manual reload.
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (c) => isActiveConversationState(c.state) || isAwaitingHumanConversationState(c.state),
+      )
+        ? 5000
+        : false,
+  });
+}
+
+export function useGroupConversation(groupId: string, conversationId: string) {
+  return useQuery({
+    queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, conversationId],
+    queryFn: () => getGroupConversation(groupId, conversationId),
+    enabled: !!groupId && !!conversationId,
+    refetchInterval: (query) =>
+      // Poll while the discussion is in progress — this is what keeps a
+      // reloaded page (no SSE connection) following a running discussion.
+      isActiveConversationState(query.state.data?.state)
+        ? 3000
+        : isAwaitingHumanConversationState(query.state.data?.state)
+          ? 5000
+          : false,
+  });
+}
+
+export function useDeleteGroupConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      groupId,
+      conversationId,
+    }: {
+      groupId: string;
+      conversationId: string;
+    }) => deleteGroupConversation(groupId, conversationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: GROUP_CONVERSATIONS_KEY });
+    },
+  });
+}
+
+export function useDeleteGroupWithMembers() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      groupId,
+      version,
+      config,
+      permanent,
+    }: {
+      groupId: string;
+      version: number;
+      config: AgentGroupConfiguration;
+      /** Hard delete — only when the user explicitly chose it. Soft otherwise. */
+      permanent?: boolean;
+    }) => deleteGroupWithMembers(groupId, version, config, permanent),
+    // Settled, not success: a partial failure has still deleted something (the
+    // group on the soft path, some members on either), and the lists must say so.
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: GROUPS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}

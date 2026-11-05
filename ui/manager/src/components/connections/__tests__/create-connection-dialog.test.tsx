@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { CreateConnectionDialog } from "@/components/connections/create-connection-dialog";
 
 /**

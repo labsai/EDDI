@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isCascadeRequest, parseCascadePreview } from "../cascade-preview";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 const AGENT = "68f1c2a9b34d5e6f70819a2b";
 const LLM = "112233445566778899aabbcc";

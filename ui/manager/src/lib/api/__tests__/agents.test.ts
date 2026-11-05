@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseResourceUri, getAgent, type AgentDescriptor } from "@/lib/api/agents";
-import { groupAgentsByName } from "@/hooks/use-agents";
+import { parseResourceUri, getAgent, type AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 
 describe("parseResourceUri", () => {
   it("parses standard agent resource URI", () => {

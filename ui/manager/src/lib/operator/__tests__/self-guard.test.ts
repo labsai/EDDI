@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { findSelfTargetedCalls, uriTargetsAgent } from "../self-guard";
-import type { PendingToolCallView } from "@/lib/api/hitl";
+import type { PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 
 const OPERATOR_ID = "68f1c2a9b34d5e6f70819a2b";
 const OTHER_ID = "aaaabbbbccccddddeeeeffff";

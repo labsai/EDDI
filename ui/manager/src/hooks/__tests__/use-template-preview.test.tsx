@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { type ReactNode } from "react";
 import { useTemplatePreview } from "@/hooks/use-template-preview";
 import { http, HttpResponse } from "msw";

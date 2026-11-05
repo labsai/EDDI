@@ -42,7 +42,7 @@ class BrandedShellRendererTest {
     private static final Map<BrandedShell, Path> SOURCES = Map.of(
             BrandedShell.MANAGE, Path.of("ui/manager/manage.html"),
             BrandedShell.WELCOME, Path.of("ui/manager/welcome.html"),
-            BrandedShell.WORKFORCE, Path.of("ui/manager/workforce.html"),
+            BrandedShell.WORKFORCE, Path.of("ui/workforce/workforce.html"),
             BrandedShell.CHAT, Path.of("ui/chat/chat.html"),
             BrandedShell.ROOT, Path.of("src/main/resources/META-INF/resources/index.html"));
 

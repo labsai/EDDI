@@ -4,10 +4,10 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
-import { PromptViewer } from "@/components/debugger/prompt-viewer";
-import { server } from "@/test/mocks/server";
+import { PromptViewer } from "@eddi/app-kit/components/debugger/prompt-viewer";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { userEvent } from "@/test/test-utils";
+import { userEvent } from "@eddi/app-kit/test/test-utils";
 
 function renderViewer(conversationId: string | null = "conv1") {
   const queryClient = new QueryClient({

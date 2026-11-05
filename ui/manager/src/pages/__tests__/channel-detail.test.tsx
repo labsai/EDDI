@@ -2,13 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
-import { server } from "@/test/mocks/server";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
-vi.mock("@/hooks/use-unsaved-changes-guard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks/use-unsaved-changes-guard")>();
+vi.mock("@eddi/app-kit/hooks/use-unsaved-changes-guard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/hooks/use-unsaved-changes-guard")>();
   return {
     ...actual,
     allowNextNavigation: () => {

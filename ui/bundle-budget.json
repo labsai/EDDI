@@ -4,9 +4,15 @@
     "manager": {
       "dist": "manager/dist",
       "pages": {
-        "manage.html": { "baselineKb": 743.8, "budgetKb": 630 },
-        "workforce.html": { "baselineKb": 743.8, "budgetKb": 630 },
-        "welcome.html": { "baselineKb": 743.8, "budgetKb": 630 }
+        "manage.html": { "baselineKb": 743.8, "budgetKb": 620 },
+        "welcome.html": { "baselineKb": 743.8, "budgetKb": 620 }
+      }
+    },
+    "workforce": {
+      "$comment": "Its own app since phase 5 (planning/frontend-unification-plan.md §7): 252.2 KB gz measured at the split, against the 743.8 KB it loaded as part of the Manager's bundle before phase 0. The budget leaves about 10% headroom.",
+      "dist": "workforce/dist",
+      "pages": {
+        "workforce.html": { "baselineKb": 743.8, "budgetKb": 280 }
       }
     },
     "chat": {

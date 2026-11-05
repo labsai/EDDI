@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { ShieldCheck, Info } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import type { TaskSectionProps } from "./task-section-props";
-import type { ResponseValidation, ResponseValidationAction, RetryableResponseValidationAction } from "./types";
-import { RESPONSE_VALIDATION_ACTIONS } from "./types";
+import type { ResponseValidation, ResponseValidationAction, RetryableResponseValidationAction } from "@eddi/app-kit/components/editors/llm/types";
+import { RESPONSE_VALIDATION_ACTIONS } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Policy fields on `responseValidation`, in display order. */
 type PolicyField = {

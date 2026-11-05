@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { type ReactNode } from "react";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
-import { useChatStore } from "@/hooks/use-chat";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { http, HttpResponse } from "msw";
 
 // We need the i18n provider for the hook's useTranslation

@@ -9,9 +9,9 @@ import {
   isProvisionableByTeamSetup,
   offeredWithoutBaseUrl,
   supportsBaseUrl,
-} from "@/lib/model-suggestions";
-import { SELF_HOSTED_PROVIDER_ID } from "@/lib/llm-provider-catalog";
-import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
+} from "@eddi/app-kit/lib/model-suggestions";
+import { SELF_HOSTED_PROVIDER_ID } from "@eddi/app-kit/lib/llm-provider-catalog";
+import { LLM_PROVIDERS, getProviderConfig } from "@eddi/app-kit/lib/api/agent-setup";
 
 /**
  * The wizard's model catalog is the one place a user's provider choice turns

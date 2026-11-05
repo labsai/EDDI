@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { TaskCascadeSection } from "../../task-cascade-section";
-import type { LlmTask, ModelCascadeConfig } from "../../types";
+import type { LlmTask, ModelCascadeConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 // SecretKeyPicker pulls vault data via react-query; renderWithProviders wires
 // the client, and with no backend the hooks simply resolve to empty/undefined.

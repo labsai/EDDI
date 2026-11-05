@@ -1,4 +1,4 @@
-import { api, ApiClientError } from "../api-client";
+import { api, ApiClientError } from "@eddi/app-kit/lib/api-client";
 
 /** One space the caller can reach, as the server describes it. */
 export interface SpaceInfo {

@@ -14,7 +14,7 @@ import {
   type ConversationState,
   type ConversationStatus,
   type ViewState,
-} from "@/lib/api/conversations";
+} from "@eddi/app-kit/lib/api/conversations";
 
 const CONVERSATIONS_KEY = ["conversations"] as const;
 

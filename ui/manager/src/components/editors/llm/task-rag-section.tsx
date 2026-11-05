@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Database, Plus, X, Trash2, AlertTriangle } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import type { TaskSectionProps } from "./task-section-props";
 
 /**

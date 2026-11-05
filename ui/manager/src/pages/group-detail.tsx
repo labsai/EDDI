@@ -17,34 +17,34 @@ import {
   useDeleteGroupConversation,
   isActiveConversationState,
   useGroupVersionLookup,
-} from "@/hooks/use-groups";
+} from "@eddi/app-kit/hooks/use-groups";
 import {
   persistedHasCaughtUp,
   streamErrorOf,
   useGroupDiscussionStream,
   whenStreamAccepted,
-} from "@/hooks/use-group-discussion-stream";
-import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+} from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import { useCancelGroupDiscussion, useSubmitHumanInput } from "@eddi/app-kit/hooks/use-hitl";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
-import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
-import { DiscussionInsights } from "@/components/groups/discussion-insights";
-import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
-import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
+import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
+import { TaskBoard, PersistedTaskBoard } from "@eddi/app-kit/components/groups/task-board";
+import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
-import { DiscussionActions } from "@/components/groups/discussion-actions";
-import { GroupConfigPanel } from "@/components/groups/group-config-panel";
-import { hasDisplayableDecision } from "@/lib/group-config";
-import { Badge } from "@/components/ui/badge";
+import { DiscussionActions } from "@eddi/app-kit/components/groups/discussion-actions";
+import { GroupConfigPanel } from "@eddi/app-kit/components/groups/group-config-panel";
+import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
-import { cn } from "@/lib/utils";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { styleDisplay } from "@/lib/discussion-styles";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
+import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
 import {
   followupGroupMember,
   closeGroupConversation,
@@ -53,16 +53,16 @@ import {
   type GroupAttachmentRef,
   type GroupConversation,
   type GroupConversationState,
-} from "@/lib/api/groups";
-import { getGroupApprovalStatus, type HitlDecision, type HitlVerdict } from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/groups";
+import { getGroupApprovalStatus, type HitlDecision, type HitlVerdict } from "@eddi/app-kit/lib/api/hitl";
 import {
   bindDecisionToPause,
   currentGroupPauseOf,
   isPauseChanged,
   type ShownPause,
-} from "@/lib/hitl-pause-binding";
+} from "@eddi/app-kit/lib/hitl-pause-binding";
 import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
-import { safeFormatDate } from "@/components/groups/group-utils";
+import { safeFormatDate } from "@eddi/app-kit/components/groups/group-utils";
 
 /** Discussions fetched per page of the history list. */
 const CONVERSATION_PAGE = 20;

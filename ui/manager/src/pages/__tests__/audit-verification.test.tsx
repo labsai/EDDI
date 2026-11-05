@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { AuditPage } from "@/pages/audit";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { auditVerdict, uncoveredCount, type AuditVerificationReport } from "@/lib/api/audit-verify";
-import type { AuditEntry } from "@/lib/api/audit";
+import type { AuditEntry } from "@eddi/app-kit/lib/api/audit";
 
 /**
  * UI review High 9: the audit screen showed a green "SIGNED" shield whenever

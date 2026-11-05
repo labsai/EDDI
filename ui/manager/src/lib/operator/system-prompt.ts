@@ -17,8 +17,8 @@ import {
   grantsAlertReads,
   type OperatorScope,
 } from "./tool-scopes";
-import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
-import { DEFAULT_BRAND, getBrand } from "@/lib/brand";
+import { MODEL_SUGGESTIONS } from "@eddi/app-kit/lib/model-suggestions";
+import { DEFAULT_BRAND, getBrand } from "@eddi/app-kit/lib/brand";
 
 /**
  * System prompt for the Platform Operator.
@@ -1109,6 +1109,10 @@ your tool schemas do not cover it, not as a routine first step:
   date, under the conversation \`title\`; the owner renames, pins and deletes
   them there. Team sessions carry their question as title and cannot be
   renamed or pinned.
+- Workforce (/workforce) is its own app beside the manager (/manage), built
+  into the same jar: one sign-in (it uses the manager's Keycloak client), and
+  moving between the two is a page load. You live only in the manager;
+  Workforce shows an administrator a link to you, never your chat.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465

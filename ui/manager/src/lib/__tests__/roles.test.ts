@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mayUse, rolesAreKnown, rolesForScreen, ROLE_ADMIN, ROLE_EDITOR, ROLE_USER } from "@/lib/roles";
+import { mayUse, rolesAreKnown, rolesForScreen, ROLE_ADMIN, ROLE_EDITOR, ROLE_USER } from "@eddi/app-kit/lib/roles";
 
 /**
  * `SCREEN_ROLES` mirrors the backend's `@RolesAllowed`. Each expectation below

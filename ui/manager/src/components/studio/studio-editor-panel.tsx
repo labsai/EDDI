@@ -5,13 +5,13 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { describeSaveError } from "@/lib/save-error";
-import { parseResourceUri } from "@/lib/api/agents";
-import { getResourceType, type ResourceTypeConfig } from "@/lib/api/resources";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { getResourceType, type ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
 import {
   cascadePartialResult,
   nextCascadeContext,
   type CascadeContext,
-} from "@/lib/api/cascade-save";
+} from "@eddi/app-kit/lib/api/cascade-save";
 import {
   useResource,
   useResourceVersions,
@@ -19,10 +19,10 @@ import {
 } from "@/hooks/use-resources";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
-import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
-import { useAgent } from "@/hooks/use-agents";
+import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
+import { useAgent } from "@eddi/app-kit/hooks/use-agents";
 import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { AlertTriangle, SquarePen } from "lucide-react";
 

@@ -1,0 +1,250 @@
+import type { Page } from "@playwright/test";
+import { expect } from "./fixtures";
+import { waitForApp } from "./helpers";
+
+/**
+ * Conversation feature matrix — what each conversation surface can do
+ * TODAY (frontend unification plan, §1.3 and phase 0).
+ *
+ * One row per capability, one column per surface. Every cell is one test,
+ * tagged `@surface:<id>` and `@capability:<id>`, so `--grep @surface:operator`
+ * prints one surface's column. A cell is:
+ *
+ *  - `yes`  — asserted here against the MSW backend;
+ *  - `unit` — supported, but the MSW tier has no fixture to reach it (an
+ *             activated operator, an agent that asks for a secret); skipped
+ *             with the unit test that covers it, so the gap stays visible;
+ *  - `no`   — not supported; `test.fixme` with the reason. When a phase brings
+ *             the capability to the surface, the cell flips to `yes` and its
+ *             assertion lands with it. Phase 3's exit criterion is this table
+ *             showing the union of capabilities on every agent surface.
+ *
+ * The table lives here because its columns live in two apps: each app's
+ * `e2e/feature-matrix.spec.ts` runs the columns it serves (the Manager:
+ * chat-panel and operator; Workforce: workforce-thread) against its own dev
+ * server. The widget's column lives in ui/chat (`src/feature-matrix.test.tsx`),
+ * which has no Playwright tier.
+ */
+
+export type SurfaceId = "chat-panel" | "operator" | "workforce-thread";
+export type CapabilityId =
+  | "katex"
+  | "highlight"
+  | "output-images"
+  | "quick-replies"
+  | "input-field"
+  | "secret-input"
+  | "history"
+  | "inline-hitl"
+  | "i18n";
+
+export type Cell =
+  | { status: "yes"; check: (page: Page) => Promise<void> }
+  | { status: "unit" | "no"; reason: string };
+
+export interface Surface {
+  path: string;
+  /** Proves the surface itself rendered, before any capability is looked at. */
+  ready: (page: Page) => Promise<void>;
+}
+
+export const SURFACES: Record<SurfaceId, Surface> = {
+  "chat-panel": {
+    path: "/manage/chat",
+    ready: async (page) => {
+      await waitForApp(page);
+      await expect(page.getByTestId("agent-selector")).toBeVisible();
+    },
+  },
+  operator: {
+    path: "/manage/operator",
+    ready: (page) => waitForApp(page),
+  },
+  "workforce-thread": {
+    path: "/workforce/board1/thread/agent1",
+    ready: async (page) => {
+      await waitForApp(page);
+      await expect(page.getByTestId("thread-new-conversation")).toBeVisible();
+    },
+  },
+};
+
+/** Start a conversation with the mock "Support Agent" in the chat panel. */
+async function startSupportChat(page: Page) {
+  await page.getByTestId("agent-selector").click();
+  await page.getByText("Support Agent").first().click();
+  await expect(page.getByTestId("chat-input")).toBeVisible({ timeout: 15_000 });
+}
+
+/** The UI follows the stored language: lang/dir on <html> say which bundle renders. */
+const i18nCell: Cell = {
+  status: "yes",
+  check: async (page) => {
+    await expect(page.locator("html")).toHaveAttribute("lang", "de");
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+  },
+};
+
+/**
+ * The operator renders through the one markdown renderer since phase 3c (the
+ * §2.5 guard in @eddi/conversation fails on any other react-markdown import),
+ * but its chat needs an activated operator, which MSW does not provide.
+ */
+const OPERATOR_RICH =
+  "renders replies through MarkdownContent (phase 3c; the one-renderer guard in packages/conversation pins it) — needs an activated operator, which MSW does not provide; the renderer's KaTeX/highlight are covered by packages/conversation and the chat-panel cells";
+
+/**
+ * Mirrors RICH_MARKDOWN_TRIGGER in ../mocks/handlers.ts: a message that
+ * contains it gets a reply with display math and a fenced code block.
+ */
+const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** Send the trigger in the chat panel; the reply goes through the one markdown renderer. */
+async function askForRichMarkdown(page: Page) {
+  await startSupportChat(page);
+  const input = page.getByTestId("chat-input");
+  await input.fill(`Please ${RICH_MARKDOWN_TRIGGER}`);
+  await input.press("Enter");
+}
+
+/** The same trigger in the member thread, whose replies use the same renderer since phase 3c. */
+async function askThreadForRichMarkdown(page: Page) {
+  const input = page.getByTestId("thread-input");
+  await input.fill(`Please ${RICH_MARKDOWN_TRIGGER}`);
+  await input.press("Enter");
+}
+
+/**
+ * Mirrors IMAGE_OUTPUT_TRIGGER in ../mocks/handlers.ts: the reply carries
+ * an `image` output item, which the chat renders as an image.
+ */
+const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
+export const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
+  katex: {
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await askForRichMarkdown(page);
+        // The KaTeX chunk loads the first time a reply contains $$…$$.
+        await expect(page.locator(".katex").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
+    operator: { status: "unit", reason: OPERATOR_RICH },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        await askThreadForRichMarkdown(page);
+        await expect(page.locator(".katex").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
+  },
+  highlight: {
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await askForRichMarkdown(page);
+        await expect(page.locator("code.hljs").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
+    operator: { status: "unit", reason: OPERATOR_RICH },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        await askThreadForRichMarkdown(page);
+        await expect(page.locator("code.hljs").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
+  },
+  "output-images": {
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await startSupportChat(page);
+        const input = page.getByTestId("chat-input");
+        await input.fill(`Please ${IMAGE_OUTPUT_TRIGGER}`);
+        await input.press("Enter");
+        // A designer image renders as an image (a model's image would be a link).
+        await expect(page.getByTestId("message-images").locator("img")).toBeVisible({ timeout: 15_000 });
+      },
+    },
+    operator: { status: "no", reason: "the operator chat renders text replies only (its own loop until phase 6)" },
+    "workforce-thread": {
+      status: "yes",
+      check: async (page) => {
+        const input = page.getByTestId("thread-input");
+        await input.fill(`Please ${IMAGE_OUTPUT_TRIGGER}`);
+        await input.press("Enter");
+        await expect(page.getByTestId("message-images").locator("img")).toBeVisible({ timeout: 15_000 });
+      },
+    },
+  },
+  "quick-replies": {
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await startSupportChat(page);
+        // The mock welcome offers four quick replies.
+        await expect(page.getByTestId("quick-reply-btn").first()).toBeVisible();
+      },
+    },
+    operator: { status: "no", reason: "the operator chat renders no quick replies" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks quick replies, but it renders none yet",
+    },
+  },
+  "input-field": {
+    "chat-panel": {
+      status: "unit",
+      reason: "partial support; no MSW agent sends inputField — see components/chat/__tests__ (secret-input-field)",
+    },
+    operator: { status: "no", reason: "the operator chat ignores inputField" },
+    "workforce-thread": {
+      status: "no",
+      reason: "the member thread runs on AgentConversation, which tracks the requested field, but it renders no field yet",
+    },
+  },
+  "secret-input": {
+    "chat-panel": {
+      status: "unit",
+      reason: "secret-input-field.tsx exists; no MSW agent asks for a secret — covered by its unit tests",
+    },
+    operator: { status: "no", reason: "the operator chat has no secret input" },
+    "workforce-thread": { status: "no", reason: "the member thread has no secret input" },
+  },
+  history: {
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await expect(page.getByTestId("history-toggle")).toBeVisible();
+      },
+    },
+    operator: {
+      status: "unit",
+      reason: "operator-history.tsx needs an activated operator, which MSW does not provide — covered by operator unit tests",
+    },
+    "workforce-thread": { status: "no", reason: "the member thread has no conversation history" },
+  },
+  "inline-hitl": {
+    "chat-panel": { status: "no", reason: "shows a paused notice only; deciding is on /manage/approvals" },
+    operator: {
+      status: "unit",
+      reason: "approve/reject per tool call needs an activated operator in a paused turn — covered by approval-banner and lib/operator unit tests",
+    },
+    "workforce-thread": { status: "no", reason: "shows a paused notice and links to approvals; no inline decision" },
+  },
+  i18n: {
+    "chat-panel": i18nCell,
+    operator: i18nCell,
+    "workforce-thread": i18nCell,
+  },
+};
+
+// The types already demand a cell for every capability and surface; this keeps
+// a cast from slipping one past them. Checked at load, not as a test: every
+// test in this tier gets the MSW guard fixture, which needs a page.
+for (const [capability, row] of Object.entries(MATRIX)) {
+  const missing = Object.keys(SURFACES).filter((s) => !(s in row));
+  if (missing.length) throw new Error(`feature matrix: ${capability} has no cell for ${missing.join(", ")}`);
+}

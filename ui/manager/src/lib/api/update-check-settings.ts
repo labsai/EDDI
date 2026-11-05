@@ -1,4 +1,4 @@
-import { api } from "@/lib/api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 
 /**
  * Whether this deployment checks for new EDDI releases — the backend's switch,

@@ -5,7 +5,7 @@ import {
   isValidIsoDuration,
   requiresApprovalTimeout,
   DEFAULT_GROUP_HITL_CONFIG,
-} from "@/lib/hitl-config";
+} from "@eddi/app-kit/lib/hitl-config";
 
 describe("getStylePhases", () => {
   it("mirrors the TASK_FORCE preset exactly (plan → execute → verify → synthesis)", () => {

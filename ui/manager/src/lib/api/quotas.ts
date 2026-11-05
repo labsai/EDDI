@@ -1,5 +1,5 @@
-import { api, isApiError } from "../api-client";
-import { nameSeg } from "./path-segment";
+import { api, isApiError } from "@eddi/app-kit/lib/api-client";
+import { nameSeg } from "@eddi/app-kit/lib/api/path-segment";
 
 /* ─── Types ─── */
 

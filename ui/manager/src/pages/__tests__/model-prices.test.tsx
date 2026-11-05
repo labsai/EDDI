@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderPage } from "@/test/test-utils";
-import { resetModelPriceMock } from "@/test/mocks/model-prices-handlers";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { resetModelPriceMock } from "@eddi/app-kit/test/mocks/model-prices-handlers";
 import { ModelPricesPage } from "../model-prices";
 
 describe("ModelPricesPage", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapWithConcurrency } from "../concurrency";
+import { mapWithConcurrency } from "@eddi/app-kit/lib/concurrency";
 
 describe("mapWithConcurrency", () => {
   it("never exceeds the limit in flight", async () => {

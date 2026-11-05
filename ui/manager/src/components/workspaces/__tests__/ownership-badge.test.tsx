@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { useSpaces } from "@/hooks/use-spaces";
 import * as workspacesApi from "@/lib/api/workspaces";

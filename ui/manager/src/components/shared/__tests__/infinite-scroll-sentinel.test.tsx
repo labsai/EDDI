@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 
 // Mock IntersectionObserver. The component calls it with `new`, and since

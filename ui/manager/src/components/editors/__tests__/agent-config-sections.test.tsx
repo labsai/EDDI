@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import {
   SecurityIdentitySection,
   CapabilitiesSection,
@@ -12,17 +12,17 @@ import {
   SessionManagementSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 const mockOnChange = vi.fn();
 
-vi.mock("@/hooks/use-capabilities", () => ({
+vi.mock("@eddi/app-kit/hooks/use-capabilities", () => ({
   useSkills: () => ({
     data: ["summarization", "translation", "code_generation"],
   }),
 }));
 
-vi.mock("@/hooks/use-secrets", () => ({
+vi.mock("@eddi/app-kit/hooks/use-secrets", () => ({
   useSecrets: () => ({
     data: [{ keyName: "slack-bot-token", description: "Bot token" }, { keyName: "slack-signing-secret", description: "Signing secret" }],
     isLoading: false,

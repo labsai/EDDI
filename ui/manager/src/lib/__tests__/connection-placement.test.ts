@@ -3,7 +3,7 @@ import {
   connectionHeaderName,
   expectedHeaderFor,
   headerNameMismatch,
-} from "@/lib/connection-placement";
+} from "@eddi/app-kit/lib/connection-placement";
 
 /**
  * The header rule: a header referencing a connection must be named what the

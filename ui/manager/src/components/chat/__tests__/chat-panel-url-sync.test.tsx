@@ -4,11 +4,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { http, HttpResponse } from "msw";
-import { createTestQueryClient } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { ChatPanel } from "../chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
-import type { InitialChatMessage } from "@/lib/workforce-chat-start";
+import { createTestQueryClient } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import type { InitialChatMessage } from "@eddi/app-kit/lib/workforce-chat-start";
 
 /**
  * T1.15 — in Workforce (`urlSync`) the open conversation lives in the address

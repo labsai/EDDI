@@ -15,13 +15,13 @@ import {
   X,
 } from "lucide-react";
 import { BackLink } from "@/components/shared/back-link";
-import { ChipInput } from "@/components/shared/chip-input";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@eddi/app-kit/components/shared/permanent-delete-option";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";
@@ -32,11 +32,11 @@ import {
   useConnection,
   useUpdateConnection,
   useDeleteConnection,
-} from "@/hooks/use-connections";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { getErrorMessage } from "@/lib/api-client";
-import { commitPending } from "@/lib/chip-values";
-import { authTypeLabel } from "@/lib/connection-labels";
+} from "@eddi/app-kit/hooks/use-connections";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { commitPending } from "@eddi/app-kit/lib/chip-values";
+import { authTypeLabel } from "@eddi/app-kit/lib/connection-labels";
 import {
   AUTH_TYPES,
   CLIENT_AUTH_METHODS,
@@ -48,7 +48,7 @@ import {
   type ConnectionConfiguration,
   type OAuthConfig,
   type StaticAuth,
-} from "@/lib/api/connections";
+} from "@eddi/app-kit/lib/api/connections";
 import {
   bindingFor,
   isOAuthType,
@@ -56,7 +56,7 @@ import {
   TIMEOUT_MS_MIN,
   validateConnection,
   type ValidationCode,
-} from "@/lib/connection-validation";
+} from "@eddi/app-kit/lib/connection-validation";
 
 /**
  * The connection editor.

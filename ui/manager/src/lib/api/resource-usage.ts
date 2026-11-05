@@ -1,6 +1,6 @@
-import { getWorkflowDescriptors, getWorkflow } from "./workflows";
-import { getAgentDescriptors, getAgent, parseResourceUri } from "./agents";
-import { mapWithConcurrency } from "@/lib/concurrency";
+import { getWorkflowDescriptors, getWorkflow } from "@eddi/app-kit/lib/api/workflows";
+import { getAgentDescriptors, getAgent, parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { mapWithConcurrency } from "@eddi/app-kit/lib/concurrency";
 
 /** Parallel requests per scan: fast, without exhausting the browser's connection pool. */
 const USAGE_FETCH_CONCURRENCY = 8;

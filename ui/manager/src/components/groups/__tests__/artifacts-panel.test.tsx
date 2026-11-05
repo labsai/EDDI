@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ArtifactsPanel } from "@/components/groups/artifacts-panel";
-import type { SharedArtifact } from "@/lib/api/groups";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ArtifactsPanel } from "@eddi/app-kit/components/groups/artifacts-panel";
+import type { SharedArtifact } from "@eddi/app-kit/lib/api/groups";
 
 // No Monaco stub needed: this panel is a read-only viewer and renders JSON in a
 // plain <pre>. Mounting a full editor here previously crashed the entire page

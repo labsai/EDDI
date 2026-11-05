@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildDigest } from "@/hooks/use-discussion-digest";
+import { buildDigest } from "@eddi/app-kit/hooks/use-discussion-digest";
 import type {
   DiscussionPhase,
   GroupConversation,
   TranscriptEntry,
   TranscriptEntryType,
-} from "@/lib/api/groups";
+} from "@eddi/app-kit/lib/api/groups";
 
 /**
  * The digest must describe the round it is asked about with that round's own

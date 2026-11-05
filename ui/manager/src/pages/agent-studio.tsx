@@ -2,15 +2,15 @@ import { useState, useMemo, useCallback, useEffect, useId, useRef } from "react"
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import type { CascadeContext } from "@/lib/api/cascade-save";
-import { getAgentDescriptors, getAgent, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
-import { getWorkflow } from "@/lib/api/workflows";
+import type { CascadeContext } from "@eddi/app-kit/lib/api/cascade-save";
+import { getAgentDescriptors, getAgent, parseResourceUri, type AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { getWorkflow } from "@eddi/app-kit/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
-import { ChatPanel } from "@/components/chat/chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { useStudioSaveAndTest } from "@/components/studio/use-studio-save-and-test";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { useWorkflowDescriptors } from "@/hooks/use-workflows";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
@@ -26,7 +26,7 @@ import {
   Workflow,
   SquarePen,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 // ==================== Types ====================
 

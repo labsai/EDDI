@@ -1,4 +1,4 @@
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Editing an agent document locally before it is saved.

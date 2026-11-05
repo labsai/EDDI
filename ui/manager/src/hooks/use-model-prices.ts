@@ -6,7 +6,7 @@ import {
   putModelPrices,
   resolveModelPrice,
   type ModelPriceCatalog,
-} from "@/lib/api/model-prices";
+} from "@eddi/app-kit/lib/api/model-prices";
 
 const modelPriceKeys = {
   all: ["model-prices"] as const,

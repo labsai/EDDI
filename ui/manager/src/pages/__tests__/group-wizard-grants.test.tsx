@@ -3,8 +3,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { GroupWizardPage } from "@/pages/group-wizard";
 
 /**
