@@ -489,22 +489,22 @@ class SlackInteractivityHandlerTest {
     }
 
     @Test
-    void unknownPauseRecord_matchesOnlyAPauseThatBeganBeforeIt() throws Exception {
+    void unknownPauseRecord_resolvesNoPause() throws Exception {
         bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
         Instant now = Instant.now();
-        // Card posted before the bookmark was readable: no pause epoch, written now.
+        // A record stored without a pause epoch (older releases wrote one when the
+        // bookmark was not readable yet). It cannot tell which pause it was for: the
+        // record is written after delivery work, so a pause that began before it may
+        // be a later one than the card shows.
         approvalRecords.put(new SlackApprovalRecord(INT_NAME, "conv-2", ISlackApprovalRecordStore.UNKNOWN_PAUSE,
                 "card-2", "C_APPROVAL", now, now.plus(Duration.ofDays(1))));
 
-        // A pause that began after the card was written cannot be the one it was for.
-        conversationPausedAt("conv-2", now.plusSeconds(30));
-        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2", "card-2")));
-        verify(conversationService, never()).resumeConversation(eq("conv-2"), any(), any());
-
-        // The pause that was already running when the card was posted is.
         conversationPausedAt("conv-2", now.minusMillis(200));
         handler.handlePayload(approvePayload("U_APPROVER", value("conv-2", "card-2")));
-        verify(conversationService).resumeConversation(eq("conv-2"), any(), isNull());
+        conversationPausedAt("conv-2", now.plusSeconds(30));
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-2", "card-2")));
+
+        verify(conversationService, never()).resumeConversation(eq("conv-2"), any(), any());
     }
 
     @Test
@@ -559,7 +559,7 @@ class SlackInteractivityHandlerTest {
     }
 
     @Test
-    void matchesPause_exactEpochOrUnknownWrittenAfterPause() {
+    void matchesPause_exactEpochOnly() {
         var exact = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.pauseEpochOf(PAUSED_AT), "card",
                 null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
         assertTrue(exact.matchesPause(PAUSED_AT));
@@ -568,8 +568,8 @@ class SlackInteractivityHandlerTest {
 
         var unknown = new SlackApprovalRecord(INT_NAME, "c", ISlackApprovalRecordStore.UNKNOWN_PAUSE, "card",
                 null, PAUSED_AT, PAUSED_AT.plusSeconds(10));
-        assertTrue(unknown.matchesPause(PAUSED_AT));
-        assertTrue(unknown.matchesPause(PAUSED_AT.minusSeconds(1)));
+        assertFalse(unknown.matchesPause(PAUSED_AT));
+        assertFalse(unknown.matchesPause(PAUSED_AT.minusSeconds(1)));
         assertFalse(unknown.matchesPause(PAUSED_AT.plusSeconds(1)));
         assertEquals(List.of(), approvalRecords.findBySubject(INT_NAME, "nothing"));
     }
