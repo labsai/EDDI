@@ -1130,6 +1130,8 @@ eddi_agents_deployed                        # Currently deployed agents (gauge)
 eddi_cluster_nats_connected                 # 1 while this node is connected to NATS (gauge)
 eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
 eddi_cluster_nats_reconnects_total          # Reconnects of this node
+eddi_cluster_nats_errors_total              # NATS errors {cause=auth|tls|config|permission|timeout|io|slow_consumer|server|other}; every cause registered at 0
+eddi_cluster_nats_misconfigured             # 1 while the connection fails for a reason retrying cannot heal (auth, TLS, client options); the node is not ready (gauge)
 eddi_cluster_members                        # Members in the presence bucket (gauge)
 eddi_cluster_node_duplicate                 # 1 while another live JVM uses this node's id; readiness is DOWN (gauge)
 eddi_cluster_versions                       # Distinct EDDI version/payload-protocol pairs among the live members; >1 during a rolling upgrade (gauge)

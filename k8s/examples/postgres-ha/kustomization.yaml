@@ -11,6 +11,8 @@
 #   bash k8s/create-secrets.sh              # once, before the first apply
 #   # The database password is no longer committed: create postgres-secrets
 #   # with the command in k8s/overlays/postgres/postgres-secret.yaml.example.
+#   # NATS authenticates too: create the nats-auth Secret and add EDDI's NATS
+#   # credentials to eddi-secrets as k8s/overlays/nats/kustomization.yaml shows.
 #   kubectl apply -k k8s/examples/postgres-ha/
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

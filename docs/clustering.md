@@ -98,11 +98,32 @@ out. Longer, each area applies its policy:
 | Cancel / GDPR stop | this node + database CAS only | — |
 | HITL recovery | paused | — |
 
-Readiness stays UP while degraded — a NATS outage that took every replica out
-of the load balancer at once would turn a coordination outage into a total
-one. Set `eddi.cluster.readiness.require-nats=true` to change that. Liveness
-never depends on NATS. Boot never waits for NATS either: a node started while
-NATS is down serves in degraded mode and joins when NATS returns.
+Readiness stays UP during an ordinary outage — a NATS outage that took every
+replica out of the load balancer at once would turn a coordination outage into
+a total one. Set `eddi.cluster.readiness.require-nats=true` to change that.
+Liveness never depends on NATS. Boot never waits for NATS either, but two
+states are **not** an outage, and report the node not-ready by default:
+
+- **Never connected since boot** (`eddi.cluster.readiness.require-first-connect`,
+  default `true`). A node that has not reached NATS once cannot take a single
+  lease, and a wrong URL used to keep it serving every turn unfenced, forever,
+  while every check stayed green. A node that *has* connected stays ready
+  through a later outage. Set it to `false` to serve degraded from boot (a
+  cluster that must come up while NATS is down).
+- **A failure retrying cannot heal** (`eddi.cluster.readiness.fail-on-misconfiguration`,
+  default `true`): an authentication or authorization error (a rotated
+  password), a TLS failure (an untrusted CA, a certificate that does not name
+  the host), or client options that could not be built (an unreadable trust
+  store). The cause is logged at ERROR, counted in
+  `eddi_cluster_nats_errors_total{cause}` and raised as
+  `EddiClusterNatsMisconfigured`. This deliberately takes every node with the
+  same bad credential out of the load balancer: loud, instead of every turn
+  running unfenced.
+
+**Recommended for production: `degraded.turns=reject`.** The default, `local`,
+keeps serving through an outage at the price of running turns unfenced. The
+Helm chart takes it as `eddi.cluster.degradedTurns`, and the Kustomize `nats`
+component sets `reject`.
 
 A node partitioned from NATS while the others are connected can run unfenced
 turns concurrently with fenced turns elsewhere. Operators who cannot accept
@@ -117,10 +138,11 @@ for up to 1 min and a changed global variable for up to 2 min (`eddi.variables.c
 |---|---|
 | `kill -9` of an EDDI node mid-turn | Its clients see a reset. The conversation's lease expires within `lease.ttl` (or is taken over immediately after the pod restarts under the same name). The next turn runs normally; a late write from the dead node is refused by the fence. |
 | Two replicas started with the same node id (a constant `EDDI_CLUSTER_NODE_ID`, a shared `eddi.schedule.instance-id`) | The second one finds the first one's live presence record, stops announcing itself, logs an ERROR, reports `eddi_cluster_node_duplicate 1` and its readiness (`cluster-node-identity`) goes DOWN until the other one is gone. A pod restarted under its own name is not a duplicate: its previous boot's record stops changing and is taken over after one presence interval. |
-| One NATS node lost (R3) | Nothing visible: JetStream keeps quorum. |
+| One NATS node lost | With R3 buckets and streams (`eddi.nats.replicas=3`: the in-chart three-node NATS sets it, `nats.externalReplicas` defaults to 3 for an external one), JetStream keeps quorum. The EDDI nodes connected to the lost server notice through missed pings — `eddi.nats.ping-interval` × `max-pings-out`, about 10–15 s when the server vanished without a TCP reset — and reconnect to another; KV calls in that window time out, so a turn can be answered 409 + `Retry-After`. With R1, the buckets and streams that lived on that server are unavailable or lost (EDDI warns at boot when R1 meets a NATS cluster of three or more servers). |
+| Wrong NATS credentials, a rotated password, a certificate that does not match | Not an outage: the node reports not-ready, logs the cause at ERROR and counts it in `eddi_cluster_nats_errors_total` (cause `auth`, `tls` or `config`); `EddiClusterNatsMisconfigured` fires. Fix the credential or the certificate; the node becomes ready on its next successful connect. |
 | All NATS lost | Degraded mode as above; automatic recovery and resync when NATS returns. |
 | NATS accepts connections but stops answering | Calls fail after `eddi.nats.request-timeout` (2 s) each. A failed turn's dead letter tries the stream for at most about 2 s before it is kept node-local; audit positions stop being requested for one timeout after a failure (entries are recorded unsequenced meanwhile), so a turn does not wait out one timeout per entry. |
-| Rolling update | Readiness goes DOWN first, the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases (side by side, within a few NATS timeouts; what it misses expires by TTL) and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
+| Rolling update | The chart's `preStop` sleep (5 s) lets the endpoint removal reach every proxy; readiness then goes DOWN, turns still routed here are admitted for the readiness grace (3 s), and the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases (side by side, within a few NATS timeouts; what it misses expires by TTL) and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
 | Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary (or the next round of an LLM tool loop) and dead-lettered (`lease-lost`); it does not write long-term user memory. Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). How soon a partitioned holder notices depends on the lease manager declaring the lease lost (see `lease.ttl`); a model or tool call already in flight finishes. |
 
 ## Sizing
@@ -199,10 +221,23 @@ streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjec
 
 A NATS user restricted to EDDI needs:
 
-- **publish:** `eddi.>`, `$JS.API.>`, `$KV.*.>`, `$O.*.>`, `$JS.ACK.>`, `$JS.FC.>` and `_INBOX.>`;
-- **subscribe:** `eddi.>`, `$JS.API.>`, `$KV.*.>` and `_INBOX.>`.
+- **publish:** `eddi.>`, `$JS.API.>`, `$KV.*.>`, `$O.*.>`, `$JS.ACK.>`, `$JS.FC.>` and `<inbox>.>`;
+- **subscribe:** `eddi.>`, `$JS.API.>`, `$KV.*.>` and `<inbox>.>`,
 
-The Helm chart's in-chart NATS grants exactly this set. Without `$O` access, exported archives stay on the node that made them.
+where `<inbox>` is `eddi.nats.inbox-prefix` (`_INBOX` by default). EDDI never deletes a
+stream, so deny it **publish** to `$JS.API.STREAM.DELETE.>`, `$JS.API.SERVER.>`,
+`$JS.API.META.>` and `$JS.API.ACCOUNT.PURGE.>` — the one credential every pod holds then
+cannot wipe the lease, nonce and audit-position buckets of the cluster. (It still purges
+dead letters, through `$JS.API.STREAM.PURGE.>`.) The Helm chart's in-chart NATS and the
+Kustomize `nats` component grant exactly this set. Without `$O` access, exported archives stay on the node that made them.
+
+**Two deployments on one NATS** are isolated by accounts, not by the prefix: the prefix
+only names things, and `$JS.API.>`, `$KV.*.>` and `_INBOX.>` reach across it. Give each
+deployment its own NATS account (JetStream enabled), and its own `eddi.nats.inbox-prefix`
+named in its permissions. The chart's `nats.isolation.enabled=true` does both for the
+in-chart NATS (account `EDDI`, inbox `_INBOX_EDDI`); it moves the buckets into the new
+account, so enable it on a fresh install. Per-node identities (one NKey or JWT user per
+pod, `eddi.nats.creds-file`) need an external NATS with its own account management.
 
 A NATS wildcard matches whole tokens only, and a KV subject is
 `$KV.<bucket>.<key>` with the bucket as one token. So `$KV.EDDI_>` and
@@ -212,20 +247,31 @@ NATS 2.11). To narrow an account shared with other applications, replace
 `$O.<prefix>_ARCHIVES.>`.
 
 **NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
-`true`). Before this check existed, any certificate the trust store accepted was
-accepted for any host. On upgrade, the broker certificate must name every host in
-`eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. The check
-applies to `tls://` and `wss://` URLs as well as to `eddi.nats.tls.enabled`, and the node dials
-the host name itself (jnats `HappyEyeballs` resolution) so the certificate is compared with the
-name in the URL, not with the address it resolves to. Without `eddi.nats.tls.truststore-path`
-and `eddi.nats.tls.keystore-path` the JVM's default trust and key stores (`javax.net.ssl.*`) are
-used, including its client certificate for mutual TLS. With
-the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a
-`*.<fullname>-nats` SAN covers them, while a certificate issued only for the fully qualified
-`…svc.cluster.local` names does not. A node whose broker certificate does not match cannot connect
-and stays in degraded mode; the TLS cause itself is logged at DEBUG by the NATS client, so look for
-the node's repeated "could not connect" warnings and raise the `io.nats` logger to DEBUG to see it. Reissue the certificate, or set
-`EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour.
+`true`) — for `eddi.nats.tls.enabled=true` **and** for every `tls://` or `wss://` server.
+The certificate must name one of the hosts in `eddi.nats.url`, and the check is made
+against those configured names, whichever address the client ends up dialling — so it
+also holds for servers jnats learns from the cluster's INFO and dials by IP. The node
+dials the host name itself (jnats `HappyEyeballs` resolution), so the TLS handshake also
+carries the name (SNI).
+Before, a `tls://` URL without `tls.enabled` (the chart's external path) fell back to the
+JVM's default context, which accepts any CA-signed certificate for any host: a man in the
+middle with any public certificate received the node's NATS credentials. `opentls://`
+(trust anything) now fails the boot. The trust store may be PKCS12, JKS or PEM — a
+cert-manager `ca.crt` works as it is; the chart mounts the in-chart NATS' CA
+(`nats.tls.secretName`) or an external one (`nats.externalCaSecretName`) and points
+`eddi.nats.tls.truststore-path` at it. Without `eddi.nats.tls.truststore-path` the JVM's
+default trust store applies (`javax.net.ssl.trustStore`, else its public CAs), and without
+`eddi.nats.tls.keystore-path` the JVM's default key store (`javax.net.ssl.keyStore`) supplies
+the client certificate for mutual TLS.
+
+The broker certificate must name every host in `eddi.nats.url` as a SAN: a DNS SAN for a
+host name, an IP SAN for an IP address. With the Helm chart's in-cluster NATS those hosts
+are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a `*.<fullname>-nats`
+SAN covers them, while a certificate issued only for the fully qualified
+`…svc.cluster.local` names does not. A node whose broker certificate does not match cannot
+connect: it logs the TLS cause at ERROR and reports not-ready (see
+[Degraded mode](#degraded-mode-nats-unreachable)). Reissue the certificate, or set
+`EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour (logged as a warning).
 
 ### Signed control plane
 
@@ -315,7 +361,11 @@ meters no longer exist; see the [cluster metrics](metrics.md#cluster-metrics).
   (`docker/cluster/nginx.conf`). `docker-compose.nats.yml` is a one-replica
   overlay for trying cluster mode next to the base file.
 - **Alerts**: [`monitoring/eddi-cluster-alerts.yml`](monitoring/eddi-cluster-alerts.yml)
-  holds Prometheus rules for the runbook above; the
+  holds Prometheus rules for the runbook above — degraded and misconfigured nodes, NATS
+  errors by cause, member loss, lease takeovers, fenced writes, acquire timeouts, an event
+  outbox backlog, dead letters, and from the NATS exporter JetStream storage, a full
+  dead-letter stream and slow consumers. The chart's PrometheusRule includes them in cluster
+  mode (`prometheusRule.enabled=true`; the NATS group needs `nats.metrics.enabled=true`); the
   [cluster dashboard](monitoring/eddi-cluster-dashboard.json) charts the same series.
 - **Demo**: [`scripts/cluster-demo/`](../scripts/cluster-demo/README.md) builds
   this topology in Docker — three nodes of one build, three NATS nodes, MongoDB
@@ -367,8 +417,9 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   the node that answered `initialize`; any other node answers a request with
   that `Mcp-Session-Id` 404, which makes a compliant client start over. Route
   `/mcp` so a client stays on one node: by client address
-  (`docker/cluster/nginx.conf` does `hash $remote_addr consistent`), with
-  `sessionAffinity: ClientIP` on a Kubernetes Service that only serves `/mcp`,
+  (`docker/cluster/nginx.conf` does `hash $remote_addr consistent`, and the Helm
+  chart's ingress does the same for ingress-nginx with an `<release>-mcp` Ingress),
+  with `sessionAffinity: ClientIP` on a Kubernetes Service that only serves `/mcp`,
   or with your ingress's cookie affinity. Every other path needs none.
 
 - A Slack follow-up in the thread of a group discussion is routed only by the

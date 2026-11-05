@@ -3037,6 +3037,124 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * C2b: with {@code nats.tls.enabled=true} the in-chart NATS could not work — no
+         * CA reached EDDI. The CA (only {@code ca.crt}, never the server key) is
+         * mounted and named as EDDI's trust store, for the in-chart and an external
+         * NATS alike, and the in-chart URL says tls://.
+         */
+        @Test
+        @DisplayName("cluster mode mounts the NATS CA into EDDI and points the trust store at it (C2b)")
+        void natsCaIsMountedIntoEddi() throws IOException {
+            String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
+            String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
+            String helpers = read(HELM_TEMPLATES.resolve("_helpers.tpl"));
+            assertTrue(deployment.contains("- name: nats-ca") && deployment.contains("mountPath: /etc/eddi/nats-ca"),
+                    "the NATS CA must be mounted into the EDDI container");
+            assertTrue(deployment.contains("- key: ca.crt"), "only ca.crt is projected — never the NATS server's private key");
+            assertTrue(configmap.contains("EDDI_NATS_TLS_TRUSTSTORE_PATH: \"/etc/eddi/nats-ca/ca.crt\""),
+                    "EDDI must read the mounted CA as its NATS trust store (PEM is accepted)");
+            assertTrue(helpers.contains(".Values.nats.tls.secretName") && helpers.contains(".Values.nats.externalCaSecretName"),
+                    "both the in-chart TLS Secret and an external CA Secret must feed the mount");
+            assertTrue(helpers.contains("$scheme := ternary \"tls\" \"nats\""), "the in-chart URL is tls:// when nats.tls is on");
+        }
+
+        /**
+         * C3: EDDI_NATS_REPLICAS was rendered for the in-chart NATS only, so an
+         * external three-node NATS got R1 buckets and streams.
+         */
+        @Test
+        @DisplayName("an external NATS gets EDDI_NATS_REPLICAS, R3 by default (C3)")
+        void externalNatsIsReplicated() throws IOException {
+            String configmap = read(HELM_TEMPLATES.resolve("configmap.yaml"));
+            assertTrue(configmap.contains("EDDI_NATS_REPLICAS: {{ $externalReplicas | quote }}"),
+                    "the external-NATS branch must render EDDI_NATS_REPLICAS");
+            assertEquals(3, chartValues().path("nats").path("externalReplicas").asInt(), "nats.externalReplicas defaults to 3");
+        }
+
+        /**
+         * C4/C10/C11 (chart side): the one shared NATS credential may not delete
+         * streams, the password can be rotated through a second user, and a deployment
+         * can be isolated in its own account with its own inbox prefix.
+         */
+        @Test
+        @DisplayName("the in-chart NATS user cannot delete streams; credentials rotate; isolation is available")
+        void natsUserIsLeastPrivilege() throws IOException {
+            String nats = read(HELM_TEMPLATES.resolve("nats.yaml"));
+            String kustomize = read(K8S.resolve("overlays/nats/nats-config.yaml"));
+            for (String conf : List.of(nats, kustomize)) {
+                assertTrue(conf.contains("\"$JS.API.STREAM.DELETE.>\""), "stream deletion must be denied to EDDI's user");
+                assertTrue(conf.contains("\"$JS.API.SERVER.>\"") && conf.contains("\"$JS.API.META.>\""),
+                        "JetStream server and placement operations must be denied to EDDI's user");
+            }
+            assertTrue(nats.contains(".Values.nats.auth.secondaryUsername"), "a second user lets the password rotate without downtime");
+            assertTrue(nats.contains("accounts {") && nats.contains("jetstream: enabled"), "nats.isolation puts EDDI in its own account");
+            assertTrue(read(HELM_TEMPLATES.resolve("configmap.yaml")).contains("EDDI_NATS_INBOX_PREFIX"),
+                    "EDDI's inbox prefix must match the permissions the chart renders");
+        }
+
+        /**
+         * C9/C10: JetStream refuses new data before the volume is full; the NATS pods
+         * are spread over nodes (required) and zones, run with GOMEMLIMIT, and the
+         * server's own metrics can be scraped.
+         */
+        @Test
+        @DisplayName("the in-chart NATS leaves filesystem headroom, spreads, limits its heap and can be scraped (C9, C10)")
+        void natsStatefulSetIsHardened() throws IOException {
+            String nats = read(HELM_TEMPLATES.resolve("nats.yaml"));
+            assertTrue(nats.contains("max_file_store: {{ $maxFileStore }}") && nats.contains("div (mul $mb 8) 10"),
+                    "max_file_store must be 80 % of the volume, not equal to it");
+            assertTrue(nats.contains("requiredDuringSchedulingIgnoredDuringExecution"), "NATS anti-affinity must be available as required");
+            assertEquals("required", chartValues().path("nats").path("antiAffinity").asText(), "required by default");
+            assertTrue(nats.contains("topology.kubernetes.io/zone"), "NATS pods must spread over zones");
+            assertTrue(nats.contains("name: GOMEMLIMIT"), "the NATS server needs a soft heap limit below its memory limit");
+            assertTrue(nats.contains("-jsz=all") && nats.contains("kind: ServiceMonitor"), "the NATS exporter and its ServiceMonitor");
+            String statefulSet = read(K8S.resolve("overlays/nats/nats-statefulset.yaml"));
+            assertTrue(statefulSet.contains("requiredDuringSchedulingIgnoredDuringExecution") && statefulSet.contains("GOMEMLIMIT"),
+                    "the Kustomize NATS component carries the same hardening");
+            assertTrue(read(K8S.resolve("overlays/nats/nats-config.yaml")).contains("max_file_store: 4096M"),
+                    "the Kustomize NATS leaves 20 % of its 5Gi volume free");
+        }
+
+        /**
+         * C7: a preStop sleep in front of SIGTERM, counted in the termination grace
+         * check; C13: SSE timeouts and /mcp affinity on ingress-nginx; C14: no memory
+         * target in the default HPA.
+         */
+        @Test
+        @DisplayName("preStop, ingress SSE and /mcp affinity, and a CPU-only default HPA (C7, C13, C14)")
+        void rolloutsIngressAndHpa() throws IOException {
+            String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
+            assertTrue(deployment.contains("command: [\"sleep\", \"{{ $preStop }}\"]"), "EDDI needs a preStop sleep");
+            assertTrue(deployment.contains("(add $drain 3 $preStop)"), "the grace check must count the preStop sleep");
+            String ingress = read(HELM_TEMPLATES.resolve("ingress.yaml"));
+            assertTrue(ingress.contains("nginx.ingress.kubernetes.io/proxy-read-timeout"), "SSE needs a read timeout above 60 s");
+            assertTrue(ingress.contains("nginx.ingress.kubernetes.io/proxy-buffering\" \"off\""), "SSE must not be buffered");
+            assertTrue(ingress.contains("path: /mcp") && ingress.contains("upstream-hash-by"), "/mcp needs client affinity");
+            assertTrue(chartValues().path("autoscaling").path("targetMemoryUtilizationPercentage").isNull(),
+                    "a JVM's memory never shrinks back: a memory target ratchets the HPA to maxReplicas");
+            assertTrue(read(K8S.resolve("overlays/nats/kustomization.yaml")).contains("command: [\"sleep\", \"5\"]"),
+                    "the Kustomize cluster component needs the preStop sleep as well");
+        }
+
+        /**
+         * C12: a cluster release shipped no cluster alert at all.
+         */
+        @Test
+        @DisplayName("in cluster mode the PrometheusRule carries the cluster alerts (C12)")
+        void clusterAlertsShipInThePrometheusRule() throws IOException {
+            String rule = read(HELM_TEMPLATES.resolve("prometheusrule.yaml"));
+            assertTrue(rule.contains(".Files.Get \"files/eddi-cluster-alerts.yml\""), "the PrometheusRule must read the cluster rules");
+            assertEquals(Monitoring.lf(read(Path.of("docs", "monitoring", "eddi-cluster-alerts.yml"))),
+                    Monitoring.lf(read(HELM.resolve("files/eddi-cluster-alerts.yml"))),
+                    "helm/eddi/files/eddi-cluster-alerts.yml is stale — run python scripts/sync-monitoring-assets.py");
+            String alerts = read(Path.of("docs", "monitoring", "eddi-cluster-alerts.yml"));
+            for (String alert : List.of("EddiClusterNatsMisconfigured", "EddiClusterMemberLost", "EddiClusterLeaseTakeovers",
+                    "EddiClusterEventOutboxBacklog", "EddiNatsJetStreamStorageHigh", "EddiDeadLetterStreamFull", "EddiNatsSlowConsumers")) {
+                assertTrue(alerts.contains("alert: " + alert), "missing cluster alert " + alert);
+            }
+        }
+
+        /**
          * An external NATS is outside the release and, as a rule, on a private address,
          * which the HTTPS egress rule excludes. Without a rule of its own every replica
          * is cut off from NATS the moment {@code networkPolicy.enabled} is set.
@@ -4826,6 +4944,10 @@ class DeploymentManifestsTest {
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
+
+    private static JsonNode chartValues() throws IOException {
+        return YAML.readTree(HELM.resolve("values.yaml").toFile());
+    }
 
     private static String read(Path path) throws IOException {
         return Files.readString(path, StandardCharsets.UTF_8);
