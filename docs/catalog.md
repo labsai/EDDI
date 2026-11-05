@@ -44,14 +44,28 @@ They hold no subject, so under enforcement only `published` admits them.
     "description": "Answers questions about orders and returns",
     "reviewNotice": null,
     "rating": null,
-    "callerLevel": "USE"
+    "callerLevel": "USE",
+    "appearance": {
+      "displayName": "Ada from Support",
+      "avatar": "https://cdn.example.com/ada.png",
+      "accentColor": "#0a7d55",
+      "starters": ["Where is my order?", "I want to return an item"]
+    },
+    "conversationControls": {
+      "undo": true, "redo": true, "attachments": true, "rating": true,
+      "quickReplies": true, "streaming": true, "rawHtml": false
+    }
   }
 ]
 ```
 
 The agent fields are the ones `GET /agents/{agentId}/profile` returns: name, description, review
-notice and rating controls. `callerLevel` is what the caller holds on the agent (`USE`, `VIEW`,
-`EDIT` or `OWN`) and is always at least `USE`.
+notice, rating controls, and the deployed version's `appearance` and `conversationControls`
+([agent presentation](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)).
+`appearance` is `null` when the agent sets none; `conversationControls` is always present, with
+every default applied (`rawHtml` is `false` unless the agent enables it). Workforce Home draws its
+cards and starter chips from these, so it needs no profile call per agent. `callerLevel` is what
+the caller holds on the agent (`USE`, `VIEW`, `EDIT` or `OWN`) and is always at least `USE`.
 
 ```json
 [

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.catalog;
 
+import ai.labs.eddi.engine.api.IRestAgentProfile.AppearanceProfile;
+import ai.labs.eddi.engine.api.IRestAgentProfile.ControlsProfile;
 import ai.labs.eddi.engine.api.IRestAgentProfile.RatingProfile;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.GET;
@@ -57,9 +59,25 @@ public interface IRestCatalog {
      * @param callerLevel
      *            what the caller holds on the agent — {@code USE}, {@code VIEW},
      *            {@code EDIT} or {@code OWN}; always at least {@code USE}
+     * @param appearance
+     *            as the profile: the deployed version's {@code appearance} (display
+     *            name, avatar, accent colour, starters); null when it sets none
+     * @param conversationControls
+     *            as the profile: the controls a client offers for the deployed
+     *            version, resolved — never null
      */
     record CatalogAgent(String agentId, String name, String description, String reviewNotice, RatingProfile rating,
-            String callerLevel) {
+            String callerLevel, AppearanceProfile appearance, ControlsProfile conversationControls) {
+
+        public CatalogAgent {
+            conversationControls = conversationControls == null ? ControlsProfile.of(null) : conversationControls;
+        }
+
+        /** An entry without appearance and with the default controls. */
+        public CatalogAgent(String agentId, String name, String description, String reviewNotice, RatingProfile rating,
+                String callerLevel) {
+            this(agentId, name, description, reviewNotice, rating, callerLevel, null, null);
+        }
     }
 
     /**
@@ -102,7 +120,8 @@ public interface IRestCatalog {
     @Operation(summary = "The agents the caller may use and that are listed",
                description = "Deployed (production, READY) agents that the caller may USE and that are listed: "
                        + "'listed: true' on the agent, or with workspaces enforced 'published' or 'internal' visibility. "
-                       + "An anonymous caller only ever sees published agents.")
+                       + "An anonymous caller only ever sees published agents. Each entry carries what "
+                       + "GET /agents/{agentId}/profile serves, appearance and conversation controls included.")
     @APIResponse(responseCode = "200", description = "The catalog; empty when nothing is listed.")
     List<CatalogAgent> listAgents();
 

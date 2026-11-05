@@ -5,7 +5,9 @@
 package ai.labs.eddi.engine.catalog;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentAppearance;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.ConversationControls;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
@@ -17,6 +19,8 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.engine.api.IRestAgentProfile.AppearanceProfile;
+import ai.labs.eddi.engine.api.IRestAgentProfile.ControlsProfile;
 import ai.labs.eddi.engine.api.OperatorRevisionCheck;
 import ai.labs.eddi.engine.catalog.IRestCatalog.CatalogAgent;
 import ai.labs.eddi.engine.catalog.IRestCatalog.CatalogGroup;
@@ -45,6 +49,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -219,6 +224,47 @@ class CatalogServiceTest {
             assertNull(entry.rating());
             // Workspaces off: everyone may do everything, as before the feature.
             assertEquals("OWN", entry.callerLevel());
+            // No appearance set: none served, and the controls are the defaults.
+            assertNull(entry.appearance());
+            assertEquals(ControlsProfile.of(null), entry.conversationControls());
+            assertFalse(entry.conversationControls().rawHtml());
+        }
+
+        @Test
+        @DisplayName("a listed agent carries the deployed version's appearance and controls, as the profile serves them")
+        void listedShownWithAppearance() throws Exception {
+            agent("a1", "Support", ALICE, ResourceVisibility.space, true);
+            var appearance = new AgentAppearance();
+            appearance.setDisplayName("Ada");
+            appearance.setAvatar("https://cdn.example.com/ada.png");
+            appearance.setAccentColor("#0a7");
+            appearance.setStarters(List.of("Track my order", "Start a return"));
+            var controls = new ConversationControls();
+            controls.setUndo(false);
+            controls.setStreaming(false);
+            controls.setRawHtml(true);
+            AgentConfiguration config = agentStore.read("a1", 3);
+            config.setAppearance(appearance);
+            config.setConversationControls(controls);
+
+            CatalogAgent entry = service(identity(BOB, "eddi-user"), settings).listAgents().getFirst();
+
+            assertEquals(new AppearanceProfile("Ada", "https://cdn.example.com/ada.png", "#0a7",
+                    List.of("Track my order", "Start a return")), entry.appearance());
+            assertEquals(ControlsProfile.of(controls), entry.conversationControls());
+            assertFalse(entry.conversationControls().undo());
+            assertTrue(entry.conversationControls().redo());
+            assertFalse(entry.conversationControls().streaming());
+            assertTrue(entry.conversationControls().rawHtml());
+        }
+
+        @Test
+        @DisplayName("an entry built without controls still reports the defaults, never null")
+        void controlsNeverNull() {
+            var entry = new CatalogAgent("a1", "Support", null, null, null, "USE");
+
+            assertNull(entry.appearance());
+            assertEquals(ControlsProfile.of(null), entry.conversationControls());
         }
 
         @Test
