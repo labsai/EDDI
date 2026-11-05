@@ -1875,9 +1875,14 @@ class ConversationHitlService {
             if (matched == null) {
                 return true;
             }
+            // The rule a call selected is the FIRST one with its match string: rules of
+            // equal match sort stably (ToolApprovalRules), and the strict merge puts a
+            // task's rules before the agent's. A later rule with the same match is
+            // shadowed, so its policy says nothing about this call.
             boolean statesPolicy = matched.equals(governing.getMatch())
                     || toolApprovals != null && toolApprovals.getRules() != null && toolApprovals.getRules().stream()
-                            .anyMatch(r -> r != null && matched.equals(r.getMatch()) && r.getTimeoutPolicy() != null);
+                            .filter(r -> r != null && matched.equals(r.getMatch())).findFirst()
+                            .map(r -> r.getTimeoutPolicy() != null).orElse(false);
             if (!statesPolicy) {
                 return true;
             }
