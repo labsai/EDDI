@@ -130,6 +130,12 @@ decides.
    `approve_group_phase`) with `verdict` `APPROVED` or `REJECTED`, and **always pass the
    `pauseId` you read**, so the decision cannot land on a different request that paused
    since. A `PAUSE_CHANGED` error means exactly that — read the status again and ask again.
+   When the user wants to approve **with changes**: `resume_conversation` takes
+   `editedAnswer` (the final answer of a rule pause, when `pauseDetails.editableAnswer` is
+   present) and `toolDecisionsJson` (a verdict per call, optionally with amended arguments);
+   `approve_group_phase` takes `taskDecisionsJson` (a verdict per task, optionally with an edited result) and
+   `editedAnswer` for a synthesis. Send only text the user wrote or approved word for word,
+   and pass a `reasonCode` only when rejecting, editing or amending, and only a code the user supplies or the status response exposes; omit it on a plain approval.
 4. `cancel_conversation` / `cancel_group_discussion` stop it instead — also only on the
    user's word.
 

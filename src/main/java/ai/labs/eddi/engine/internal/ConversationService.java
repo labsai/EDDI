@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -855,6 +856,19 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Inject
     Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /**
+     * Renders {@code hitlConfig.approvalContext} at pause commit. Field-injected
+     * for the same reason as above: {@code null} in unit tests that build the
+     * service by hand, where no context is rendered.
+     */
+    @Inject
+    Instance<ApprovalContextRenderer> approvalContextRenderer;
+
+    /** The approval-context renderer, or {@code null} when none is available. */
+    ApprovalContextRenderer approvalContextRenderer() {
+        return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
+    }
 
     /**
      * The alert hook: a turn that ended badly (see
@@ -3162,6 +3176,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                                    List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException {
         conversationHitlService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+    }
+
+    @Override
+    public void validateHitlDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        conversationHitlService.validateDecision(conversationId, decision);
     }
 
     @Override

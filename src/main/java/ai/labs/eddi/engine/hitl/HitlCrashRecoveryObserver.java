@@ -244,9 +244,12 @@ public class HitlCrashRecoveryObserver {
                 }
                 String groupConversationId = gc.getId();
                 try {
-                    // cancelDiscussion is CAS/terminal-guarded: it no-ops if the
-                    // discussion was resumed/cancelled between the scan and here.
-                    if (groupConversationService.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL)) {
+                    // Paused-only and bound to the pause this scan found expired: an
+                    // approval landing in between resumes the discussion, and a plain
+                    // cancelDiscussion would then stop the running work (or end a
+                    // later, fresh pause) instead of no-opping.
+                    if (groupConversationService.cancelPausedDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL,
+                            HitlDecision.pauseIdOf(pausedAt))) {
                         cancelledGroups++;
                     }
                 } catch (Exception e) {

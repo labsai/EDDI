@@ -106,6 +106,12 @@ describe("normalizeConvergence", () => {
     );
   });
 
+  it("carries the SERVICE judge's model through (8a)", () => {
+    const service = { llmProvider: "openai", llmModel: "gpt-4o-mini", parameters: { apiKey: "${vault:k}" } };
+    expect(normalizeConvergence({ enabled: true, judge: "SERVICE", service }).service).toEqual(service);
+    expect(normalizeConvergence({ enabled: true }).service).toBeUndefined();
+  });
+
   it("raises minRepeats to the floor — a first repeat has no predecessor", () => {
     expect(normalizeConvergence({ enabled: true, minRepeats: 1 }).minRepeats).toBe(
       CONVERGENCE_MIN_REPEATS_FLOOR,

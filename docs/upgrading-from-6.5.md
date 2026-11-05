@@ -1,7 +1,9 @@
 # Upgrading from EDDI 6.5
 
-This guide is for an existing **EDDI 6.5.x deployment** moving to 6.6 and later. It
-collects the changes that a working 6.5 client notices. Re-read it before you upgrade. For an older deployment, start with
+This guide is for an existing **EDDI 6.5.x deployment** moving to 6.6 or 6.7. Everything up to
+[Changes in 6.7](#changes-in-67) applies from 6.6 on; the last section adds what 6.7 changes on top. It
+collects the changes that a working 6.5 client notices. It is written as the changes land, so
+read it again before you upgrade. For an older deployment, start with
 [Upgrading from 6.4](upgrading-from-6.4.md).
 
 ---
@@ -190,3 +192,101 @@ admin password is, so it refuses a wider bind until `keycloak-admin-rotate` has 
 and left a marker (`.eddi-admin-verified`) in the volume. One `up` with `KEYCLOAK_BIND=127.0.0.1`
 does that; after it, set `KEYCLOAK_BIND` back. A fresh volume is created with your password and
 needs nothing.
+
+---
+
+## Changes in 6.7
+
+6.7 is mostly hardening and opt-in features. Stored agent, group and workflow configs keep working:
+every new field is optional and absent on existing documents. What an existing deployment notices:
+
+### Defaults that changed
+
+- **A new-release check is on by default.** The backend asks `api.github.com` once a day (through the
+  SSRF-safe `OutboundHttp`) whether a newer EDDI exists and raises one admin notification per
+  release. Set `eddi.update-check.enabled=false` (or its environment-variable form) to turn it off before
+  first boot; that also locks the switch in the Manager. The old browser-only `localStorage` flag is
+  ignored. In an air-gapped deployment, disable it so the daily call does not fail.
+- **Cost figures rise for some workloads.** Usage is normalised the way each provider bills it, so
+  `inputTokens` and spend now include Anthropic/Bedrock prompt-cache reads and writes and Gemini
+  thinking tokens. Dashboards and cost ceilings that were tuned on the old, understated numbers may
+  trigger sooner. `eddi.llm.pricing.provider-normalization=false` restores the old counting. Prices
+  now come from a managed model-price catalog (`/administration/model-prices`); the default
+  `unpricedPolicy` is `ALLOW`, so nothing is refused until you opt in.
+- **Team budgets are admin-edit only.** `eddi.groups.team-budget.admin-only-edits=true`: editors can
+  no longer change a group's `teamBudget`. Set it to `false` to restore editor edits. New root
+  discussions, follow-ups and continuations are refused with `409` when the team or tenant is spent
+  or its budget cannot be read (fail closed), and scheduled cadence fires are skipped.
+- **`HumanInputRequest.content` is optional on the DTO** (REST) and gains `choice`; MCP
+  `submit_group_human_input` gains `choice`. A missing `content` is still a `400` for every pause
+  kind except a tie-break.
+- **The cascade judge sees the request.** With `modelCascade.strategy: judge_model`, the judge now
+  receives the last 8,000 characters of the user message along with the answer, so its scores (and
+  thus escalation rates) can shift.
+
+### Several controls fail closed
+
+The review sweep tightened many paths; callers that relied on the loose behaviour see an error
+rather than a silent success. Examples: ingestion refuses a source whose ownership it cannot verify;
+a resumed conversation re-checks USE access; Slack approval cards need a known pause; every bot-token
+reference is checked against `allowedHosts`; scheme-relative and parser references in configs and
+exports are vetted; a caller without access to a group gets `403` (not `500`) from the workspace
+endpoints; the GDPR stop sequence now waits for the member count it read itself. Check your
+automation and Slack/e-mail integrations after upgrading and read the per-area changelog entries for
+the exact behaviour.
+
+### Cluster deployments (NATS)
+
+Applies only if you run more than one node.
+
+- **Readiness is loud.** A node that never connected to NATS, or hit an unrecoverable
+  authentication or TLS error, now reports not-ready (`eddi.cluster.readiness.require-first-connect`
+  and `.fail-on-misconfiguration`, both default `true`). A wrong credential therefore takes every
+  node with it out of rotation instead of running silently unfenced. Both switches can be turned
+  off.
+- **`tls://` and `wss://` servers are host-name verified** against the configured host names;
+  `opentls://` fails boot. Boot also refuses non-positive durations, two auth methods at once and a
+  malformed inbox prefix.
+- **Signing is opt-in.** Set `eddi.cluster.signing.key` to sign every RPC, reply and event
+  (`Eddi-Sig`, HMAC-SHA256); `eddi.cluster.signing.required=true` refuses unsigned messages and
+  refuses to start without a key. Without a key only a WARN is logged. During a rolling upgrade
+  keep `required=false` until every node carries the key.
+- **Webhook de-duplication fails closed** (`503`) while NATS is unreachable, under
+  `eddi.cluster.degraded.nonces=reject` (the default).
+- **Duplicate node ids are detected.** A twin stops announcing, and the new `cluster-node-identity`
+  readiness check goes DOWN.
+- **New NATS objects.** A `<prefix>_DEPLOYMENTS` KV bucket; `<prefix>_ARCHIVES` is capped
+  (`eddi.cluster.archives.max-bytes`, 1 GiB). Account isolation and a custom inbox prefix are opt-in
+  because switching an existing release would strand its dead letters and archives.
+- **Helm and Kustomize.** The chart is `2.14.0` or later. The Kustomize `nats` component now needs a
+  `nats-auth` Secret that you create before applying; `nats.antiAffinity: required` needs at least
+  three nodes; a `preStop` sleep and a short readiness grace are added for SIGTERM. The chart exposes
+  `eddi.cluster.degradedTurns`; `reject` is recommended for production, though the code default is
+  still `local`.
+- **Rolling upgrades.** Group conversation schema goes to version 5; a pod that predates it refuses
+  to resume a document that holds a human tie-break pause. Finish the rollout before enabling
+  `HUMAN_DECIDES`. `SharedTaskList` gains `reviewerEdits`: confirm older pods tolerate the unknown
+  field before enabling `allowResultEdits` on a mixed-version cluster. New collections and tables
+  (settings, model prices, team budgets, approval analytics) are created on first use and ignored
+  by older nodes.
+
+### New opt-in features
+
+None of these changes behaviour until configured; each has its own page.
+
+| Feature | Switch | Read |
+| --- | --- | --- |
+| White-label branding | Admin → Branding in the Manager | [white-labeling](white-labeling.md) |
+| `toolQuotas` — per-subject, per-window tool-call caps | `toolQuotas` on the LLM task | [langchain](langchain.md) |
+| Tool-call guardrails | `toolCallGuardrails` | [langchain](langchain.md) |
+| Edit-on-approve and decision audit v2 | `hitlConfig.review` | [hitl](hitl.md) |
+| Approval analytics, sampled audit, earned autonomy | `hitlConfig.oversight` | [hitl](hitl.md) |
+| Human tie-breaks and humans as task-force executors | `voteConfig.humanTieBreak`, `tiePolicy: HUMAN_DECIDES` | [group-conversations](group-conversations.md) |
+| Cross-team handoff | `teamHandoff.targets`, `handoffConfig` | [group-conversations](group-conversations.md) |
+| Model-backed convergence judge | `convergence.judge: SERVICE` | [group-conversations](group-conversations.md) |
+| Team budgets | `teamBudget` on a group | [group-conversations](group-conversations.md) |
+
+### Dependency advisories
+
+6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
+Manager and Chat UI. Nothing to do besides pulling the new image.

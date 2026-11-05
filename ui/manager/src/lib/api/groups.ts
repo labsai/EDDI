@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { HITL_CLIENT_HEADERS } from "./hitl";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
 import { repairNegotiationArbitration } from "../hitl-config";
@@ -235,10 +236,13 @@ export interface ConvergenceConfig {
   /** Agreement score at or above which the phase is converged (default 0.8, compared with >=). */
   threshold: number;
   /**
-   * `"MODERATOR"` (default) runs the group's moderator as judge. `"SERVICE"` is
-   * accepted but currently falls back to MODERATOR with a backend warning.
+   * `"MODERATOR"` (default) runs the group's moderator as judge. `"SERVICE"`
+   * calls the model named in `service` directly (no moderator needed); without a
+   * `service` model it falls back to the moderator with a backend warning.
    */
   judge: ConvergenceJudge;
+  /** The model `judge: "SERVICE"` calls. Ignored for MODERATOR. */
+  service?: ServiceJudgeConfig | null;
   /**
    * What the judge decides (E2). `"SIMILARITY"` (default, absent on configs saved
    * before 6.6) scores agreement with the previous repeat against `threshold`.
@@ -249,6 +253,23 @@ export interface ConvergenceConfig {
 }
 
 export type ConvergenceJudge = "MODERATOR" | "SERVICE";
+
+/**
+ * Backend `ServiceJudgeConfig`: the model a SERVICE convergence judge calls. A
+ * credential-named parameter (`apiKey`, ...) must be a `${vault:...}` or
+ * `${vars:...}` reference — a literal is refused at save time.
+ */
+export interface ServiceJudgeConfig {
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  parameters?: Record<string, string> | null;
+  /** USD per 1M input tokens; absent = unpriced ($0). */
+  inputPricePer1M?: number | null;
+  /** USD per 1M output tokens; absent = unpriced ($0). */
+  outputPricePer1M?: number | null;
+  /** Per-call timeout in ms (default 20000, ceiling 60000). */
+  timeoutMs?: number | null;
+}
 
 export type ConvergenceMode = "SIMILARITY" | "VERDICT";
 
@@ -588,6 +609,12 @@ export interface AgentGroupConfiguration {
    * checkpoint ever runs and the discussion costs nothing extra.
    */
   facilitator?: FacilitatorConfig | null;
+  /**
+   * Cross-team handoff, both halves (see `team-handoffs.ts`): the teams this
+   * group may file tasks into, and the sources it accepts from. `null` = the
+   * group neither sends nor receives.
+   */
+  handoffConfig?: import("./team-handoffs").GroupHandoffConfig | null;
 }
 
 /**
@@ -1080,6 +1107,8 @@ export interface GroupConversation {
   hitlPauseReason?: string;
   hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
   hitlApprovalTimeout?: string;
+  /** The group's `approvalContext` rendered when this pause was committed; `null` when none is configured. */
+  hitlApprovalContext?: import("./hitl").ApprovalContextView | null;
   /** Where inside a SEQUENTIAL phase the pause landed, so a resume skips what already ran (F2). */
   resumePoint?: ResumePoint | null;
   /**
@@ -1833,11 +1862,17 @@ async function streamRefusalMessage(response: Response): Promise<string> {
 }
 
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
-function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+function postSSE(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
+): Promise<Response> {
   return fetch(`${api.getBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...extraHeaders,
       ...api.getAuthHeader(),
     },
     body: JSON.stringify(body),
@@ -1905,6 +1940,7 @@ export async function* streamGroupApproval(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve/stream`,
     request,
     signal,
+    HITL_CLIENT_HEADERS,
   );
   yield* readGroupSSE(response);
 }

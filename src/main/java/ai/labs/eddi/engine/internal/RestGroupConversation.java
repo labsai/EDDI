@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -16,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -282,6 +284,24 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /**
+     * The 400 body of an invalid approval request, on both the plain and the
+     * streaming path: which field was refused and why, because the caller needs it
+     * to correct the request (a fixed "unknown task id" text named the wrong cause
+     * for every review-field refusal). The rule is the same for both: only a
+     * {@link ReviewRefusalException} - the review validation's own message, written
+     * for the caller, control characters stripped and capped at 300 characters - is
+     * returned; any other {@code IllegalArgumentException} (its message was not
+     * written for a caller and may carry internal or request data) gets the fixed
+     * hint.
+     */
+    static String invalidApprovalDetail(IllegalArgumentException e) {
+        if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
+            return "Invalid approval request: " + e.getMessage();
+        }
+        return "Invalid approval request: an unknown task id was referenced, or a task is not awaiting approval.";
+    }
+
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
@@ -369,6 +389,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // is to continue, close or delete — a transcript is not less private than
             // the right to append to it.
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // The pause's approvalContext rides on this document: served through the
+            // current filter.
+            gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
             return gc;
         } catch (ForbiddenException e) {
             throw e;
@@ -606,12 +629,11 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.")
                     .build();
         } catch (IllegalArgumentException e) {
-            // #13: invalid taskApprovals (unknown taskId / task not awaiting) → 400. Do
-            // not reflect the caller-supplied taskId; keep the hint generic.
-            LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());
+            // #13: an invalid approval request → 400 naming the field and why (see
+            // invalidApprovalDetail for the one rule both approve paths follow).
+            LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                            + "approval.")
+                    .entity(invalidApprovalDetail(e))
                     .build();
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
@@ -863,11 +885,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.");
             closeQuietly(eventSink);
         } catch (IllegalArgumentException e) {
-            // invalid taskApprovals (unknown taskId / task not awaiting) — keep the
-            // hint generic, never reflect the caller-supplied taskId.
-            sendErrorEvent(eventSink, sse,
-                    "Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                            + "approval.");
+            // the same 400 detail as the non-streaming path
+            LOGGER.infof("Streaming approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
+            sendErrorEvent(eventSink, sse, invalidApprovalDetail(e));
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
@@ -946,6 +966,8 @@ public class RestGroupConversation implements IRestGroupConversation {
                                     + "conversation is awaiting approval — use the summary view")
                             .build();
                 }
+                // Served to the approver, but through the current filter like the rest.
+                gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
                 return Response.ok(gc).build();
             }
             // Summary (default): pause coordinates only — no transcript. Pause
@@ -980,6 +1002,13 @@ public class RestGroupConversation implements IRestGroupConversation {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
             }
+            // The designer's approvalContext, rendered once at pause commit and
+            // re-redacted here — same audience as the prompt above (owner, admin, an
+            // approver inside the APPROVAL pause), and only while awaiting approval.
+            summary.put("approvalContext",
+                    awaitingApproval && hitlAccessGuard.mayReadPendingHumanPrompt(gc)
+                            ? ApprovalContextViews.toView(gc.getHitlApprovalContext())
+                            : null);
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -1069,7 +1098,15 @@ public class RestGroupConversation implements IRestGroupConversation {
         // ledger.
         String name = identity == null || identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
         request.getDecision().setDecidedBy(name == null || name.isBlank() ? null : name);
+        request.getDecision().setChannel(HitlClientChannelReader.of(hitlClientChannelReader));
     }
+
+    /**
+     * Reads {@code X-EDDI-Client} for the HITL audit channel; nullable in unit
+     * tests.
+     */
+    @Inject
+    HitlClientChannelReader hitlClientChannelReader;
 
     // --- SSE Helpers ---
 
@@ -1193,6 +1230,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
                 // Not terminal — artifacts are edited throughout the discussion.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
+            }
+
+            @Override
+            public void onTeamHandoff(GroupConversationEventSink.TeamHandoffEvent event) {
+                // Not terminal — a handoff can happen at any turn or at completion.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TEAM_HANDOFF, toJson(event));
             }
 
             @Override

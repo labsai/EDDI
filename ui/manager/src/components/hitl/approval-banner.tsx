@@ -18,11 +18,16 @@ import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
+  type ApprovalContextView,
+  type DecisionReview,
   type HitlVerdict,
   type PauseDetails,
   type PendingToolCallView,
   type ToolCallDecision,
 } from "@/lib/api/hitl";
+import { AnswerEditor, ReasonCodeSelect } from "@/components/hitl/answer-editor";
+import { ApprovalContext } from "@/components/hitl/approval-context";
+import { validateEditedAnswer } from "@/lib/hitl-edit";
 
 export interface ApprovalBannerProps {
   /** What kind of surface this approval is for. */
@@ -44,6 +49,9 @@ export interface ApprovalBannerProps {
   /** Structured pause details from GET …/approval-status. When this is a
    *  TOOL_CALL pause, the per-call tool approval UI is rendered (regular only). */
   pauseDetails?: PauseDetails | null;
+  /** The designer's `approvalContext` for this pause (draft, sources, claims …),
+   *  shown above the decision. Absent/empty = nothing is rendered. */
+  approvalContext?: ApprovalContextView | null;
   /** Whether the mutation is in-flight. */
   isSubmitting?: boolean;
   /** True while the structured pause details are still loading for a paused
@@ -75,12 +83,14 @@ export interface ApprovalBannerProps {
    *  alongside `pauseDetailsError`. */
   onRetryPauseDetails?: () => void;
   /** Called when the user submits a decision. `toolDecisions` is populated only
-   *  for a TOOL_CALL pause (per-call verdicts / amended arguments). */
+   *  for a TOOL_CALL pause (per-call verdicts / amended arguments); `review`
+   *  carries an edited answer and a reason code when the reviewer gave them. */
   onDecide: (
     verdict: HitlVerdict,
     note?: string,
     taskApprovals?: Record<string, string>,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => void;
   /** Called when the user cancels. */
   onCancel?: () => void;
@@ -174,6 +184,7 @@ export function ApprovalBanner({
   granularity,
   pendingTaskIds,
   pauseDetails,
+  approvalContext,
   isSubmitting,
   pauseDetailsPending,
   pauseDetailsError,
@@ -195,6 +206,10 @@ export function ApprovalBanner({
   // must never fire on a single click: resuming a TOOL_CALL pause runs real
   // gated tools, reject cannot be undone, and cancel aborts in-flight work.
   const [confirmAction, setConfirmAction] = useState<HitlVerdict | "CANCEL" | null>(null);
+  // Edit-on-approve (RULE pause with pauseDetails.editableAnswer) and reason codes.
+  const [editing, setEditing] = useState(false);
+  const [editedAnswer, setEditedAnswer] = useState("");
+  const [reasonCode, setReasonCode] = useState("");
 
   // Tick every second so the countdown updates live and flips to "Overdue"
   // while the banner is on screen (the banner shows precisely when paused, so
@@ -212,6 +227,12 @@ export function ApprovalBanner({
 
   const toolPause = pauseDetails?.type === "TOOL_CALL" ? pauseDetails : null;
   const isToolCall = !!toolPause;
+  const rulePause = pauseDetails?.type === "RULE" ? pauseDetails : null;
+  const editableAnswer = surface === "regular" ? (rulePause?.editableAnswer ?? null) : null;
+  const reasonCodes = (toolPause?.reasonCodes ?? rulePause?.reasonCodes ?? []);
+  const isEditing = editing && !!editableAnswer;
+  // The same test handleSubmit applies: an editor opened and left as it was is a plain approval.
+  const hasEdit = isEditing && !!editableAnswer && editedAnswer !== editableAnswer.draft;
 
   // Every gated call must carry an explicit verdict before Approve is offered.
   // Checked against callStates directly (not toolDecisions, which is built only
@@ -247,6 +268,18 @@ export function ApprovalBanner({
     setSubmitError(null);
   };
 
+  /**
+   * The review fields to send. A reason code explains a change — a rejection,
+   * an edit, an amended or rejected call — so the backend refuses one on a plain
+   * approval; it is dropped there rather than turned into a 400.
+   */
+  const reviewFor = (verdict: HitlVerdict, changed: boolean, edited?: string): DecisionReview | undefined => {
+    const review: DecisionReview = {};
+    if (edited !== undefined) review.editedAnswer = edited;
+    if (reasonCode && (verdict === "REJECTED" || changed)) review.reasonCode = reasonCode;
+    return Object.keys(review).length ? review : undefined;
+  };
+
   const submitToolDecision = (topVerdict: HitlVerdict) => {
     if (!toolPause) return;
     const finalNote = note.trim() || undefined;
@@ -254,7 +287,9 @@ export function ApprovalBanner({
     // top-level REJECTED is contradictory (the backend 400s it). To approve
     // some and reject others, use the Approve action with per-call toggles.
     if (topVerdict === "REJECTED") {
-      onDecide("REJECTED", finalNote, undefined, undefined);
+      const review = reviewFor("REJECTED", true);
+      if (review) onDecide("REJECTED", finalNote, undefined, undefined, review);
+      else onDecide("REJECTED", finalNote, undefined, undefined);
       return;
     }
     // No prototype: a provider-chosen call id of "__proto__" would otherwise re-prototype this object
@@ -263,7 +298,12 @@ export function ApprovalBanner({
     const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
-      const amend = s?.amend?.trim();
+      // An amendment identical to the arguments shown is no amendment: the server
+      // compares it with the stored arguments and would answer a reason code on
+      // that "plain approval" with a 400. Arguments redacted for display differ from
+      // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      const typed = s?.amend?.trim();
+      const amend = typed && typed !== call.arguments ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;
@@ -286,7 +326,13 @@ export function ApprovalBanner({
       }
       toolDecisions[call.callId] = decision;
     }
-    onDecide("APPROVED", finalNote, undefined, Object.keys(toolDecisions).length ? toolDecisions : undefined);
+    const changed = Object.values(toolDecisions).some((d) => d.verdict === "REJECTED" || !!d.amendedArguments);
+    const review = reviewFor("APPROVED", changed);
+    const decisions = Object.keys(toolDecisions).length ? toolDecisions : undefined;
+    // The review argument is passed only when there is one, so a decision without
+    // review fields reaches the caller exactly as before.
+    if (review) onDecide("APPROVED", finalNote, undefined, decisions, review);
+    else onDecide("APPROVED", finalNote, undefined, decisions);
   };
 
   const handleSubmit = (verdict: HitlVerdict) => {
@@ -295,6 +341,27 @@ export function ApprovalBanner({
       return;
     }
     const finalNote = note.trim() || undefined;
+    if (verdict === "APPROVED" && isEditing && editableAnswer) {
+      // An edit identical to the draft is a plain approval - and is not held to the
+      // edit limits (a blank or over-long draft can still be approved as it stands).
+      const changed = editedAnswer !== editableAnswer.draft;
+      const error = changed
+        ? editedAnswer.includes("<REDACTED>")
+          ? t(
+              "hitlReview.redactedMarkerRemains",
+              "The text still contains the redaction marker <REDACTED>. Remove it, or approve without edits: the server cannot apply an edit that keeps it.",
+            )
+          : validateEditedAnswer(t, editedAnswer, editableAnswer)
+        : null;
+      if (error) {
+        setSubmitError(error);
+        return;
+      }
+      const review = reviewFor("APPROVED", changed, changed ? editedAnswer : undefined);
+      if (review) onDecide("APPROVED", finalNote, undefined, undefined, review);
+      else onDecide("APPROVED", finalNote, undefined);
+      return;
+    }
     // For TASK granularity, send an explicit decision for every pending task:
     // any task the reviewer didn't individually toggle defaults to the
     // top-level verdict, so no task is left ambiguous.
@@ -305,7 +372,10 @@ export function ApprovalBanner({
         finalTaskApprovals[id] = taskApprovals[id] ?? verdict;
       }
     }
-    onDecide(verdict, finalNote, finalTaskApprovals);
+    const anyTaskRejected = !!finalTaskApprovals && Object.values(finalTaskApprovals).includes("REJECTED");
+    const review = reviewFor(verdict, anyTaskRejected);
+    if (review) onDecide(verdict, finalNote, finalTaskApprovals, undefined, review);
+    else onDecide(verdict, finalNote, finalTaskApprovals);
   };
 
   const handleTaskToggle = (taskId: string, verdict: string) => {
@@ -355,12 +425,22 @@ export function ApprovalBanner({
               confirmLabel: t("hitl.approve", "Approve"),
               variant: "warning" as const,
             }
-          : {
-              title: t("hitl.confirmApproveTitle", "Approve request?"),
-              description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
-              confirmLabel: t("hitl.approve", "Approve"),
-              variant: "warning" as const,
-            };
+          : hasEdit
+            ? {
+                title: t("hitlReview.confirmApproveEditedTitle", "Approve with your edits?"),
+                description: t(
+                  "hitlReview.confirmApproveEditedDescription",
+                  "Your text replaces the agent's answer and the conversation resumes.",
+                ),
+                confirmLabel: t("hitlReview.approveEdited", "Approve with edits"),
+                variant: "warning" as const,
+              }
+            : {
+                title: t("hitl.confirmApproveTitle", "Approve request?"),
+                description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
+                confirmLabel: t("hitl.approve", "Approve"),
+                variant: "warning" as const,
+              };
       case "REJECTED":
         // Two different outcomes, and conflating them pushed the wrong way. A
         // TOOL_CALL rejection does NOT end the conversation: the backend
@@ -480,6 +560,8 @@ export function ApprovalBanner({
           </span>
         )}
       </div>
+
+      <ApprovalContext context={approvalContext} />
 
       {/* Tool-call approvals (TOOL_CALL pause) */}
       {toolPause && (
@@ -658,6 +740,43 @@ export function ApprovalBanner({
         </div>
       )}
 
+      {/* Edit-on-approve: the agent's answer, editable before approving (RULE) */}
+      {rulePause?.lastEditRefused && (
+        <p
+          role="alert"
+          className="mb-3 flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-500/10 p-2 text-xs text-warn-700 dark:text-warn-400"
+          data-testid="last-edit-refused"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {rulePause.lastEditRefused.reason === "SCREENED_OUT"
+            ? t("hitlReview.lastEditScreenedOut", "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.", {
+                guardrail: rulePause.lastEditRefused.guardrail ?? "",
+              })
+            : rulePause.lastEditRefused.reason === "REDACTED_CONTENT"
+              ? t("hitlReview.lastEditRedacted", "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.")
+              : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
+        </p>
+      )}
+      {editableAnswer && (
+        <AnswerEditor
+          editable={editableAnswer}
+          editing={isEditing}
+          value={editedAnswer}
+          onToggle={() => {
+            if (!editing) setEditedAnswer(editableAnswer.draft);
+            setEditing((v) => !v);
+            setSubmitError(null);
+          }}
+          onChange={(v) => {
+            setEditedAnswer(v);
+            setSubmitError(null);
+          }}
+        />
+      )}
+      {reasonCodes.length > 0 && (
+        <ReasonCodeSelect options={reasonCodes} value={reasonCode} onChange={setReasonCode} />
+      )}
+
       {/* Note toggle + input */}
       <div className="mb-3">
         <button
@@ -766,7 +885,11 @@ export function ApprovalBanner({
           data-testid="approve-button"
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          {perCallReview ? t("hitl.submitDecisions", "Submit decisions") : t("hitl.approve", "Approve")}
+          {perCallReview
+            ? t("hitl.submitDecisions", "Submit decisions")
+            : hasEdit
+              ? t("hitlReview.approveEdited", "Approve with edits")
+              : t("hitl.approve", "Approve")}
         </button>
         <button
           type="button"

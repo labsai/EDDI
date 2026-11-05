@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -700,6 +701,8 @@ public class ConversationMemory implements IConversationMemory {
     // tool-call batch. Persisted via ConversationMemorySnapshot like the bookmark.
     private transient String hitlPauseType;
     private transient PendingToolCallBatch hitlPendingToolCalls;
+    // Approval-card context rendered at pause commit; persisted like the bookmark.
+    private transient RenderedApprovalContext hitlApprovalContext;
     // The agent-level tool-approval config, carried onto memory at conversation
     // start; NOT persisted (re-resolved from the pinned agent config each turn).
     private transient ToolApprovalsConfig agentToolApprovalsConfig;
@@ -784,6 +787,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlPendingToolCalls(PendingToolCallBatch batch) {
         this.hitlPendingToolCalls = batch;
+    }
+
+    @Override
+    public RenderedApprovalContext getHitlApprovalContext() {
+        return hitlApprovalContext;
+    }
+
+    @Override
+    public void setHitlApprovalContext(RenderedApprovalContext context) {
+        this.hitlApprovalContext = context;
     }
 
     @Override
