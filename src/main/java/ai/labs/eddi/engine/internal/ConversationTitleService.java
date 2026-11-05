@@ -157,7 +157,7 @@ public class ConversationTitleService {
             }
         } catch (RuntimeException e) {
             count("error");
-            LOGGER.warnf("Could not title conversation %s: %s", sanitize(memory != null ? memory.getConversationId() : null),
+            LOGGER.warnf("Could not title conversation %s: %s", sanitize(memory.getConversationId()),
                     sanitize(e.getMessage()));
         }
     }
