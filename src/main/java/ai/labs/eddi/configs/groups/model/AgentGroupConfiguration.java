@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.GroupHitlReviewConfig;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
@@ -1720,6 +1721,22 @@ public class AgentGroupConfiguration {
 
         public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
             this.onTaskRejection = onTaskRejection != null ? onTaskRejection : HitlRejectionPolicy.FAIL;
+        }
+
+        /**
+         * Result edits on approval and the audit taxonomy — see
+         * {@link GroupHitlReviewConfig}. Absent = approve/reject only.
+         *
+         * @since 6.7.0
+         */
+        private GroupHitlReviewConfig review;
+
+        public GroupHitlReviewConfig getReview() {
+            return review;
+        }
+
+        public void setReview(GroupHitlReviewConfig review) {
+            this.review = review;
         }
     }
 

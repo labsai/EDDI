@@ -4400,6 +4400,26 @@
     "groupReviewLoadError": "无法加载该讨论。",
     "groupReviewNoEntries": "目前还没有任何发言。"
   },
+  "hitlReview": {
+    "approveEdited": "修改后批准",
+    "confirmApproveEditedDescription": "您的文本将替换智能体的回答，对话随后继续。",
+    "confirmApproveEditedTitle": "按您的修改批准？",
+    "discardEdit": "放弃我的修改",
+    "editAnswer": "批准前编辑回答",
+    "editEmpty": "回答不能为空。",
+    "editNotJson": "此智能体以 JSON 回答——回答必须是 JSON 对象。",
+    "editTooLong": "回答超过 {{max}} 个字符。",
+    "editedAnswerLabel": "最终回答",
+    "hideOriginal": "隐藏原文",
+    "lastEditDrift": "由于智能体已更改，您上次的修改未能应用——原始回答再次等待审核。",
+    "lastEditRedacted": "您上一次的编辑未被应用:回答包含已隐藏(已遮蔽)的内容,因此只能按原样批准或拒绝。",
+    "redactedMarkerRemains": "文本中仍含有遮蔽标记 <REDACTED>。请删除它，或不编辑直接批准：服务器无法应用保留该标记的编辑。",
+    "lastEditScreenedOut": "您上次的修改被智能体的输出护栏拦截（{{guardrail}}）——原始回答再次等待审核。",
+    "noReason": "无原因",
+    "reasonLabel": "原因（用于拒绝或修改）",
+    "reviewerEdit": "审核人修改",
+    "showOriginal": "显示原文"
+  },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
     "error": "出错了",

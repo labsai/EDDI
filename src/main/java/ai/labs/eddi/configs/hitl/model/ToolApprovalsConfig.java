@@ -135,6 +135,13 @@ public class ToolApprovalsConfig {
         private String approvalTimeout;
         /** Overrides {@link ToolApprovalsConfig#getPauseReason()}. ≤500 chars. */
         private String pauseReason;
+        /**
+         * Approval category recorded in the audit ledger for calls this rule governs
+         * (e.g. {@code github.reply}). Absent = derived {@code tool:<pattern>}.
+         *
+         * @since 6.7.0
+         */
+        private String approvalCategory;
         /** Overrides {@link ToolApprovalsConfig#getPendingMessage()}. ≤500 chars. */
         private String pendingMessage;
 
@@ -168,6 +175,14 @@ public class ToolApprovalsConfig {
 
         public void setPauseReason(String pauseReason) {
             this.pauseReason = pauseReason;
+        }
+
+        public String getApprovalCategory() {
+            return approvalCategory;
+        }
+
+        public void setApprovalCategory(String approvalCategory) {
+            this.approvalCategory = approvalCategory;
         }
 
         public String getPendingMessage() {

@@ -4,7 +4,10 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.hitl.review.HitlReviewDetails;
 import ai.labs.eddi.datastore.ConnectionWaitTimeouts;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -124,6 +127,38 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     @Inject
     IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
+
+    /**
+     * Reads {@code X-EDDI-Client} for the HITL audit channel; nullable in unit
+     * tests.
+     */
+    @Inject
+    HitlClientChannelReader hitlClientChannelReader;
+
+    /**
+     * The pinned agent config for approval-status review fields; nullable in unit
+     * tests.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
+
+    /**
+     * The HITL config of the agent version the paused conversation is pinned to, or
+     * null when it cannot be read — the review fields then fall back to their
+     * defaults (derived category, built-in reason codes, no editable draft).
+     */
+    private AgentConfiguration.HitlConfig pinnedHitlConfig(ConversationMemorySnapshot snapshot) {
+        if (agentConfigurationCache == null || snapshot == null || snapshot.getAgentId() == null || snapshot.getAgentVersion() == null) {
+            return null;
+        }
+        try {
+            AgentConfiguration config = agentConfigurationCache.read(snapshot.getAgentId(), snapshot.getAgentVersion());
+            return config != null ? config.getHitlConfig() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Review details of %s fall back to defaults: %s", sanitize(snapshot.getAgentId()), e.getMessage());
+            return null;
+        }
+    }
 
     /**
      * Counts turns refused because their caller had already timed out; nullable in
@@ -802,6 +837,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // must not NPE; see resolveApprover for what is recorded instead.
         String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
         decision.setDecidedBy(resolveApprover(principalName, identity.isAnonymous(), decision.getDecidedBy()));
+        decision.setChannel(HitlClientChannelReader.of(hitlClientChannelReader));
         try {
             if (handler == null) {
                 conversationService.resumeConversation(conversationId, decision, null);
@@ -989,6 +1025,7 @@ public class RestAgentEngine implements IRestAgentEngine {
                         ? batch.getExecutedUngatedCallNames()
                         : List.of());
         details.put("outcomeUnknown", outcomeUnknown);
+        HitlReviewDetails.forToolCall(details, batch, pinnedHitlConfig(snapshot));
         return details;
     }
 
@@ -1038,6 +1075,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         details.put("type", "RULE");
         details.put("reason", tail.snapshot().getHitlPauseReason());
         details.put("actions", findPausedStepActions(conversationId, tail));
+        HitlReviewDetails.forRule(details, tail.snapshot(), pinnedHitlConfig(tail.snapshot()));
         return details;
     }
 

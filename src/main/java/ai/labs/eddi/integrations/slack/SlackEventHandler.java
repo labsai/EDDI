@@ -1009,7 +1009,7 @@ public class SlackEventHandler {
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
                 agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
-                pauseType, pendingToolCalls);
+                pauseType, pendingToolCalls, SlackHitlEditModal.forCard(pauseType, pendingToolCalls, bookmark, platformConfig));
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". Only the originating integration's own token

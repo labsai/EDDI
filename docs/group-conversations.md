@@ -799,7 +799,7 @@ controls that shape *when it stops* and *what it costs*:
 mechanism behind DELPHI's rounds.
 
 **`requiresApproval`** pauses the discussion at the phase boundary until a human
-approves or rejects (see [HITL](hitl.md)). At `TASK` granularity on an `EXECUTE`
+approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
 **`convergence` (I2)** ends a repeating phase early once the round stopped

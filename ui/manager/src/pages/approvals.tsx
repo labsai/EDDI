@@ -46,6 +46,7 @@ import type {
   PendingApprovalSummary,
   HitlVerdict,
   ToolCallDecision,
+  DecisionReview,
   PendingToolCallView,
 } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
@@ -91,6 +92,7 @@ interface ApprovalQueueRowProps {
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => void;
   onToolCancel: (item: PendingApprovalSummary) => void;
   /** Decide a group pause from the inline review panel (note included). */
@@ -508,8 +510,8 @@ function ApprovalQueueRow({
                 renderCallExtra={renderCallExtra}
                 // The status the banner rendered goes along, so the decision is
                 // bound to the calls the reviewer actually saw.
-                onDecide={(verdict, note, _taskApprovals, toolDecisions) =>
-                  onToolDecide(item, approvalStatus.data, verdict, note, toolDecisions)
+                onDecide={(verdict, note, _taskApprovals, toolDecisions, review) =>
+                  onToolDecide(item, approvalStatus.data, verdict, note, toolDecisions, review)
                 }
                 onCancel={() => onToolCancel(item)}
               />
@@ -813,6 +815,7 @@ export function ApprovalsPage() {
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => {
     // No status means nothing was shown; fall back to the row's own identity
     // rather than sending an unbound verdict.
@@ -824,7 +827,7 @@ export function ApprovalsPage() {
       () =>
         resumeMutation.mutateAsync({
           conversationId: item.conversationId,
-          decision: { verdict, note, toolDecisions },
+          decision: { verdict, note, toolDecisions, ...review },
           shown,
         }),
       () => {

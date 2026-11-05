@@ -695,6 +695,9 @@ eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdic
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
 eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
+eddi_hitl_decision_total                    # Decided HITL units (answer, tool call, phase, task); tags: surface, outcome, channel
+eddi_hitl_edit_chars                        # Summary: characters an approver changed per edit; tag: kind
+eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift, redacted_content)
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface

@@ -4400,6 +4400,26 @@
     "groupReviewLoadError": "Die Diskussion konnte nicht geladen werden.",
     "groupReviewNoEntries": "Es wurde noch nichts gesagt."
   },
+  "hitlReview": {
+    "approveEdited": "Mit Änderungen genehmigen",
+    "confirmApproveEditedDescription": "Ihr Text ersetzt die Antwort des Agenten und die Unterhaltung wird fortgesetzt.",
+    "confirmApproveEditedTitle": "Mit Ihren Änderungen genehmigen?",
+    "discardEdit": "Meine Änderungen verwerfen",
+    "editAnswer": "Antwort vor der Genehmigung bearbeiten",
+    "editEmpty": "Die Antwort darf nicht leer sein.",
+    "editNotJson": "Dieser Agent antwortet in JSON — die Antwort muss ein JSON-Objekt sein.",
+    "editTooLong": "Die Antwort ist länger als {{max}} Zeichen.",
+    "editedAnswerLabel": "Endgültige Antwort",
+    "hideOriginal": "Original ausblenden",
+    "lastEditDrift": "Ihre letzte Änderung konnte nicht übernommen werden, weil sich der Agent geändert hat — die ursprüngliche Antwort steht erneut zur Prüfung.",
+    "lastEditRedacted": "Ihre letzte Änderung wurde nicht übernommen: Die Antwort enthält verborgene (geschwärzte) Inhalte und kann nur unverändert genehmigt oder abgelehnt werden.",
+    "redactedMarkerRemains": "Der Text enthält noch die Schwärzungsmarkierung <REDACTED>. Entfernen Sie sie oder genehmigen Sie ohne Änderungen: Der Server kann eine Änderung, die sie behält, nicht übernehmen.",
+    "lastEditScreenedOut": "Ihre letzte Änderung wurde von den Ausgabe-Guardrails des Agenten blockiert ({{guardrail}}) — die ursprüngliche Antwort steht erneut zur Prüfung.",
+    "noReason": "Kein Grund",
+    "reasonLabel": "Grund (für eine Ablehnung oder Änderung)",
+    "reviewerEdit": "Änderung durch Prüfer",
+    "showOriginal": "Original anzeigen"
+  },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
     "error": "Etwas ist schiefgelaufen",
