@@ -25,6 +25,11 @@ export interface MessageProps {
   enableMarkdown?: boolean;
   enableMath?: boolean;
   enableCodeHighlight?: boolean;
+  /**
+   * The agent's `conversationControls.rawHtml` (D9). True renders HTML in the
+   * reply through the sanitizer; false — the default — shows it as the text
+   * it is.
+   */
   enableRawHtml?: boolean;
   /** Who is speaking, for screen readers. Defaults to a generic "Assistant". */
   agentName?: string | null;
@@ -81,7 +86,7 @@ export const Message = memo(function Message({
   enableMarkdown = true,
   enableMath = true,
   enableCodeHighlight = true,
-  enableRawHtml = true,
+  enableRawHtml = false,
   agentName,
   ratingStep,
   rating,
@@ -130,7 +135,12 @@ export const Message = memo(function Message({
         ) : enableMarkdown ? (
           <div className="markdown-body" dir="auto">
             {hasContent ? (
-              <MarkdownContent enableMath={enableMath} enableCodeHighlight={enableCodeHighlight} enableRawHtml={enableRawHtml}>
+              <MarkdownContent
+                enableMath={enableMath}
+                enableCodeHighlight={enableCodeHighlight}
+                enableRawHtml={enableRawHtml}
+                escapeRawHtml={!enableRawHtml}
+              >
                 {renderedContent}
               </MarkdownContent>
             ) : images.length ? null : message.isStreaming ? (
