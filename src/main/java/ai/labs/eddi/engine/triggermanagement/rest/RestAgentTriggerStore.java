@@ -88,7 +88,8 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
                     agentTriggerConfiguration = agentTriggersCache.get(intent);
                     if (agentTriggerConfiguration == null) {
                         agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
-                        agentTriggersCache.put(intent, agentTriggerConfiguration);
+                        // Read from the store: a fill, which other nodes need not evict for.
+                        agentTriggersCache.fill(intent, agentTriggerConfiguration);
                     }
                 }
             }

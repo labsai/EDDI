@@ -34,12 +34,17 @@ import java.util.Map;
  * DOWN and the load balancer / Kubernetes endpoint controller stops routing new
  * traffic to this pod. It joins the existing readiness set (alongside the agent
  * readiness check) rather than inventing a parallel mechanism;</li>
- * <li><b>stops accepting new turns</b> — {@link #isShuttingDown()} is consulted
- * by {@code ConversationService} on the start/say/sayStreaming/resume entry
- * points, which reject with {@code RejectedExecutionException} once it flips. A
- * resume is gated too: it enqueues a full turn through the same coordinator
- * this drain is waiting on, and it is rejected BEFORE the pause is consumed, so
- * the approval simply stays pending;</li>
+ * <li><b>keeps admitting turns for the readiness grace</b> — the load balancer
+ * and Kubernetes' endpoint controller need a few seconds to stop routing here,
+ * and a turn that arrives meanwhile used to be refused with 503 on every
+ * rolling update and scale-in. The Helm chart adds a {@code preStop} sleep in
+ * front of SIGTERM for the same reason;</li>
+ * <li><b>then stops accepting new turns</b> — {@link #isShuttingDown()} is
+ * consulted by {@code ConversationService} on the start/say/sayStreaming/resume
+ * entry points, which reject with {@code RejectedExecutionException} once it
+ * flips. A resume is gated too: it enqueues a full turn through the same
+ * coordinator this drain is waiting on, and it is rejected BEFORE the pause is
+ * consumed, so the approval simply stays pending;</li>
  * <li><b>tells the coordinator</b> ({@code beginShutdown}) — in cluster mode
  * the turns still waiting for a conversation lease are answered 409 +
  * Retry-After at once instead of being waited for;</li>
@@ -110,6 +115,11 @@ public class GracefulShutdownService {
      */
     private volatile boolean shuttingDown;
 
+    /**
+     * Readiness is DOWN from the shutdown signal on; see {@link #isShuttingDown}.
+     */
+    private volatile boolean readinessDown;
+
     @Inject
     public GracefulShutdownService(IConversationCoordinator conversationCoordinator,
             @ConfigProperty(name = "eddi.shutdown.drain-timeout-seconds", defaultValue = DEFAULT_DRAIN_TIMEOUT_SECONDS) int drainTimeoutSeconds,
@@ -128,11 +138,21 @@ public class GracefulShutdownService {
     }
 
     /**
-     * @return {@code true} once a {@link ShutdownEvent} has been observed. New
-     *         conversation turns must be refused from this point on.
+     * @return {@code true} once the readiness grace after a {@link ShutdownEvent}
+     *         has passed. New conversation turns must be refused from this point
+     *         on. During the grace, readiness is already DOWN
+     *         ({@link #isReadinessDown()}) but turns still routed here are served.
      */
     public boolean isShuttingDown() {
         return shuttingDown;
+    }
+
+    /**
+     * @return {@code true} from the moment a {@link ShutdownEvent} is observed:
+     *         {@link ShutdownReadinessHealthCheck} reports DOWN.
+     */
+    public boolean isReadinessDown() {
+        return readinessDown;
     }
 
     void onShutdown(@Observes ShutdownEvent shutdownEvent) {
@@ -162,11 +182,23 @@ public class GracefulShutdownService {
      * @return {@code true} if everything drained within the timeout
      */
     boolean drain() {
-        // Steps 1 and 2 are the SAME flag flip: readiness reports DOWN and the
-        // conversation entry points start rejecting. Do it first and unconditionally
-        // — even if the drain below fails, no new work is admitted.
+        // Readiness first: the load balancer stops routing here. Turns that still
+        // arrive during the grace — the endpoint removal takes a few seconds to reach
+        // every proxy — are served rather than refused with 503.
+        readinessDown = true;
+        LOGGER.infof("Shutdown signalled — readiness is now DOWN; new conversation turns are still admitted for %d ms",
+                readinessGraceMillis);
+
+        // The poll loop below honours this return value; the grace sleep must too, or
+        // an interrupt gets acknowledged (the flag is restored) and then ignored — we
+        // would keep waiting after being told to stop, and the first poll would throw
+        // immediately anyway, landing in the "timed out" branch and misreporting why.
+        boolean graceCompleted = sleepQuietly(readinessGraceMillis);
+
+        // Then the accept gate, unconditionally — even if the drain below fails, no
+        // new work is admitted.
         shuttingDown = true;
-        LOGGER.info("Shutdown signalled — readiness is now DOWN and new conversation turns are rejected");
+        LOGGER.info("New conversation turns are now rejected; draining");
         // Turns that have not started yet are answered now rather than drained: in
         // cluster mode a turn still waiting for its conversation lease could otherwise
         // hold this drain until its acquire timeout (longer than the drain), and then
@@ -177,11 +209,7 @@ public class GracefulShutdownService {
             LOGGER.warnf("Coordinator shutdown start failed: %s", e.getMessage());
         }
 
-        // The poll loop below honours this return value; the grace sleep must too, or
-        // an interrupt gets acknowledged (the flag is restored) and then ignored — we
-        // would keep waiting after being told to stop, and the first poll would throw
-        // immediately anyway, landing in the "timed out" branch and misreporting why.
-        if (!sleepQuietly(readinessGraceMillis)) {
+        if (!graceCompleted) {
             int remaining = countInFlight();
             if (remaining == 0) {
                 LOGGER.info("Readiness grace interrupted, but nothing was in flight — shutdown drain completed");

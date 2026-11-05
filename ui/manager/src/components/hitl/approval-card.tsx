@@ -58,7 +58,7 @@ export function ApprovalCard({
                 }
               : undefined
           }
-          onDecide={(verdict, note, taskApprovals, toolDecisions) => {
+          onDecide={(verdict, note, taskApprovals, toolDecisions, review) => {
             setSubmitted(
               summariseDecision({
                 cardKey,
@@ -71,7 +71,8 @@ export function ApprovalCard({
                 phaseName: banner.pausedPhaseName,
               }),
             );
-            onDecide(verdict, note, taskApprovals, toolDecisions);
+            if (review) onDecide(verdict, note, taskApprovals, toolDecisions, review);
+            else onDecide(verdict, note, taskApprovals, toolDecisions);
           }}
         />
       </div>

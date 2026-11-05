@@ -83,7 +83,7 @@ services:
 
   nats-1:
     <<: *nats
-    image: nats:2.11-alpine
+    image: nats:2.11.17-alpine@sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
     command: ["--name", "nats-1", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
@@ -93,7 +93,7 @@ services:
 
   nats-2:
     <<: *nats
-    image: nats:2.11-alpine
+    image: nats:2.11.17-alpine@sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
     command: ["--name", "nats-2", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
@@ -103,7 +103,7 @@ services:
 
   nats-3:
     <<: *nats
-    image: nats:2.11-alpine
+    image: nats:2.11.17-alpine@sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
     command: ["--name", "nats-3", "--jetstream", "--store_dir=/data", "-m", "8222",
               "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
               "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
@@ -127,6 +127,8 @@ services:
       EDDI_SECURITY_ALLOW_UNAUTHENTICATED: ${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}
       EDDI_MCP_ALLOW_UNAUTHENTICATED: ${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}
       EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: ${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}
+      # Update check (see docker-compose.yml): false switches it off entirely.
+      EDDI_UPDATE_CHECK_ENABLED: ${EDDI_UPDATE_CHECK_ENABLED:-true}
       # Host allow-list while authentication is off — see docker-compose.yml. The
       # load balancer passes the browser's Host through, so localhost works as is.
       EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: ${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}

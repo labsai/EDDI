@@ -218,7 +218,7 @@ See the [Kubernetes Deployment Guide](kubernetes.md) for full details including 
 
 - Java 25
 - MongoDB ≥ 6.0 (or PostgreSQL)
-- Docker, if you want Dev Services to start the database for you
+- Docker, if you want Dev Services to start MongoDB for you (PostgreSQL has no Dev Service; start it yourself and use the `postgres` profile)
 
 No local Maven install is needed — the repository ships the Maven wrapper
 (`./mvnw`, or `.\mvnw.cmd` on Windows), which downloads the pinned version on
@@ -228,7 +228,7 @@ first use.
 
 Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 
-> **Note:** If no database instance is available, Quarkus Dev Services will try to start a container automatically (requires Docker running on the host).
+> **Note:** If no database instance is available, Quarkus Dev Services will try to start a MongoDB container automatically (requires Docker running on the host).
 
 On a terminal, under project root folder, run the following command:
 

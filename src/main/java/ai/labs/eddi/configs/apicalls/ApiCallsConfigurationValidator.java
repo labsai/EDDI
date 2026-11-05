@@ -41,6 +41,10 @@ public final class ApiCallsConfigurationValidator {
                         + "Set responseObjectName (the key the response is stored under in conversation memory), "
                         + "or set saveResponse to false.";
             }
+            if (!ApiCall.isKnownUnknownFields(call.getUnknownFields())) {
+                return "http call '" + call.getName() + "': unknownFields '" + call.getUnknownFields() + "' is not one of '"
+                        + ApiCall.UNKNOWN_FIELDS_REJECT + "', '" + ApiCall.UNKNOWN_FIELDS_DROP + "' or '" + ApiCall.UNKNOWN_FIELDS_ALLOW + "'.";
+            }
             String forEachProblem = forEachProblem(call);
             if (forEachProblem != null) {
                 return "http call '" + call.getName() + "': " + forEachProblem;

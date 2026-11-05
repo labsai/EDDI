@@ -39,6 +39,8 @@ Global variables are available through two complementary syntaxes:
 
 Available in LLM task system prompts and other template contexts. Resolved by the Qute template engine at template processing time.
 
+> **Default tenant only.** `{vars.<key>}` always reads the `default` tenant's variables. To read another tenant's variable use the late-binding form `${vars:tenantId/<key>}`.
+
 ```text
 You are an AI assistant powered by {vars.default-model}.
 Always respond at temperature {vars.default-temperature}.
@@ -46,7 +48,7 @@ Always respond at temperature {vars.default-temperature}.
 
 ### 2. Late-Binding Syntax: `${vars:<key>}` / `${vars:tenantId/<key>}`
 
-Available **everywhere** — in LLM task parameters, HTTP call configurations, MCP/A2A settings, embedding configs, Slack configs, and even the `type` field that selects the LLM provider. Resolved by `GlobalVariableResolver` at runtime, after template processing but before vault secret resolution.
+Available in LLM task parameters, HTTP call configurations, MCP/A2A settings, embedding configs, connections, and even the `type` field that selects the LLM provider (the full list is under [Where References Work](#where-references-work)). Resolved by `GlobalVariableResolver` at runtime, after template processing but before vault secret resolution.
 
 Supports two forms, mirroring the vault's pattern:
 
@@ -59,7 +61,7 @@ Supports two forms, mirroring the vault's pattern:
 {
   "type": "${vars:default-provider}",
   "parameters": {
-    "model": "${vars:default-model}",
+    "modelName": "${vars:default-model}",
     "apiKey": "${vault:openai-api-key}",
     "baseUrl": "${vars:api-base-url}"
   }
@@ -70,7 +72,7 @@ Multi-tenant example:
 ```json
 {
   "parameters": {
-    "model": "${vars:tenant-a/default-model}"
+    "modelName": "${vars:tenant-a/default-model}"
   }
 }
 ```
@@ -92,9 +94,15 @@ EDDI resolves configuration values in a strict three-step order:
 3. Vault secrets           →  ${vault:x}
 ```
 
-This ordering is important: vault secrets can contain global variable references, and global variables can be composed with template expressions.
+This ordering is important: a **variable's value** can be a `${vault:x}` (or `${connection:x}`) reference, which is resolved in the later step, so `${vars:x}` can resolve through to a secret. The reverse does not work: variables are resolved first, so a vault secret whose stored value contains `${vars:y}` is not expanded.
+
+Because a variable can point at a secret, **only an `eddi-admin` may store a variable whose value contains a `${vault:...}`, `${eddivault:...}` or `${connection:...}` reference**; an editor's `PUT` answers `403`. Otherwise an editor could redirect a deployed agent's credentials past the deploy-time grant check.
 
 > **⚠️ Nesting is not supported.** `${vars:${vault:x}}` and `${vault:${vars:x}}` will NOT work. Each resolution layer operates independently on the fully-resolved output of the previous layer.
+
+### Assembled references are refused
+
+A `${vault:...}`, `${connection:...}` or `${caller:...}` reference must be written **whole**: either literally in the configuration, or as the entire content of one variable. If a reference exists only because variable values (or a variable and the text around it) were joined, for example one variable holding `${vau` and another `lt:x}`, resolution throws instead of resolving it. See [security.md](security.md) for the reasoning.
 
 ## Where References Work
 
@@ -109,6 +117,9 @@ This ordering is important: vault secrets can contain global variable references
 | **A2A Tool Providers** | API keys, agent URLs |
 | **Embedding Model Factory** | All embedding model parameters |
 | **Embedding Store Factory** | All embedding store parameters |
+| **Connections** | Credential headers and parameters (`CredentialReferenceResolver`) |
+
+The list is not exhaustive: any code path that goes through `GlobalVariableResolver` or `CredentialReferenceResolver` resolves `${vars:...}`.
 
 > **Channel integrations are not on this list.** `ChannelTargetRouter` resolves the platform config of a channel integration (Slack bot tokens, signing secrets, …) through `SecretResolver`, which understands `${vault:...}` only. A `${vars:...}` reference placed there is passed through verbatim to the channel API.
 
@@ -127,6 +138,8 @@ administrative action like every other `PUT`/`DELETE` here — when
 `eddi.audit.admin-actions.enabled` is on (the default) and the ledger is
 available; a record that cannot be written is logged and does not change the
 answer, so do not treat the ledger as a complete list of attempts.
+
+With [workspaces](workspaces.md) enforced, deployment-wide (`default` tenant) variables can be changed only by an `eddi-admin`, and a non-admin may read only the `default` tenant and the tenants of their own spaces (`403` otherwise). A space's tenant is always stored with `exportable: false`, whatever the request body says.
 
 ### Endpoints
 
@@ -226,10 +239,12 @@ Reference it in all agents' `langchain.json`:
 {
   "type": "${vars:default-provider}",
   "parameters": {
-    "model": "${vars:default-model}"
+    "modelName": "${vars:default-model}"
   }
 }
 ```
+
+(`modelName` is the model key for most providers; Ollama uses `model`. See [LLM Parameters](llm-parameters.md).)
 
 Switch all agents at once:
 ```bash
@@ -258,7 +273,7 @@ Reference in agent config:
 ```json
 {
   "parameters": {
-    "model": "${vars:default-model}"
+    "modelName": "${vars:default-model}"
   }
 }
 ```
@@ -313,32 +328,3 @@ Current API version: {vars.api-version}.
 - **Need to change the LLM model for all agents?** → Use a **Global Variable** (`${vars:...}`)
 - **Need to remember a user's name across conversations?** → Use **Properties** with `scope: longTerm`
 - **Need reusable system prompt instructions?** → Use **Prompt Snippets** (`{snippets.<name>}`)
-
-## Testing
-
-### Backend Tests
-
-| Test Class | Tests | Coverage |
-|-----------|-------|---------|
-| `GlobalVariableTest` | 9 | Model record, tenant defaults, JSON serialization, equality |
-| `GlobalVariableResolverTest` | 16 | Short/full form resolution, tenant caching, invalidation, edge cases |
-| `RestGlobalVariableStoreTest` | 11 | CRUD, tenant+key validation, cache invalidation, patterns |
-| `GlobalVariableStoreTest` | 9 | MongoDB adapter CRUD with mocked MongoCollection, tenant scoping |
-| `PostgresGlobalVariableStoreTest` | 14 | PostgreSQL adapter CRUD with mocked JDBC, tenant isolation, error paths |
-| `GlobalVariableCrudIT` | 8 | Full CRUD lifecycle against MongoDB (Testcontainers) |
-| `PostgresGlobalVariableCrudIT` | 8 | Full CRUD lifecycle against PostgreSQL (Testcontainers) |
-
-### Integration Tests
-
-The integration tests verify the complete REST API lifecycle:
-
-1. List variables (initially empty)
-2. Create a variable via PUT
-3. Read the variable by key
-4. Update the variable value
-5. Verify the variable appears in the list
-6. Verify 404 for non-existent keys
-7. Verify validation rejects invalid key patterns
-8. Delete the variable and verify removal
-
-Tests run against both MongoDB and PostgreSQL via Quarkus DevServices (Testcontainers).

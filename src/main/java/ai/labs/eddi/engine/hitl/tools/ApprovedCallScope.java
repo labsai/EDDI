@@ -132,21 +132,67 @@ public final class ApprovedCallScope {
     /**
      * Whether {@code candidate} (a URI, or raw tool arguments) names
      * {@code conversationId}: case-insensitive containment, tolerating
-     * percent-encoding. A false positive costs one refused call, a false negative
-     * the boundary.
+     * percent-encoding and JSON string escapes. Raw tool arguments are JSON, and
+     * the receiver decodes a backslash-u escape of {@code 0061} to {@code a}, so an
+     * id spelled with escapes must not slip past a check on the undecoded text. A
+     * false positive costs one refused call, a false negative the boundary.
      */
     public static boolean targetsConversation(String candidate, String conversationId) {
         if (candidate == null || conversationId == null || conversationId.isBlank()) {
             return false;
         }
-        String decoded = candidate;
+        String needle = conversationId.trim().toLowerCase(Locale.ROOT);
+        return urlDecoded(candidate).toLowerCase(Locale.ROOT).contains(needle)
+                || urlDecoded(jsonUnescaped(candidate)).toLowerCase(Locale.ROOT).contains(needle);
+    }
+
+    private static String urlDecoded(String candidate) {
         try {
-            decoded = URLDecoder.decode(candidate, StandardCharsets.UTF_8);
+            return URLDecoder.decode(candidate, StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
             // A malformed escape is not a reason to stop checking — fall back to the
             // raw string rather than returning false and allowing the write.
+            return candidate;
         }
-        return decoded.toLowerCase(Locale.ROOT).contains(conversationId.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private static final char BACKSLASH = 92;
+
+    /**
+     * Resolves JSON string escapes the way a JSON parser would: a {@code u} escape
+     * to its UTF-16 unit, any other escaped character to itself (control-character
+     * escapes cannot be part of an id, so their exact value does not matter here).
+     * A malformed {@code u} escape is kept as written.
+     */
+    static String jsonUnescaped(String text) {
+        if (text.indexOf(BACKSLASH) < 0) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != BACKSLASH || i + 1 >= text.length()) {
+                out.append(c);
+                continue;
+            }
+            char next = text.charAt(i + 1);
+            if (next == 'u') {
+                if (i + 6 <= text.length()) {
+                    try {
+                        out.append((char) Integer.parseInt(text.substring(i + 2, i + 6), 16));
+                        i += 5;
+                        continue;
+                    } catch (NumberFormatException e) {
+                        // kept as written below
+                    }
+                }
+                out.append(c);
+                continue;
+            }
+            out.append(next);
+            i++;
+        }
+        return out.toString();
     }
 
     private static void restore(Binding previous) {

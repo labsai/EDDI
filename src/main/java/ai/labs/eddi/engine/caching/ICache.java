@@ -24,6 +24,25 @@ public interface ICache<K, V> extends ConcurrentMap<K, V> {
     }
 
     /**
+     * A read-through fill: stores a value the caller has just read from its source
+     * of truth. Nothing changed, so in cluster mode no other node is told — an
+     * ordinary {@link #put(Object, Object)} announces an eviction, and a fill that
+     * did so made the nodes of a round-robin cluster evict each other's fresh
+     * copies on every read (B3). Use {@code put} for a mutation.
+     */
+    default V fill(K key, V value) {
+        return put(key, value);
+    }
+
+    /**
+     * {@link #putIfAbsent(Object, Object)} for a read-through fill: like
+     * {@link #fill}, never announced to the other nodes.
+     */
+    default V fillIfAbsent(K key, V value) {
+        return putIfAbsent(key, value);
+    }
+
+    /**
      * An overloaded form of {@link #put(Object, Object)}, which takes in lifespan
      * parameters.
      *

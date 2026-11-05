@@ -271,6 +271,15 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant, allowedHosts != null ? allowedHosts : before.allowedHosts());
             } else {
+                if (expected != null && allowedHosts != null && !SecretMetadata.sameGrant(before.allowedAgents(), expected)) {
+                    // A stale request is refused BEFORE the host list is written. The
+                    // precondition is checked atomically only by the grant write below, so
+                    // a request carrying hosts used to commit them first and then answer
+                    // 409 "nothing was written" — a stale edit that could still widen or
+                    // clear where the key may go. A concurrent edit landing between this
+                    // read and the grant write is still refused there, after the hosts.
+                    return grantConflictResponse(ref, before.allowedAgents());
+                }
                 boolean hostsWritten = false;
                 try {
                     if (allowedHosts != null) {

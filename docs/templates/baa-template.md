@@ -43,16 +43,23 @@ safeguards that reasonably and appropriately protect the confidentiality,
 integrity, and availability of ePHI, including but not limited to:
 
 - Encryption at rest for all databases storing ePHI (MongoDB WiredTiger
-  Encryption at Rest, PostgreSQL TDE, or equivalent)
-- Encryption in transit via TLS 1.2+ for all EDDI endpoints
+  Encryption at Rest, storage-level encryption for PostgreSQL, or
+  equivalent). EDDI does not encrypt the database itself; this is a
+  deployer-configured control
+- Encryption in transit via TLS 1.2+ for all EDDI endpoints (EDDI does not
+  terminate TLS itself; it is configured at the reverse proxy)
 - Access control via Keycloak OIDC with role-based permissions
-- Automatic session timeout (15-minute idle maximum)
+- Automatic session timeout (15-minute idle maximum), configured in the
+  identity provider; EDDI does not enforce it
 - AES-256-GCM envelope encryption for API keys and credentials
   (EDDI Secrets Vault)
 
-**(b) Audit Trail**: Maintain an immutable audit ledger (HMAC-SHA256
-signed) of all AI pipeline operations, tool invocations, and data access
-events, retained for the period required by HIPAA (minimum 6 years).
+**(b) Audit Trail**: Maintain an append-only audit ledger of AI pipeline
+task executions, tool invocations, and administrative actions, signed with
+HMAC-SHA256 when a signing key is configured, retained for the period
+required by HIPAA (minimum 6 years). The ledger does not record read access
+to stored data, and a GDPR/CCPA erasure request redacts the content of the
+affected rows in place while keeping the rows.
 
 **(c) Reporting**: Report to Covered Entity any use or disclosure of PHI
 not provided for by this BAA, and any Security Incident or Breach of
@@ -70,14 +77,18 @@ Associate shall maintain BAAs with the following subcontractors:
 
 **(e) Access to PHI**: Make PHI available to Covered Entity or the
 individual as required by 45 CFR §164.524, using the EDDI data export
-endpoint (`GET /admin/gdpr/{userId}/export`).
+endpoint (`GET /admin/gdpr/{userId}/export`) together with other means. The
+export is partial by design (it always reports itself as incomplete and
+names the categories it omits), so Business Associate must supplement it
+for any request under §164.524.
 
 **(f) Amendment**: Make PHI available for amendment as required by 45 CFR
 §164.526.
 
 **(g) Accounting of Disclosures**: Maintain and make available information
 required for an accounting of disclosures as required by 45 CFR §164.528.
-The EDDI audit ledger provides this capability.
+The EDDI audit ledger can supply source records for this, but it is not an
+accounting of disclosures by itself.
 
 **(h) Government Access**: Make internal practices, books, and records
 relating to the use and disclosure of PHI available to the Secretary of
@@ -85,8 +96,7 @@ HHS for determining compliance.
 
 **(i) Minimum Necessary**: Use PHI only as the minimum necessary to
 accomplish the intended purpose of the use or disclosure. Configure EDDI's
-conversation history windowing and context selection to limit PHI in LLM
-context windows.
+conversation history windowing to limit PHI in LLM context windows.
 
 ---
 
@@ -132,7 +142,11 @@ term of this BAA.
 return or destroy all PHI. If return or destruction is not feasible,
 Business Associate shall extend the protections of this BAA to the PHI
 and limit further uses and disclosures. EDDI's GDPR erasure endpoint
-(`DELETE /admin/gdpr/{userId}`) provides programmatic data destruction.
+(`DELETE /admin/gdpr/{userId}`) removes a user's memories, conversations
+and related records, but it is partial: audit ledger rows are kept with
+their content redacted, database log message text is kept, and the audit
+dead-letter sink, database backups and copies outside EDDI are not reached.
+Business Associate must destroy those separately.
 
 ---
 

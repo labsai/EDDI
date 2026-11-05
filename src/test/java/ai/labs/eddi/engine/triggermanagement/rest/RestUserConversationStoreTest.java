@@ -105,7 +105,8 @@ class RestUserConversationStoreTest {
             UserConversation result = restStore.readUserConversation("intent1", "user1");
 
             assertSame(uc, result);
-            verify(cache).put("intent1::user1", uc);
+            // A read-through fill: cached without telling the other nodes to evict (B3).
+            verify(cache).fill("intent1::user1", uc);
         }
 
         @Test

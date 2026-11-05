@@ -805,12 +805,21 @@ resolve_stack_passwords() {
   if [[ "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ]]; then
     POSTGRES_PASSWORD=$(generate_password)
   fi
+  # EDDI's own MongoDB user. docker-compose.yml falls back to the ROOT password when
+  # MONGO_APP_PASSWORD is unset, which hands the app root's credential under another
+  # name. A fresh install (no .env yet) gets its own; an existing one never does:
+  # its app user already exists with the old password, so a stored value is carried
+  # forward and an absent one stays absent (the compose fallback keeps it working).
+  [[ -n "${MONGO_APP_PASSWORD:-}" ]] || MONGO_APP_PASSWORD=$(env_file_value MONGO_APP_PASSWORD)
+  if [[ "${DB_CHOICE:-1}" != "2" && -z "$MONGO_APP_PASSWORD" && ! -f "$EDDI_DIR/.env" ]]; then
+    MONGO_APP_PASSWORD=$(generate_password)
+  fi
   # Written single-quoted into .env, where compose reads the value literally;
   # a single quote is the one character that cannot be carried that way.
   local value
-  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
+  for value in "$MONGO_APP_PASSWORD" "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
     if [[ "$value" == *"'"* ]]; then
-      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
+      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD, MONGO_APP_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
     fi
   done
   if [[ ( "$WITH_AUTH" == "true" && -z "$KC_BOOTSTRAP_ADMIN_PASSWORD" ) \
@@ -1322,6 +1331,11 @@ EOF
   if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
     echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'" >> "$EDDI_DIR/.env"
   fi
+  # EDDI's MongoDB user password (see resolve_stack_passwords): written only when
+  # one is known, so an existing install without one keeps its root-password fallback.
+  if [[ -n "${MONGO_APP_PASSWORD:-}" ]]; then
+    echo "MONGO_APP_PASSWORD='${MONGO_APP_PASSWORD}'" >> "$EDDI_DIR/.env"
+  fi
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT
   # would otherwise outlive the overlay that used it.
@@ -1480,6 +1494,9 @@ wait_for_ready() {
 # service's port is not handed them - nor is a same-named service of another
 # compose project, which says nothing about who holds this port. Answers "no" when
 # the daemon cannot be asked: the credentials are then withheld, not guessed at.
+# The credential requests go to 127.0.0.1, the address those ports are published on,
+# not to "localhost": that name can resolve to ::1 first, where a listener of another
+# local user would hold the same port number.
 # Args: service host_port
 compose_service_running() {
   local ids
@@ -1500,7 +1517,7 @@ compose_service_running() {
 kc_password_token() {
   local kc_base="$1" json_tool="$2" realm="$3" user="$4" password="$5" token=""
   compose_service_running keycloak "${kc_base##*:}" || return 0
-  token=$(printf '%s' "$password" | curl -sf -X POST \
+  token=$(printf '%s' "$password" | curl --noproxy 127.0.0.1 -sf -X POST \
     --data-urlencode "client_id=admin-cli" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "username=${user}" \
@@ -1523,7 +1540,7 @@ kc_authed_curl() {
   [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || return 1
   cfg=$(umask 077; mktemp "${TMPDIR:-/tmp}/eddi-kc-auth.XXXXXX") || return 1
   printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
-  curl -K "$cfg" "$@"
+  curl --noproxy 127.0.0.1 -K "$cfg" "$@"
   rc=$?
   rm -f "$cfg"
   return $rc
@@ -1716,7 +1733,7 @@ ensure_stack_passwords_for_running_install() {
      && [[ -z "$(env_file_value KC_BOOTSTRAP_ADMIN_PASSWORD)" ]]; then
     local kc_port kc_base
     kc_port=$(env_file_value KEYCLOAK_PORT)
-    kc_base="http://localhost:${kc_port:-8180}"
+    kc_base="http://127.0.0.1:${kc_port:-8180}"
     KC_BOOTSTRAP_ADMIN_USERNAME="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
     [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]] || KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
     KEYCLOAK_PORT="${kc_port:-8180}"
@@ -1739,7 +1756,7 @@ ensure_stack_passwords_for_running_install() {
      && [[ -z "$(env_file_value GRAFANA_ADMIN_PASSWORD)" ]]; then
     local g_port g_base g_status g_user body="" legacy_auth
     g_port=$(env_file_value GRAFANA_PORT)
-    g_base="http://localhost:${g_port:-3000}"
+    g_base="http://127.0.0.1:${g_port:-3000}"
     [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
     g_user="${GRAFANA_ADMIN_USER:-admin}"
     [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
@@ -1757,7 +1774,7 @@ ensure_stack_passwords_for_running_install() {
       fi
       # Built into a header rather than a curl -u literal (see confirm_grafana_login).
       legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
-      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+      g_status=$(printf '%s' "$body" | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -X PUT \
         -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
     else
@@ -1930,7 +1947,7 @@ repair_running_keycloak() {
 
   local kc_port kc_base
   kc_port=$(grep '^KEYCLOAK_PORT=' "$EDDI_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d "\"'\r ") || kc_port=""
-  kc_base="http://localhost:${kc_port:-8180}"
+  kc_base="http://127.0.0.1:${kc_port:-8180}"
 
   # The scope definitions have to be current: the realm file on disk is the one
   # this installation was set up with, which is exactly the file that lacked
@@ -2005,7 +2022,7 @@ configure_keycloak_client() {
   [[ "$WITH_AUTH" != "true" ]] && return 0
 
   local kc_port="${KEYCLOAK_PORT:-8180}"
-  local kc_base="http://localhost:${kc_port}"
+  local kc_base="http://127.0.0.1:${kc_port}"
 
   echo -ne "  Configuring Keycloak CORS  "
 
@@ -2310,7 +2327,7 @@ configure_first_logins() {
   fi
 
   if [[ "$WITH_AUTH" == "true" && -n "$json_tool" ]]; then
-    local kc_base="http://localhost:${KEYCLOAK_PORT:-8180}"
+    local kc_base="http://127.0.0.1:${KEYCLOAK_PORT:-8180}"
     [[ -n "$KC_ADMIN_TOKEN" ]] || keycloak_admin_login "$kc_base" "$json_tool"
     set_first_login_passwords "$kc_base" "$json_tool"
     # A stopped legacy stack: .env had no password, this run generated one, but
@@ -2339,7 +2356,7 @@ grafana_login_status() {
   local g_base="$1" credentials status=""
   credentials=$(printf '%s:%s' "$2" "$3" | base64 | tr -d '\n')
   status=$(printf 'header = "Authorization: Basic %s"\n' "$credentials" \
-    | curl -s -o /dev/null -w "%{http_code}" -K - "${g_base}/api/user" 2>/dev/null) || status="000"
+    | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -K - "${g_base}/api/user" 2>/dev/null) || status="000"
   printf '%s' "${status:-000}"
 }
 
@@ -2360,12 +2377,12 @@ grafana_login_status() {
 # EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
-  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
+  local json_tool="$1" g_base="http://127.0.0.1:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
   if ! compose_service_running grafana "${GRAFANA_PORT:-3000}"; then
     warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
     return 0
   fi
-  until curl -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
+  until curl --noproxy 127.0.0.1 -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
     if (( waited >= 60 )); then
       warn "Grafana did not answer on ${g_base} within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env."
       return 0
@@ -2392,7 +2409,7 @@ confirm_grafana_login() {
       # curl -u literal, which secret scanners report as a leaked credential.
       local legacy_auth
       legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
-      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+      g_status=$(printf '%s' "$body" | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -X PUT \
         -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
       if [[ "$g_status" == "200" ]]; then

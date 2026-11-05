@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.rest.ConnectionReadRedactor;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
@@ -136,12 +137,6 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * {@code finally} can only ever remove files this very invocation created.
      */
     private static final String EXPORT_SCRATCH_ROOT = "export";
-
-    /**
-     * {@code ${connection:name}} or {@code ${connection:tenant/name}}, wherever it
-     * sits.
-     */
-    private static final Pattern CONNECTION_REFERENCE_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
 
     /**
      * Separates the display slug from the machine part of an archive key. The slug
@@ -1002,12 +997,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static <T> Map<IResourceId, T> readConfigs(IResourceStore<T> store, List<URI> configUris)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         Map<IResourceId, T> ret = new LinkedHashMap<>();
+        Set<String> read = new HashSet<>();
         for (URI uri : configUris) {
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
-            ret.put(resourceId, store.read(resourceId.getId(), resourceId.getVersion()));
+            // Each resource once. IResourceId has no value equality, so the map kept a
+            // full copy per reference: an agent naming one workflow a thousand times
+            // read, held and archived it a thousand times.
+            if (resourceId.getId() == null || read.add(identityOf(resourceId))) {
+                ret.put(resourceId, store.read(resourceId.getId(), resourceId.getVersion()));
+            }
         }
 
         return ret;
+    }
+
+    private static String identityOf(IResourceId resourceId) {
+        return resourceId.getId() + "?version=" + resourceId.getVersion();
     }
 
     /**
@@ -1025,8 +1030,12 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static <T> Map<IResourceId, T> readExistingConfigs(IResourceStore<T> store, List<URI> configUris)
             throws IResourceStore.ResourceStoreException {
         Map<IResourceId, T> ret = new LinkedHashMap<>();
+        Set<String> read = new HashSet<>();
         for (URI uri : configUris) {
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            if (resourceId.getId() != null && !read.add(identityOf(resourceId))) {
+                continue;
+            }
             try {
                 ret.put(resourceId, store.read(resourceId.getId(), resourceId.getVersion()));
             } catch (IResourceStore.ResourceNotFoundException e) {
@@ -1205,16 +1214,18 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * Every {@code ${connection:…}} reference in the archived configs, in
      * first-seen order.
      */
-    private static Set<ConnectionReference> extractConnectionReferences(List<String> configStrings) {
+    static Set<ConnectionReference> extractConnectionReferences(List<String> configStrings) {
         Set<ConnectionReference> references = new LinkedHashSet<>();
         for (String config : configStrings) {
             if (config == null || config.isEmpty()) {
                 continue;
             }
-            Matcher matcher = CONNECTION_REFERENCE_PATTERN.matcher(config);
-            while (matcher.find()) {
+            // The linear scanner, not the regex: CONNECTION_PATTERN backtracks over the
+            // rest of the text from every unterminated "${connection:", so a config
+            // full of them cost quadratic CPU per export.
+            for (ReferenceScanner.Match match : ConnectionReference.findAll(config)) {
                 try {
-                    references.add(ConnectionReference.parse(matcher.group()));
+                    references.add(ConnectionReference.of(match));
                 } catch (IllegalArgumentException e) {
                     LOGGER.debugf("Skipping an unparseable connection reference in an exported config: %s",
                             LogSanitizer.sanitize(e.getMessage()));

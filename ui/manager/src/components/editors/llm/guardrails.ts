@@ -1,7 +1,10 @@
 import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "./types";
 
-/** Where a guardrail runs: on the user's message, or on the model's answer. */
-export type GuardrailPhaseName = "input" | "output";
+/**
+ * Where a guardrail runs: on the user's message, on the model's answer, or on
+ * the arguments of a tool call the model asks for (`toolCallGuardrails`).
+ */
+export type GuardrailPhaseName = "input" | "output" | "tool_call";
 
 /** The types the backend registers, in the order the select offers them. */
 export const GUARDRAIL_TYPES = [
@@ -13,6 +16,7 @@ export const GUARDRAIL_TYPES = [
   "judge",
   "json-object",
   "expression",
+  "disclosure",
 ] as const;
 export type GuardrailTypeName = (typeof GUARDRAIL_TYPES)[number];
 
@@ -125,15 +129,19 @@ export const PII_REGIONS: PiiRegion[] = ["europe", "americas", "asiaPacific", "a
 export const PII_KINDS: string[] = [...PII_UNIVERSAL_KINDS, ...PII_COUNTRIES.flatMap((c) => c.kinds.map((k) => k.kind))];
 
 const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
-  "prompt-injection": ["input"],
-  "pii-redaction": ["input", "output"],
-  "regex-filter": ["input", "output"],
-  "max-length": ["input", "output"],
-  classifier: ["input", "output"],
-  judge: ["output"],
-  "json-object": ["output"],
-  expression: ["output"],
+  "prompt-injection": ["input", "tool_call"],
+  "pii-redaction": ["input", "output", "tool_call"],
+  "regex-filter": ["input", "output", "tool_call"],
+  "max-length": ["input", "output", "tool_call"],
+  classifier: ["input", "output", "tool_call"],
+  judge: ["output", "tool_call"],
+  "json-object": ["output", "tool_call"],
+  expression: ["output", "tool_call"],
+  disclosure: ["output", "tool_call"],
 };
+
+/** The only action `disclosure` works with; the backend refuses any other. */
+export const DISCLOSURE_ACTION: GuardrailActionName = "redact";
 
 /** Types without a rewrite: `redact` has nothing to rewrite with, so the engine blocks instead. */
 const NO_REWRITE: ReadonlySet<string> = new Set([
@@ -177,7 +185,7 @@ export function outputGuardrailsBuffer(list: GuardrailConfig[] | undefined): boo
 }
 
 export function newGuardrail(type: string): GuardrailConfig {
-  return { type };
+  return type === "disclosure" ? { type, action: DISCLOSURE_ACTION } : { type };
 }
 
 /**
@@ -292,7 +300,7 @@ export function withType(g: GuardrailConfig, type: string): GuardrailConfig {
   void _drop;
   const failMode = g.parameters?.failMode;
   const repromptMessage = g.parameters?.repromptMessage;
-  let next: GuardrailConfig = { ...rest, type };
+  let next: GuardrailConfig = type === "disclosure" ? withAction({ ...rest, type }, DISCLOSURE_ACTION) : { ...rest, type };
   if (failMode) next = withParameter(next, "failMode", failMode);
   if (repromptMessage) next = withParameter(next, "repromptMessage", repromptMessage);
   return next;
@@ -404,6 +412,8 @@ export function summarizeGuardrail(g: GuardrailConfig): string {
       return p.maxChars ? `${p.maxChars}` : "";
     case "expression":
       return [p.issue, p.expr && p.expr.length > 60 ? `${p.expr.slice(0, 60)}…` : p.expr].filter(Boolean).join(" · ");
+    case "disclosure":
+      return p.text ?? "";
     default:
       return "";
   }
@@ -458,6 +468,12 @@ export const TYPE_TEXT: Record<GuardrailTypeName, [string, string, string, strin
     "Expression check",
     "llmEditor.grTypeExpressionDesc",
     "Evaluates your boolean expression over the JSON answer, e.g. sum(lines[*].amount) == total. When it is false, a reprompt tells the model your fix text and nothing else.",
+  ],
+  disclosure: [
+    "toolCallGuardrails.typeDisclosure",
+    "Disclosure label",
+    "toolCallGuardrails.typeDisclosureDesc",
+    "Adds a fixed label, such as “— AI-assisted reply”, to a text that does not carry it yet. Works with redact only, and adds the label once however often the text is screened.",
   ],
 };
 

@@ -211,6 +211,27 @@ class CounterweightServiceTest {
     }
 
     @Test
+    void presetSnippetKeys_areCreatableUnderTheSnippetNamePattern() {
+        // Snippet names must match [a-z0-9_]+ (PromptSnippetStore), so a preset key
+        // that contains a hyphen could never be created through the REST API.
+        assertTrue(CounterweightService.SNIPPET_KEY_CAUTIOUS.matches("[a-z0-9_]+"));
+        assertTrue(CounterweightService.SNIPPET_KEY_STRICT.matches("[a-z0-9_]+"));
+    }
+
+    @Test
+    void apply_strictLevel_resolvesFromUnderscoreSnippet() {
+        when(promptSnippetService.getForAgent(any())).thenReturn(Map.of("counterweight_strict", "## CUSTOM STRICT"));
+
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("strict");
+
+        String result = service.apply("Base prompt", config, null);
+        assertTrue(result.contains("CUSTOM STRICT"));
+        assertFalse(result.contains("STRICT MODE"));
+    }
+
+    @Test
     void apply_presetSnippetIsResolvedForTheAgent() {
         // C4c: the preset override must come from a snippet THIS agent may use, not
         // from any workspace that happens to own a snippet with the preset's name.

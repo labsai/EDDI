@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.hitl.tools;
 
+import ai.labs.eddi.engine.hitl.oversight.OversightWriteGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,7 +52,9 @@ import java.util.regex.Pattern;
  * task-level {@code toolApprovals} is combined with the agent gate (strictly by
  * default, wholesale under {@code eddi.hitl.tool.task-approvals.mode=replace}),
  * and an agent should not be the one writing it: changing what gates an agent
- * is a human's edit, made in the Manager, not an approval click. A body that
+ * is a human's edit, made in the Manager, not an approval click. The same holds
+ * for {@code toolCallGuardrails}, the hard blocks on a task's tool-call
+ * arguments: an agent that could write them could strip its own. A body that
  * cannot be parsed is refused too — "could not see it" is not "it is not
  * there".</li>
  * <li><b>An agent-store write that removes or changes another agent's gate.</b>
@@ -92,12 +95,17 @@ public final class SelfUngatingGuard {
     /** Every configuration store answers under {@code /<name>store/}. */
     private static final Pattern CONFIG_STORE_PATH = Pattern.compile("/[a-z]+store/");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
+    private static final String TOOL_CALL_GUARDRAILS_KEY = "toolCallGuardrails";
     private static final String HITL_CONFIG_KEY = "hitlConfig";
 
     public static final String OWN_AGENT_REASON = "an agent may not modify, deploy or start itself";
     public static final String OWN_RESOURCE_REASON = "an agent may not modify the workflow or configuration resources it runs on";
     public static final String GATE_WRITE_REASON = "an agent may not write a tool-approval gate (toolApprovals) into an LLM configuration";
+    public static final String GUARDRAIL_WRITE_REASON = "an agent may not write tool-call guardrails (toolCallGuardrails) into an LLM "
+            + "configuration";
     public static final String LLM_GATE_REMOVAL_REASON = "an agent may not remove or replace a tool-approval gate (toolApprovals) "
+            + "stored in an LLM configuration";
+    public static final String LLM_GUARDRAIL_REMOVAL_REASON = "an agent may not remove or replace tool-call guardrails (toolCallGuardrails) "
             + "stored in an LLM configuration";
     public static final String GATE_REMOVAL_REASON = "an agent may not remove or change another agent's tool-approval gate (hitlConfig)";
     public static final String PATCH_OP_REASON = "a configuration patch may only use add, replace, remove and test operations";
@@ -206,6 +214,11 @@ public final class SelfUngatingGuard {
         if (p.resourcesUnresolved() && CONFIG_STORE_PATH.matcher(decodedUri).find()) {
             return UNRESOLVED_RESOURCES_REASON;
         }
+        String oversightRefusal = OversightWriteGuard.refusal(decodedUri, body, AGENT_STORE_TARGET,
+                p.storedGates() != null ? p.storedGates()::hitlConfigOf : null);
+        if (oversightRefusal != null) {
+            return oversightRefusal;
+        }
         if (LLM_STORE_PATHS.stream().anyMatch(decodedUri::contains)) {
             String refusal = llmStoreRefusal(method, body);
             return refusal != null ? refusal : storedLlmGateRefusal(method, body, decodedUri, p.storedLlms());
@@ -224,9 +237,18 @@ public final class SelfUngatingGuard {
         try {
             JsonNode tree = MAPPER.readTree(body);
             if (tree.isArray() && isPatch(method)) {
-                return patchRefusal(tree, TOOL_APPROVALS_KEY);
+                String gate = patchRefusal(tree, TOOL_APPROVALS_KEY);
+                if (GATE_WRITE_REASON.equals(gate)) {
+                    return gate;
+                }
+                // Naming the guardrails outranks an unsupported operation, as naming the
+                // gate does.
+                return GATE_WRITE_REASON.equals(patchRefusal(tree, TOOL_CALL_GUARDRAILS_KEY)) ? GUARDRAIL_WRITE_REASON : gate;
             }
-            return containsKey(tree, TOOL_APPROVALS_KEY) ? GATE_WRITE_REASON : null;
+            if (containsKey(tree, TOOL_APPROVALS_KEY)) {
+                return GATE_WRITE_REASON;
+            }
+            return containsKey(tree, TOOL_CALL_GUARDRAILS_KEY) ? GUARDRAIL_WRITE_REASON : null;
         } catch (JsonProcessingException e) {
             return UNVERIFIABLE_REASON;
         }
@@ -258,12 +280,15 @@ public final class SelfUngatingGuard {
             return UNVERIFIABLE_REASON;
         }
         List<String> gatePaths = new ArrayList<>();
+        List<String> guardrailPaths = new ArrayList<>();
         try {
-            collectKeyPaths(storedLlms.llmConfigOf(target.group(1), versionNumber), TOOL_APPROVALS_KEY, "", gatePaths);
+            JsonNode stored = storedLlms.llmConfigOf(target.group(1), versionNumber);
+            collectKeyPaths(stored, TOOL_APPROVALS_KEY, "", gatePaths);
+            collectNonEmptyKeyPaths(stored, TOOL_CALL_GUARDRAILS_KEY, "", guardrailPaths);
         } catch (Exception e) {
             return UNVERIFIABLE_REASON;
         }
-        if (gatePaths.isEmpty()) {
+        if (gatePaths.isEmpty() && guardrailPaths.isEmpty()) {
             return null;
         }
         JsonNode tree;
@@ -273,13 +298,26 @@ public final class SelfUngatingGuard {
             return UNVERIFIABLE_REASON;
         }
         if (!(tree.isArray() && isPatch(method))) {
-            return LLM_GATE_REMOVAL_REASON;
+            return !gatePaths.isEmpty() ? LLM_GATE_REMOVAL_REASON : LLM_GUARDRAIL_REMOVAL_REASON;
         }
         for (JsonNode operation : tree) {
             String path = operation.path("path").asText("");
+            String op = operation.path("op").asText("").toLowerCase(Locale.ROOT);
             for (String gatePath : gatePaths) {
-                if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
+                if (touchesStoredPath(op, path, gatePath)) {
                     return LLM_GATE_REMOVAL_REASON;
+                }
+                // The gate paths are the STORED document's, and a patch applies in order:
+                // an add or remove at or before a gated element of the same array moves
+                // that element, and a later operation then reaches it at a position no
+                // stored path names.
+                if (("add".equals(op) || "remove".equals(op)) && shiftsElementOf(path, gatePath)) {
+                    return LLM_GATE_REMOVAL_REASON;
+                }
+            }
+            for (String guardrailPath : guardrailPaths) {
+                if (touchesStoredPath(op, path, guardrailPath)) {
+                    return LLM_GUARDRAIL_REMOVAL_REASON;
                 }
             }
         }
@@ -287,9 +325,151 @@ public final class SelfUngatingGuard {
     }
 
     /**
+     * True if an operation reaches a protected stored path: it targets the path or
+     * one of its ancestors, or it is an {@code add}/{@code remove} at an array
+     * index at or before the protected element's index under the same parent. That
+     * shift moves the protected element to an index the stored paths do not name,
+     * so a later operation in the same patch could drop it unseen
+     * ({@code remove /tasks/0} twice removes a gated {@code /tasks/1}).
+     * {@code move} and {@code copy} are refused by {@link #patchRefusal} already;
+     * an append ({@code /-}) shifts nothing.
+     */
+    static boolean touchesStoredPath(String op, String path, String storedPath) {
+        if (path.isEmpty() || storedPath.equals(path) || storedPath.startsWith(path + "/")) {
+            return true;
+        }
+        if (!"add".equals(op) && !"remove".equals(op)) {
+            return false;
+        }
+        int slash = path.lastIndexOf('/');
+        String parentPrefix = path.substring(0, slash + 1);
+        Long index = arrayIndex(path.substring(slash + 1));
+        if (index == null || !storedPath.startsWith(parentPrefix)) {
+            return false;
+        }
+        String rest = storedPath.substring(parentPrefix.length());
+        int next = rest.indexOf('/');
+        Long storedIndex = arrayIndex(next < 0 ? rest : rest.substring(0, next));
+        return storedIndex != null && storedIndex >= index;
+    }
+
+    /** The segment as an RFC 6901 array index, or null if it is not one. */
+    private static Long arrayIndex(String segment) {
+        if (segment.isEmpty() || segment.length() > 18 || !segment.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            return null;
+        }
+        return Long.valueOf(segment);
+    }
+
+    /**
+     * Whether an add or remove at {@code path} moves the array element that
+     * {@code gatePath} runs through: same array, an index at or before the gate's.
+     * An append ({@code -}) moves nothing.
+     */
+    static boolean shiftsElementOf(String path, String gatePath) {
+        int slash = path.lastIndexOf('/');
+        if (slash < 0) {
+            return false;
+        }
+        String parent = path.substring(0, slash);
+        String index = path.substring(slash + 1);
+        if (!gatePath.startsWith(parent + "/")) {
+            return false;
+        }
+        String rest = gatePath.substring(parent.length() + 1);
+        int end = rest.indexOf('/');
+        String gateIndex = end < 0 ? rest : rest.substring(0, end);
+        if (!isArrayIndex(index) || !isArrayIndex(gateIndex)) {
+            return false;
+        }
+        // Compared as digit strings of any length (no leading zeros): shorter is
+        // smaller, equal lengths compare as text.
+        return index.length() < gateIndex.length() || index.length() == gateIndex.length() && index.compareTo(gateIndex) <= 0;
+    }
+
+    private static boolean isArrayIndex(String segment) {
+        return !segment.isEmpty() && segment.chars().allMatch(Character::isDigit) && (segment.length() == 1 || segment.charAt(0) != '0');
+    }
+
+    /** The {@code resourceType} the MCP management tools give an LLM document. */
+    private static final String LLM_MCP_RESOURCE_TYPE = "langchain";
+
+    /**
+     * An MCP {@code update_resource} replacing an LLM document: the raw-argument
+     * twin of the whole-document rule in {@link #storedLlmGateRefusal}. A
+     * replacement carries every task, so it is refused whenever the stored version
+     * it replaces holds a gate (one that re-states the gate was refused for naming
+     * it). Without a lookup, or for arguments of any other shape, nothing is said.
+     */
+    private static String storedLlmReplacementRefusal(String rawArguments, StoredLlmLookup storedLlms) {
+        if (storedLlms == null || rawArguments == null || rawArguments.isBlank()) {
+            return null;
+        }
+        JsonNode args;
+        try {
+            args = MAPPER.readTree(rawArguments);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+        if (args == null || !args.isObject() || !LLM_MCP_RESOURCE_TYPE.equals(args.path("resourceType").asText("").trim().toLowerCase(Locale.ROOT))
+                || args.path("resourceId").asText("").isBlank() || !args.hasNonNull("config")) {
+            return null;
+        }
+        // update_resource's own default when the version is omitted. A string "3" is
+        // read as 3, since the server coerces it to the Integer parameter; any other
+        // value cannot be matched to the version being replaced.
+        JsonNode versionNode = args.get("version");
+        Integer version;
+        if (versionNode == null || versionNode.isNull()) {
+            version = 1;
+        } else if (versionNode.canConvertToInt() && versionNode.isIntegralNumber()) {
+            version = versionNode.asInt();
+        } else if (versionNode.isTextual() && versionNode.asText().trim().matches("\\d{1,9}")) {
+            version = Integer.valueOf(versionNode.asText().trim());
+        } else {
+            return UNVERIFIABLE_REASON;
+        }
+        List<String> gatePaths = new ArrayList<>();
+        try {
+            collectKeyPaths(storedLlms.llmConfigOf(args.path("resourceId").asText().trim(), version), TOOL_APPROVALS_KEY, "", gatePaths);
+        } catch (Exception e) {
+            return UNVERIFIABLE_REASON;
+        }
+        return gatePaths.isEmpty() ? null : LLM_GATE_REMOVAL_REASON;
+    }
+
+    /**
      * Adds the JSON pointer of every {@code key} member at any depth of
      * {@code node}.
      */
+    /**
+     * As {@link #collectKeyPaths}, but a key holding an empty array or object is
+     * skipped: an empty stored list protects nothing, and a default-serialised
+     * document carries one, so counting it would refuse every whole-document write.
+     */
+    static void collectNonEmptyKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String child = pointer + "/" + field.getKey().replace("~", "~0").replace("/", "~1");
+                JsonNode value = field.getValue();
+                boolean empty = value.isNull() || ((value.isArray() || value.isObject()) && value.isEmpty());
+                if (key.equals(field.getKey()) && !empty) {
+                    paths.add(child);
+                }
+                collectNonEmptyKeyPaths(value, key, child, paths);
+            }
+        } else if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) {
+                collectNonEmptyKeyPaths(node.get(i), key, pointer + "/" + i, paths);
+            }
+        }
+    }
+
     static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
         if (node == null) {
             return;
@@ -438,10 +618,13 @@ public final class SelfUngatingGuard {
         if (decoded.contains(TOOL_APPROVALS_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_WRITE_REASON;
         }
+        if (decoded.contains(TOOL_CALL_GUARDRAILS_KEY.toLowerCase(Locale.ROOT))) {
+            return GUARDRAIL_WRITE_REASON;
+        }
         if (decoded.contains(HITL_CONFIG_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_REMOVAL_REASON;
         }
-        return null;
+        return storedLlmReplacementRefusal(rawArguments, p.storedLlms());
     }
 
     private static boolean containsId(String haystack, String id) {

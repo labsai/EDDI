@@ -404,6 +404,37 @@ public class ToolRateLimiter {
     }
 
     /**
+     * The deployment-wide bucket alone, for a call whose task switched its own
+     * per-conversation limit off ({@code enableRateLimiting: false}). That flag is
+     * the agent designer's; the global ceiling is the operator's provider-quota
+     * decision, and a task setting must not opt out of it. Takes a token when the
+     * call is admitted; never refuses when
+     * {@code eddi.tools.ratelimit.global.enabled} is off.
+     *
+     * @return true if the deployment-wide limit refuses the call, false if it may
+     *         run
+     */
+    public boolean refusedByGlobalLimit(String toolName) {
+        if (!globalLimitEnabled) {
+            return false;
+        }
+        boolean acquired;
+        if (clustered()) {
+            KvRateLimitBackend.Decision decision = kvBackend().take(KvRateLimitBackend.key(SCOPE_GLOBAL, toolName), globalLimit);
+            acquired = decision == KvRateLimitBackend.Decision.UNAVAILABLE
+                    ? degradedAcquire(SCOPE_GLOBAL, toolName, globalLimit, true)
+                    : decision == KvRateLimitBackend.Decision.ALLOWED;
+        } else {
+            acquired = bucketFor(SCOPE_GLOBAL, toolName, globalLimit).tryAcquire();
+        }
+        meterRegistry.counter(acquired ? "eddi.tool.ratelimit.allowed" : "eddi.tool.ratelimit.denied", "tool", toolName).increment();
+        if (!acquired) {
+            LOGGER.warn(String.format("Rate limit exceeded for tool '%s' (scope '%s').", sanitize(toolName), SCOPE_GLOBAL));
+        }
+        return !acquired;
+    }
+
+    /**
      * Try to acquire permission to execute a tool on behalf of one conversation.
      *
      * @param conversationId

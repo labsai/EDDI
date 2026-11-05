@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime;
 
 import ai.labs.eddi.engine.model.LogEntry;
+import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,9 +36,18 @@ import org.jboss.logmanager.ExtLogRecord;
  * LogManager workflow and pushes it to this store.
  * </p>
  *
+ * <p>
+ * {@code @Startup}: the store must exist from application start. It used to be
+ * created on first injection (by the log admin REST resource or the MCP tools),
+ * and until then {@link LogCaptureFilter} had nowhere to send records, so a
+ * fresh instance showed no logs — and persisted none — until someone opened the
+ * log view.
+ * </p>
+ *
  * @author ginccc
  * @since 6.0.0
  */
+@Startup
 @ApplicationScoped
 public class BoundedLogStore {
 
@@ -413,7 +423,7 @@ public class BoundedLogStore {
      * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
      * JUL LogRecords, we fall back to manual MessageFormat.
      */
-    private static String formatRecord(LogRecord record) {
+    static String formatRecord(LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";

@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -481,6 +482,9 @@ public class McpGroupTools {
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // The same serve-time pass the REST group views run: the stored context was
+            // rendered by whatever build wrote it, and the redaction rules are per build.
+            gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
             return jsonSerialization.serialize(gc);
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);

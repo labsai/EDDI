@@ -117,13 +117,13 @@ endpoint for volume, and the dropped counter above for integrity.
 
 ### HIPAA (§164.408)
 
-- **HHS (Secretary)**: Within **60 days** of discovery
+- **HHS (Secretary)**: For breaches of 500 or more individuals, within **60 days** of discovery, contemporaneously with individual notice
 - **Affected individuals**: Without unreasonable delay, no later than
   **60 days** after discovery
 - **Media**: If breach affects ≥ 500 residents of a state, notify
   prominent media outlets in that state
-- **Small breaches** (< 500 individuals): May be reported annually to HHS
-  in a batch submission
+- **Small breaches** (< 500 individuals): Logged and reported annually to HHS,
+  within 60 days of the end of the calendar year
 
 ### Template
 

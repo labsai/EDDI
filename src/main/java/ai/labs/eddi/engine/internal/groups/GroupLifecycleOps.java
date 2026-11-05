@@ -342,6 +342,8 @@ public class GroupLifecycleOps {
                         // keeps totalCost — and so the ceiling — honest.
                         propagateDynamicAgentTracking(snapshot, followUpGc);
                         GroupCostLedger.accumulateMemberCost(followUpGc, costKey, snapshot);
+                        // F6: the follow-up's spend goes to the team like a phase turn's.
+                        groupConversationService.chargeTeamBudget(followUpGc);
                         String response = groupConversationService.extractResponse(snapshot);
                         if ((response == null || response.isEmpty()) && snapshot != null
                                 && snapshot.getConversationState() == ConversationState.ERROR) {
@@ -666,6 +668,7 @@ public class GroupLifecycleOps {
                     }
                     if (gc.getPendingHumanInput() != null) {
                         summary.setPendingMemberId(gc.getPendingHumanInput().memberId());
+                        summary.setPendingKind(PendingHumanInputView.kindOf(gc));
                     }
                     return summary;
                 })

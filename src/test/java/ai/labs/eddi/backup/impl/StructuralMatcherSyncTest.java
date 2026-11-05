@@ -11,6 +11,7 @@ import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
@@ -22,6 +23,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.NotFoundException;
@@ -37,6 +39,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -159,6 +162,27 @@ class StructuralMatcherSyncTest {
         assertEquals("workflow", removed.resourceType());
         assertEquals(TARGET_WF2, removed.targetId());
         assertEquals(1, removed.workflowIndex());
+    }
+
+    @Test
+    @DisplayName("a REMOVE row names a workflow only for a caller who may VIEW it")
+    void removedWorkflowNameNeedsView() throws Exception {
+        targetAgent.setWorkflows(new ArrayList<>(List.of(uri("workflow", TARGET_WF, 4), uri("workflow", TARGET_WF2, 1))));
+        var privateDescriptor = new DocumentDescriptor();
+        privateDescriptor.setName("Payroll workflow");
+        when(descriptorStore.readCurrentDescriptor(TARGET_WF2)).thenReturn(privateDescriptor);
+        var guard = mock(ResourceAccessGuard.class);
+        matcher.resourceAccessGuard = guard;
+
+        when(guard.canAccess(privateDescriptor, AccessLevel.VIEW)).thenReturn(false);
+        assertNull(removedRow(matcher.buildPreview(source(LLM_JSON), TARGET_AGENT, false)).name());
+
+        when(guard.canAccess(privateDescriptor, AccessLevel.VIEW)).thenReturn(true);
+        assertEquals("Payroll workflow", removedRow(matcher.buildPreview(source(LLM_JSON), TARGET_AGENT, false)).name());
+    }
+
+    private static ResourceDiff removedRow(ImportPreview preview) {
+        return preview.resources().stream().filter(diff -> diff.action() == DiffAction.REMOVE).findFirst().orElseThrow();
     }
 
     @Test

@@ -71,6 +71,7 @@ describe("TaskGuardrailsSection", () => {
       "judge",
       "json-object",
       "expression",
+      "disclosure",
     ]);
   });
 

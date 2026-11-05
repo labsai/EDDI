@@ -6,6 +6,8 @@ answer arrives. EDDI recovers from each of these in a fixed order, always tries 
 leaves a trail an operator can read afterwards. This page is the map: what can fail, what the engine does about
 it, which settings control it and where to look when a turn did not go as expected.
 
+**In short:** with no settings an LLM call is attempted up to 3 times on transient failures, there is no cascade and no fallback model, and the turn still ends with an answer or an error the caller can read.
+
 Everything here is **optional and off by default** unless stated otherwise. An agent with no resilience
 settings behaves as it did before, with two exceptions that are bug fixes: a reply that is not valid JSON no
 longer fails the turn under `convertToObject`, and an HTTP 500 from a provider is now retried.
@@ -26,9 +28,9 @@ error body (a status alone cannot tell a rate limit from a spent daily quota). T
 | Credentials / quota (`AUTH`, `QUOTA_EXHAUSTED`) | 401/403, a **per-day** 429 | Not retried (a spent quota cannot succeed); the cascade escalates at once; the circuit opens on the first one |
 | Context too long (`CONTEXT_TOO_LONG`) | 400 "input token count exceeds" | With `onContextTooLong: "retry"`, one re-send with the history window halved |
 | Empty, truncated or filtered reply | finish reason `SAFETY`, `MAX_TOKENS`, blank text | `responseValidation` action per case; `retry` re-asks (truncation with a larger token cap) |
-| Not JSON | prose, a code fence, text around the object | Local repair (free), then `onInvalidJson` |
+| Not JSON | prose, a code fence, text around the object, a double-escaped object | Local repair (free), then `onInvalidJson` (`wrap` keeps plain prose as the answer with no second call, see [Local rescue](#local-rescue-of-near-miss-json-replies)) |
 | Malformed JSON | cut off mid-object, bad syntax | Never throws; the raw string is kept, then `onInvalidJson` |
-| Wrong shape | valid JSON without the field the template reads, wrong type, `""` | Outcome `schema_mismatch` (`responseSchema` / `nonBlankFields`), then `onSchemaMismatch` |
+| Wrong shape | valid JSON without the field the template reads, wrong type, `""`, a misspelled field name, `{}` | `fieldAliases` renames a known misspelling; otherwise outcome `schema_mismatch` (`responseSchema` / `nonBlankFields`), then `onSchemaMismatch` |
 | Dependency | an httpcall the turn needs is slow | The call's timeout and its retries are clamped to the remaining turn budget |
 | Caller gives up | the caller times out at 60 s while the engine still works | The turn deadline ends the work in time; an `Idempotency-Key` retry gets the answer instead of `409` |
 | Systemic | key revoked, model retired, prompt that always yields prose | The per-model circuit breaker stops calling it for everyone for a while |
@@ -40,12 +42,31 @@ Recovery always runs from cheapest to most expensive, and each step is skipped w
 
 ```text
 model answers
-  1. local repair          fence stripping / extracting the object from prose      free
+  1. local repair          fence strip, \' repair, double-escape repair, extract the object from prose,
+                           fieldAliases, shape check, then wrap (opt-in, see below)   free
   2. transport retry       retry: same request, provider delay honoured             transient faults only
   3. same-model re-ask     responseValidation "retry" + corrective message          up to maxRetries (default 1)
   4. escalate              next cascade step, which repeats 1-3 with its own re-asks
   5. fallback              fallbackAction / onError: fallback                       the user gets an answer
 ```
+
+### Local rescue of near-miss JSON replies
+
+Step 1 can keep four common near-misses without any second model call. All of it is opt-in and absent by
+default (full reference and example in [LangChain: Rescue near-miss replies](langchain.md#rescue-near-miss-replies-without-a-second-model-call)):
+
+| Shape | Option | Outcome |
+| --- | --- | --- |
+| Plain HTML or text, no JSON | `responseValidation.onInvalidJson: "wrap"` + required `wrapField` (+ optional `wrapDefaults`, `wrapMaxChars`, default 20000); never text starting with `{` or `[` | `wrapped` |
+| Double-escaped JSON (`{\"a\": \"b\"}`) | one-level unescape, on whenever `onInvalidJson` is `wrap` or `retry`; accepted only as an object, never tried on a reply that already parsed | `repaired` |
+| Valid JSON, wrong field name | task field `fieldAliases` (`{"htmlResponseStr": "htmlResponseText"}`); renames only into an absent target | `repaired` |
+| Valid but empty `{}` | not rescued: `nonBlankFields` + `onSchemaMismatch: "retry"` (the recommended pair, which also catches the other empty shapes) | `schema_mismatch`, then one re-ask |
+
+A typical tool-using agent on a provider without native JSON mode combines them:
+`"onInvalidJson": "wrap"`, `"wrapField": "htmlResponseText"`, `"nonBlankFields": ["htmlResponseText"]`,
+`"onSchemaMismatch": "retry"`, plus the alias map. A wrapped reply is then checked against
+`nonBlankFields` and `responseSchema` like any parsed reply, so a rescue never lets an off-shape answer through.
+Broken JSON (it starts with `{` or `[`) is **not** wrapped: it stays `invalid` and `fallbackAction` applies.
 
 The order is deliberate: a one-off format slip is usually fixed by the model that made it, and escalating
 first would pay a different, possibly slower or dearer model for every hiccup. A model that keeps failing the
@@ -83,7 +104,9 @@ Two rules hold at every step:
 | `retry.maxRetryAfterMs` | Longest provider-requested wait accepted; a longer one stops retrying **without sleeping** so a cascade escalates at once (engine ceiling 30000) | `10000` |
 | `responseValidation.enabled` | Master switch of the `responseValidation` policies below (`retry` and the validation `fallback` need it) | `false` |
 | `responseValidation.onEmpty` / `onTruncation` / `onContentFilter` | `ignore`, `warn`, `fallback`, `error` or `retry` | `warn` |
-| `responseValidation.onInvalidJson` / `onSchemaMismatch` | As above, for a `convertToObject` reply that is not JSON / breaks the shape | `ignore` |
+| `responseValidation.onInvalidJson` / `onSchemaMismatch` | As above, for a `convertToObject` reply that is not JSON / breaks the shape. `onInvalidJson` also accepts `wrap` | `ignore` |
+| `responseValidation.wrapField` / `wrapDefaults` / `wrapMaxChars` | With `onInvalidJson: "wrap"`: the top-level property a plain-text reply is wrapped into (required), an object of defaults merged next to it, and the longest text wrapped | none / none / `20000` |
+| `fieldAliases` | Task field: `{"alias": "target"}` renames a top-level key of the parsed reply when the target is absent | none |
 | `responseValidation.onContextTooLong` | `retry` re-sends once with the history window halved; anything else lets the failure propagate | `error` |
 | `responseValidation.onRefusal` / `onStreamingTimeout` | `retry` is **not** supported here (treated as `warn`) | `ignore` / `warn` |
 | `responseValidation.maxRetries` | Same-model re-asks per model (per cascade step), shared by every `retry` policy. Clamped to 0..3. A cascade step overrides it with `maxFormatRetries` | `1` |
@@ -100,6 +123,7 @@ Two rules hold at every step:
 | `nonBlankFields` | Fields of the parsed reply that must hold a non-blank string (`"htmlResponseText"`, `"answer.text"`) | none |
 | `parameters.responseSchema` | A JSON Schema the reply must match; also sent natively to providers that support it | none |
 | `jsonResponseFormat` | `auto`, `on` or `off`: whether the request carries the provider's JSON mode | `auto` |
+| `answerMode` / `answerToolChoice` | `tool` makes the model answer through a terminal `reply` tool whose arguments are the `responseSchema` — provider-enforced also with tools on Gemini, Anthropic and Bedrock. A plain-text answer still goes through `onInvalidJson`; no extra model call compared to `text` ([details](langchain.md#answering-through-a-reply-tool-answermode-tool)) | `text` / `required` |
 | `modelCascade.steps[i].maxFormatRetries` | Per-step override of `maxRetries` | task value |
 | `modelCascade.steps[i].timeoutMs` | Per-step timeout; also caps the step model's request `timeout` | `30000` |
 
@@ -238,7 +262,7 @@ These keys are written to the turn's step. They are **not** part of the public c
 
 | Key | Meaning |
 | --- | --- |
-| `llm:output:outcome:<taskId>` | How a `convertToObject` reply parsed: `valid`, `repaired` (needed fence stripping or extraction), `invalid`, `empty`, `schema_mismatch` |
+| `llm:output:outcome:<taskId>` | How a `convertToObject` reply parsed: `valid`, `repaired` (needed fence stripping, extraction, the double-escape repair or an alias rename), `wrapped` (plain text wrapped by `onInvalidJson: "wrap"`), `invalid`, `empty`, `schema_mismatch` |
 | `llm:output:reason:<taskId>` | EDDI's own reason for `invalid` / `schema_mismatch` (`truncated JSON`, `schema: $.htmlResponseText required`, `nonBlank: $.a.b`). Never model output |
 | `llm:retry:<taskId>` | `{reasks, unresolved}`: how many same-model re-asks were sent and which problem was still unresolved afterwards |
 | `llm:fallback:<taskId>` | `true` when the engine served its own fallback instead of a model answer |
@@ -270,6 +294,7 @@ LLM recovery conversationId=<id> agentId=<id> class=<class> action=<action> outc
 | `action` | `class` | `outcome` | `attempt` |
 | --- | --- | --- | --- |
 | `repair` | `invalid_json` | `recovered` | `1` |
+| `wrap` (a plain-text reply wrapped into the configured object) | `invalid_json` | `recovered` | `1` |
 | `retry` (a same-model re-ask) | the reply problem (`empty`, `truncated`, `content_filter`, `invalid_json`, `schema_mismatch`, `context_too_long`) | `recovered`, `still_invalid`, `failed` | the re-ask number |
 | `escalate` (a cascade step handed over) | the failure class, or the reply problem, or `low_confidence` | the escalation reason: `invalid_output`, `timeout`, `error`, `retryable_error`, `low_confidence` | the 1-based step that gave up |
 | `circuit_skip` | the class that opened the circuit | `skipped` | `1` (the step number under a cascade) |
@@ -286,9 +311,10 @@ All counters are Micrometer meters on `/q/metrics` (names below as Prometheus re
 | Metric | Tags | Meaning |
 | --- | --- | --- |
 | `eddi_llm_failure_total` | `class`, `model` | A failed model call by failure class: every failed cascade step, and every failed single-model task |
-| `eddi_llm_recovery_total` | `action`, `outcome`, `trigger` | One count per recovery action. `action` is `repair`, `retry`, `escalate`, `circuit_skip` or `fallback` |
-| `eddi_llm_output_total` | `outcome` | `convertToObject` replies by parse outcome (`valid`, `repaired`, `invalid`, `empty`, `schema_mismatch`) |
-| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`) |
+| `eddi_llm_recovery_total` | `action`, `outcome`, `trigger` | One count per recovery action. `action` is `repair`, `wrap`, `retry`, `escalate`, `circuit_skip` or `fallback` (`wrap` with outcome `not_wrappable` counts a reply `onInvalidJson: "wrap"` could not rescue) |
+| `eddi_llm_output_total` | `outcome` | `convertToObject` replies by parse outcome (`valid`, `repaired`, `wrapped`, `invalid`, `empty`, `schema_mismatch`) |
+| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`, `httpcall_foreach`) |
+| `eddi_llm_answer_tool_total` | `outcome` | `answerMode: "tool"` decisions: `reply`, `text` (answered in text, handed to `onInvalidJson`), `duplicate`, `discarded_by_pause`, `no_reply` (iteration budget spent), `collision_dropped` |
 | `eddi_llm_cancelled_total` | `scope` | An attempt or cascade step abandoned on timeout |
 | `eddi_llm_circuit_total`, `eddi_llm_circuit_skipped_total`, `eddi_llm_circuit_open` | | Circuit breaker transitions, skipped turns and the gauge of open circuits |
 
