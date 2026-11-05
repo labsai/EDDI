@@ -1466,7 +1466,13 @@ public class Conversation implements IConversation {
     private void persistRevisionCandidate(ConversationPauseException e) {
         HitlRevisionCandidate candidate = conversationMemory.getHitlRevisionCandidate();
         HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
-        if (candidate == null || policy == null || !policy.revise() || candidate.getTranscriptJson() == null) {
+        if (candidate == null || policy == null) {
+            return;
+        }
+        // Kept for a revision (needs the frozen request) or for an approver's edit
+        // (needs only the draft).
+        boolean revisable = policy.revise() && candidate.getTranscriptJson() != null;
+        if (!revisable && !policy.captureDraft()) {
             return;
         }
         if (!answerPrecedesPause(candidate, e.getPausedWorkflowId(), e.getPausedAbsoluteTaskIndex())) {
@@ -1564,6 +1570,31 @@ public class Conversation implements IConversation {
             }
         }
         return true;
+    }
+
+    /**
+     * "Approve with edits" ({@code hitlConfig.review.allowAnswerEdits}): the
+     * approver's text replaces the draft (see {@link ReviewerEditStep}). When the
+     * engine refuses it — an output guardrail blocked it, or the configuration
+     * changed since the pause — the human's decision stands but cannot be applied:
+     * the turn pauses again, on the same task and the unchanged draft, with a new
+     * pause id.
+     */
+    private void applyReviewerEdit(HitlDecision decision, HitlRevisionCandidate candidate, IWritableConversationStep step)
+            throws LifecycleException, ConversationPauseException {
+        HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
+        String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
+        int pausedIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex();
+        IExecutableWorkflow workflow = policy != null && policy.captureDraft() && candidate != null && candidate.getDraft() != null
+                && answerPrecedesPause(candidate, pausedWorkflowId, pausedIndex) ? findWorkflow(candidate.getWorkflowId()) : null;
+        var outcome = ReviewerEditStep.apply(conversationMemory, step, workflow, candidate, decision, policy != null && policy.screenEdits());
+        step.setCurrentWorkflowId(pausedWorkflowId);
+        if (!outcome.applied()) {
+            conversationMemory.setHitlRevisionCandidate(candidate);
+            clearHitlStatusMarker(step);
+            throw new ConversationPauseException(pausedWorkflowId, pausedIndex, conversationMemory.getHitlPauseReason(),
+                    ConversationPauseException.PauseOrigin.RULE);
+        }
     }
 
     /**
@@ -1898,6 +1929,12 @@ public class Conversation implements IConversation {
                 return;
             }
 
+            // review.allowAnswerEdits: an approval with an edited answer replaces the
+            // draft before the remaining tasks run; a refused edit pauses again.
+            if (!toolPause && decision.getEditedAnswer() != null) {
+                applyReviewerEdit(decision, revisionCandidate, currentStep);
+            }
+
             String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
             // RULE pauses resume AFTER the paused task (the rule already evaluated;
             // +1 = backward compat). TOOL_CALL pauses resume AT the paused task so
@@ -2032,6 +2069,7 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlPauseReason(null);
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
+        conversationMemory.setHitlApprovalContext(null);
     }
 
     /**

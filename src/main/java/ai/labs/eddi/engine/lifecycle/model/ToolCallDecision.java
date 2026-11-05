@@ -18,6 +18,21 @@ public class ToolCallDecision {
     private HitlDecision.HitlVerdict verdict;
     private String note;
     private String amendedArguments;
+    /**
+     * Optional reason code for this call's rejection or amendment (see
+     * {@code review.reasonCodes}); falls back to the decision's.
+     *
+     * @since 6.7.0
+     */
+    private String reasonCode;
+
+    public String getReasonCode() {
+        return reasonCode;
+    }
+
+    public void setReasonCode(String reasonCode) {
+        this.reasonCode = reasonCode;
+    }
 
     public HitlDecision.HitlVerdict getVerdict() {
         return verdict;

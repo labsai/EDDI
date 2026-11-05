@@ -58,6 +58,9 @@ public final class HitlConfigValidation {
         validateRange(hitlConfig.getMaxRevisionsPerTurn(), 1, 10, "hitlConfig.maxRevisionsPerTurn");
         warnIfToolApprovalsInheritsAutoApprove(hitlConfig);
         validateNotify(hitlConfig.getNotify(), "hitlConfig.notify");
+        HitlReviewConfigValidation.validate(hitlConfig.getReview(), "hitlConfig.review");
+        ApprovalContextValidation.validate(hitlConfig.getApprovalContext(), "hitlConfig.approvalContext",
+                ApprovalContextValidation.Scope.AGENT);
     }
 
     /**
@@ -256,7 +259,9 @@ public final class HitlConfigValidation {
                         + " e.g. \"PT5M\") or " + fieldPath + ".approvalTimeout for the rule to inherit");
             }
             checkReasonLength(rule.getPauseReason(), rulePath + ".pauseReason");
+            HitlReviewConfigValidation.validateCategory(rule.getApprovalCategory(), rulePath + ".approvalCategory");
             checkReasonLength(rule.getPendingMessage(), rulePath + ".pendingMessage");
+            ApprovalContextValidation.validate(rule.getContext(), rulePath + ".context", ApprovalContextValidation.Scope.RULE);
         }
     }
 
@@ -320,6 +325,9 @@ public final class HitlConfigValidation {
         validateApprovalTimeout(hitlConfig.getApprovalTimeout(),
                 hitlConfig.getTimeoutPolicy() != null
                         && hitlConfig.getTimeoutPolicy() != HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        HitlReviewConfigValidation.validate(hitlConfig.getReview(), "hitlConfig.review");
+        ApprovalContextValidation.validate(hitlConfig.getApprovalContext(), "hitlConfig.approvalContext",
+                ApprovalContextValidation.Scope.GROUP);
     }
 
     private static void validateApprovalTimeout(String approvalTimeout, boolean finitePolicy) {

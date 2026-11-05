@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Bell, CheckCheck, KeyRound, Share2 } from "lucide-react";
+import { Bell, CheckCheck, Gift, KeyRound, Share2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +24,8 @@ import { shareResource, type AccessLevel } from "@/lib/api/sharing";
 import { userSubject } from "@/lib/spaces";
 import { isAgentUri, managerChatPath, managerRouteFor } from "@/lib/resource-links";
 import { useSpaces } from "@/hooks/use-spaces";
+import { useUpdateCheckSwitch } from "@/hooks/use-update-check";
+import { UPDATES_PATH } from "@/lib/brand";
 
 const NOTIFICATION_KEYS = {
   count: ["workspaces", "notifications", "count"] as const,
@@ -31,19 +33,22 @@ const NOTIFICATION_KEYS = {
 };
 
 /**
- * Shares with the signed-in user, and access requests for what they own.
+ * Shares with the signed-in user, access requests for what they own, and — for an
+ * administrator — the notice that a newer EDDI release exists.
  *
  * <h3>Why this exists</h3> A share used to change a grant and nothing else: the
  * recipient found out only if the sharer told them some other way, and then had
  * to hunt for the resource. An access request had nowhere to go at all. Both now
  * land here, and an owner can grant a request in one click.
  *
- * Hidden while workspaces are not enforced — nothing is shared then, because
- * everybody already sees everything.
+ * Hidden while workspaces are not enforced (nothing is shared then, because
+ * everybody already sees everything) *and* the update check is off: the update
+ * notice is the one thing that reaches the bell regardless.
  */
 export function NotificationBell() {
   const { enabled } = useSpaces();
-  if (!enabled) return null;
+  const { enabled: updateCheck } = useUpdateCheckSwitch();
+  if (!enabled && !updateCheck) return null;
   return <NotificationBellInner />;
 }
 
@@ -224,6 +229,9 @@ function NotificationItem({
   const level = levelLabel(t, n.level);
   const unread = !n.readAt;
   const request = n.type === "ACCESS_REQUESTED";
+  if (n.type === "UPDATE_AVAILABLE") {
+    return <UpdateNotificationItem notification={n} onDismiss={onDismiss} onNavigate={onNavigate} />;
+  }
   // Somebody given only USE cannot open the configuration page — send them to
   // the chat instead, which is what "shared so you can chat with it" means.
   const chatOnly = !request && n.level === "USE" && isAgentUri(n.resourceUri);
@@ -270,6 +278,44 @@ function NotificationItem({
         )}
         {unread && (
           <Button size="sm" variant="ghost" onClick={onDismiss} disabled={busy} data-testid={`notification-dismiss-${n.id}`}>
+            {t("workspaces.notifications.dismiss", "Dismiss")}
+          </Button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function UpdateNotificationItem({
+  notification: n,
+  onDismiss,
+  onNavigate,
+}: {
+  notification: WorkspaceNotification;
+  onDismiss: () => void;
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const unread = !n.readAt;
+  return (
+    <li className={cn("space-y-2 px-3 py-3", unread && "bg-primary/5")} data-testid={`notification-${n.id}`}>
+      <div className="flex items-start gap-2">
+        <Gift className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="text-sm">
+            {t("updates.updateAvailable", "{{productName}} {{version}} is available", { version: n.resourceName })}
+          </p>
+          <p className="text-xs text-muted-foreground">{new Date(n.createdAt).toLocaleString()}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 ps-6">
+        <Button size="sm" variant="outline" asChild>
+          <Link to={UPDATES_PATH} onClick={onNavigate} data-testid={`notification-update-${n.id}`}>
+            {t("updates.howToUpdate", "How to update")}
+          </Link>
+        </Button>
+        {unread && (
+          <Button size="sm" variant="ghost" onClick={onDismiss} data-testid={`notification-dismiss-${n.id}`}>
             {t("workspaces.notifications.dismiss", "Dismiss")}
           </Button>
         )}

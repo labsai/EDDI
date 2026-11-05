@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { create } from "zustand";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { getCatalogAgents } from "@/lib/api/catalog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ENVIRONMENTS, type Environment } from "@/lib/constants";
 import { deployedEnvironments, withAnyDeployedVersion } from "@/lib/deployment-environments";
@@ -160,6 +162,12 @@ interface ChatState {
   isProcessing: boolean;
   isThinking: boolean;
   streamingEnabled: boolean;
+  /**
+   * False when the selected agent switched streaming off
+   * (`conversationControls.streaming`): its turns are then sent without
+   * streaming whatever the user's toggle says.
+   */
+  agentStreaming: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
   quickReplies: string[];
@@ -227,6 +235,7 @@ interface ChatState {
   setProcessing: (v: boolean) => void;
   setThinking: (v: boolean) => void;
   toggleStreaming: () => void;
+  setAgentStreaming: (allowed: boolean) => void;
   clearMessages: () => void;
   setUndoRedo: (undo: boolean, redo: boolean) => void;
   setQuickReplies: (replies: string[]) => void;
@@ -254,6 +263,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isProcessing: false,
   isThinking: false,
   streamingEnabled: loadStreamingPref(),
+  agentStreaming: true,
   undoAvailable: false,
   redoAvailable: false,
   quickReplies: [],
@@ -342,6 +352,8 @@ export const useChatStore = create<ChatState>((set) => ({
       return { streamingEnabled: next };
     }),
 
+  setAgentStreaming: (allowed) => set({ agentStreaming: allowed }),
+
   clearMessages: () =>
     set((s) => {
       revokeMessagePreviews(s.messages);
@@ -429,10 +441,35 @@ export const useChatStore = create<ChatState>((set) => ({
 // --- TanStack Query Hooks ---
 
 
-/** Fetch agent descriptors and filter to only those that are deployed. */
+/**
+ * Fetch agent descriptors and filter to only those that are deployed.
+ *
+ * For a caller the agent and deployment stores refuse (`eddi-user` — see
+ * `useWorkforceAccess`) the list is the end-user catalog instead: listed,
+ * production-deployed agents they may use, in the same shape, so the chat
+ * picker works for them rather than failing on a 403.
+ */
 export function useDeployedAgents() {
-  return useQuery({
+  const { canAuthor } = useWorkforceAccess();
+  const catalog = useQuery({
+    queryKey: [...chatKeys.deployedAgents, "catalog"],
+    queryFn: async () =>
+      (await getCatalogAgents()).map((agent) => ({
+        resource: `eddi://ai.labs.agent/agentstore/agents/${agent.agentId}?version=1`,
+        name: agent.name ?? "",
+        description: agent.description ?? "",
+        createdOn: 0,
+        lastModifiedOn: 0,
+        id: agent.agentId,
+        version: 1,
+        environments: ["production"] as Environment[],
+      })),
+    enabled: !canAuthor,
+    staleTime: 60_000,
+  });
+  const store = useQuery({
     queryKey: chatKeys.deployedAgents,
+    enabled: canAuthor,
     queryFn: async () => {
       const descriptors = await getAgentDescriptors(500, 0, "");
       // One entry per agent ID, keeping its latest version. This used to key
@@ -492,6 +529,7 @@ export function useDeployedAgents() {
     },
     staleTime: 60_000,
   });
+  return canAuthor ? store : catalog;
 }
 
 /** Start a new conversation with a agent, then GET to pick up welcome messages. */
@@ -901,7 +939,10 @@ export function useSendMessage() {
         throw new Error("No active conversation");
       }
       managerT = t;
-      chatConversation.setOptions({ streaming: state.streamingEnabled, t: t as unknown as Translate });
+      chatConversation.setOptions({
+        streaming: state.streamingEnabled && state.agentStreaming,
+        t: t as unknown as Translate,
+      });
       const result = await chatConversation.send(message, isSecret, { attachments: attachments ?? [] });
       if (result.outcome === "refused" || result.outcome === "failed") {
         throw result.failure.error ?? new Error(result.failure.message);

@@ -20,7 +20,8 @@ import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { describeGroupDeleteError } from "@/lib/group-delete-errors";
-import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
+import { useDeleteGroup, useDeleteGroupWithMembers, useUpdateGroup } from "@/hooks/use-groups";
+import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
 import { GroupAdvancedEditor } from "./group-advanced-editor";
 import { GroupHitlEditor } from "./group-hitl-editor";
 import { GroupPhaseEditor } from "./group-phase-editor";
@@ -121,6 +122,31 @@ export function GroupConfigPanel({
     config.taskListConfig?.assignmentMode === "BID";
   const canEditHitl = !!groupId && groupVersion != null;
   const deleteGroupMutation = useDeleteGroup();
+  const listingUpdate = useUpdateGroup();
+
+  /**
+   * Saves the `listed` flag on its own, like the other sections here do theirs:
+   * it is one field and says nothing about how the group runs, so it needs no
+   * edit mode. Blocked while a section editor is open, for the reason those are
+   * mutually exclusive — each saves the whole config from its own snapshot.
+   */
+  function handleToggleListed(listed: boolean) {
+    if (!groupId || groupVersion == null) return;
+    listingUpdate.mutate(
+      { id: groupId, version: groupVersion, config: { ...config, listed } },
+      {
+        onSuccess: ({ version }) => {
+          if (version !== null) onVersionChange?.(version);
+          toast.success(
+            listed
+              ? t("catalogListing.listedToast", "Listed in the catalog")
+              : t("catalogListing.unlistedToast", "Removed from the catalog"),
+          );
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      },
+    );
+  }
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
 
   const hitl = config.hitlConfig;
@@ -208,6 +234,16 @@ export function GroupConfigPanel({
           </Link>
         )}
       </div>
+
+      {/* End-user catalog listing (opt-in, IRestCatalog) */}
+      {canEditHitl && (
+        <CatalogListingToggle
+          kind="group"
+          listed={config.listed}
+          onChange={handleToggleListed}
+          disabled={anyEditing || listingUpdate.isPending}
+        />
+      )}
 
       {/* Discussion style — color-coded */}
       <div>

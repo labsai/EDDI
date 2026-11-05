@@ -33,6 +33,7 @@ import {
   setBaseUrl,
   setAuthToken,
   parseRatingProfile,
+  parseConversationControls,
   ratableSteps,
   isPausedState,
   type ApprovalStatus,
@@ -49,6 +50,8 @@ import { END_REASON_AGENT_VERSION_RETIRED } from "@/types";
 
 /** How long to wait for a postMessage token before starting without one. */
 const TOKEN_WAIT_MS = 5000;
+/** Before (or without) a profile: every control, and HTML in replies as text (D9). */
+const DEFAULT_CONTROLS = parseConversationControls(null);
 /** How often to repeat the ready signal while waiting, in case the parent was not listening yet. */
 const READY_REPEAT_MS = 1000;
 
@@ -358,6 +361,9 @@ export function ChatWidget() {
   // conversation may be read. A failure (an EDDI without the endpoint) settles
   // it too, so it only ever waits for the request, never blocks on it.
   const [profileSettled, setProfileSettled] = useState(false);
+  // The agent's conversationControls (B4). Raw HTML stays text until the
+  // profile says the agent enables it (D9).
+  const [controls, setControls] = useState(DEFAULT_CONTROLS);
   // Read at send time by the controller (`canSend`), which quick replies and
   // the requested field call directly. Synced after commit.
   const profileSettledRef = useRef(false);
@@ -373,6 +379,7 @@ export function ChatWidget() {
     // for the previous target cannot overwrite the new one's.
     dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
     dispatch({ type: "SET_RATING_PROFILE", profile: isDemo ? DEMO_RATING_PROFILE : null });
+    setControls(DEFAULT_CONTROLS);
     if (!tokenReady) {
       // The lookup is authenticated; asked before the token arrived it would
       // fail and read as "no notice".
@@ -397,6 +404,7 @@ export function ChatWidget() {
         // Absent on an older server, or when the deployed version asks for no
         // ratings: no rating control is shown.
         dispatch({ type: "SET_RATING_PROFILE", profile: parseRatingProfile(profile?.rating) });
+        setControls(parseConversationControls(profile?.conversationControls));
       })
       .catch(() => { /* no profile endpoint: no notice, no ratings */ })
       .finally(() => {
@@ -412,7 +420,7 @@ export function ChatWidget() {
   const ratings = useRatings({
     client: isDemo ? demoRatingClient : httpRatingClient,
     conversationId: state.conversationId,
-    profile: state.ratingProfile,
+    profile: controls.rating ? state.ratingProfile : null,
     messages: state.messages,
     conversationState: state.conversationState,
   });
@@ -448,14 +456,14 @@ export function ChatWidget() {
   useLayoutEffect(() => {
     if (transport) controller.setOptions({ transport });
     controller.setOptions({
-      streaming: !!state.config.enableStreaming,
+      streaming: !!state.config.enableStreaming && controls.streaming,
       canSend: () => profileSettledRef.current,
       environment,
       onStepRerun: clearRatedStep,
       t,
     });
     controller.onOpened = loadAgentName;
-  }, [controller, transport, state.config.enableStreaming, environment, clearRatedStep, loadAgentName]);
+  }, [controller, transport, state.config.enableStreaming, controls.streaming, environment, clearRatedStep, loadAgentName]);
 
   /* ─── Auto-start conversation ───────────────── */
   // Held until the token the host promised has arrived (or the wait ran out).
@@ -659,6 +667,7 @@ export function ChatWidget() {
                   enableMarkdown={state.config.enableMarkdown !== false}
                   enableMath={state.config.enableMath !== false}
                   enableCodeHighlight={state.config.enableCodeHighlight !== false}
+                  enableRawHtml={controls.rawHtml}
                   agentName={state.agentName}
                   ratingStep={ratingStep}
                   rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
@@ -701,7 +710,7 @@ export function ChatWidget() {
       </MessageList>
 
       {!isEnded && !isPaused &&
-        state.config.enableQuickReplies !== false && (
+        state.config.enableQuickReplies !== false && controls.quickReplies && (
           <QuickReplies
             replies={state.quickReplies}
             onSelect={handleQuickReply}
@@ -777,7 +786,7 @@ export function ChatWidget() {
             {state.conversationId && (
               <div className="chat-actions">
                 <div className="chat-actions__left">
-                  {state.config.enableUndo !== false && (
+                  {state.config.enableUndo !== false && controls.undo && (
                     <button
                       className="chat-actions__btn"
                       onClick={() => void controller.undo()}
@@ -790,7 +799,7 @@ export function ChatWidget() {
                       <Undo2 size="1em" />
                     </button>
                   )}
-                  {state.config.enableRedo !== false && (
+                  {state.config.enableRedo !== false && controls.redo && (
                     <button
                       className="chat-actions__btn"
                       onClick={() => void controller.redo()}
@@ -883,6 +892,7 @@ export function ChatWidget() {
               />
             ) : (
               <Composer
+                attachments={controls.attachments}
                 onSend={handleSend}
                 disabled={(!state.conversationId && !isManagedAgent) || isPaused || !profileSettled}
                 conversationId={state.conversationId}

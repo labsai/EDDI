@@ -100,7 +100,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 
 | Tool                    | Description                                                                                                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
+| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Intervals below `eddi.schedule.min-interval-seconds` (default 60) are refused, as over REST. Heartbeats default to persistent conversations |
 | `list_schedules`        | List all scheduled agent triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by agentId                                                              |
 | `read_schedule`         | Read a schedule's full configuration including recent fire history (last 10 executions)                                                                                                             |
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
@@ -197,12 +197,12 @@ Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the RES
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `list_pending_approvals`          | List regular (1:1) conversations awaiting approval (owner-scoped; includes RULE and TOOL_CALL pauses)                          |
 | `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `detail=full` returns the snapshot incl. any tool-call batch |
-| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses                                      |
+| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses. Optional `editedAnswer`, `reasonCode` and per-call `toolDecisionsJson` — see [HITL review & audit](hitl-review-and-audit.md) |
 | `cancel_conversation`             | Cancel a paused or running conversation                                                                                        |
 | `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
-| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; returns the resumed discussion |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; optional `taskDecisionsJson`, `editedAnswer` and `reasonCode` (see [HITL review & audit](hitl-review-and-audit.md)); returns the resumed discussion |
 | `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 

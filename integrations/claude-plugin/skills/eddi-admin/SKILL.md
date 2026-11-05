@@ -71,6 +71,16 @@ Manager or REST change. Before hand-writing any configuration JSON,
 read [config-gotchas.md](references/config-gotchas.md) — each gotcha saves and deploys
 cleanly and then misbehaves at runtime.
 
+How chat windows present an agent lives on the agent document, which `get_agent` shows
+but no MCP tool writes (the Manager's "Presentation & titles" section or the REST agent
+store does): `appearance` (display name, an https or small `data:image` avatar,
+`#rrggbb` accent, up to 6 starters), `conversationControls` (switches default on, except
+`rawHtml`, which is **off unless true** — the Chat UI used to render HTML for every
+agent), and `titleGeneration` (model-written conversation titles, off by default,
+charged to the cost budget). Conversations from `list_conversations` carry `title` and
+`pinned`; a title is the first non-secret message unless the agent opts in, and one the
+user set is never replaced. `read_docs("agent-config-authoring")` has the fields.
+
 ## Test
 
 An agent test suite is a set of scripted conversations with expectations per turn
@@ -89,6 +99,17 @@ id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 
 Run the suite before every promotion when the agent has one. `read_docs("agent-testing")`
 has the suite format.
+
+## Offering agents to end users
+
+End users (`eddi-user`) pick agents and teams from the catalog, which Workforce shows them. An agent
+appears there only when it is deployed, the person may use it, and it is **listed**: the agent
+document carries `"listed": true` (a group: the group document), default false. With workspaces
+enforced, `published` and `internal` visibility list it as well. For a group, set the flag with
+`update_group`. No MCP tool writes the agent document (`update_resource` does not take the agent
+type, and `update_agent` edits only its name and description), so for an agent point the admin at
+the **Listed in the catalog** switch on the agent's page in the Manager, then redeploy. Listing never grants
+access. `read_docs("catalog")` has the details.
 
 ## Feedback from users
 

@@ -1084,6 +1084,31 @@ const BODY_CHEATSHEET = `Quick reference — answer from HERE first; read the do
 your tool schemas do not cover it, not as a routine first step:
 - Agent: name, description, and a reference to ONE workflow (id + version).
   Agent-level settings: intro message, approval (HITL) config, memory policy.
+- The end-user catalog is what Workforce offers a plain \`eddi-user\`: read it
+  with the two catalog reads (\`/catalog/agents\`, \`/catalog/groups\`). An
+  agent appears only when it is deployed to production and READY, the person
+  may USE it, and it is LISTED: \`"listed": true\` in the agent document (a
+  group: in the group document), default false — so a fresh or upgraded
+  deployment lists nothing. With workspaces enforced, \`published\` and
+  \`internal\` visibility count as listed too. You yourself (the Platform
+  Operator) are never listed unless your own document says \`listed: true\`.
+  Listing is not a permission: an unlisted agent is still usable by whoever may
+  use it, and a listed one stays invisible to whoever may not. The catalog
+  answers for the caller, so as an administrator you see every listed entry,
+  not what one particular user sees. "Why don't my users see agent X?" — check,
+  in order: deployed and READY in production, \`listed\` (or visibility),
+  sharing. To list or unlist, point the admin at the "Listed in the catalog"
+  switch in the agent's page or the group's panel in the manager.
+  Each catalog agent also carries the deployed version's \`appearance\` and
+  \`conversationControls\`, as the agent profile does. Workforce Home shows
+  them: the display name, avatar and accent colour on the agent's card, and
+  the \`starters\` as chips that start a chat. An avatar on an https host only
+  shows if the Manager's img-src allows that host; a data:image avatar always
+  does. A change shows once the new version is deployed.
+- Workforce lists each user's own chats and team sessions in its sidebar, by
+  date, under the conversation \`title\`; the owner renames, pins and deletes
+  them there. Team sessions carry their question as title and cannot be
+  renamed or pinned.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
@@ -1114,6 +1139,30 @@ your tool schemas do not cover it, not as a routine first step:
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;
   both resolve to the same step, so leave a stored one as it is. (A \`rag\` step
   is covered in its own section, which states what can be done with one.)
+- How chat windows show an agent is set in the agent document, all optional:
+  \`appearance\` (\`displayName\` up to 80 characters, \`avatar\` an https URL or a
+  small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
+  6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
+  quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
+  false = HTML in replies is shown as TEXT, true renders it). The rawHtml
+  default is a change: the Chat UI used to render HTML for every agent, so an
+  agent whose replies contain HTML needs \`rawHtml: true\` (docs page
+  "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
+  400 naming the field. Clients read both from the agent profile
+  (/agents/{agentId}/profile, deployed version). You do not edit agent
+  documents: point the admin at the agent's "Presentation & titles" section.
+- Conversations carry \`title\`, \`titleSource\` (AUTO, LLM or USER) and \`pinned\`
+  on the conversation listing. The default title is the first user message that
+  was not secret (never a secretInput turn, a vaulted input or a guardrail-
+  withheld one), cut to eddi.conversations.title-max-length (default 80). An
+  agent's \`titleGeneration\` (\`enabled\`, default false; \`llmProvider\`,
+  \`llmModel\` required when on; \`parameters\` for credentials as vault
+  references; \`maxLength\` default 60) asks a model once per conversation, in
+  the background, charged to the tenant cost budget (spend kind
+  CONVERSATION_TITLE); a failure leaves the default title. Renaming and pinning
+  belong to the conversation's owner (PATCH on the conversation, not one of your
+  tools), and a title the owner set is never replaced. Metric:
+  eddi_conversation_titles_total{outcome}.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

@@ -483,6 +483,24 @@ public interface IConversationService {
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
+     * Dry run of a HITL decision: the checks {@code resumeConversation} runs before
+     * it consumes the pause (pause id, tool decisions, edited answer, reason
+     * codes), without consuming anything. For surfaces that must answer
+     * synchronously (Slack's {@code view_submission}).
+     *
+     * @throws IllegalArgumentException
+     *             on an invalid decision
+     * @throws PauseMismatchException
+     *             when the decision names a pause that is no longer current
+     * @throws IllegalStateException
+     *             when the conversation is not awaiting a decision
+     * @since 6.7.0
+     */
+    default void validateHitlDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        throw new UnsupportedOperationException("validateHitlDecision");
+    }
+
+    /**
      * Load the full conversation memory snapshot for a given conversationId.
      *
      * @throws ResourceStoreException

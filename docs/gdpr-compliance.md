@@ -189,7 +189,11 @@ The export is a structured, machine-readable JSON bundle of these categories —
 yet every category EDDI erases; what it leaves out is named in `omittedCategories`
 (see the note below):
 - All persistent user memories
-- All conversation transcripts (with full chat history)
+- All conversation transcripts (with full chat history), each with its `title` and `pinned`
+  flag — a title derived from the user's first non-secret message, written by a model
+  from it (`titleGeneration`), or set by the user. Titles live on the conversation
+  descriptor, so the erasure step "Conversation descriptors" removes them, archived
+  copies of soft-deleted conversations included
 - All managed conversation mappings (intent→conversation bindings)
 - All audit processing records (capped at 10,000 entries)
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —

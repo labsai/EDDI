@@ -93,6 +93,8 @@ export interface ComposerProps {
   focusSignal?: number;
   /** The host's placeholder; the translated default without one. */
   placeholder?: string;
+  /** False when the agent switched attachments off (`conversationControls`): no picker. */
+  attachments?: boolean;
 }
 
 function isCoarsePointer(): boolean {
@@ -102,7 +104,14 @@ function isCoarsePointer(): boolean {
   );
 }
 
-export function Composer({ onSend, disabled, conversationId, focusSignal = 0, placeholder }: ComposerProps) {
+export function Composer({
+  onSend,
+  disabled,
+  conversationId,
+  focusSignal = 0,
+  placeholder,
+  attachments = true,
+}: ComposerProps) {
   const {
     state: { isProcessing, isSecretMode, pendingAttachments, restoreDraft },
     dispatch,
@@ -509,6 +518,8 @@ export function Composer({ onSend, disabled, conversationId, focusSignal = 0, pl
         </div>
       )}
     <div className="chat-input">
+      {attachments && (
+      <>
       {/* Hidden file input for attachments */}
       <input
         ref={fileInputRef}
@@ -541,6 +552,8 @@ export function Composer({ onSend, disabled, conversationId, focusSignal = 0, pl
           <Paperclip size="1em" />
         )}
       </button>
+      </>
+      )}
       {/* Secret mode toggle */}
       <button
         type="button"

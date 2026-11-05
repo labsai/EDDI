@@ -12,10 +12,11 @@ import {
   Square,
   Trash2,
   Users,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -25,10 +26,13 @@ import { AgentWorkforceCard } from "@/components/workforce/agent-workforce-card"
 import { KnowledgeHealthCard } from "@/components/workforce/knowledge-health-card";
 import { QuickActions } from "@/components/workforce/quick-actions";
 import { OnboardingHero } from "@/components/workforce/onboarding-hero";
+import { useRecentAgents } from "@/hooks/use-recent-agents";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/workforce/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
-
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { EndUserCatalog, CatalogPreview } from "@/components/workforce/catalog-view";
+import { HomeComposer, RecentSessions } from "@/components/workforce/workforce-home";
 import { toast } from "sonner";
 
 // ─── View mode persistence ───────────────────────────────────────
@@ -199,17 +203,30 @@ function MobileFab() {
 
 // ─── Workforce Section ───────────────────────────────────────────
 
+/** Agents shown before the section offers "Show all" (about two rows). */
+const WORKFORCE_COLLAPSED_COUNT = 12;
+
 function WorkforceSection() {
   const { t } = useTranslation();
-  const { data: agentsRaw } = useAgentDescriptors(50);
+  const [expanded, setExpanded] = useState(false);
+  const orderByRecentUse = useRecentAgents();
+  // Descriptors are per version, so a single page can hold fewer distinct agents
+  // than its size. Page through all of them so no agent is ever missing.
+  const { data: agentPages, isError, isComplete, fetchNextPage } = useAllAgentDescriptors();
+  const agentsRaw = useMemo(() => agentPages?.pages.flat(), [agentPages]);
   const navigate = useNavigate();
 
   const agents = useMemo(
-    () => (agentsRaw ? groupAgentsByName(agentsRaw).slice(0, 10) : []),
-    [agentsRaw],
+    // Most recently used by this user first, then the rest by last modified.
+    () => (agentsRaw ? orderByRecentUse(groupAgentsByName(agentsRaw)) : []),
+    [agentsRaw, orderByRecentUse],
   );
 
   if (!agents.length) return null;
+
+  const collapsible = agents.length > WORKFORCE_COLLAPSED_COUNT;
+  const visible =
+    collapsible && !expanded ? agents.slice(0, WORKFORCE_COLLAPSED_COUNT) : agents;
 
   return (
     <section
@@ -228,8 +245,15 @@ function WorkforceSection() {
         </span>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 pb-2">
-        {agents.map((agent) => {
+      <div
+        data-testid="workforce-agent-grid"
+        className={cn(
+          "grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 pb-2",
+          // Keep a very large workforce from pushing the rest of the page away.
+          expanded && "max-h-[28rem] overflow-y-auto pe-1",
+        )}
+      >
+        {visible.map((agent) => {
           const idMatch = agent.resource?.match(
             /\/agentstore\/agents\/([^?]+)/,
           );
@@ -246,13 +270,64 @@ function WorkforceSection() {
           );
         })}
       </div>
+
+      {isError && !isComplete && (
+        <div
+          role="alert"
+          data-testid="workforce-load-incomplete"
+          className="mt-1 flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            {t("workforce.loadIncomplete", "Some experts could not be loaded.")}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="workforce-load-retry"
+            onClick={() => void fetchNextPage()}
+          >
+            {t("common.retry", "Retry")}
+          </Button>
+        </div>
+      )}
+
+      {collapsible && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-1 text-muted-foreground"
+          aria-expanded={expanded}
+          data-testid="workforce-toggle-all"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t("workforce.showLess", "Show fewer")
+            : t("workforce.showAll", "Show all {{total}}", {
+                total: agents.length,
+              })}
+          <ChevronDown
+            className={cn("ms-1 h-4 w-4 transition-transform", expanded && "rotate-180")}
+          />
+        </Button>
+      )}
     </section>
   );
 }
 
 // ─── Dashboard Page ──────────────────────────────────────────────
 
+/**
+ * An author (`eddi-editor` / `eddi-admin`) gets the building dashboard, read
+ * from the group and agent stores; everyone else gets the catalog of what they
+ * may use — those stores would answer them 403.
+ */
 function WorkforceDashboard() {
+  const { canAuthor } = useWorkforceAccess();
+  return canAuthor ? <AuthorDashboard /> : <EndUserCatalog />;
+}
+
+function AuthorDashboard() {
   const { t } = useTranslation();
   const { data: boards, isLoading, isError, refetch } =
     useEnrichedGroupDescriptors();
@@ -375,6 +450,12 @@ function WorkforceDashboard() {
   // Populated — 3-pillar Intelligence Dashboard
   return (
     <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
+      {/* ─── Home (T1.4): ask an agent, pick up where you left off ── */}
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <HomeComposer />
+        <RecentSessions />
+      </div>
+
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 
@@ -392,6 +473,9 @@ function WorkforceDashboard() {
 
       {/* ─── Knowledge Health ────────────────────────────────── */}
       <KnowledgeHealthCard />
+
+      {/* ─── What end users see (the catalog) ────────────────── */}
+      <CatalogPreview />
 
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel

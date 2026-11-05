@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationPurgeService;
+import ai.labs.eddi.engine.memory.ConversationTitles;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -47,6 +48,7 @@ import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import ai.labs.eddi.utils.PageBounds;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -802,6 +804,28 @@ public class RestConversationStore implements IRestConversationStore {
                     String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         return snapshot;
+    }
+
+    @Override
+    public ConversationDescriptor patchConversation(String conversationId, ConversationPatch patch)
+            throws ResourceStoreException, ResourceNotFoundException {
+        checkNotNull(conversationId, "conversationId");
+        // A write, so the strict owner check of the delete path: the owner or an admin,
+        // never a reviewer, and a legacy descriptor's owner resolved from its memory.
+        conversationAccessGuard.requireConversationOwnerStrict(conversationId, id -> {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
+            return snapshot != null ? snapshot.getUserId() : null;
+        });
+        if (patch == null || patch.title() == null && patch.pinned() == null) {
+            throw new BadRequestException("Give a title, a pinned flag, or both");
+        }
+        String title = patch.title() == null ? null : ConversationTitles.requireValidOwnerTitle(patch.title());
+        // Only the live descriptor: a soft-deleted conversation has none, and is not
+        // renamed through its archived copy.
+        if (!conversationDescriptorStore.writeOwnerEdit(conversationId, title, patch.pinned())) {
+            throw new NotFoundException(format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
     }
 
     @Override

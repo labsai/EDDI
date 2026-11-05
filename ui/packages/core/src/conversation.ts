@@ -19,6 +19,42 @@ export interface AgentProfile {
   reviewNotice?: string | null;
   /** How the deployed version asks for ratings; null/absent when it does not. */
   rating?: unknown;
+  /** The deployed version's controls (B4); read with `parseConversationControls`. */
+  conversationControls?: unknown;
+}
+
+/**
+ * Which chat controls to offer for an agent (`conversationControls`, served
+ * resolved by the profile and the catalog): every switch on unless the agent
+ * turned it off, except `rawHtml`, which is off unless the agent turned it on
+ * (decision D9).
+ */
+export interface ConversationControls {
+  undo: boolean;
+  redo: boolean;
+  attachments: boolean;
+  rating: boolean;
+  quickReplies: boolean;
+  streaming: boolean;
+  rawHtml: boolean;
+}
+
+/**
+ * The controls a profile reports, field by field: anything missing or not a
+ * boolean takes its default — so an older server, which sends none, offers
+ * every control and renders no HTML.
+ */
+export function parseConversationControls(raw: unknown): ConversationControls {
+  const c = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    undo: c.undo !== false,
+    redo: c.redo !== false,
+    attachments: c.attachments !== false,
+    rating: c.rating !== false,
+    quickReplies: c.quickReplies !== false,
+    streaming: c.streaming !== false,
+    rawHtml: c.rawHtml === true,
+  };
 }
 
 export interface SendOptions {

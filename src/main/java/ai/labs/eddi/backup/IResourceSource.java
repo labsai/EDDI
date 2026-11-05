@@ -7,8 +7,12 @@ package ai.labs.eddi.backup;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.utils.RestUtilities;
 import jakarta.ws.rs.BadRequestException;
 
+import java.io.IOException;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +45,41 @@ public interface IResourceSource extends AutoCloseable {
             throw new BadRequestException("The source agent names " + workflowUris.size() + " workflows; at most "
                     + MAX_WORKFLOW_REFERENCES + " are supported");
         }
+    }
+
+    /** Reads the workflow at one position of the source agent's list. */
+    @FunctionalInterface
+    interface WorkflowReader {
+        WorkflowSourceData read(URI workflowUri, int positionIndex) throws IOException;
+    }
+
+    /**
+     * The workflow at {@code positionIndex}, read once per resource id and version:
+     * a workflow the agent names again shares the first record's config and
+     * extensions under its own position. Each further occurrence used to be read
+     * and parsed anew, so a source agent repeating one large workflow kept that
+     * many full copies alive. Readers of a {@link WorkflowSourceData} therefore
+     * must not modify its config in place.
+     *
+     * @param readByIdentity
+     *            the workflows read so far, by {@code <id>?version=<version>}
+     */
+    static WorkflowSourceData atPosition(Map<String, WorkflowSourceData> readByIdentity, URI workflowUri, int positionIndex,
+                                         WorkflowReader reader)
+            throws IOException {
+        IResourceId resourceId = workflowUri == null ? null : RestUtilities.extractResourceId(workflowUri);
+        String identity = resourceId == null || resourceId.getId() == null
+                ? null
+                : resourceId.getId() + "?version=" + resourceId.getVersion();
+        WorkflowSourceData first = identity == null ? null : readByIdentity.get(identity);
+        if (first != null) {
+            return new WorkflowSourceData(first.sourceId(), first.name(), positionIndex, first.config(), first.extensions());
+        }
+        WorkflowSourceData read = reader.read(workflowUri, positionIndex);
+        if (read != null && identity != null) {
+            readByIdentity.put(identity, read);
+        }
+        return read;
     }
 
     /** Agent config + metadata from the source. */

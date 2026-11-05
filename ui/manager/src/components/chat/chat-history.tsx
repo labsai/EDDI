@@ -95,7 +95,11 @@ export function ChatHistory({ open, onNewConversation }: ChatHistoryProps) {
                       {loadingId === convId && (
                         <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
                       )}
-                      {convId.substring(0, 12)}…
+                      {/* The conversation's title (B2) once its first turn
+                          gave it one; the id before that. */}
+                      <span className="truncate" dir="auto">
+                        {conv.title?.trim() || `${convId.substring(0, 12)}…`}
+                      </span>
                     </span>
                     <div className="flex items-center gap-2">
                       <ConversationStateBadge state={conv.conversationState} />

@@ -2,7 +2,13 @@ import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
+import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
+import { modelPriceHandlers } from "./model-prices-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
+import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
+
+export { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS };
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
 // discovers every handler array this module exports, checks it too.
@@ -124,6 +130,19 @@ const WORKFLOWS_MOCK = [
   },
 ];
 
+/**
+ * Renames and pins (`PATCH /conversationstore/conversations/{id}`) layered over
+ * `CONVERSATIONS_MOCK`, so the fixture itself never changes; `src/test/setup.ts`
+ * clears them after every test.
+ */
+const CONVERSATION_PATCHES = new Map<string, Record<string, unknown>>();
+/** Marks a deleted conversation in `CONVERSATION_PATCHES`; never sent to the client. */
+const DELETED = "__deleted";
+
+export function resetConversationPatches(): void {
+  CONVERSATION_PATCHES.clear();
+}
+
 const CONVERSATIONS_MOCK = [
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
@@ -136,6 +155,10 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 8,
     environment: "production",
     agentName: "Support Agent",
+    // B2: the first user message as title, pinned by its owner.
+    title: "Where is order 1042?",
+    titleSource: "AUTO",
+    pinned: true,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv2",
@@ -160,6 +183,9 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 3,
     environment: "production",
     agentName: "Support Agent",
+    title: "Refund for a damaged parcel",
+    titleSource: "USER",
+    pinned: false,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv4",
@@ -742,6 +768,9 @@ const WORKSPACES_DISABLED = {
 /** Where an E2E spec plants the workspace context it wants. */
 export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 
+/** Where an E2E spec plants the update-check switch it wants (default: on). */
+export const UPDATE_CHECK_SEED_KEY = "eddi-e2e-update-check";
+
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
@@ -914,10 +943,27 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 }
 
 export const handlers = [
+  // The server-side update-check switch: on by default, like the real backend.
+  http.get("*/administration/update-check", () =>
+    HttpResponse.json(
+      readSeed<{ enabled: boolean; lockedByConfig: boolean; uiEnabled: boolean }>(UPDATE_CHECK_SEED_KEY) ?? {
+        enabled: true,
+        lockedByConfig: false,
+        uiEnabled: true,
+      },
+    ),
+  ),
+  http.put("*/administration/update-check", async ({ request }) => {
+    const { enabled } = (await request.json()) as { enabled: boolean };
+    return HttpResponse.json({ enabled, lockedByConfig: false, uiEnabled: enabled });
+  }),
+
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
+  // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
+  ...modelPriceHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
@@ -1054,10 +1100,26 @@ export const handlers = [
   }),
 
   // What a chat window shows about an agent, and how much it is used.
-  http.get("*/agents/:agentId/profile", ({ params }) =>
-    HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
-  ),
+  http.get("*/agents/:agentId/profile", ({ params }) => {
+    // A listed agent answers with its catalog appearance and controls (B4);
+    // any other with none set: no appearance, the default controls.
+    const listed = MOCK_CATALOG_AGENTS.find((a) => a.agentId === String(params.agentId));
+    return HttpResponse.json({
+      agentId: String(params.agentId),
+      name: listed?.name ?? null,
+      description: listed?.description ?? null,
+      reviewNotice: null,
+      appearance: listed?.appearance ?? null,
+      conversationControls: listed?.conversationControls ?? {
+        undo: true, redo: true, attachments: true, rating: true, quickReplies: true, streaming: true, rawHtml: false,
+      },
+    });
+  }),
   http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
+
+  // The end-user catalog (IRestCatalog) — what Workforce reads for an eddi-user.
+  http.get("*/catalog/agents", () => HttpResponse.json(MOCK_CATALOG_AGENTS)),
+  http.get("*/catalog/groups", () => HttpResponse.json(MOCK_CATALOG_GROUPS)),
 
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
@@ -1544,7 +1606,12 @@ export const handlers = [
     const agentId = url.searchParams.get("agentId");
     const conversationId = url.searchParams.get("conversationId");
     const conversationState = url.searchParams.get("conversationState");
-    let result = [...CONVERSATIONS_MOCK];
+    // What the owner renamed or pinned (PATCH below) since the last reset.
+    let result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      return [{ ...c, ...patch }];
+    });
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
@@ -1636,8 +1703,35 @@ export const handlers = [
     });
   }),
 
-  // Delete conversation
-  http.delete("*/conversationstore/conversations/:id", () => {
+  // Rename / pin (B2) — owner only; mirrors RestConversationStore.patchConversation:
+  // 400 for neither field or a blank / too long title, 404 for an unknown id.
+  http.patch("*/conversationstore/conversations/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { title?: unknown; pinned?: unknown };
+    const hasTitle = body.title !== undefined && body.title !== null;
+    const hasPinned = body.pinned !== undefined && body.pinned !== null;
+    if (!hasTitle && !hasPinned) return HttpResponse.json({ error: "Nothing to change" }, { status: 400 });
+    const title = hasTitle ? String(body.title).replace(/\s+/g, " ").trim() : undefined;
+    if (title !== undefined && (title.length === 0 || title.length > 200)) {
+      return HttpResponse.json({ error: "Invalid title" }, { status: 400 });
+    }
+    const id = String(params.id);
+    const entry = CONVERSATIONS_MOCK.find((c) => c.resource.endsWith(`/${id}`));
+    if (!entry) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const patch = { ...CONVERSATION_PATCHES.get(id) };
+    if (title !== undefined) {
+      patch.title = title;
+      patch.titleSource = "USER";
+    }
+    if (hasPinned) patch.pinned = body.pinned === true;
+    CONVERSATION_PATCHES.set(id, patch);
+    return HttpResponse.json({ ...entry, ...patch });
+  }),
+
+  // Delete conversation — gone from the listing afterwards, as on the backend
+  // (a soft delete drops the descriptor).
+  http.delete("*/conversationstore/conversations/:id", ({ params }) => {
+    const id = String(params.id);
+    CONVERSATION_PATCHES.set(id, { ...CONVERSATION_PATCHES.get(id), [DELETED]: true });
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -3182,6 +3276,7 @@ export const handlers = [
   http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+  ...teamHandoffHandlers,
 
   // ── I10 — packaged group templates ──
 
@@ -5673,7 +5768,9 @@ export const backupSyncHandlers = [
   // (GET */agents/pending-approvals is registered earlier, before the
   //  ":conversationId" catch-all, so it isn't shadowed.)
 
-  http.post("*/agents/:conversationId/resume", async ({ request }) => {
+  http.post("*/agents/:conversationId/resume", async ({ params, request }) => {
+    const editable = await editableResumeFor(params.conversationId, request);
+    if (editable) return editable;
     const body = (await request.json().catch(() => ({}))) as { note?: string };
     if (body?.note && body.note.length > 4096) {
       return HttpResponse.json(
@@ -5703,7 +5800,9 @@ export const backupSyncHandlers = [
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 
-  http.get("*/agents/:conversationId/approval-status", () => {
+  http.get("*/agents/:conversationId/approval-status", ({ params }) => {
+    const editable = editableApprovalStatusFor(params.conversationId);
+    if (editable) return editable;
     return HttpResponse.json({
       conversationId: "conv-awaiting-1",
       state: "AWAITING_HUMAN",

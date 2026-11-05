@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -224,6 +225,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     AgentConfigurationCache agentConfigurationCache;
+
+    /**
+     * Titles each conversation from its first usable message (see
+     * {@link ConversationTitleService}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} means no titles are written.
+     */
+    @Inject
+    ConversationTitleService conversationTitleService;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
@@ -855,6 +864,19 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Inject
     Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /**
+     * Renders {@code hitlConfig.approvalContext} at pause commit. Field-injected
+     * for the same reason as above: {@code null} in unit tests that build the
+     * service by hand, where no context is rendered.
+     */
+    @Inject
+    Instance<ApprovalContextRenderer> approvalContextRenderer;
+
+    /** The approval-context renderer, or {@code null} when none is available. */
+    ApprovalContextRenderer approvalContextRenderer() {
+        return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
+    }
 
     /**
      * The alert hook: a turn that ended badly (see
@@ -1602,6 +1624,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                             reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            // Titles the conversation on the turn of its first usable message;
+                            // a model-written title is generated in the background. Never throws.
+                            if (conversationTitleService != null) {
+                                conversationTitleService.afterTurn(returnConversationMemory, rerunOnly);
+                            }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
@@ -3162,6 +3189,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                                    List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException {
         conversationHitlService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+    }
+
+    @Override
+    public void validateHitlDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        conversationHitlService.validateDecision(conversationId, decision);
     }
 
     @Override

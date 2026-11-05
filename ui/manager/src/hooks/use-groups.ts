@@ -53,10 +53,15 @@ export function useGroupDescriptors(limit = 20, index = 0, filter = "") {
   });
 }
 
-export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "") {
+/**
+ * `enabled: false` for a caller the group store refuses (`eddi-user`) — Workforce
+ * reads the catalog for them instead (see `useWorkforceAccess`).
+ */
+export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "", enabled = true) {
   return useQuery({
     queryKey: [...GROUPS_KEY, "enriched", { limit, index, filter }],
     queryFn: () => getEnrichedGroupDescriptors(limit, index, filter),
+    enabled,
     // A new filter keeps showing the previous results until its own arrive,
     // instead of blanking the list to a skeleton on every search.
     placeholderData: keepPreviousData,

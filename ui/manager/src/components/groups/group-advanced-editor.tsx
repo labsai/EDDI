@@ -8,6 +8,8 @@ import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { HandoffConfigSection } from "@/components/groups/handoff-config-section";
+import { handoffProblems, type GroupHandoffConfig } from "@/lib/api/team-handoffs";
 import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
 import {
   ARTIFACT_DEFAULT_MAX_PER_DISCUSSION,
@@ -144,6 +146,9 @@ export function GroupAdvancedEditor({
   );
   const [escalateTo, setEscalateTo] = useState(config.facilitator?.escalateTo ?? "");
 
+  // --- cross-team handoff ---
+  const [handoffConfig, setHandoffConfig] = useState<GroupHandoffConfig | null>(config.handoffConfig ?? null);
+
   // --- I18 assignment mode ---
   const [assignmentMode, setAssignmentMode] = useState<AssignmentMode>(
     config.taskListConfig?.assignmentMode ?? "ROLE",
@@ -192,7 +197,8 @@ export function GroupAdvancedEditor({
     escalateTargetMissing ||
     midPhaseMovesUnreachable ||
     noMoveSelected ||
-    tooManyMoves;
+    tooManyMoves ||
+    handoffProblems(handoffConfig).length > 0;
 
   const save = () => {
     if (blocked) return;
@@ -260,6 +266,9 @@ export function GroupAdvancedEditor({
             escalateTo: allowedMoves.has("ESCALATE_HUMAN") ? escalateTo.trim() : null,
           }
         : undefined,
+      // Absence is off: unticking drops the block. Fields the form does not show
+      // ride along because the section edits a copy of the stored object.
+      handoffConfig: handoffConfig ?? undefined,
       // Assignment mode lives on taskListConfig and only applies to TASK_FORCE.
       // Leave the block untouched for every other style rather than conjuring one.
       taskListConfig:
@@ -662,6 +671,9 @@ export function GroupAdvancedEditor({
           </p>
         </section>
       )}
+
+      {/* ---- cross-team handoff ---- */}
+      <HandoffConfigSection value={handoffConfig} onChange={setHandoffConfig} />
 
       {/* ---- actions ---- */}
       <div className="flex justify-end gap-2 border-t border-border pt-2.5">

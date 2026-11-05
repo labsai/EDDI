@@ -11,10 +11,12 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Puts a target's own secret values back into source content that the export's
@@ -175,19 +177,36 @@ final class ScrubbedSecrets {
      * <p>
      * A destination the source itself carries as a target-bound value is taken from
      * the target by the same merge, so it does not count as a change.
+     * <p>
+     * The fields of both sides are compared, not only the source's: a source that
+     * drops the target's {@code baseUrl} sends to the provider's default endpoint
+     * instead, which is a change of destination too. A destination that is not a
+     * string — a number where a host belongs — is the same only when it is equal on
+     * both sides: skipping it let a numeric host past the comparison and become a
+     * different server's address once the config was decoded.
      */
     static boolean changesDestination(Map<?, ?> sourceMap, Map<?, ?> targetMap) {
-        for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
-            if (!(entry.getValue() instanceof String sourceValue) || isTargetBound(sourceValue)) {
-                continue;
-            }
-            String key = String.valueOf(entry.getKey());
+        Set<String> keys = new LinkedHashSet<>();
+        sourceMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
+        targetMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
+        for (String key : keys) {
+            Object sourceValue = sourceMap.get(key);
             Object targetValue = targetMap.get(key);
-            String targetText = targetValue instanceof String text ? text : null;
-            if (!isDestinationField(key, sourceValue, targetText)) {
+            if (sourceValue instanceof String bound && isTargetBound(bound)) {
                 continue;
             }
-            if (!Objects.equals(destinationOf(sourceValue), targetText == null ? null : destinationOf(targetText))) {
+            String sourceText = sourceValue instanceof String text ? text : null;
+            String targetText = targetValue instanceof String text ? text : null;
+            if (!isDestinationField(key, sourceText, targetText) || (sourceValue == null && targetValue == null)) {
+                continue;
+            }
+            if (sourceText == null || targetText == null) {
+                if (!Objects.equals(sourceValue, targetValue)) {
+                    return true;
+                }
+                continue;
+            }
+            if (!Objects.equals(destinationOf(sourceText), destinationOf(targetText))) {
                 return true;
             }
         }

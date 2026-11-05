@@ -1,3 +1,5 @@
+import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
+import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
 import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
@@ -569,6 +571,7 @@ export function AgentDetailPage() {
   const doc = editable ?? agent;
   const modifiedSectionCount = [
     touched("workflows"),
+    touched("listed"),
     touched("a2aEnabled", "description", "a2aSkills"),
     touched("security", "identity"),
     touched("capabilities"),
@@ -579,6 +582,7 @@ export function AgentDetailPage() {
     touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
     touched("ratingConfig"),
+    touched("appearance", "conversationControls", "titleGeneration"),
     touched("hitlConfig"),
     touched("channels"),
   ].filter(Boolean).length;
@@ -1048,6 +1052,14 @@ export function AgentDetailPage() {
         className="contents"
         data-testid="agent-config-sections"
       >
+      {/* End-user catalog listing (opt-in, IRestCatalog) */}
+      <CatalogListingToggle
+        kind="agent"
+        listed={doc.listed}
+        onChange={(listed) => editAgent({ ...doc, listed })}
+        disabled={isSaving}
+      />
+
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={doc}
@@ -1090,6 +1102,14 @@ export function AgentDetailPage() {
         disabled={isSaving}
         modified={touched("ratingConfig")}
         onValidityChange={setRatingInvalid}
+      />
+
+      {/* Appearance, chat controls and conversation titles */}
+      <AgentPresentationSection
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("appearance", "conversationControls", "titleGeneration")}
       />
 
       {/* Spend limits */}

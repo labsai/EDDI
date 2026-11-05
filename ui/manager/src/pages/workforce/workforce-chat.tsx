@@ -1,5 +1,10 @@
+import { useCallback, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { markAgentUsed } from "@/hooks/use-recent-agents";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { readInitialChatMessage } from "@/lib/workforce-chat-start";
+import { workforceKeys } from "@/lib/query-keys";
 import { useTranslation } from "react-i18next";
 import {
   ChevronLeft,
@@ -10,6 +15,7 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { useChatStore } from "@/hooks/use-chat";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { cn } from "@/lib/utils";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 
 /**
  * workforce-native chat page.
@@ -20,11 +26,42 @@ export function WorkforceChat() {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = usePersistedBoolean("workforce-chat-details-panel", true);
   const [searchParams] = useSearchParams();
+  // The details panel reads the agent and deployment stores — authors only.
+  const { canAuthor } = useWorkforceAccess();
 
   // Read selected agent from Zustand store, fallback to URL searchParams ?agentId=, fallback to first deployed agent
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedAgentName = useChatStore((s) => s.selectedAgentName);
   const effectiveAgentId = selectedAgentId || searchParams.get("agentId") || null;
+
+  // Feeds the "last used" ordering on the Workforce dashboard. While a deep link
+  // names a different agent than the one still selected, ChatPanel has not
+  // resolved it yet; recording now would credit the previous agent.
+  const urlAgentId = searchParams.get("agentId");
+  useEffect(() => {
+    if (!selectedAgentId) return;
+    if (urlAgentId && urlAgentId !== selectedAgentId) return;
+    markAgentUsed(selectedAgentId);
+  }, [selectedAgentId, urlAgentId]);
+
+  // A first message from Home travels in router state. It is dropped from the
+  // history entry as soon as the chat takes it, so a reload cannot send it again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialMessage = useMemo(() => readInitialChatMessage(location.state), [location.state]);
+  const conversationId = useChatStore((s) => s.conversationId);
+  const dropInitialMessage = useCallback(() => {
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+  }, [navigate, location.pathname, location.search]);
+
+  // The sidebar lists this conversation with the title its first turn gives
+  // it: re-read the list when a conversation opens and after each turn.
+  const queryClient = useQueryClient();
+  const isProcessing = useChatStore((s) => s.isProcessing);
+  useEffect(() => {
+    if (!conversationId || isProcessing) return;
+    void queryClient.invalidateQueries({ queryKey: workforceKeys.chats });
+  }, [conversationId, isProcessing, queryClient]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -42,6 +79,7 @@ export function WorkforceChat() {
         </h2>
 
         {/* Details panel toggle */}
+        {canAuthor && (
         <button
           type="button"
           onClick={() => setShowDetails((v) => !v)}
@@ -68,6 +106,7 @@ export function WorkforceChat() {
             <PanelRightOpen className="h-4 w-4" />
           )}
         </button>
+        )}
       </div>
 
       {/* Main area — chat + optional right details panel */}
@@ -77,11 +116,15 @@ export function WorkforceChat() {
             line sizes this column to its content and pushes the details panel
             out of the window. */}
         <div className="flex-1 min-w-0 min-h-0">
-          <ChatPanel />
+          <ChatPanel
+            urlSync
+            initialMessage={initialMessage}
+            onInitialMessageConsumed={dropInitialMessage}
+          />
         </div>
 
         {/* Right details panel */}
-        {showDetails && (
+        {canAuthor && showDetails && (
           <AgentDetailsPanel
             agentId={effectiveAgentId}
             agentName={selectedAgentName}

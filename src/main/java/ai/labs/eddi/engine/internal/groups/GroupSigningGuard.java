@@ -231,7 +231,13 @@ public class GroupSigningGuard {
             for (int i = startIdx; i < totalEntries; i++) {
                 TranscriptEntry entry = transcript.get(i);
                 // Skip non-agent entries (user questions, errors, etc.)
-                if ("user".equals(entry.speakerAgentId()) || entry.content() == null) {
+                // A reviewer's edit (speaker hitl:<decidedBy>) is written by the engine on
+                // an authorized approval, never by an agent — nothing to verify. The speaker
+                // prefix alone proves nothing (a member may be named hitl:x); the engine-set
+                // marker does.
+                if ("user".equals(entry.speakerAgentId()) || entry.content() == null
+                        || entry.speakerAgentId() != null && entry.speakerAgentId().startsWith(GroupReviewEditor.REVIEWER_SPEAKER_PREFIX)
+                                && GroupReviewEditor.REVIEWER_EDIT_MARKER.equals(entry.errorReason())) {
                     continue;
                 }
 

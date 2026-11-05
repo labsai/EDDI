@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { CommandPalette } from "@/components/shared/command-palette";
 import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
+import { AuthorRoute } from "@/components/workforce/author-route";
 import { LandingPage } from "@/pages/landing-page";
 import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
@@ -60,6 +61,7 @@ const SecretsPage = lazyPage(() => import("@/pages/secrets"), "SecretsPage");
 const VariablesPage = lazyPage(() => import("@/pages/variables"), "VariablesPage");
 const AuditPage = lazyPage(() => import("@/pages/audit"), "AuditPage");
 const QuotasPage = lazyPage(() => import("@/pages/quotas"), "QuotasPage");
+const ModelPricesPage = lazyPage(() => import("@/pages/model-prices"), "ModelPricesPage");
 const WorkspacesPage = lazyPage(() => import("@/pages/workspaces"), "WorkspacesPage");
 const GdprPage = lazyPage(() => import("@/pages/gdpr"), "GdprPage");
 const BrandingPage = lazyPage(() => import("@/pages/branding"), "BrandingPage");
@@ -149,12 +151,12 @@ export function App() {
           {/* Workforce — standalone app, no Manager chrome */}
           <Route path="/workforce" element={<WorkforceLayout />}>
             <Route index element={<WorkforceDashboard />} />
-            <Route path="new" element={<WorkforceWizard />} />
-            <Route path="analytics" element={<WorkforceAnalytics />} />
+            <Route path="new" element={<AuthorRoute><WorkforceWizard /></AuthorRoute>} />
+            <Route path="analytics" element={<AuthorRoute><WorkforceAnalytics /></AuthorRoute>} />
             <Route path="chat" element={<WorkforceChat />} />
             <Route path=":boardId" element={<WorkforceBoard />} />
             <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
-            <Route path=":boardId/settings" element={<WorkforceSettings />} />
+            <Route path=":boardId/settings" element={<AuthorRoute><WorkforceSettings /></AuthorRoute>} />
             <Route path=":boardId/history" element={<WorkforceHistory />} />
             <Route path="*" element={<NotFoundPage scope="workforce" />} />
           </Route>
@@ -184,6 +186,7 @@ export function App() {
             <Route path="/manage/variables" element={<VariablesPage />} />
             <Route path="/manage/audit" element={<AuditPage />} />
             <Route path="/manage/quotas" element={<QuotasPage />} />
+            <Route path="/manage/model-prices" element={<ModelPricesPage />} />
             <Route path="/manage/workspaces" element={<WorkspacesPage />} />
             <Route path="/manage/gdpr" element={<GdprPage />} />
             <Route path="/manage/branding" element={<BrandingPage />} />

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
+import ai.labs.eddi.configs.groups.HandoffConfigValidator;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.properties.SecretScopeValidation;
@@ -14,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaConfigValidator;
@@ -62,9 +64,11 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
                 ToolQuotaConfigValidator.validate(task.getToolQuotas(), "langchain.task[" + i + "].toolQuotas");
+                HandoffConfigValidator.validateTask(task.getTeamHandoff(), "langchain.task[" + i + "].teamHandoff");
                 SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");
                 SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");
+                RescueOptions.validate(task.getResponseValidation(), task.getFieldAliases(), "langchain.task[" + i + "]");
                 warnStrictModeImplications(task.getToolApprovals(), fieldPath);
             }
         }

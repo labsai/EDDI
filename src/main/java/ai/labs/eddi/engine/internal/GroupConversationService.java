@@ -34,6 +34,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -45,6 +46,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -62,11 +64,13 @@ import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
+import ai.labs.eddi.engine.internal.groups.ServiceConvergenceJudge;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
+import ai.labs.eddi.engine.runtime.internal.handoff.DecisionHandoffs;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
@@ -80,6 +84,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -257,6 +262,21 @@ public class GroupConversationService implements IGroupConversationService, User
     ISharedArtifactStore sharedArtifactStore;
 
     /**
+     * Renders {@code hitlConfig.approvalContext} at pause commit. Same
+     * field-injection pattern and null-safety as {@link #sharedArtifactStore} —
+     * unresolvable in direct-construction unit tests, where no context is rendered.
+     */
+    @Inject
+    Instance<GroupApprovalContextRenderer> approvalContextRenderer;
+
+    /**
+     * The group approval-context renderer, or {@code null} when none is available.
+     */
+    public GroupApprovalContextRenderer approvalContextRenderer() {
+        return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
+    }
+
+    /**
      * Shared LLM summarization for I9 transcript windowing. Same field-injection
      * pattern and null-safety as {@link #attachmentStore} — {@code null} in the
      * direct-construction unit tests, where an enabled window falls back to the
@@ -264,6 +284,20 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     SummarizationService summarizationService;
+
+    /**
+     * The vault-grant rule the SERVICE judge re-checks before resolving its
+     * parameters.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
+    /**
+     * Files {@code handoffConfig.onDecision} rules once a discussion completes.
+     * Null in tests that build the service by hand: no rules fire.
+     */
+    @Inject
+    DecisionHandoffs decisionHandoffs;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -346,6 +380,8 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        this.phaseExecutionEngine
+                .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
@@ -848,7 +884,15 @@ public class GroupConversationService implements IGroupConversationService, User
         // SYNTHESIS one, so the discussion concludes with an answer rather than
         // stopping mid-transcript. Deliberately NOT a break: "jump to the first
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
-        boolean costCeilingSynthesizeNow = false;
+        //
+        // Carried across a resume (gc.costCeilingSkipAhead): a synthesis that requires
+        // approval pauses the run under the skip-ahead, and the leg its approval starts
+        // must go on skipping the remaining work phases. A fresh leg (a new round)
+        // starts with it off.
+        if (startPhaseIndex == 0) {
+            gc.setCostCeilingSkipAhead(false);
+        }
+        boolean costCeilingSynthesizeNow = gc.isCostCeilingSkipAhead();
 
         try {
             // F1: publish the live instance this leg runs with. Covers both a fresh
@@ -889,6 +933,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
                     continue;
                 }
+                // A SYNTHESIS phase the skip-ahead lets through is executed work, not
+                // abandoned work: its answer is published, so its approval gate holds.
+                // Only the phase that trips the ceiling itself skips its gate below.
+                final boolean ranUnderSkipAhead = costCeilingSynthesizeNow;
 
                 // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
                 // (the negotiation's arbitration) is only needed when bargaining
@@ -1072,6 +1120,7 @@ public class GroupConversationService implements IGroupConversationService, User
                             return gc;
                         }
                         costCeilingSynthesizeNow = true;
+                        gc.setCostCeilingSkipAhead(true);
                         // Leave the REPEAT loop too, not just future phases: a phase
                         // with repeats > 1 (ROUND_TABLE's "Discussion" is repeats =
                         // rounds - 1 by default) would otherwise re-enter its executor
@@ -1322,7 +1371,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // complete, so no boundary gate is owed yet and the
                                 // resumed leg still reaches it at phase end.
                                 boolean boundaryGateWillPause = !facilitatorMidPhaseResume
-                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)
                                         && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
                                                 || (gc.getTaskList() != null
                                                         && (gc.getTaskList().hasAwaitingApproval()
@@ -1392,8 +1441,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 // appending a second identical SKIPPED entry and re-incrementing the
                 // hit counter, which is exactly the "one overspend reported as many"
                 // the repeat-loop break exists to prevent. The guard's own comment
-                // states this requirement; it just could not see this phase.
-                if (phase.requiresApproval() && !costCeilingSynthesizeNow) {
+                // states this requirement; it just could not see this phase. A
+                // SYNTHESIS phase that ran under the skip-ahead (ranUnderSkipAhead) is
+                // not that phase — its answer is about to be published, so it pauses.
+                if (phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)) {
                     if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause if tasks await approval — or if an
                         // aborted wave (timeout/error) left executable tasks behind.
@@ -1526,6 +1577,7 @@ public class GroupConversationService implements IGroupConversationService, User
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            gc.setCostCeilingSkipAhead(false);
             // I12: a facilitator's phase-list divergence is one-off for the round —
             // a continuation round starts from the config's phases again, and stale
             // extension counts would misattribute under next round's indices.
@@ -1537,6 +1589,14 @@ public class GroupConversationService implements IGroupConversationService, User
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
             persistWhileRunning(gc);
+
+            // Only past the CAS above: a discussion a human cancelled mid-flight must not
+            // file work for another team. Idempotent (deterministic dedupe keys), never
+            // throws.
+            if (decisionHandoffs != null) {
+                decisionHandoffs.afterCompleted(gc, config, listener);
+                persistDecisionHandoffs(gc);
+            }
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
@@ -1726,6 +1786,27 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
+    }
+
+    /**
+     * Persists the filed-handoff records {@code afterCompleted} added to a
+     * COMPLETED document. The completion write above ran before them, and no later
+     * write follows on the normal path, so without this the stored discussion would
+     * omit {@code handoffState.filed}. Conditional on the stored state still being
+     * COMPLETED, and best-effort: filing is idempotent (deterministic dedupe keys),
+     * so a lost write only costs the record, never a duplicate hand-off.
+     */
+    private void persistDecisionHandoffs(GroupConversation gc) {
+        if (gc.getHandoffState() == null) {
+            return;
+        }
+        try {
+            conversationStore.updateIfState(gc, GroupConversationState.COMPLETED);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.warnf("Could not persist decision handoffs of group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    e.getMessage());
+        }
     }
 
     /**
@@ -2417,10 +2498,10 @@ public class GroupConversationService implements IGroupConversationService, User
     // requires the method to be declared directly on this class.
 
     private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      int timeoutSeconds, int phaseIdx,
                                                       DiscussionPhase phase, TranscriptEntryType entryType,
                                                       String targetAgentId) {
-        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
     }
 
     private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,

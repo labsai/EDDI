@@ -3,7 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { configure } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
-import { resetBrandingMockState, resetSecretsMockState } from "./mocks/handlers";
+import { resetBrandingMockState, resetConversationPatches, resetSecretsMockState } from "./mocks/handlers";
 import { resetRatingStore } from "./mocks/rating-handlers";
 import { resetAlertStore } from "./mocks/alert-handlers";
 import { drainToasts } from "./drain-toasts";
@@ -89,6 +89,7 @@ afterEach(async () => {
   // Handlers that hold module state are not reset by resetHandlers().
   resetSecretsMockState();
   resetBrandingMockState();
+  resetConversationPatches();
   resetRatingStore();
   resetAlertStore();
 });

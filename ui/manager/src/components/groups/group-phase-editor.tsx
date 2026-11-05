@@ -18,6 +18,7 @@ import type {
 } from "@/lib/api/groups";
 import { DEFAULT_VOTE_QUORUM } from "@/lib/api/groups";
 import { getStylePhases } from "@/lib/hitl-config";
+import { ServiceJudgeFields } from "@/components/groups/service-judge-fields";
 import {
   CONVERGENCE_MIN_REPEATS_FLOOR,
   DEFAULT_CONVERGENCE_THRESHOLD,
@@ -459,16 +460,12 @@ export function GroupPhaseEditor({
             )}
 
             {canConverge && convergence?.enabled && convergence.judge === "SERVICE" && (
-              <p
-                className="mt-1.5 flex items-start gap-1 text-[10px] text-muted-foreground"
-                data-testid={`phase-convergence-service-note-${idx}`}
-              >
-                <Info className="mt-0.5 h-2.5 w-2.5 shrink-0" aria-hidden="true" />
-                {t(
-                  "groups.judgeServiceNote",
-                  "Accepted but not yet wired — the engine falls back to the moderator and logs a warning.",
-                )}
-              </p>
+              <ServiceJudgeFields
+                idx={idx}
+                service={convergence.service}
+                onChange={(service) => patchConvergence(idx, { service })}
+                inputCls={inputCls}
+              />
             )}
 
             {/* Ballot configuration (I14) — every VOTE phase needs one. */}

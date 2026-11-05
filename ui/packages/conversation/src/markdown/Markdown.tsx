@@ -10,8 +10,9 @@
      rendered by `Message`, not here.
    - Raw HTML only through the sanitizer. The parser for it (rehype-raw → parse5)
      loads the first time a reply contains HTML. Whether an agent's HTML is
-     rendered at all becomes a per-agent setting (D9, `conversationControls
-     .rawHtml`, phase 4); until then it is, for every agent.
+     rendered at all is a per-agent setting (D9, `conversationControls
+     .rawHtml`): `Message` renders it only for an agent that enables it and
+     otherwise shows it as text (`escapeRawHtml`).
    - Math (`$$…$$` only; single dollars are prices) through KaTeX with
      `trust: false`, and fenced code through highlight.js — each its own chunk,
      loaded the first time a reply needs it.
@@ -181,7 +182,10 @@ export interface MarkdownContentProps {
   enableMath?: boolean;
   /** highlight.js for fenced code. Default on. */
   enableCodeHighlight?: boolean;
-  /** Sanitised raw HTML (D9 makes this per agent). Default on. */
+  /**
+   * Sanitised raw HTML. Default on here; `Message` passes the agent's
+   * `conversationControls.rawHtml` (D9), off unless the agent enables it.
+   */
   enableRawHtml?: boolean;
   /**
    * Show raw HTML as text instead of rendering or dropping it — for
