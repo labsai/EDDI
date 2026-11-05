@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { CoordinatorPage } from "@/pages/coordinator";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { toast } from "sonner";
-import { addDeadLetter, degradedOverview, resetClusterFixture, SINGLE_NODE_OVERVIEW } from "@/test/mocks/cluster-handlers";
-import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
+import { addDeadLetter, degradedOverview, resetClusterFixture, SINGLE_NODE_OVERVIEW } from "@eddi/app-kit/test/mocks/cluster-handlers";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 
 /**
  * The SSE source is replaced by a handle the test can push events through —
@@ -15,7 +15,7 @@ import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/
  */
 type Listener = (event: MessageEvent) => void;
 const sources: { listeners: Record<string, Listener[]>; onopen: (() => void) | null; onerror: (() => void) | null; close: () => void }[] = [];
-vi.mock("@/lib/bearer-event-source", () => ({
+vi.mock("@eddi/app-kit/lib/bearer-event-source", () => ({
   BearerEventSource: vi.fn().mockImplementation(function () {
     const source = {
       listeners: {} as Record<string, Listener[]>,

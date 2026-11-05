@@ -6,14 +6,14 @@ import {
   toolApprovalsInheritsAutoApprove,
   KNOWN_TOOL_SOURCES,
 } from "@/lib/hitl-tool-approvals";
-import { requiresApprovalTimeout, isValidIsoDuration } from "@/lib/hitl-config";
-import { noProgressPolicyLabel } from "@/lib/hitl-labels";
+import { requiresApprovalTimeout, isValidIsoDuration } from "@eddi/app-kit/lib/hitl-config";
+import { noProgressPolicyLabel } from "@eddi/app-kit/lib/hitl-labels";
 import {
   MAX_PAUSE_REASON_LENGTH,
   type ToolApprovalsConfig,
   type HitlTimeoutPolicy,
   type HitlOnNoProgress,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * Editor for a {@link ToolApprovalsConfig} (tool-level approval gating). Shared

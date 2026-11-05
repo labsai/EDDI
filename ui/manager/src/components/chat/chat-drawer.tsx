@@ -1,29 +1,29 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer";
-import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
-import type { SentAttachment } from "@/hooks/use-chat";
-import type { ChatMessage as ChatMessageModel } from "@/lib/api/chat";
+import { useChatStore, useStartConversation, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import type { SentAttachment } from "@eddi/app-kit/hooks/use-chat";
+import type { ChatMessage as ChatMessageModel } from "@eddi/app-kit/lib/api/chat";
 import {
   filesFromClipboard,
   useAttachmentStaging,
   useFileDrop,
   type AttachmentStaging,
   type ReadyAttachment,
-} from "@/hooks/use-attachment-staging";
-import { ChatMessage } from "./chat-message";
-import { GuardrailActivity } from "./guardrail-activity";
-import { ChatActivity } from "./chat-activity";
-import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
-import { StreamingToggle } from "./streaming-toggle";
-import { DebugDrawer as DebugPanel } from "@/components/debugger/debug-drawer";
-import { useDebugStore } from "@/hooks/use-debug-events";
-import { InputHint } from "@/components/chat/input-hint";
-import { SecretInputField } from "./secret-input-field";
-import type { InputField } from "@/lib/api/conversations";
-import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
-import { cn } from "@/lib/utils";
-import { isImeComposing } from "@/lib/ime";
+} from "@eddi/app-kit/hooks/use-attachment-staging";
+import { ChatMessage } from "@eddi/app-kit/components/chat/chat-message";
+import { GuardrailActivity } from "@eddi/app-kit/components/chat/guardrail-activity";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import { FileDropOverlay, PendingAttachmentChip } from "@eddi/app-kit/components/chat/attachment-chip";
+import { StreamingToggle } from "@eddi/app-kit/components/chat/streaming-toggle";
+import { DebugDrawer as DebugPanel } from "@eddi/app-kit/components/debugger/debug-drawer";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
+import { InputHint } from "@eddi/app-kit/components/chat/input-hint";
+import { SecretInputField } from "@eddi/app-kit/components/chat/secret-input-field";
+import type { InputField } from "@eddi/app-kit/lib/api/conversations";
+import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import {
   ArrowDown,
   Bot,

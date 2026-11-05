@@ -6,15 +6,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { HandoffInbox } from "@/components/groups/handoff-inbox";
 import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn, formatUsd } from "@/lib/utils";
-import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
+import { useGroup, useGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { useSchedules } from "@/hooks/use-schedules";
@@ -26,7 +26,7 @@ import {
   isValidCron,
   listTimeZones,
   type ScheduleConfiguration,
-} from "@/lib/api/schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 import {
   useGroupWorkspace,
   useAddWorkspaceBacklogTask,

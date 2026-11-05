@@ -2,12 +2,12 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, Share2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { accessFor } from "@/lib/access";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useSpaces } from "@/hooks/use-spaces";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   useInfiniteWorkflowDescriptors,
   useDeleteWorkflow,
@@ -18,8 +18,8 @@ import { WorkflowCard } from "@/components/workflows/workflow-card";
 import { CreateWorkflowDialog } from "@/components/workflows/create-workflow-dialog";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";

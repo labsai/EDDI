@@ -2,9 +2,9 @@ import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageUp, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
-import type { BrandAssetSlot } from "@/lib/brand";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { cn } from "@eddi/app-kit/lib/utils";
+import type { BrandAssetSlot } from "@eddi/app-kit/lib/brand";
 
 /** Same cap as `BrandAssetValidator.MAX_BYTES`. */
 export const MAX_ASSET_BYTES = 512 * 1024;

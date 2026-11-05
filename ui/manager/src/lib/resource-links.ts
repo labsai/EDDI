@@ -1,4 +1,4 @@
-import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 
 /**
  * Where in the Manager a resource lives, from its `eddi://` URI.

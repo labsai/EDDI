@@ -15,11 +15,11 @@ import {
   ShieldQuestion,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import type { OperatorConfig, GateVerificationResult } from "@/lib/api/operator";
-import type { DeploymentStatus } from "@/lib/api/agents";
+import type { DeploymentStatus } from "@eddi/app-kit/lib/api/agents";
 
 interface OperatorStatusPanelProps {
   config: OperatorConfig;

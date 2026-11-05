@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commitPending, splitChipEntries } from "@/lib/chip-values";
+import { commitPending, splitChipEntries } from "@eddi/app-kit/lib/chip-values";
 
 /**
  * The arithmetic behind the flush that stops Save silently dropping typed text.

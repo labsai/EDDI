@@ -1,5 +1,5 @@
-import { RESOURCE_TYPES, type ResourceTypeConfig } from "@/lib/api/resources";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import { RESOURCE_TYPES, type ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 /** The stored document a gated whole-document write would replace. */
 export interface ConfigWriteTarget {

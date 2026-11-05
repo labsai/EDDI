@@ -114,9 +114,10 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
-  # The frontends under ui/: the Manager, the Chat UI and the shared packages are
-  # one npm workspace (ui/package.json) with a single ui/package-lock.json, so one
-  # entry covers all of them and a dependency both apps use moves in one PR. They
+  # The frontends under ui/: the Manager, Workforce, the Chat UI and the shared
+  # packages are one npm workspace (ui/package.json) with a single
+  # ui/package-lock.json, so one entry covers all of them and a dependency the apps
+  # share moves in one PR. They
   # ran Renovate in their own repos (automerge of minor/patch once CI was green);
   # the Renovate app is not installed on this repository, and two bots on one repo
   # is the one clearly wrong option.

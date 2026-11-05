@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildGrantRequestText, grantEndpoints } from "@/lib/grant-request";
+import { buildGrantRequestText, grantEndpoints } from "@eddi/app-kit/lib/grant-request";
 
 describe("grantEndpoints", () => {
   it("builds one append call per plain vault secret, segments encoded", () => {

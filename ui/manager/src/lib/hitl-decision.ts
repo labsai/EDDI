@@ -1,4 +1,4 @@
-import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@/lib/api/hitl";
+import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * What a reviewer agreed to, captured the moment the decision was submitted, so

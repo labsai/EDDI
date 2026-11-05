@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatMessage } from "@/components/chat/chat-message";
-import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatMessage } from "@eddi/app-kit/components/chat/chat-message";
+import type { ChatMessage as ChatMessageType } from "@eddi/app-kit/lib/api/chat";
 
 const userMessage: ChatMessageType = {
   id: "msg-1", role: "user",

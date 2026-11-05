@@ -474,10 +474,10 @@ EDDI implements open standards — not proprietary APIs:
 
 ### 🖥️ Manager Dashboard & Chat UI
 
-Both UIs live in this repository (`ui/manager`, `ui/chat`) and are built into the EDDI jar and Docker image — nothing to deploy separately.
+The UIs live in this repository (`ui/manager`, `ui/workforce`, `ui/chat`) and are built into the EDDI jar and Docker image — nothing to deploy separately.
 
 - 🎨 **React 19 Manager** (`/manage`) — Admin dashboard for agent building, testing, deployment, and monitoring, with the Platform Operator, an agent wizard, and editors for every resource type, including knowledge-base ingestion sources
-- 👥 **Workforce** (`/workforce`) — A workspace for group conversations: boards, member threads, a live discussion overview, and history
+- 👥 **Workforce** (`/workforce`) — The end-user app, its own lighter bundle: chats with agents and teams of agents in one sidebar, Home with starters, boards, member threads, a live discussion overview, and history; role-aware, with one sign-in shared with the Manager
 - 💬 **Chat UI** (`/chat`) — Standalone React chat with SSE streaming and Keycloak auth
 - ✋ **Approvals, Connections & Sharing** — Pages for pending HITL approvals, connections and linked accounts, and sharing resources between users and teams
 - 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
@@ -560,7 +560,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
-| **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat`, after `npm ci` in `ui/` (one lockfile for both) |
+| **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager, Workforce and Chat UIs. Install it only to run `npm run dev` in `ui/manager`, `ui/workforce` or `ui/chat`, after `npm ci` in `ui/` (one lockfile for all) |
 | **mise**       | Optional | [`mise.toml`](mise.toml) pins the exact JDK, Maven and Node versions and offers the common commands as tasks (`mise run dev`, `mise run test`) |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
@@ -581,7 +581,7 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
 
-> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm ci` once in `ui/` (an npm workspace: one lockfile for both UIs), then `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
+> **💡 The UIs build with Maven, at packaging time.** Their sources live in `ui/manager`, `ui/workforce` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, a few minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` and `/workforce` only after a `package`. For frontend work run `npm ci` once in `ui/` (an npm workspace: one lockfile for every UI), then `npm run dev` in `ui/manager` (port 3000) or `ui/workforce` (port 3002), both proxying to the backend on 7070. Upgrading an older checkout? Run `./mvnw clean` once.
 
 Dev mode also enables:
 
@@ -612,7 +612,7 @@ Dev mode also enables:
 | `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
 | `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
 | `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
-| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (`compile` and `test` never build them) |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager, Workforce and Chat UIs (`compile` and `test` never build them) |
 | `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
 | `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
 | `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
@@ -645,7 +645,7 @@ target/site/jacoco/index.html
 | `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
-| `-DskipUi` | `false` | Skip the npm build of `ui/manager` and `ui/chat` (the jar then serves no UI) |
+| `-DskipUi` | `false` | Skip the npm build of `ui/manager`, `ui/workforce` and `ui/chat` (the jar then serves no UI) |
 
 </details>
 

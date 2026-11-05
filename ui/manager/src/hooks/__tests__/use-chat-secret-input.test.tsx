@@ -3,13 +3,13 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   useChatStore,
   useDeployedAgents,
   useLoadConversation,
   useStartConversation,
-} from "@/hooks/use-chat";
+} from "@eddi/app-kit/hooks/use-chat";
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({

@@ -5,12 +5,12 @@ import { http, HttpResponse } from "msw";
 import { render } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { createTestQueryClient, renderWithProviders, userEvent } from "@/test/test-utils";
-import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
-import { server } from "@/test/mocks/server";
-import { useDeployWithGrants, type DeployWithGrantsOutcome } from "@/hooks/use-deploy-with-grants";
-import { AuthContext, GUEST_CONTEXT } from "@/components/auth/auth-context";
-import type { DeploymentFailure, DeploymentPreflight } from "@/lib/api/agents";
+import { createTestQueryClient, renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { GrantRequiredDialogHost } from "@eddi/app-kit/components/secrets/grant-required-dialog";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useDeployWithGrants, type DeployWithGrantsOutcome } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { AuthContext, GUEST_CONTEXT } from "@eddi/app-kit/components/auth/auth-context";
+import type { DeploymentFailure, DeploymentPreflight } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Grant, then deploy. The vault mock is stateful and seeded with

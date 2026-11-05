@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { CommandPalette } from "@/components/shared/command-palette";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 

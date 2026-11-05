@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Bot, LayoutDashboard, Workflow } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { brandPreviewStyle, type BrandColorValues } from "@/lib/brand-css";
-import type { BrandAssetFlags } from "@/lib/brand";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { brandPreviewStyle, type BrandColorValues } from "@eddi/app-kit/lib/brand-css";
+import type { BrandAssetFlags } from "@eddi/app-kit/lib/brand";
 
 /**
  * Static class names for the swatch strip: Tailwind only generates utilities it

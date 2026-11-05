@@ -4,10 +4,10 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
-import { CostDashboard } from "@/components/debugger/cost-dashboard";
-import { server } from "@/test/mocks/server";
+import { CostDashboard } from "@eddi/app-kit/components/debugger/cost-dashboard";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { formatUsd } from "@/lib/utils";
+import { formatUsd } from "@eddi/app-kit/lib/utils";
 
 function renderDashboard(conversationId: string | null = "conv1") {
   const queryClient = new QueryClient({

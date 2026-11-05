@@ -1,9 +1,9 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Globe } from "lucide-react";
-import { ChipInput } from "@/components/shared/chip-input";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
 import { ValidationMessage } from "@/components/connections/validation-message";
-import { validateOrigin, type ValidationCode } from "@/lib/connection-validation";
+import { validateOrigin, type ValidationCode } from "@eddi/app-kit/lib/connection-validation";
 
 interface OriginAllowlistFieldProps {
   value: string[];

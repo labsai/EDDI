@@ -17,7 +17,7 @@ import {
 import {
   useSkills,
   useCapabilitySearch,
-} from "@/hooks/use-capabilities";
+} from "@eddi/app-kit/hooks/use-capabilities";
 import {
   useExtensionTypes,
 } from "@/hooks/use-extensions-store";
@@ -27,9 +27,9 @@ import {
 import {
   useSetupAgent,
   useCreateApiAgent,
-} from "@/hooks/use-agent-setup";
+} from "@eddi/app-kit/hooks/use-agent-setup";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 function createWrapper() {
   const queryClient = new QueryClient({

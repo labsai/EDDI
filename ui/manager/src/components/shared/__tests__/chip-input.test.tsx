@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChipInput } from "@/components/shared/chip-input";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
 
 /** A host that owns both the values and the pending text, as a real form does. */
 function Host({

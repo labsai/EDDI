@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { getExtensionTypes } from "@/lib/api/extensions";
-import type { ExtensionDescriptor } from "@/lib/api/extensions";
+import { getExtensionTypes } from "@eddi/app-kit/lib/api/extensions";
+import type { ExtensionDescriptor } from "@eddi/app-kit/lib/api/extensions";
 
 const EXTENSIONS_STORE_KEY = ["extensionStore"] as const;
 

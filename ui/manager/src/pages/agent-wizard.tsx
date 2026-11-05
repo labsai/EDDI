@@ -1,6 +1,6 @@
 import { useState, useCallback, useId, useMemo, useRef } from "react";
 import type { TFunction } from "i18next";
-import { isSecretReference, referenceLabel } from "@/lib/secret-reference";
+import { isSecretReference, referenceLabel } from "@eddi/app-kit/lib/secret-reference";
 import { useTranslation } from "react-i18next";
 import {
   Wand2,
@@ -30,20 +30,20 @@ import {
   IdCard,
   ClipboardCheck,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
-import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
-import { useDeployWithGrants, isGrantFailure, type DeployWithGrantsOutcome } from "@/hooks/use-deploy-with-grants";
-import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
-import { getErrorMessage } from "@/lib/api-client";
-import { type DeploymentFailure } from "@/lib/api/agents";
+import { useSetupAgent, useCreateApiAgent } from "@eddi/app-kit/hooks/use-agent-setup";
+import { useDeployWithGrants, isGrantFailure, type DeployWithGrantsOutcome } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { deployFailureMessage, reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { type DeploymentFailure } from "@eddi/app-kit/lib/api/agents";
 import {
   getProviderConfig,
   type SetupAgentRequest,
   type CreateApiAgentRequest,
   type SetupResult,
   resolveSetupVersion,
-} from "@/lib/api/agent-setup";
+} from "@eddi/app-kit/lib/api/agent-setup";
 import {
   MODEL_SUGGESTIONS,
   acceptsOptionalApiKey,
@@ -51,7 +51,7 @@ import {
   isBaseUrlRequired,
   isProvisionableBySetup,
   supportsBaseUrl,
-} from "@/lib/model-suggestions";
+} from "@eddi/app-kit/lib/model-suggestions";
 import { ModelCombobox } from "@/components/shared/model-combobox";
 import {
   SELF_HOSTED_EXAMPLES,
@@ -59,12 +59,12 @@ import {
   getApiKeyUrl,
   getDefaultBaseUrl,
   getKeyPlaceholder,
-} from "@/lib/llm-provider-catalog";
-import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
+} from "@eddi/app-kit/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { BUILT_IN_TOOLS } from "@/components/editors/llm/types";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { BUILT_IN_TOOLS } from "@eddi/app-kit/components/editors/llm/types";
 import { readCapped } from "@/lib/read-capped";
 
 /* ================================================================

@@ -5,7 +5,7 @@ import {
   deleteWorkspaceBacklogTask,
   type AcceptHandoffRequest,
   type DeclineHandoffRequest,
-} from "@/lib/api/team-handoffs";
+} from "@eddi/app-kit/lib/api/team-handoffs";
 import { WORKSPACE_KEY } from "@/hooks/use-group-workspace";
 
 /**

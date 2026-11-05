@@ -11,8 +11,8 @@ import {
   readBrand,
   setBrand,
   subscribeBrand,
-} from "@/lib/brand";
-import { DEFAULT_BRAND_SCRIPT } from "../../../scripts/vite-plugin-brand.mjs";
+} from "@eddi/app-kit/lib/brand";
+import { DEFAULT_BRAND_SCRIPT } from "../../../../scripts/vite-plugin-brand.mjs";
 
 const ZEBRA = {
   branded: true,

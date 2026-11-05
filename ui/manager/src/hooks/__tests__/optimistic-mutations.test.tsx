@@ -3,12 +3,12 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { http, HttpResponse, delay } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { useToggleSchedule } from "@/hooks/use-schedules";
-import { useSubmitHumanInput } from "@/hooks/use-hitl";
-import type { GroupConversation } from "@/lib/api/groups";
-import type { ScheduleConfiguration } from "@/lib/api/schedules";
-import { agentDeploymentQueries, agentKeys } from "@/lib/query-keys";
+import { useSubmitHumanInput } from "@eddi/app-kit/hooks/use-hitl";
+import type { GroupConversation } from "@eddi/app-kit/lib/api/groups";
+import type { ScheduleConfiguration } from "@eddi/app-kit/lib/api/schedules";
+import { agentDeploymentQueries, agentKeys } from "@eddi/app-kit/lib/query-keys";
 
 /**
  * A click should change what the user sees at once — not after the request and

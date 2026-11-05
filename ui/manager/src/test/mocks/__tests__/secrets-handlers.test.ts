@@ -5,7 +5,7 @@ import {
   listSecrets,
   storeSecret,
   updateSecretGrant,
-} from "@/lib/api/secrets";
+} from "@eddi/app-kit/lib/api/secrets";
 
 /**
  * The secret mocks share one mutable store, reset after every test by

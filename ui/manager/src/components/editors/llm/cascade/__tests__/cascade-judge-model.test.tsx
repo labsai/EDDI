@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { CascadeJudgeModelEditor } from "@/components/editors/llm/cascade/cascade-judge-model";
-import type { CascadeJudgeModel } from "@/components/editors/llm/types";
+import type { CascadeJudgeModel } from "@eddi/app-kit/components/editors/llm/types";
 
 function renderJudge(value: CascadeJudgeModel) {
   const onChange = vi.fn();

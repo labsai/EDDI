@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJsonSchema } from "@/lib/api/schemas";
-import { getResourceType } from "@/lib/api/resources";
+import { getResourceType } from "@eddi/app-kit/lib/api/resources";
 
 /**
  * Fetch the JSON Schema for a resource type slug.

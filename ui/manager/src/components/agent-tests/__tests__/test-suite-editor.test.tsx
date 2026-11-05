@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { TestSuiteEditor } from "@/components/editors/test-suite-editor";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
-import { MOCK_SUITE } from "@/test/mocks/agent-test-fixtures";
+import { MOCK_SUITE } from "@eddi/app-kit/test/mocks/agent-test-fixtures";
 import type { AgentTestSuite } from "@/lib/api/agent-tests";
 
 describe("TestSuiteEditor", () => {

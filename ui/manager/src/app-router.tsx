@@ -1,10 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { ThemeProvider } from "@eddi/ui";
-import { AppToaster } from "@/components/layout/app-toaster";
-import { AuthProvider } from "@/components/auth/auth-provider";
+import type { QueryClient } from "@tanstack/react-query";
+import { AppProviders } from "@eddi/app-kit/components/layout/app-providers";
 import { App } from "@/app";
-import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
 
 /**
  * The browser router for the app.
@@ -14,23 +11,17 @@ import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dia
  * needs to stop in-app navigation from silently discarding edits. `<App />` still
  * declares the real route table with `<Routes>`, so every route, lazy page and
  * layout is unchanged — this wrapper is one catch-all route that matches
- * everything, renders the providers, and hands the path over to `<App />`.
+ * everything, renders the providers (shared with Workforce, @eddi/app-kit), and
+ * hands the path over to `<App />`.
  */
 export function createAppRouter(queryClient: QueryClient) {
   return createBrowserRouter([
     {
       path: "*",
       element: (
-        <AuthProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
-              <App />
-              <AppToaster />
-              {/* The one vault-grant dialog every deploy flow asks through. */}
-              <GrantRequiredDialogHost />
-            </ThemeProvider>
-          </QueryClientProvider>
-        </AuthProvider>
+        <AppProviders queryClient={queryClient}>
+          <App />
+        </AppProviders>
       ),
     },
   ]);

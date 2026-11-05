@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -24,8 +24,8 @@ import {
   Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import { useSkills } from "@eddi/app-kit/hooks/use-capabilities";
+import type { Agent, ChannelConnector } from "@eddi/app-kit/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -35,18 +35,18 @@ import {
   type AgentHitlConfig,
   type HitlRejectionAction,
   type ToolApprovalsConfig,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
-import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
-import { CONFIDENCE_COLORS } from "@/lib/constants";
-import { EditorSection } from "./editor-section";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@eddi/app-kit/lib/hitl-config";
+import { CONFIDENCE_COLORS } from "@eddi/app-kit/lib/constants";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
-import { ApprovalContextEditor } from "./approval-context-editor";
-import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ApprovalContextEditor } from "@eddi/app-kit/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@eddi/app-kit/lib/hitl-approval-context";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 /** What every agent-detail section takes from the page. */

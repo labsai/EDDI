@@ -1,5 +1,5 @@
-import { api } from "../api-client";
-import { seg, nameSeg } from "./path-segment";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { seg, nameSeg } from "@eddi/app-kit/lib/api/path-segment";
 
 // ─── Types ───
 

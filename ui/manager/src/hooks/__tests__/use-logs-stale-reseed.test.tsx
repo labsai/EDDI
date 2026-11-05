@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import type { LogEntry } from "@/lib/api/logs";
+import type { LogEntry } from "@eddi/app-kit/lib/api/logs";
 
 // A fake event source per filter, and a reseed fetch the test settles by hand.
 const h = vi.hoisted(() => ({
@@ -8,8 +8,8 @@ const h = vi.hoisted(() => ({
   reseeds: [] as Array<{ level?: string; resolve: (rows: unknown[]) => void }>,
 }));
 
-vi.mock("@/lib/api/logs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/logs")>();
+vi.mock("@eddi/app-kit/lib/api/logs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/logs")>();
   return {
     ...actual,
     createLogEventSource: () => {

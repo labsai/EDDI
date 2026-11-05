@@ -27,62 +27,62 @@ import {
   Settings2,
   ClipboardCheck,
 } from "lucide-react";
-import { cn, hashColor, getInitials } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { cn, hashColor, getInitials } from "@eddi/app-kit/lib/utils";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { ProviderSelect } from "@/components/shared/provider-select";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
-import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
+import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@eddi/app-kit/hooks/use-groups";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
+import { styleLabel, styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
 import {
   groupSaveProblems,
   idsTakenByOtherMembers,
   optionsOfferedTo,
   uncoveredRolePhases,
   type GroupSaveProblem,
-} from "@/lib/group-config";
-import { GroupSaveProblems } from "@/components/groups/group-save-problems";
-import { getErrorMessage } from "@/lib/api-client";
+} from "@eddi/app-kit/lib/group-config";
+import { GroupSaveProblems } from "@eddi/app-kit/components/groups/group-save-problems";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
   type OnHumanTimeout,
-} from "@/lib/api/groups";
-import type { GroupHitlConfig } from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/groups";
+import type { GroupHitlConfig } from "@eddi/app-kit/lib/api/hitl";
 import {
   getStylePhases,
   applyApprovalPhases,
   DEFAULT_GROUP_HITL_CONFIG,
   isValidIsoDuration,
   requiresApprovalTimeout,
-} from "@/lib/hitl-config";
-import { granularityLabel } from "@/lib/hitl-labels";
-import { parseResourceUri } from "@/lib/api/agents";
-import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+} from "@eddi/app-kit/lib/hitl-config";
+import { granularityLabel } from "@eddi/app-kit/lib/hitl-labels";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import {
   getGroupTemplates,
   DEFAULT_AGENT_TIMEOUT_SECONDS,
   type GroupTemplate,
-} from "@/lib/group-templates";
+} from "@eddi/app-kit/lib/group-templates";
 import {
   setupAgent,
   resolveSetupVersion,
   LLM_PROVIDERS,
   type SetupAgentRequest,
-} from "@/lib/api/agent-setup";
-import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { describeUndeployed, reportDeployOutcome } from "@/lib/deploy-outcome";
-import { isProvisionableByTeamSetup } from "@/lib/model-suggestions";
-import { providerNeedsKey, providerLabel } from "@/components/workforce/wizard/member-validation";
-import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
+} from "@eddi/app-kit/lib/api/agent-setup";
+import { useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { describeUndeployed, reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
+import { isProvisionableByTeamSetup } from "@eddi/app-kit/lib/model-suggestions";
+import { providerNeedsKey, providerLabel } from "@eddi/app-kit/components/workforce/wizard/member-validation";
+import { useLeaveConfirm } from "@eddi/app-kit/components/workforce/wizard/use-leave-confirm";
 import { DurationField } from "@/components/shared/duration-field";
 import { BackLink } from "@/components/shared/back-link";
 import { summarizeRoles } from "@/lib/role-labels";
-import { mapWithConcurrency } from "@/lib/concurrency";
+import { mapWithConcurrency } from "@eddi/app-kit/lib/concurrency";
 
 /** New agents provisioned at once by the wizard: faster than one by one, gentle on the backend. */
 const MEMBER_SETUP_CONCURRENCY = 3;

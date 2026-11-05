@@ -11,7 +11,7 @@
    ────────────────────────────────────────────── */
 
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Vitest runs from ui/packages/core.
@@ -94,6 +94,33 @@ function findCycles(graph: Map<string, string[]>): string[][] {
   return cycles;
 }
 
+/** The app directories under ui/. */
+const APP_DIRS = ["manager", "chat", "workforce"].map((app) => join(PACKAGES_ROOT, "..", app) + sep);
+const APP_PACKAGES = /^(eddi-manager|eddi-chat-ui|eddi-workforce)(\/|$)/;
+
+/** Whether `spec`, imported from `file`, reaches an app: `@/…`, an app's npm name, or a path into its directory. */
+function importsApp(file: string, spec: string): boolean {
+  if (spec.startsWith("@/") || APP_PACKAGES.test(spec)) return true;
+  if (!spec.startsWith(".")) return false;
+  const target = resolve(dirname(file), spec);
+  return APP_DIRS.some((dir) => target.startsWith(dir));
+}
+
+/** What an `exports` subpath resolves to: the exact key, else the longest matching `*` pattern (Node's rule). */
+function exportTarget(exports: Record<string, string>, subpath: string): string[] {
+  const key = `./${subpath}`;
+  if (exports[key]) return [exports[key]];
+  const patterns = Object.keys(exports)
+    .filter((k) => k.includes("*"))
+    .map((k) => ({ k, prefix: k.slice(0, k.indexOf("*")), suffix: k.slice(k.indexOf("*") + 1) }))
+    .filter(({ prefix, suffix }) => key.startsWith(prefix) && key.endsWith(suffix) && key.length >= prefix.length + suffix.length)
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+  const best = patterns[0];
+  if (!best) return [];
+  const star = key.slice(best.prefix.length, key.length - best.suffix.length);
+  return [exports[best.k]!.replace("*", star)];
+}
+
 /** A network call from source: fetch(), sendBeacon(), an XHR, EventSource or WebSocket. */
 const API_CALL = /\b(?:fetch|sendBeacon)\s*\(|\bnew\s+(?:XMLHttpRequest|EventSource|WebSocket)\b/;
 
@@ -107,12 +134,46 @@ describe("package boundaries", () => {
   });
 
   it("never imports an app", () => {
+    // Relative specifiers are resolved, not pattern-matched: @eddi/app-kit has
+    // components/chat/ and components/workforce/ directories of its own, which
+    // are not the apps of those names.
     const offenders = modules.flatMap((m) =>
       m.imports
-        .filter((spec) => spec.startsWith("@/") || /(^|\/)(manager|chat|workforce)\//.test(spec))
+        .filter((spec) => importsApp(m.file, spec))
         .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("keeps @eddi/core, @eddi/ui and @eddi/conversation below @eddi/app-kit", () => {
+    // app-kit is the signed-in apps' shared layer on top of the three: it may
+    // use all of them, none of them may use it.
+    const offenders = modules
+      .filter((m) => m.pkg !== "@eddi/app-kit")
+      .flatMap((m) =>
+        m.imports
+          .filter((spec) => /^@eddi\/app-kit(\/|$)/.test(spec))
+          .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
+      );
+    expect(modules.some((m) => m.pkg === "@eddi/app-kit")).toBe(true);
+    expect(offenders).toEqual([]);
+  });
+
+  it("exports every module of @eddi/app-kit", () => {
+    // Its `exports` map patterns per directory (`./hooks/*` → `*.ts`); a .tsx in
+    // a .ts directory, or the reverse, needs an explicit entry, or an app's
+    // import of it fails to resolve only at build time.
+    const root = join(PACKAGES_ROOT, "app-kit");
+    const { exports } = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      exports: Record<string, string>;
+    };
+    const unexported = modules
+      .filter((m) => m.pkg === "@eddi/app-kit")
+      .map((m) => relative(join(root, "src"), m.file).split(sep).join("/"))
+      // Ambient declarations are referenced, never imported.
+      .filter((file) => !file.endsWith(".d.ts"))
+      .filter((file) => !exportTarget(exports, file.replace(/\.tsx?$/, "")).some((t) => t === `./src/${file}`));
+    expect(unexported).toEqual([]);
   });
 
   it("keeps @eddi/core free of React and the UI packages", () => {

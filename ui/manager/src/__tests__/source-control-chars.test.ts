@@ -17,7 +17,9 @@ import { join, relative, resolve } from "node:path";
  */
 
 const repoRoot = resolve(__dirname, "../..");
-const ROOTS = ["src", "e2e", "scripts"];
+// The Manager's own files, and the shared layer it compiles as source
+// (@eddi/app-kit, where lib/api/groups.ts lives since Workforce's split).
+const ROOTS = ["src", "e2e", "scripts", "../packages/app-kit/src"];
 const SOURCE = /\.(?:[cm]?[jt]sx?|json|css|html)$/;
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
@@ -40,7 +42,9 @@ describe("source hygiene", () => {
   it("finds the files it is meant to grade", () => {
     // A walk that silently finds nothing would pass the check below vacuously.
     const files = ROOTS.flatMap((root) => sourceFiles(resolve(repoRoot, root)));
-    expect(files.map((f) => relative(repoRoot, f))).toContain(join("src", "lib", "api", "groups.ts"));
+    expect(files.map((f) => relative(repoRoot, f))).toContain(
+      join("..", "packages", "app-kit", "src", "lib", "api", "groups.ts"),
+    );
   });
 
   it("has no raw control characters in any source file", () => {

@@ -1,9 +1,9 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Palette } from "lucide-react";
-import type { Agent, AgentAppearance, ConversationControls, TitleGeneration } from "@/lib/api/agents";
+import type { Agent, AgentAppearance, ConversationControls, TitleGeneration } from "@eddi/app-kit/lib/api/agents";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { EditorSection } from "./editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 
 /** The switches that default to on: absent keeps the control. */
 const DEFAULT_ON_CONTROLS = ["undo", "redo", "attachments", "rating", "quickReplies", "streaming"] as const;

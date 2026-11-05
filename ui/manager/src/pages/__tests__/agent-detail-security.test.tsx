@@ -5,8 +5,8 @@ import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@eddi/ui";
 import { SecurityIdentitySection } from "@/components/editors/agent-config-sections";
-import type { Agent } from "@/lib/api/agents";
-import { server } from "@/test/mocks/server";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 /** The page's draft setter; a section only ever reports an edit through it. */

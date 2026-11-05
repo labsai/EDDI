@@ -1,6 +1,6 @@
-import { getAgentDescriptors, parseResourceUri } from "./agents";
-import { getWorkflowDescriptors } from "./workflows";
-import { getConversationDescriptors } from "./conversations";
+import { getAgentDescriptors, parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { getWorkflowDescriptors } from "@eddi/app-kit/lib/api/workflows";
+import { getConversationDescriptors } from "@eddi/app-kit/lib/api/conversations";
 
 export interface DashboardStats {
   agentCount: number;

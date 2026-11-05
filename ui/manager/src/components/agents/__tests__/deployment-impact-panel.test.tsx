@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse, type JsonBodyType } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
 

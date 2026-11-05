@@ -1,4 +1,5 @@
 import { defineConfig, mergeConfig } from "vitest/config";
+import { fileURLToPath, URL } from "node:url";
 import viteConfig from "./vite.config.ts";
 
 export default mergeConfig(
@@ -7,7 +8,12 @@ export default mergeConfig(
     test: {
       globals: true,
       environment: "jsdom",
-      setupFiles: ["./src/test/setup.ts"],
+      // The shared setup (mocked Keycloak and Monaco, the MSW server over the
+      // mock API, @eddi/app-kit) first, then the Manager's own (its i18n).
+      setupFiles: [
+        fileURLToPath(new URL("../packages/app-kit/src/test/setup-common.ts", import.meta.url)),
+        "./src/test/setup.ts",
+      ],
       testTimeout: 30_000,
       css: true,
       // `.claude/worktrees/**` holds checkouts of other branches. Their test
@@ -44,13 +50,17 @@ export default mergeConfig(
       coverage: {
         provider: "v8",
         reporter: ["text", "json", "html", "lcov"],
-        include: ["src/**/*.{ts,tsx}"],
+        // The shared app layer (@eddi/app-kit) moved out of src/ with Workforce's
+        // split; the Manager's tests still exercise most of it, so it is measured
+        // here too and the thresholds keep meaning what they meant.
+        include: ["src/**/*.{ts,tsx}", "../packages/app-kit/src/**/*.{ts,tsx}"],
         exclude: [
           "src/test/**",
+          "../packages/app-kit/src/test/**",
           "src/**/*.d.ts",
           "src/main.tsx",
           "src/app.tsx",
-          "src/lib/auth-config.ts",
+          "../packages/app-kit/src/lib/auth-config.ts",
         ],
         // Recalibrated for Vitest 4, not relaxed. Vitest 3's v8-to-istanbul
         // counted every source LINE as a statement — so JSX markup, which runs

@@ -90,37 +90,38 @@ const allowedHits: string[] = [];
 // ── The routes ───────────────────────────────────────────────────────
 
 /**
- * Every static route of the Manager, read from its route table rather than
- * listed by hand, so a page added to `app.tsx` is covered without touching
- * this file. Routes with a parameter are covered below only where the setup
+ * Every static route of the Manager and of Workforce, read from their route
+ * tables rather than listed by hand, so a page added to either `app.tsx` is
+ * covered without touching this file. Workforce is its own app
+ * (ui/workforce/src/app.tsx), read here as text: both ship in the jar this tier
+ * drives. Routes with a parameter are covered below only where the setup
  * creates a fixture for them.
  */
 function managerRoutes(): { manage: string[]; workforce: string[] } {
   const app = readFileSync(new URL("../../src/app.tsx", import.meta.url), "utf8");
+  const workforceApp = readFileSync(new URL("../../../workforce/src/app.tsx", import.meta.url), "utf8");
   const literal = (s: string) => [...s.matchAll(/\bpath="([^"]+)"/g)].map((m) => m[1]!);
   const isStatic = (p: string) => !p.includes(":") && !p.includes("*");
 
   // The /workforce block's children are relative paths.
-  const start = app.indexOf('<Route path="/workforce"');
-  const end = app.indexOf("</Route>", start);
-  expect(start, "app.tsx no longer has a <Route path=\"/workforce\"> block").toBeGreaterThan(0);
-  const workforceBlock = app.slice(start, end);
+  const start = workforceApp.indexOf('<Route path="/workforce"');
+  const end = workforceApp.indexOf("</Route>", start);
+  expect(start, "ui/workforce/src/app.tsx no longer has a <Route path=\"/workforce\"> block").toBeGreaterThan(0);
   const workforce = [
     "/workforce",
-    ...literal(workforceBlock)
+    ...literal(workforceApp.slice(start, end))
       .filter((p) => !p.startsWith("/") && isStatic(p))
       .map((p) => `/workforce/${p}`),
   ];
 
-  const manage = literal(app.slice(0, start) + app.slice(end))
-    .filter((p) => p.startsWith("/manage") && isStatic(p));
+  const manage = literal(app).filter((p) => p.startsWith("/manage") && isStatic(p));
 
   return { manage, workforce };
 }
 
 /** Every resource type's list page, read from RESOURCE_TYPES. */
 function resourceListRoutes(): string[] {
-  const src = readFileSync(new URL("../../src/lib/api/resources.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("@eddi/app-kit/lib/api/resources", import.meta.url), "utf8");
   return [...src.matchAll(/^\s*slug: "([a-z]+)",/gm)].map((m) => `/manage/resources/${m[1]}`);
 }
 

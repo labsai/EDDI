@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { GroupConfigPanel } from "../group-config-panel";
-import type { AgentGroupConfiguration } from "@/lib/api/groups";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { GroupConfigPanel } from "@eddi/app-kit/components/groups/group-config-panel";
+import type { AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 const mockConfig: AgentGroupConfiguration = {

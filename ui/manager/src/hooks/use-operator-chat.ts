@@ -6,7 +6,7 @@ import {
   sendMessageStreaming,
   type ChatMessage,
   type SSEEvent,
-} from "@/lib/api/chat";
+} from "@eddi/app-kit/lib/api/chat";
 import {
   getSimpleConversationLog,
   getConversationDescriptors,
@@ -15,14 +15,14 @@ import {
   parseConversationUri,
   type ConversationState,
   type SimpleConversationMemorySnapshot,
-} from "@/lib/api/conversations";
-import { buildAttachmentContext } from "@/lib/api/attachments";
-import { revokeMessagePreviews, type SentAttachment } from "@/hooks/use-chat";
-import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@/lib/api/hitl";
-import { PauseChangedError, type ShownPause } from "@/lib/hitl-pause-binding";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
+} from "@eddi/app-kit/lib/api/conversations";
+import { buildAttachmentContext } from "@eddi/app-kit/lib/api/attachments";
+import { revokeMessagePreviews, type SentAttachment } from "@eddi/app-kit/hooks/use-chat";
+import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@eddi/app-kit/lib/api/hitl";
+import { PauseChangedError, type ShownPause } from "@eddi/app-kit/lib/hitl-pause-binding";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 import { OPERATOR_PROBE_USER_ID, type OperatorConfig } from "@/lib/api/operator";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 
 /**
  * Chat state for the Platform Operator.

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { ErrorBoundary } from "@eddi/app-kit/components/ui/error-boundary";
 
 // Suppress React error boundary console noise in tests
 const originalConsoleError = console.error;

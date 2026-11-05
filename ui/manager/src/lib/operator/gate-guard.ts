@@ -1,4 +1,4 @@
-import type { PendingToolCallView } from "@/lib/api/hitl";
+import type { PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 import { parseJsonPatch, type JsonPatchOp } from "./json-patch";
 
 /**

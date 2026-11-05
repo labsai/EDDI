@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
-import "@/lib/monaco-setup";
+import "@eddi/app-kit/lib/monaco-setup";
 import { DiffEditor } from "@monaco-editor/react";
 import { RefreshCw, ChevronDown } from "lucide-react";
 import { useTheme } from "@eddi/ui";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 
 export interface VersionDiffDialogProps {
   open: boolean;

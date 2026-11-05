@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { ChatPanel } from "../chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 const RATING = {
   scale: "FIVE_STAR",

@@ -1,4 +1,4 @@
-import type { ModelPriceCatalog, ModelPriceEntry } from "@/lib/api/model-prices";
+import type { ModelPriceCatalog, ModelPriceEntry } from "@eddi/app-kit/lib/api/model-prices";
 
 /**
  * Client-side mirror of ModelPriceCatalogValidator — the server is the

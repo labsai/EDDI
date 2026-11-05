@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getRecentLogs,
   getHistoryLogs,
   getInstanceId,
-} from "../logs";
+} from "@eddi/app-kit/lib/api/logs";
 
 describe("logs API", () => {
   // ─── getRecentLogs ──────────────────────────────────────────────

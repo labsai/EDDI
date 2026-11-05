@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Gauge } from "lucide-react";
-import type { ModelCascadeConfig } from "../types";
+import type { ModelCascadeConfig } from "@eddi/app-kit/components/editors/llm/types";
 import { parseNum as num } from "./cascade-utils";
 
 /**

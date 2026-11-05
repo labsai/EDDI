@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Database, Radio } from "lucide-react";
-import type { NatsView, PeerView } from "@/lib/api/cluster";
+import type { NatsView, PeerView } from "@eddi/app-kit/lib/api/cluster";
 import { formatBytes, formatDuration } from "@/lib/cluster-labels";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 
 function PeerList({ peers }: { peers: PeerView[] }) {
   const { t } = useTranslation();

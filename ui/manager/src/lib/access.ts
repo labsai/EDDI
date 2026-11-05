@@ -1,6 +1,6 @@
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
 import { levelIncludes, type AccessLevel } from "@/lib/api/sharing";
-import { parseResourceUri } from "@/lib/api/agents";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * What the signed-in user may do with one listed resource.

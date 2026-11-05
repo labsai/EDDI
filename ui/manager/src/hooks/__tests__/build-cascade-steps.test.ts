@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCascadeSteps, type PipelineEvent } from "@/hooks/use-debug-events";
+import { buildCascadeSteps, type PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 
 const T = 1000;
 

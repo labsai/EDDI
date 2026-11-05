@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ActionTags } from "./action-tags";
+import { ActionTags } from "@eddi/app-kit/components/editors/action-tags";
 import {
   AlertTriangle,
   ArrowDown,
@@ -12,9 +12,9 @@ import {
   X,
   GitBranch,
 } from "lucide-react";
-import { RenamableKeyInput } from "./renamable-key-input";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { nextFreeKey } from "./editor-value-utils";
+import { RenamableKeyInput } from "@eddi/app-kit/components/editors/renamable-key-input";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { nextFreeKey } from "@eddi/app-kit/components/editors/editor-value-utils";
 
 // ─── Types matching RulesConfiguration backend model ──────────────────────
 

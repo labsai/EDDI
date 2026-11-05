@@ -5,7 +5,7 @@ import {
   isSafeBrandColor,
   parseSrgb,
   toColorInputValue,
-} from "@/lib/brand-validation";
+} from "@eddi/app-kit/lib/brand-validation";
 
 /** BrandValidator's grammar and rules, so the page flags what the server would refuse. */
 describe("isSafeBrandColor", () => {

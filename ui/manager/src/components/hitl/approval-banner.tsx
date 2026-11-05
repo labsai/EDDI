@@ -11,11 +11,11 @@ import {
   Pencil,
   Hand,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { formatToolArguments } from "@/lib/hitl-format-args";
-import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
-import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
+import { timeoutPolicyLabel, granularityLabel } from "@eddi/app-kit/lib/hitl-labels";
+import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@eddi/app-kit/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
   type ApprovalContextView,
@@ -24,7 +24,7 @@ import {
   type PauseDetails,
   type PendingToolCallView,
   type ToolCallDecision,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { AnswerEditor, ReasonCodeSelect } from "@/components/hitl/answer-editor";
 import { ApprovalContext } from "@/components/hitl/approval-context";
 import { validateEditedAnswer } from "@/lib/hitl-edit";

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
-import { useAgentDescriptors } from "./use-agents";
-import { getConversationDescriptors, type ConversationDescriptor } from "@/lib/api/conversations";
+import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
+import { getConversationDescriptors, type ConversationDescriptor } from "@eddi/app-kit/lib/api/conversations";
 import { getCoordinatorStatus, type CoordinatorStatus } from "@/lib/api/coordinator";
 
 export function useDashboardStats() {

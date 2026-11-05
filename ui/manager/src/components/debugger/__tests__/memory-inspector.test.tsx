@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { MemoryInspector } from "@/components/debugger/memory-inspector";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { MemoryInspector } from "@eddi/app-kit/components/debugger/memory-inspector";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 const DETAILED_URL = "*/agents/:id";

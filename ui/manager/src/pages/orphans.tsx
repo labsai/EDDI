@@ -15,10 +15,10 @@ import {
 import { Link } from "react-router-dom";
 import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
 import { isScanComplete, type OrphanInfo } from "@/lib/api/orphans";
-import { getExtensionTypeConfig, getResourceSlugForExtension } from "@/lib/api/extensions";
-import { RESOURCE_TYPES } from "@/lib/api/resources";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { getExtensionTypeConfig, getResourceSlugForExtension } from "@eddi/app-kit/lib/api/extensions";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 

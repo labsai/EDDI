@@ -1,5 +1,5 @@
-import type { AgentRatingConfig } from "@/lib/api/agents";
-import { RATING_LIMITS } from "@/lib/api/ratings";
+import type { AgentRatingConfig } from "@eddi/app-kit/lib/api/agents";
+import { RATING_LIMITS } from "@eddi/app-kit/lib/api/ratings";
 
 /** What is wrong with a field — the section renders the message. */
 export type RatingConfigError =

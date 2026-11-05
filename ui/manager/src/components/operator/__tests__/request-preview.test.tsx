@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 const authState = vi.hoisted(() => ({ roles: [] as string[], method: "none" as "none" | "keycloak" }));
 
-vi.mock("@/hooks/use-auth", () => ({
+vi.mock("@eddi/app-kit/hooks/use-auth", () => ({
   useAuth: () => ({ authenticated: true, loading: false, user: null, roles: authState.roles, method: authState.method, login: () => {}, logout: () => {} }),
   useHasRole: (role: string) => authState.method === "none" || authState.roles.includes(role),
 }));
 import { RequestPreview } from "@/components/operator/request-preview";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 function preview(overrides: Partial<ResolvedRequestPreview> = {}): ResolvedRequestPreview {
   return {

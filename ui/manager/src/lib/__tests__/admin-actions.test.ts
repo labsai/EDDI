@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { ApiClientError } from "@/lib/api-client";
-import { toAdminAction, type AdminAction, type AuditEntry } from "@/lib/api/audit";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
+import { toAdminAction, type AdminAction, type AuditEntry } from "@eddi/app-kit/lib/api/audit";
 import {
   adminActionsFailure,
   filterAdminActions,

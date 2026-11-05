@@ -8,7 +8,7 @@ import {
   type ToolCallExpectation,
 } from "@/lib/api/agent-tests";
 import { cleanExpectation as clean, propertyKind, type PropertyKind } from "@/lib/agent-test-utils";
-import { RenamableKeyInput } from "@/components/editors/renamable-key-input";
+import { RenamableKeyInput } from "@eddi/app-kit/components/editors/renamable-key-input";
 import { INPUT_CLASS, JsonField, LabelledField, OptionalNumberField, StringListField } from "./fields";
 
 /** A `property_N` name no other row uses, so a new row never overwrites one. */

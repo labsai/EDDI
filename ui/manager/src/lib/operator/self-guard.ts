@@ -1,4 +1,4 @@
-import type { PendingToolCallView } from "@/lib/api/hitl";
+import type { PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * Refuses a gated write that the operator aimed at **itself**.

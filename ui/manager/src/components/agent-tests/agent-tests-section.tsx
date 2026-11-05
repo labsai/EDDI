@@ -6,9 +6,9 @@ import { ChevronDown, ChevronRight, FlaskConical, Loader2, Play } from "lucide-r
 import { Button } from "@eddi/ui";
 import { useResourceDescriptors } from "@/hooks/use-resources";
 import { useAgentTestRuns, useStartAgentTestRun } from "@/hooks/use-agent-tests";
-import { parseResourceUri } from "@/lib/api/resources";
-import { getErrorMessage } from "@/lib/api-client";
-import { formatDuration, formatUsd } from "@/lib/utils";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/resources";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { formatDuration, formatUsd } from "@eddi/app-kit/lib/utils";
 import type { AgentTestRun } from "@/lib/api/agent-tests";
 import { RunStatusBadge } from "./run-status";
 import { RunResultSheet } from "./run-result-sheet";

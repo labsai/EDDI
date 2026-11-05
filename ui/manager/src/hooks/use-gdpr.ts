@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { groupKeys } from "@/lib/query-keys";
+import { groupKeys } from "@eddi/app-kit/lib/query-keys";
 import {
   deleteUserData,
   exportUserData,

@@ -5,8 +5,8 @@ import {
   resolveLiveTurnSteps,
   type PipelineEvent,
   type PipelineTurn,
-} from "@/hooks/use-debug-events";
-import type { AuditEntry } from "@/lib/api/audit";
+} from "@eddi/app-kit/hooks/use-debug-events";
+import type { AuditEntry } from "@eddi/app-kit/lib/api/audit";
 
 describe("useDebugStore", () => {
   beforeEach(() => {

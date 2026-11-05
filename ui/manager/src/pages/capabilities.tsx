@@ -12,11 +12,11 @@ import {
   ChevronRight,
   Blocks,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useDebounce } from "@/hooks/use-debounce";
-import { useSkills, useCapabilitySearch, useSkillRegistry } from "@/hooks/use-capabilities";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { CONFIDENCE_COLORS } from "@/lib/constants";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
+import { useSkills, useCapabilitySearch, useSkillRegistry } from "@eddi/app-kit/hooks/use-capabilities";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
+import { CONFIDENCE_COLORS } from "@eddi/app-kit/lib/constants";
 
 const confidenceColors = CONFIDENCE_COLORS;
 

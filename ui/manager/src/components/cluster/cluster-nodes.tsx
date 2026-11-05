@@ -2,13 +2,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Crown, PauseCircle, PlayCircle, Server, ServerOff } from "lucide-react";
-import type { ClusterNode } from "@/lib/api/cluster";
+import type { ClusterNode } from "@eddi/app-kit/lib/api/cluster";
 import { formatDuration, nodeStateLabel } from "@/lib/cluster-labels";
 import { useDrainNode } from "@/hooks/use-cluster";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 interface NodeGridProps {
   nodes: ClusterNode[];

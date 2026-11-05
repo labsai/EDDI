@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
-import type { ExtensionDescriptor } from "@/lib/api/extensions";
+import type { ExtensionDescriptor } from "@eddi/app-kit/lib/api/extensions";
 
 const mockExtensionTypes: ExtensionDescriptor[] = [
   {
@@ -34,8 +34,8 @@ vi.mock("@/hooks/use-extensions-store", () => ({
 }));
 
 // Mock resource APIs
-vi.mock("@/lib/api/resources", async () => {
-  const actual = await vi.importActual("@/lib/api/resources");
+vi.mock("@eddi/app-kit/lib/api/resources", async () => {
+  const actual = await vi.importActual("@eddi/app-kit/lib/api/resources");
   return {
     ...actual,
     getResourceDescriptors: vi.fn().mockResolvedValue([]),
@@ -45,7 +45,7 @@ vi.mock("@/lib/api/resources", async () => {
   };
 });
 
-vi.mock("@/lib/api/agents", () => ({
+vi.mock("@eddi/app-kit/lib/api/agents", () => ({
   parseResourceUri: vi.fn(() => ({
     id: "new-123",
     version: 1,

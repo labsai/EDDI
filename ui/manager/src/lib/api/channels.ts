@@ -1,6 +1,6 @@
-import { api } from "../api-client";
-import type { AgentDescriptor } from "./agents";
-import { seg } from "./path-segment";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
 
 // ─── Types ──────────────────────────────────────────────────────
 

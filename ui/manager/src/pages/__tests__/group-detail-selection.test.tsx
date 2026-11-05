@@ -3,10 +3,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { renderPage, createTestQueryClient } from "@/test/test-utils";
+import { renderPage, createTestQueryClient } from "@eddi/app-kit/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
-import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
-import { server } from "@/test/mocks/server";
+import { useGroupStreamStore } from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 /**

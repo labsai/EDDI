@@ -2,8 +2,8 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useQuery } from "@tanstack/react-query";
 import { History, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { useConversationDescriptors } from "@/hooks/use-conversations";
@@ -13,9 +13,9 @@ import {
   extractInput,
   parseConversationUri,
   type ConversationState,
-} from "@/lib/api/conversations";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+} from "@eddi/app-kit/lib/api/conversations";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /**
  * Past operator conversations, so an investigation stays reachable after the

@@ -1,4 +1,4 @@
-import type { PendingToolCallView } from "@/lib/api/hitl";
+import type { PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 import { findSelfTargetedCalls } from "./self-guard";
 import { findGateCarryingCalls, type GateCarryingReason } from "./gate-guard";
 

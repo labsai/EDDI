@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ArrowDownToLine } from "lucide-react";
-import { describeHandoffSource, type HandoffOrigin } from "@/lib/api/team-handoffs";
+import { describeHandoffSource, type HandoffOrigin } from "@eddi/app-kit/lib/api/team-handoffs";
 
 interface HandoffOriginBadgeProps {
   origin: HandoffOrigin | undefined;

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { deployAgent, getDeploymentStatus } from "@/lib/api/agents";
-import { useChatStore, useStartConversation } from "@/hooks/use-chat";
-import { chatKeys } from "@/lib/query-keys";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { deployAgent, getDeploymentStatus } from "@eddi/app-kit/lib/api/agents";
+import { useChatStore, useStartConversation } from "@eddi/app-kit/hooks/use-chat";
+import { chatKeys } from "@eddi/app-kit/lib/query-keys";
 
 const POLL_ATTEMPTS = 15;
 const POLL_INTERVAL_MS = 2000;

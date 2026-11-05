@@ -3,14 +3,14 @@ import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-vi.mock("@/lib/api/cascade-save", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api/cascade-save")>(
-    "@/lib/api/cascade-save",
+vi.mock("@eddi/app-kit/lib/api/cascade-save", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/cascade-save")>(
+    "@eddi/app-kit/lib/api/cascade-save",
   );
   return { ...actual, cascadeSaveResource: vi.fn() };
 });
 
-import { CascadeSaveError, cascadeSaveResource } from "@/lib/api/cascade-save";
+import { CascadeSaveError, cascadeSaveResource } from "@eddi/app-kit/lib/api/cascade-save";
 import { useCascadeSave } from "@/hooks/use-resources";
 
 /**

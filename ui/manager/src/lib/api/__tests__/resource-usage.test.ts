@@ -3,13 +3,13 @@ import { findResourceUsage } from "../resource-usage";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
-vi.mock("../workflows", () => ({
+vi.mock("@eddi/app-kit/lib/api/workflows", () => ({
   getWorkflowDescriptors: vi.fn(),
   getWorkflow: vi.fn(),
 }));
 
-vi.mock("../agents", async () => {
-  const actual = await vi.importActual<typeof import("../agents")>("../agents");
+vi.mock("@eddi/app-kit/lib/api/agents", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/agents")>("@eddi/app-kit/lib/api/agents");
   return {
     ...actual,
     getAgentDescriptors: vi.fn(),
@@ -17,8 +17,8 @@ vi.mock("../agents", async () => {
   };
 });
 
-import { getWorkflowDescriptors, getWorkflow } from "../workflows";
-import { getAgentDescriptors, getAgent } from "../agents";
+import { getWorkflowDescriptors, getWorkflow } from "@eddi/app-kit/lib/api/workflows";
+import { getAgentDescriptors, getAgent } from "@eddi/app-kit/lib/api/agents";
 
 // ── Tests ──────────────────────────────────────────────────────────
 

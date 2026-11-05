@@ -1,22 +1,22 @@
 import { useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyRound, type LucideIcon, UserRoundKey } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { HeaderValueField } from "@/components/connections/header-value-field";
 import { ValidationMessage } from "@/components/connections/validation-message";
 import {
   isOAuthType,
   legalBindings,
   type ConnectionErrors,
-} from "@/lib/connection-validation";
-import { bindingLabel } from "@/lib/connection-labels";
+} from "@eddi/app-kit/lib/connection-validation";
+import { bindingLabel } from "@eddi/app-kit/lib/connection-labels";
 import type {
   Binding,
   ConnectionConfiguration,
   StaticAuth,
   OAuthConfig,
-} from "@/lib/api/connections";
+} from "@eddi/app-kit/lib/api/connections";
 
 /** The header an integrating system sends a caller-supplied credential in. */
 const CALLER_CREDENTIAL_HEADER = "X-EDDI-Connection-Credential";

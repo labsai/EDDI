@@ -20,7 +20,7 @@ import {
 } from "@/hooks/use-orphans";
 import {
   useConversationCosts,
-} from "@/hooks/use-tool-metrics";
+} from "@eddi/app-kit/hooks/use-tool-metrics";
 
 function createWrapper() {
   const queryClient = new QueryClient({

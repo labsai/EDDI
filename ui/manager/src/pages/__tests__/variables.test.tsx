@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { VariablesPage } from "@/pages/variables";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 // Save original clipboard so we can restore it
@@ -226,7 +226,7 @@ describe("VariablesPage", () => {
 
   it("shows empty state when no variables exist", async () => {
     // Override the handler to return empty array for this test
-    const { server } = await import("@/test/mocks/server");
+    const { server } = await import("@eddi/app-kit/test/mocks/server");
     const { http, HttpResponse } = await import("msw");
     server.use(
       http.get("*/variablestore/variables/:tenantId", () => HttpResponse.json([])),

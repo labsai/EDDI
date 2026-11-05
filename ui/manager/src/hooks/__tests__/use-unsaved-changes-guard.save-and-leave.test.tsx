@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, RouterProvider, Route, Routes, createMemoryRouter } from "react-router-dom";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { NavigationGuardDialog } from "@eddi/app-kit/components/shared/navigation-guard-dialog";
 
 /**
  * Save & leave on the app's one navigation prompt. A page that can save on

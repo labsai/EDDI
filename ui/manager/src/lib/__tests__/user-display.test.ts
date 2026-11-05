@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AuthUser } from "@/components/auth/auth-context";
+import type { AuthUser } from "@eddi/app-kit/components/auth/auth-context";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 
 const EMPTY: AuthUser = { username: "", firstName: "", lastName: "", email: "", fullName: "" };

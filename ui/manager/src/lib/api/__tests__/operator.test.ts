@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   readOperatorConfig,
   writeOperatorConfig,
@@ -28,14 +28,14 @@ import {
   operatorAgentName,
 } from "../operator";
 import { safetyPreambleForScope } from "@/lib/operator/system-prompt";
-import { setBrand } from "@/lib/brand";
+import { setBrand } from "@eddi/app-kit/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,
   buildToolApprovals,
   buildEndpointFilter,
 } from "@/lib/operator/tool-scopes";
-import type { Agent } from "../agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 const BASE = "*/variablestore/variables/default";
 

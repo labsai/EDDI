@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ToolApprovalsEditor } from "../tool-approvals-editor";
-import type { ToolApprovalsConfig } from "@/lib/api/hitl";
+import type { ToolApprovalsConfig } from "@eddi/app-kit/lib/api/hitl";
 import type { TaskSectionProps } from "./task-section-props";
 
 /**

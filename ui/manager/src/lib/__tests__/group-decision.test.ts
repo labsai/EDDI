@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { describeDecision } from "@/lib/group-decision";
-import type { DecisionRecord } from "@/lib/api/groups";
+import { describeDecision } from "@eddi/app-kit/lib/group-decision";
+import type { DecisionRecord } from "@eddi/app-kit/lib/api/groups";
 
 /**
  * Decisions as EDDI's engines build them — `DebateVerdictParser`,

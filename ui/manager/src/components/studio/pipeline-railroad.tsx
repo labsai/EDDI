@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 import { Circle, ChevronRight, Workflow } from "lucide-react";
-import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+import { getExtensionIcon, getExtensionColor } from "@eddi/app-kit/lib/api/extensions";
 
 // ==================== Types ====================
 

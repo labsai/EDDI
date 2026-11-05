@@ -18,9 +18,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuota, useQuotaUsage, useUpdateQuota, useResetUsage } from "@/hooks/use-quotas";
-import { getErrorMessage } from "@/lib/api-client";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
 

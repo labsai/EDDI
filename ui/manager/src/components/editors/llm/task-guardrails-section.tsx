@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { GuardrailSheet } from "./guardrail-sheet";
 import {
   ACTION_TEXT,
@@ -15,7 +15,7 @@ import {
   type GuardrailPhaseName,
 } from "./guardrails";
 import type { TaskSectionProps } from "./task-section-props";
-import type { GuardrailConfig, LlmTask } from "./types";
+import type { GuardrailConfig, LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 type ListField = "inputGuardrails" | "outputGuardrails";
 

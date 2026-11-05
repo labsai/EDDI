@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { parseCascadePreview } from "@/lib/operator/cascade-preview";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 /**
  * The readable form of a gated `POST /agentstore/agents/{id}/cascade`: one line

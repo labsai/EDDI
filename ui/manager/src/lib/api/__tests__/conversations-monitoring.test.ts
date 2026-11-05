@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
   getConversationDescriptors,
@@ -7,7 +7,7 @@ import {
   endActiveConversations,
   purgeEndedConversations,
   type ConversationStatus,
-} from "../conversations";
+} from "@eddi/app-kit/lib/api/conversations";
 
 describe("getConversationDescriptors — pagination & filter params", () => {
   it("sends index (page) and limit query params", async () => {

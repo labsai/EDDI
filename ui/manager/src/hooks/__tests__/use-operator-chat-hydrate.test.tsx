@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import type {
   ConversationDescriptor,
   SimpleConversationMemorySnapshot,
-} from "@/lib/api/conversations";
+} from "@eddi/app-kit/lib/api/conversations";
 
 /**
  * Restoring an operator conversation across a navigation, a reload, and a
@@ -26,8 +26,8 @@ const h = vi.hoisted(() => ({
   duringLogRead: null as null | (() => void),
 }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     startConversation: vi.fn(async () => "conv-new"),
@@ -37,8 +37,8 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/api/conversations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/conversations")>();
+vi.mock("@eddi/app-kit/lib/api/conversations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/conversations")>();
   return {
     ...actual,
     getSimpleConversationLog: vi.fn(
@@ -329,7 +329,7 @@ describe("hydrate: a conversation that cannot take another turn", () => {
       conversationSteps: [step("other")],
       conversationOutputs: [textOutput("conv-2 answer")],
     };
-    const { getSimpleConversationLog } = await import("@/lib/api/conversations");
+    const { getSimpleConversationLog } = await import("@eddi/app-kit/lib/api/conversations");
     const shared = vi.mocked(getSimpleConversationLog).getMockImplementation();
     vi.mocked(getSimpleConversationLog).mockImplementation(async (conversationId: string) => {
       if (conversationId === "conv-2") return conv2Read as SimpleConversationMemorySnapshot;
@@ -370,7 +370,7 @@ describe("hydrate: a conversation that cannot take another turn", () => {
       // we assert the state while it is still resolving.
     ];
     let pickStarted = false;
-    const { getSimpleConversationLog } = await import("@/lib/api/conversations");
+    const { getSimpleConversationLog } = await import("@eddi/app-kit/lib/api/conversations");
     const shared = vi.mocked(getSimpleConversationLog).getMockImplementation();
     vi.mocked(getSimpleConversationLog).mockImplementation(async () => {
       const next = reads.shift();

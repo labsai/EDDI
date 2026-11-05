@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import { getEddiVersion } from "../system";
 

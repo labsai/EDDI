@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Input } from "@/components/ui/input";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { ValidationMessage } from "@/components/connections/validation-message";
-import { splitTemplate } from "@/lib/secret-reference";
-import type { ValidationCode } from "@/lib/connection-validation";
+import { splitTemplate } from "@eddi/app-kit/lib/secret-reference";
+import type { ValidationCode } from "@eddi/app-kit/lib/connection-validation";
 
 interface HeaderValueFieldProps {
   value: string;

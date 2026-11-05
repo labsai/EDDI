@@ -1,21 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
-vi.mock("@/hooks/use-agents", () => ({
+vi.mock("@eddi/app-kit/hooks/use-agents", () => ({
   useAgentDescriptors: () => ({ data: [] }),
   groupAgentsByName: () => [],
 }));
 
-import { GroupPhaseEditor } from "@/components/groups/group-phase-editor";
-import { GroupAdvancedEditor } from "@/components/groups/group-advanced-editor";
-import type { AgentGroupConfiguration, DiscussionPhase } from "@/lib/api/groups";
+import { GroupPhaseEditor } from "@eddi/app-kit/components/groups/group-phase-editor";
+import { GroupAdvancedEditor } from "@eddi/app-kit/components/groups/group-advanced-editor";
+import type { AgentGroupConfiguration, DiscussionPhase } from "@eddi/app-kit/lib/api/groups";
 
 /**
  * Group editors that wrote something other than what the author entered — or

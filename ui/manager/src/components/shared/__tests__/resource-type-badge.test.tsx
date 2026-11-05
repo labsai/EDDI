@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 
 describe("ResourceTypeBadge", () => {

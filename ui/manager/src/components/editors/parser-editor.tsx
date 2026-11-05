@@ -30,11 +30,11 @@ import {
   Type,
   BookA,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useQueries } from "@tanstack/react-query";
 import { DictionaryPickerDialog } from "@/components/editors/dictionary-picker-dialog";
 import { parseDictionaryUri } from "@/lib/dictionary-uri";
-import { getDescriptor } from "@/lib/api/descriptors";
+import { getDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 
 export interface ParserEditorProps {
   data: ParserData;

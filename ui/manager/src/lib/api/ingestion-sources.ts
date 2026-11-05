@@ -1,5 +1,5 @@
-import { api, apiErrorFromResponse } from "@/lib/api-client";
-import { seg } from "./path-segment";
+import { api, apiErrorFromResponse } from "@eddi/app-kit/lib/api-client";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
 
 /**
  * Ingestion sources — where a knowledge base pulls its own documents from.

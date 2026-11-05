@@ -7,7 +7,7 @@ import {
   levenshtein,
   KNOWN_TOOL_SOURCES,
 } from "@/lib/hitl-tool-approvals";
-import type { ToolApprovalsConfig } from "@/lib/api/hitl";
+import type { ToolApprovalsConfig } from "@eddi/app-kit/lib/api/hitl";
 
 describe("validateToolPattern", () => {
   it("accepts a bare tool name", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { DeploymentPreflight } from "@/lib/api/agents";
+import type { DeploymentPreflight } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Batch deploys run a few at a time instead of one after another, while the
@@ -10,8 +10,8 @@ const api = vi.hoisted(() => ({
   deployAgentAndWait: vi.fn(),
   preflightDeploy: vi.fn(),
 }));
-vi.mock("@/lib/api/agents", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api/agents")>()),
+vi.mock("@eddi/app-kit/lib/api/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@eddi/app-kit/lib/api/agents")>()),
   deployAgentAndWait: api.deployAgentAndWait,
   preflightDeploy: api.preflightDeploy,
 }));
@@ -21,7 +21,7 @@ import {
   runDeployManyWithGrants,
   serializeGrantDecisions,
   useGrantDialogStore,
-} from "@/hooks/use-deploy-with-grants";
+} from "@eddi/app-kit/hooks/use-deploy-with-grants";
 
 const NO_ISSUES = { checked: true, enforcement: "OFF", grantIssues: [] } as unknown as DeploymentPreflight;
 const targets = Array.from({ length: 5 }, (_, i) => ({ agentId: `agent-${i}`, version: 1 }));

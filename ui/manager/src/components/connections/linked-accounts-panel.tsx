@@ -12,9 +12,9 @@ import {
   PowerOff,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { GrantStatusBadge } from "@/components/connections/connection-badges";
@@ -22,14 +22,14 @@ import {
   useMyConnections,
   useAuthorizeConnection,
   useDisconnectConnection,
-} from "@/hooks/use-connections";
+} from "@eddi/app-kit/hooks/use-connections";
 import { navigateAway } from "@/lib/navigate-away";
 import { isSafeAuthorizationUrl } from "@/lib/authorization-url";
 import {
   CONNECTIONS_DISABLED,
   CONNECTIONS_FORBIDDEN,
   type LinkedAccount,
-} from "@/lib/api/connections";
+} from "@eddi/app-kit/lib/api/connections";
 import type { TFunction } from "i18next";
 
 /** A connection this viewer could link but has not. Only an admin can enumerate these. */

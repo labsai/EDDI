@@ -10,18 +10,18 @@ import {
   UserCheck,
   type LucideIcon,
 } from "lucide-react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
+import { Input } from "@eddi/app-kit/components/ui/input";
 import { StepDots } from "@/components/shared/step-dots";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";
 import { OriginAllowlistField } from "@/components/connections/origin-allowlist-field";
 import { ValidationMessage } from "@/components/connections/validation-message";
-import { useCreateConnection } from "@/hooks/use-connections";
-import { getErrorMessage } from "@/lib/api-client";
-import { commitPending } from "@/lib/chip-values";
-import { authTypeDescription, authTypeLabel } from "@/lib/connection-labels";
+import { useCreateConnection } from "@eddi/app-kit/hooks/use-connections";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { commitPending } from "@eddi/app-kit/lib/chip-values";
+import { authTypeDescription, authTypeLabel } from "@eddi/app-kit/lib/connection-labels";
 import {
   AUTH_TYPES,
   emptyConnection,
@@ -32,8 +32,8 @@ import {
   type ConnectionConfiguration,
   type OAuthConfig,
   type StaticAuth,
-} from "@/lib/api/connections";
-import { validateConnection } from "@/lib/connection-validation";
+} from "@eddi/app-kit/lib/api/connections";
+import { validateConnection } from "@eddi/app-kit/lib/connection-validation";
 
 interface CreateConnectionDialogProps {
   open: boolean;

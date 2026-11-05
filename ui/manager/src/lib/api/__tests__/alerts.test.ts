@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { acknowledgeAlertEvents } from "../alerts";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { acknowledgeAlertEvents } from "@eddi/app-kit/lib/api/alerts";
 
 function captureBody() {
   const bodies: unknown[] = [];

@@ -1,16 +1,16 @@
 import { useState, useCallback, useId } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
-import { ActionTags } from "./action-tags";
+import { ActionTags } from "@eddi/app-kit/components/editors/action-tags";
 import { Field } from "./editor-field";
-import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
+import { MODEL_SUGGESTIONS } from "@eddi/app-kit/lib/model-suggestions";
 import { ModelCombobox } from "@/components/shared/model-combobox";
-import { getProviderConfig } from "@/lib/api/agent-setup";
+import { getProviderConfig } from "@eddi/app-kit/lib/api/agent-setup";
 import { dedicatedParamKeys, modelParamSpec } from "./llm/model-params";
-import { NumberInput } from "./number-input";
-import { RenamableKeyInput } from "./renamable-key-input";
-import { hasOwnKey, nextFreeKey, renameKey } from "./editor-value-utils";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
+import { RenamableKeyInput } from "@eddi/app-kit/components/editors/renamable-key-input";
+import { hasOwnKey, nextFreeKey, renameKey } from "@eddi/app-kit/components/editors/editor-value-utils";
 import {
   ChevronDown,
   ChevronRight,
@@ -38,17 +38,17 @@ import {
   EyeOff,
   AlertTriangle,
 } from "lucide-react";
-import { ContentEditor } from "./content-editor";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ContentEditor } from "@eddi/app-kit/components/editors/content-editor";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
-import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
+import { ConnectionReferenceWarning } from "@eddi/app-kit/components/shared/connection-reference-warning";
 import {
   PropertyInstructionsEditor,
   OutputBuildInstructionsEditor,
   QrBuildInstructionsEditor,
-} from "./apicalls-editor";
-import { EditorSection } from "./editor-section";
-import { cn } from "@/lib/utils";
+} from "@eddi/app-kit/components/editors/apicalls-editor";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { TaskCascadeSection } from "./llm/task-cascade-section";
 import { TaskPricingSection } from "./llm/task-pricing-section";
 import { TaskMemorySection } from "./llm/task-memory-section";
@@ -89,7 +89,7 @@ export type {
   IdentityMaskingConfig,
   ResponseValidation,
   ResponseValidationAction,
-} from "./llm/types";
+} from "@eddi/app-kit/components/editors/llm/types";
 
 import {
   type LlmTask as LangchainTask,
@@ -97,10 +97,10 @@ import {
   type LlmPostResponse,
   HIDDEN_PARAM_KEYS,
   BUILT_IN_TOOLS,
-} from "./llm/types";
+} from "@eddi/app-kit/components/editors/llm/types";
 
-import { ProviderSelect } from "@/components/shared/provider-select";
-import { SELF_HOSTED_PROVIDER_ID, getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalog";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
+import { SELF_HOSTED_PROVIDER_ID, getDefaultBaseUrl, getProviderRegions } from "@eddi/app-kit/lib/llm-provider-catalog";
 
 /** The Model section edits temperature itself; the settings panel leaves it there. */
 const MODEL_SECTION_KEYS: ReadonlySet<string> = new Set(["temperature"]);

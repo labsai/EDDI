@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { alertKeys } from "@/lib/query-keys";
-import { isApiError } from "@/lib/api-client";
+import { alertKeys } from "@eddi/app-kit/lib/query-keys";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   acknowledgeAlertEvent,
   acknowledgeAlertEvents,
@@ -14,7 +14,7 @@ import {
   updateAlertRule,
   type AlertEventQuery,
   type AlertRule,
-} from "@/lib/api/alerts";
+} from "@eddi/app-kit/lib/api/alerts";
 
 /** How often the unacknowledged count refreshes — the Feedback badge's cadence. */
 export const ALERT_POLL_MS = 30_000;

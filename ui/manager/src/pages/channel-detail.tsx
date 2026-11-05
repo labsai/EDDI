@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
@@ -13,14 +13,14 @@ import {
   ExternalLink, Star, AlertTriangle, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-secrets";
-import { AgentPicker } from "@/components/shared/agent-picker";
-import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
+import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";

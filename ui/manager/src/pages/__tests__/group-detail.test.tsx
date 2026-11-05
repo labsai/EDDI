@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderPage } from "@/test/test-utils";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 function renderGroupDetail(id = "grp1", version = "1") {

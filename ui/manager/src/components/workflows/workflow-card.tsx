@@ -6,8 +6,8 @@ import {
   MoreVertical,
   ExternalLink,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import { cn } from "@eddi/app-kit/lib/utils";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 import { useState } from "react";
 import { accessFor } from "@/lib/access";
 import { Link } from "react-router-dom";

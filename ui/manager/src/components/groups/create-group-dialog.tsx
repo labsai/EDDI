@@ -3,23 +3,23 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw, ChevronDown, ChevronUp, Info, Settings } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { cn } from "@eddi/app-kit/lib/utils";
 import {
   useCreateGroup,
   useEnrichedGroupDescriptors,
   useAvailableStyles,
   isStyleSupported,
-} from "@/hooks/use-groups";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+} from "@eddi/app-kit/hooks/use-groups";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import {
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
-} from "@/lib/api/groups";
-import { styleInfo, styleLabel, styleDisplay } from "@/lib/discussion-styles";
+} from "@eddi/app-kit/lib/api/groups";
+import { styleInfo, styleLabel, styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
 import {
   groupSaveProblems,
   idsTakenByOtherMembers,
@@ -27,14 +27,14 @@ import {
   optionsOfferedTo,
   uncoveredRolePhases,
   type GroupSaveProblem,
-} from "@/lib/group-config";
-import { GroupSaveProblems } from "@/components/groups/group-save-problems";
-import { getErrorMessage } from "@/lib/api-client";
+} from "@eddi/app-kit/lib/group-config";
+import { GroupSaveProblems } from "@eddi/app-kit/components/groups/group-save-problems";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   getGroupTemplates,
   DEFAULT_AGENT_TIMEOUT_SECONDS,
   type GroupTemplate,
-} from "@/lib/group-templates";
+} from "@eddi/app-kit/lib/group-templates";
 
 interface CreateGroupDialogProps {
   open: boolean;

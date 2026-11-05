@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, act } from "@testing-library/react";
-import { useSmartAutoScroll } from "../use-smart-auto-scroll";
+import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 
 /**
  * The reported bug: while a reply is streaming, the user cannot scroll up.

@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { act, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ChatPage } from "@/pages/chat";
-import { useChatStore } from "@/hooks/use-chat";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 // The chat store is module-global; reset it so paused state can't leak between
 // tests in this file.

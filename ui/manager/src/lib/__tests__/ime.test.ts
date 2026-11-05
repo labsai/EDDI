@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 
 describe("isImeComposing", () => {
   it("is true while a composition is open", () => {

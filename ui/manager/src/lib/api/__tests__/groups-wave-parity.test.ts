@@ -14,9 +14,9 @@ import {
   type AgentGroupConfiguration,
   type TranscriptEntry,
   type TranscriptEntryType,
-} from "../groups";
+} from "@eddi/app-kit/lib/api/groups";
 
-vi.mock("../../api-client", () => ({
+vi.mock("@eddi/app-kit/lib/api-client", () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock("../../api-client", () => ({
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (await import("../../api-client")).api as any;
+const api = (await import("@eddi/app-kit/lib/api-client")).api as any;
 
 beforeEach(() => {
   vi.clearAllMocks();
