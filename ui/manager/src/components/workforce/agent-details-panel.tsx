@@ -8,6 +8,7 @@ import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { getWorkflow } from "@/lib/api/workflows";
 import { useDeployedAgents, useChatStore } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
+import { ActiveToolsList } from "@/components/workforce/active-tools-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,7 +35,6 @@ import {
   ChevronDown,
   ChevronUp,
   Terminal,
-  Wrench,
 } from "lucide-react";
 
 interface AgentDetailsPanelProps {
@@ -142,23 +142,6 @@ export function AgentDetailsPanel({
         ? null // -1 means unlimited, omit
         : null;
 
-  // Build comprehensive list of active tool names
-  const activeTools: string[] = [];
-  if (firstTask?.tools?.length) {
-    activeTools.push(...firstTask.tools);
-  }
-  if (firstTask?.builtInToolsWhitelist?.length) {
-    activeTools.push(...firstTask.builtInToolsWhitelist);
-  }
-  if (firstTask?.enableHttpCallTools) activeTools.push("HTTP Calls");
-  if (firstTask?.enableMcpCallTools) activeTools.push("MCP Tools");
-  if (agentData?.enableMemoryTools) activeTools.push("Memory");
-  if (agentData?.capabilities?.length) {
-    for (const cap of agentData.capabilities) {
-      if (!activeTools.includes(cap.skill)) activeTools.push(cap.skill);
-    }
-  }
-
   const handleCopyId = useCallback(async () => {
     if (!realAgentId) return;
     try {
@@ -199,7 +182,7 @@ export function AgentDetailsPanel({
 
   if (!agentId) {
     return (
-      <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
+      <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto overflow-x-hidden flex flex-col max-lg:hidden", className)}>
         <div className="p-3 border-b border-border flex items-center justify-between shrink-0 bg-muted/20">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
             <Bot className="h-3.5 w-3.5 text-primary" />
@@ -232,7 +215,7 @@ export function AgentDetailsPanel({
   const description = agentData?.description || resolvedDescriptor?.description;
 
   return (
-    <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto flex flex-col max-lg:hidden", className)}>
+    <div className={cn("w-80 shrink-0 border-s border-border bg-card overflow-y-auto overflow-x-hidden flex flex-col max-lg:hidden", className)}>
       {/* Header bar */}
       <div className="p-3 border-b border-border flex items-center justify-between shrink-0 bg-muted/20">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -329,13 +312,13 @@ export function AgentDetailsPanel({
 
           {/* Model & LLM Configuration Card */}
           <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2 min-w-0">
+              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5 shrink-0">
                 <Cpu className="h-3.5 w-3.5 text-purple-400" />
                 {t("Workforce.agentEditor.llmConfig", "Model & LLM Engine")}
               </h5>
               {displayModel && (
-                <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono">
+                <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono min-w-0 max-w-full truncate" title={displayModel}>
                   {displayModel}
                 </Badge>
               )}
@@ -374,30 +357,7 @@ export function AgentDetailsPanel({
                 </>
               )}
 
-              {/* Specific Active Tools List */}
-              <div className="space-y-1 pt-1 border-t border-border/40">
-                <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
-                  <Wrench className="h-3 w-3 text-sky-400" />
-                  {t("Workforce.agentEditor.activeTools", "Active Tools")}
-                </span>
-                <div className="flex flex-wrap gap-1 pt-0.5">
-                  {activeTools.length > 0 ? (
-                    activeTools.map((tool, idx) => (
-                      <Badge
-                        key={`${tool}-${idx}`}
-                        variant="secondary"
-                        className="text-[10px] bg-sky-500/10 text-sky-400 border-sky-500/20"
-                      >
-                        {tool}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground italic">
-                      {t("Workforce.agentEditor.noTools", "None configured")}
-                    </span>
-                  )}
-                </div>
-              </div>
+              <ActiveToolsList task={firstTask} enableMemoryTools={agentData?.enableMemoryTools} />
             </div>
           </div>
 
