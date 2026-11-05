@@ -790,10 +790,11 @@ filters on the run id.
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata) |
 | `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 naming the cause when the provider or store fails) |
+| `POST` | `/ragstore/rags/{id}/evaluate?version=N` | EDIT | Benchmark retrieval: golden queries `{query, expected[], k?}` run through the same search and scored — first-hit rank, hit@k, reciprocal rank, recall@k, MRR — optionally against a baseline (one embedding call per query; see [Evaluating retrieval](#evaluating-retrieval)) |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
 Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
-design, and a run rewrites what every agent using it retrieves. Reading chunks and searching need EDIT
+design, and a run rewrites what every agent using it retrieves. Reading chunks, searching and evaluating need EDIT
 for the same reason in the other direction: they return the knowledge base's text and cost an
 embedding call each, while the document listing returns only ingestion state and needs VIEW.
 
@@ -860,6 +861,135 @@ Replacing a document's chunks needs `removeAll(Filter)` on the vector store, wit
 langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
 and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
 backend.
+
+## Evaluating retrieval
+
+`POST /ragstore/rags/{id}/search` shows what one query retrieves. To tell whether a change — a new
+chunk size, another embedding model, a different `minScore` — made retrieval better or worse, run a
+fixed set of **golden queries** through the same search and score the results:
+
+```
+POST /ragstore/rags/{id}/evaluate?version=N
+```
+
+Each query names the documents a good retrieval returns. The endpoint runs every query exactly as
+`/search` does (same embedding model in query mode, same isolation filter, same `sourceId` narrowing)
+and reports, per query, the rank of the first hit, hit@k and the reciprocal rank, and over all
+queries the hit rate, recall@k and MRR. It needs **EDIT**, like `/search`, and costs **one embedding
+call per query**; the request is synchronous.
+
+```json
+{
+  "k": 5,
+  "queries": [
+    { "id": "refunds", "query": "How do I get my money back?", "expected": ["refund-policy"] },
+    { "id": "shipping", "query": "Do you ship to Austria?", "expected": ["shipping-eu", "faq"], "k": 10 }
+  ]
+}
+```
+
+| Field | Default | Meaning |
+| ----- | ------- | ------- |
+| `queries` | — (required) | The golden queries: `query` (required, at most 2,000 characters), `expected` (required, at least one non-blank identifier, at most 100), optional `id` and `k` |
+| `k` | the knowledge base's `maxResults`, else 5 | Cut-off for queries that set none. Between 1 and 50, the most a search returns |
+| `minScore` | the knowledge base's `minScore`, else 0 | As for `/search`; between 0 and 1 |
+| `sourceId` | — | Narrows every query to one ingestion source's chunks |
+| `matchKeys` | `["source", "documentId", "url"]` | Which chunk metadata keys identify a document (at most 10) |
+| `baseline` | — | An earlier run to compare with (below) |
+
+At most `eddi.rag.evaluation.max-queries` queries (default 100) go in one request; more is a 400
+naming the setting, as is every other malformed request — all checked before the first embedding
+call. A provider or store failure is a 502 with the `queryIndex` it failed at; nothing partial is
+returned.
+
+### What counts as a hit
+
+A retrieved chunk is a hit for an expected document when the value of one of the `matchKeys` in the
+chunk's metadata **equals** the expected identifier — exactly and **case-sensitively** (the expected
+value is trimmed; nothing else is normalized). The defaults cover both ways documents get in:
+
+- `source` — the `documentName` of a document ingested with `POST /{id}/ingest`.
+- `documentId` and `url` — what an [ingestion source](#ingestion-sources) stores: the page URL for a
+  web source, the file id for an upload source (see the source's documents listing).
+
+To match on something else, say the file name an upload source stores as `title`, send
+`"matchKeys": ["title"]`. Several chunks of one document count once, and one chunk can satisfy two
+expected documents if it carries both identifiers.
+
+### The numbers
+
+| Metric | Per query | Aggregate (`summary`) |
+| ------ | --------- | --------------------- |
+| `firstHitRank` | 1-based rank of the first chunk that hits any expected document within the top `k`; null without one | — |
+| `hit` / `hitRate` | hit@k: whether there is a first hit | Share of queries with a hit |
+| `reciprocalRank` / `mrr` | `1 / firstHitRank`, 0 without a hit | Mean: MRR@k |
+| `recall` | recall@k: share of the **distinct** expected documents found in the top `k` | Mean over queries |
+
+Both hit rate and recall are returned because they differ as soon as a query expects more than one
+document: a query expecting `["a", "b"]` that retrieves only `a` has a hit but a recall of 0.5. Each
+query also lists `found`, `missing` and `retrieved` — every result's rank, score, identifiers and
+whether it was relevant — so a miss can be read without a second search. Chunk text is not returned;
+that is what `/search` is for.
+
+```json
+{
+  "k": 5,
+  "minScore": 0.0,
+  "matchKeys": ["source", "documentId", "url"],
+  "summary": { "queries": 2, "scoredQueries": 2, "hitRate": 1.0, "recall": 0.75, "mrr": 0.75 },
+  "queries": [
+    {
+      "id": "refunds", "query": "How do I get my money back?", "k": 5, "expected": ["refund-policy"],
+      "resultCount": 5, "firstHitRank": 2, "hit": true, "reciprocalRank": 0.5, "recall": 1.0,
+      "found": ["refund-policy"], "missing": [],
+      "retrieved": [
+        { "rank": 1, "score": 0.83, "ids": ["faq"], "relevant": false },
+        { "rank": 2, "score": 0.81, "ids": ["refund-policy"], "relevant": true }
+      ]
+    }
+  ]
+}
+```
+
+(The second query is left out above.)
+
+### Comparing with a baseline
+
+Send an earlier response's `queries` back as `baseline` — pasting the whole earlier response works,
+fields the comparison does not read are ignored — and the response gains a `comparison`:
+
+```json
+{
+  "queries": [ ... ],
+  "baseline": { "queries": [ { "id": "refunds", "k": 5, "hit": true, "reciprocalRank": 1.0, "recall": 1.0 } ] }
+}
+```
+
+```json
+"comparison": {
+  "comparedQueries": 1, "hitRateDelta": 0.0, "recallDelta": 0.0, "mrrDelta": -0.5,
+  "regressions": 1, "improvements": 0, "regressed": true,
+  "queries": [ { "key": "refunds", "hitBefore": true, "hitNow": true, "reciprocalRankDelta": -0.5,
+                 "recallDelta": 0.0, "regressed": true, "improved": false, "kChanged": false } ],
+  "onlyInCurrent": [], "onlyInBaseline": []
+}
+```
+
+- Queries are paired by `id`, or by their text when they have none. Two queries with one key on the
+  same side are a 400 — the pairing would be a guess.
+- A query **regressed** when its reciprocal rank or its recall went down; either is enough, so a
+  query that ranks its first hit higher but loses a second document is still flagged. It
+  **improved** when something went up and nothing went down.
+- The aggregate deltas are taken over the queries **both runs contain**, so adding or dropping a
+  query never moves them; those are listed in `onlyInCurrent` and `onlyInBaseline` instead.
+- `regressed` at the top is true when any query regressed or any aggregate went down.
+- `kChanged` marks a query scored at a different cut-off than in the baseline, where the deltas
+  compare different things. A baseline value left out (a hand-written baseline with only `recall`,
+  say) is simply not compared.
+
+The scores move with the knowledge base as well as with the configuration: re-ingesting or crawling
+in between changes what there is to find. Compare runs over the same content when the question is
+whether a configuration change helped.
 
 ## Observability
 
