@@ -1074,6 +1074,10 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                     clauses.add(fieldExpression + " LIKE ? ESCAPE '\\'");
                     params.add("%" + escapeLike(contains.text()) + "%");
                     substringSearch = true;
+                } else if (qf.getFilter() instanceof IResourceFilter.ContainsIgnoreCase contains) {
+                    // The case-insensitive twin: the same escaped pattern, under ILIKE.
+                    clauses.add(fieldExpression + " ILIKE ? ESCAPE '\\'");
+                    params.add("%" + escapeLike(contains.text()) + "%");
                 } else if (qf.getFilter() instanceof Boolean boolVal) {
                     clauses.add("COALESCE((" + fieldExpression + ")::boolean, false) = ?");
                     params.add(boolVal);

@@ -80,6 +80,46 @@ public interface IRestConversationStore {
                                                              @QueryParam("conversationState") ConversationState conversationState,
                                                              @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
 
+    /**
+     * Searches the caller's own conversations by title, newest first. Paged like
+     * the listing: {@code index} is a page of results, {@code index * limit} above
+     * 10,000 is refused, and a page can come back short (a conversation whose
+     * memory is gone is left out), so page until one comes back empty.
+     * <p>
+     * <b>Only the caller's conversations</b>, for every caller — an administrator
+     * included: this is "my conversations", and an administrator's view of
+     * everybody's is the listing's {@code filter}. The owner is pushed into the
+     * query as an exact match on the descriptor's {@code userId}, so another user's
+     * conversation is never read. With authorization disabled there is no owner to
+     * scope to and every conversation is searched, as the listing shows every
+     * conversation then.
+     * <p>
+     * <b>Titles only.</b> A title never comes from a secret turn (it is derived
+     * after the turn's secret scrub, see {@code ConversationTitles}), it lives on
+     * the conversation descriptor, and GDPR erasure deletes every descriptor of the
+     * user — so nothing searchable outlives an erasure. Conversation outputs are
+     * not searched: see {@code docs/rest-api-reference.md}.
+     *
+     * @param query
+     *            the text to find in a title — literal (no wildcards or patterns),
+     *            case-insensitive, whitespace collapsed; 1 to 100 characters
+     */
+    @GET
+    @Path("/search")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Search my conversations",
+               description = "The caller's own conversations whose title contains q (literal, case-insensitive), newest first. "
+                       + "Paged with index and limit like the listing. Titles only; never another user's conversation.")
+    @APIResponse(responseCode = "200", description = "The matching conversation descriptors (possibly empty).")
+    @APIResponse(responseCode = "400", description = "q is blank or longer than 100 characters, or the page is out of bounds.")
+    List<ConversationDescriptor> searchConversations(@Parameter(name = "q", required = true, example = "Rome",
+                                                                description = "Text to find in the title (1-100 characters)")
+    @QueryParam("q") String query,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit);
+
     @GET
     @Path("/simple/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)

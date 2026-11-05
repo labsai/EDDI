@@ -151,6 +151,7 @@
     "GET /conversations/{conversationId}/attachments/{storageRef}",
     "GET /conversationstore/conversations",
     "GET /conversationstore/conversations/active/{agentId}",
+    "GET /conversationstore/conversations/search",
     "GET /conversationstore/conversations/simple/{conversationId}",
     "GET /conversationstore/conversations/{conversationId}",
     "GET /deploymentstore/deployments",

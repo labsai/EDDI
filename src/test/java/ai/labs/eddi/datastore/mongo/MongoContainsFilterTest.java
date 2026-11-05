@@ -68,6 +68,19 @@ class MongoContainsFilterTest extends MongoTestBase {
         assertEquals(Set.of(hit), find("name", new IResourceFilter.Contains("% off 'today' \\o/ a_b")));
     }
 
+    @Test
+    @DisplayName("ContainsIgnoreCase: literal, anywhere, any case; wildcards and regex characters are text")
+    void containsIgnoreCaseIsALiteralSubstringOfAnyCase() throws IOException {
+        String lower = store(Map.of("title", "trip to rome (a+b) 50% a_b"));
+        String upper = store(Map.of("title", "TRIP TO ROME (A+B) 50% A_B!"));
+        store(Map.of("title", "trip to rome (aab) 50X axb")); // "+", "%" and "_" are not special
+        store(Map.of("title", "trip to rome abcx")); // "rome .+x" as a regex would match this
+        store(Map.of("name", "trip to rome (a+b) 50% a_b")); // the field is absent
+
+        assertEquals(Set.of(lower, upper), find("title", new IResourceFilter.ContainsIgnoreCase("Rome (A+b) 50% a_B")));
+        assertEquals(Set.of(), find("title", new IResourceFilter.ContainsIgnoreCase("rome .+x")));
+    }
+
     /**
      * The agent group the conversation listing pushes into its descriptor query
      * (RestConversationStore.listingRestrictions): the descriptor names this agent,

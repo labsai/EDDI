@@ -935,6 +935,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                 } else if (queryFilter.getFilter() instanceof IResourceFilter.Contains contains) {
                     // An unanchored regex already finds the text anywhere; no .* wrapping.
                     filters.add(Filters.regex(queryFilter.getField(), StringUtilities.escapeRegexChars(contains.text())));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.ContainsIgnoreCase contains) {
+                    // Same literal (escaped) text, matched without regard to case.
+                    filters.add(Filters.regex(queryFilter.getField(), StringUtilities.escapeRegexChars(contains.text()), "i"));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }

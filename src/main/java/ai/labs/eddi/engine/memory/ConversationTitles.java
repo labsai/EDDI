@@ -221,4 +221,27 @@ public final class ConversationTitles {
         }
         return normalized;
     }
+
+    /** Longest text the conversation search accepts, after normalizing. */
+    public static final int MAX_SEARCH_QUERY_LENGTH = 100;
+
+    /**
+     * A search text, normalized as titles are stored ({@link #normalize}), so that
+     * a query with a double space or a line break still finds the title it was
+     * typed from. The result is literal text, never a pattern: the storage escapes
+     * it for the regex (MongoDB) or {@code LIKE} (PostgreSQL) it is matched with.
+     *
+     * @throws BadRequestException
+     *             when it is blank, or longer than {@link #MAX_SEARCH_QUERY_LENGTH}
+     */
+    public static String requireValidSearchQuery(String query) {
+        String normalized = normalize(query);
+        if (normalized.isEmpty()) {
+            throw new BadRequestException("q must not be blank");
+        }
+        if (normalized.length() > MAX_SEARCH_QUERY_LENGTH) {
+            throw new BadRequestException("q must be at most " + MAX_SEARCH_QUERY_LENGTH + " characters");
+        }
+        return normalized;
+    }
 }

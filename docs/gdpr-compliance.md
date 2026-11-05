@@ -193,7 +193,9 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   flag — a title derived from the user's first non-secret message, written by a model
   from it (`titleGeneration`), or set by the user. Titles live on the conversation
   descriptor, so the erasure step "Conversation descriptors" removes them, archived
-  copies of soft-deleted conversations included
+  copies of soft-deleted conversations included. The conversation search
+  (`GET /conversationstore/conversations/search`) matches titles only and keeps no
+  index of its own, so it finds nothing of an erased user's conversations
 - All managed conversation mappings (intent→conversation bindings)
 - All audit processing records (capped at 10,000 entries)
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —
