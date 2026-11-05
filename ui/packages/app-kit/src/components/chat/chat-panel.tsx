@@ -8,6 +8,7 @@ import { preferredChatEnvironment } from "../../lib/deployment-environments";
 import { toast } from "sonner";
 import { getErrorMessage } from "../../lib/api-client";
 import {
+  chatConversation,
   useChatStore,
   useDeployedAgents,
   useStartConversation,
@@ -32,6 +33,7 @@ import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "../../hooks/use-chat-ratings";
 import { lastStepIndex, ratableSteps } from "@eddi/core";
+import { ReplyAnnouncer, type AnnouncedMessage } from "@eddi/conversation";
 import { ChatActivity } from "./chat-activity";
 import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
@@ -71,6 +73,8 @@ import {
   Wrench,
   ListOrdered,
   Star,
+  Square,
+  WifiOff,
 } from "lucide-react";
 
 export interface ChatPanelProps {
@@ -115,6 +119,14 @@ export function ChatPanel({
   const agentListboxId = useId();
 
   const [contextOpen, setContextOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  /** Put the caret back in the composer: after a send, a new chat, Stop. */
+  const focusComposer = useCallback(() => {
+    requestAnimationFrame(() => {
+      rootRef.current?.querySelector<HTMLElement>('[data-testid="chat-input"]')?.focus();
+    });
+  }, []);
 
   // Store state
   const messages = useChatStore((s) => s.messages);
@@ -123,6 +135,9 @@ export function ChatPanel({
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
+  // Undo, redo and rerun raise isProcessing too; only a turn being answered can be stopped.
+  const historyBusy = useChatStore((s) => s.historyBusy);
+  const reconnecting = useChatStore((s) => s.reconnecting);
   const isPaused = useChatStore((s) => s.isPaused);
   const pauseReason = useChatStore((s) => s.pauseReason);
   const pausedAt = useChatStore((s) => s.pausedAt);
@@ -413,9 +428,9 @@ export function ChatPanel({
     useChatStore.getState().clearMessages();
     startConversation.mutate(
       { agentId: selectedAgentId, environment: chatEnvironment },
-      { onError: (err) => toast.error(getErrorMessage(err)) },
+      { onSuccess: focusComposer, onError: (err) => toast.error(getErrorMessage(err)) },
     );
-  }, [selectedAgentId, startConversation, chatEnvironment]);
+  }, [selectedAgentId, startConversation, chatEnvironment, focusComposer]);
 
   // ── Attachment upload (shared staging hook — also used by the operator) ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -514,6 +529,42 @@ export function ChatPanel({
   const lastMessage = messages[messages.length - 1];
   const showRerun = lastMessage?.role === "agent" && lastMessage.isError === true;
 
+  // ── Stop ──
+  // Aborts the stream and asks the server to cancel the turn; the controller
+  // then checks that it took, and says so when it did not (a cluster can run
+  // the turn on another pod — docs/hitl.md).
+  const canStop = Boolean(conversationId) && isProcessing && !historyBusy && !conversationBusy;
+  const handleStop = useCallback(() => {
+    void chatConversation.stop();
+    focusComposer();
+  }, [focusComposer]);
+
+  // Esc stops a running turn: from anywhere in the panel, or from the page
+  // itself when nothing else has focus. An open dialog or menu keeps its Esc.
+  useEffect(() => {
+    if (!canStop) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || isImeComposing(e)) return;
+      const target = e.target as Node | null;
+      const inPanel = !!target && !!rootRef.current?.contains(target);
+      if (!inPanel && target !== document.body) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"]')) return;
+      e.preventDefault();
+      handleStop();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canStop, handleStop]);
+
+  /** "Support Bot said:" — what the screen reader hears before a reply. */
+  const speaker = useCallback(
+    () =>
+      t("conversation.speaker.agent", "{{name}} said:", {
+        name: selectedAgentName?.trim() || t("conversation.speaker.agentDefault", "Assistant"),
+      }),
+    [t, selectedAgentName],
+  );
+
   const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
     // A rerun replaces the last reply, so its thumb no longer applies (locally;
@@ -529,7 +580,7 @@ export function ChatPanel({
   }, [rerunConversation, t, messages, clearRatedStep]);
 
   return (
-    <div className={cn(
+    <div ref={rootRef} className={cn(
       "flex h-full min-w-0 overflow-hidden bg-background",
       !embedded && "rounded-xl border border-border shadow-sm"
     )}>
@@ -835,13 +886,16 @@ export function ChatPanel({
         <div className="relative flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
-          className="h-full overflow-y-auto"
+          // A stable gutter: the scrollbar appearing as the transcript grows
+          // must not reflow every line of it.
+          className="h-full overflow-y-auto [scrollbar-gutter:stable]"
           onScroll={handleScroll}
-          // The transcript is a log: new agent messages are announced as they
-          // arrive instead of being silent to a screen reader.
+          // The transcript is a log, but not a live one: a streamed reply would
+          // be read token by token. The announcer below says each reply once,
+          // when it is complete.
           role="log"
-          aria-live="polite"
-          aria-relevant="additions"
+          aria-live="off"
+          aria-busy={isProcessing}
           aria-label={t("chat.transcript", "Conversation")}
         >
           {!selectedAgentId ? (
@@ -932,6 +986,19 @@ export function ChatPanel({
                 ))}
               <GuardrailActivity messages={messages} isProcessing={isProcessing} />
 
+              {/* The stream dropped mid-reply; the turn is being followed on
+                  the server until it settles (the controller's reconnect). */}
+              {reconnecting && (
+                <div
+                  className="flex items-center gap-2 px-4 py-2 text-xs text-warn-600 dark:text-warn-400"
+                  role="status"
+                  data-testid="chat-reconnecting"
+                >
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{t("conversation.indicator.reconnecting", "Connection lost. Reconnecting…")}</span>
+                </div>
+              )}
+
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && !stepMovePending && (
                 <div className="flex justify-center py-2">
@@ -952,12 +1019,15 @@ export function ChatPanel({
           )}
           </div>
 
+          <ReplyAnnouncer messages={messages as AnnouncedMessage[]} speaker={speaker} className="sr-only" />
+
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
             <button
               onClick={() => scrollToBottom("smooth")}
               className="absolute bottom-4 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
+              aria-label={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
               <ArrowDown className="h-4 w-4" />
@@ -1030,6 +1100,7 @@ export function ChatPanel({
             onSend={handleSend}
             disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy || reviewPending}
             isProcessing={isProcessing}
+            onStop={canStop ? handleStop : undefined}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
             fileInputRef={fileInputRef}
@@ -1065,6 +1136,7 @@ function ChatInputWithSecretToggle({
   onSend,
   disabled = false,
   isProcessing = false,
+  onStop,
   isSecretMode,
   onToggleSecret,
   fileInputRef,
@@ -1084,6 +1156,8 @@ function ChatInputWithSecretToggle({
   onSend: (message: string, isSecret?: boolean) => boolean;
   disabled?: boolean;
   isProcessing?: boolean;
+  /** Set while a turn runs that can be stopped: the send button becomes Stop. */
+  onStop?: () => void;
   isSecretMode: boolean;
   onToggleSecret: () => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -1118,6 +1192,9 @@ function ChatInputWithSecretToggle({
     }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
+      // A click on Send moved focus to the button; the next message starts
+      // in the composer. (A touch keyboard stays as the person left it.)
+      if (!window.matchMedia?.("(pointer: coarse)").matches) textareaRef.current.focus();
     }
   }, [value, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
 
@@ -1310,6 +1387,19 @@ function ChatInputWithSecretToggle({
           />
         )}
 
+        {onStop ? (
+          /* While the agent answers, the send button's place is Stop's (Esc too). */
+          <button
+            type="button"
+            onClick={onStop}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
+            title={t("chat.stopWithKey", "Stop (Esc)")}
+            aria-label={t("chat.stop", "Stop")}
+            data-testid="chat-stop"
+          >
+            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+          </button>
+        ) : (
         <button
           onClick={handleSend}
           disabled={!canSend}
@@ -1328,6 +1418,7 @@ function ChatInputWithSecretToggle({
             <Send className="h-5 w-5" />
           )}
         </button>
+        )}
       </div>
       {/* Secret mode is a single-line password field — a newline hint there
           would promise something the input cannot do. */}

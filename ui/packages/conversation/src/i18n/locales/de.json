@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "Ich sehe genauer hin…",
   "conversation.indicator.thinking": "Denke nach…",
   "conversation.indicator.guardrail": "Antwort wird geprüft…",
+  "conversation.indicator.reconnecting": "Verbindung verloren. Neu verbinden…",
   "conversation.message.noResponse": "Keine Antwort",
   "conversation.speaker.you": "Sie sagten:",
   "conversation.speaker.agent": "{{name}} sagte:",
@@ -114,5 +115,8 @@
   "conversation.guardrail.actionBlock": "blockiert",
   "conversation.guardrail.actionRedact": "geschwärzt",
   "conversation.guardrail.actionReprompt": "Modell erneut angefragt",
-  "conversation.guardrail.actionWarn": "markiert"
+  "conversation.guardrail.actionWarn": "markiert",
+  "conversation.stop.finished": "Das Anhalten kam zu spät: Die Antwort war auf dem Server schon fertig und gilt. Hier ist sie vollständig.",
+  "conversation.stop.stillRunning": "Das Anhalten hat diesen Zug nicht erreicht: Er läuft auf einem anderen Server weiter, und was er tut, gilt. Seine Antwort erscheint, wenn du die Unterhaltung erneut öffnest.",
+  "conversation.stop.unreachable": "Das Anhalten hat den Server nicht erreicht. Der Zug läuft dort vielleicht weiter; öffne die Unterhaltung erneut, um zu sehen, wie er endete."
 }

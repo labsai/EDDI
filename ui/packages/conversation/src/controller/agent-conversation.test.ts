@@ -442,6 +442,55 @@ describe("send — refusals and failures", () => {
   });
 });
 
+describe("send — reconnecting after a dropped stream", () => {
+  const dropping = () =>
+    fakeTransport({
+      stream: vi.fn(async function* () {
+        yield ev("token", "Part of");
+        throw new TypeError("network");
+      }),
+    });
+
+  it("follows the turn until it settles and shows its reply in place of the partial one", async () => {
+    const transport = dropping();
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0, 0, 0] });
+    transport.read
+      .mockReset()
+      .mockRejectedValueOnce(new TypeError("still offline"))
+      .mockResolvedValueOnce({ conversationState: "IN_PROGRESS" })
+      .mockResolvedValueOnce({ conversationState: "READY", conversationOutputs: [output("Part of the answer", { quickReplies: [{ value: "More" }] })] });
+    const seen: boolean[] = [];
+    c.subscribe(() => seen.push(c.getSnapshot().reconnecting));
+    const result = await c.send("question");
+    expect(result).toEqual({ outcome: "sent" });
+    expect(seen).toContain(true);
+    expect(c.getSnapshot().reconnecting).toBe(false);
+    expect(transport.read).toHaveBeenCalledTimes(3);
+    expect(texts(c)).toEqual(["question", "Part of the answer"]);
+    expect(c.getSnapshot().quickReplies).toEqual([{ value: "More" }]);
+    expect(c.getSnapshot().isProcessing).toBe(false);
+  });
+
+  it("calls the connection lost when the turn never settles", async () => {
+    const transport = dropping();
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0] });
+    transport.read.mockResolvedValue({ conversationState: "IN_PROGRESS" });
+    await c.send("question");
+    expect(texts(c).slice(-1)[0]).toContain("Part of\n\n⚠️ Connection lost");
+    expect(c.getSnapshot().reconnecting).toBe(false);
+  });
+
+  it("does not reconnect without the option, or before any of the reply arrived", async () => {
+    const transport = dropping();
+    const c = await opened(transport);
+    transport.read.mockClear();
+    transport.read.mockResolvedValue({ conversationState: "IN_PROGRESS" });
+    await c.send("question");
+    expect(c.getSnapshot().reconnecting).toBe(false);
+    expect(transport.read).toHaveBeenCalledTimes(1); // the existing re-read for the state
+  });
+});
+
 describe("send — snapshot transports", () => {
   it("non-streaming: applies the reply snapshot", async () => {
     const say = vi.fn(async () => ({ conversationState: "READY" as const, conversationOutputs: [output("Plain", { quickReplies: [{ value: "Q" }] })] }));
@@ -542,6 +591,98 @@ describe("pause, cancel, stop", () => {
     expect(transport.cancel).toHaveBeenCalledWith("c1");
     expect(c.getSnapshot().messages.map((m) => m.content)).toEqual(["long"]);
     expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+  });
+
+  describe("whether Stop took (a cluster can run the turn on another pod)", () => {
+    /** A turn that streams one token and then waits until it is aborted. */
+    function stoppable(over: Partial<AgentTransport> = {}) {
+      const stream = vi.fn((_id: string | null, _t: string, o: { signal: AbortSignal }) =>
+        (async function* () {
+          yield ev("token", "Half a re");
+          await new Promise((_, reject) => o.signal.addEventListener("abort", () => reject(new DOMException("a", "AbortError"))));
+        })(),
+      );
+      return fakeTransport({ stream, ...over });
+    }
+
+    async function stopMidTurn(transport: ReturnType<typeof stoppable>, reads: (read: ReturnType<typeof vi.fn>) => void = () => {}) {
+      const c = await opened(transport, { stopVerifyDelaysMs: [0, 0] });
+      transport.read.mockReset();
+      reads(transport.read);
+      const turn = c.send("long");
+      await vi.waitFor(() => expect(texts(c).slice(-1)[0]).toBe("Half a re"));
+      await c.stop();
+      await turn;
+      return c;
+    }
+
+    it("says nothing when the conversation stays interrupted", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, (read) =>
+        read.mockResolvedValue({ conversationState: "EXECUTION_INTERRUPTED", conversationOutputs: [] }),
+      );
+      // The turn's own re-read after its stream, then the two checks.
+      expect(transport.read).toHaveBeenCalledTimes(3);
+      expect(c.getSnapshot().messages.some((m) => m.kind === "notice")).toBe(false);
+      expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+    });
+
+    it("says the turn finished anyway and shows its whole reply in place of the part Stop left", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, (read) =>
+        read.mockResolvedValue({ conversationState: "READY", conversationOutputs: [output("Half a reply, finished on pod B")] }),
+      );
+      expect(texts(c)).toEqual([
+        "long",
+        "Stop came too late: the reply had already finished on the server, and it counts. Here it is in full.",
+        "Half a reply, finished on pod B",
+      ]);
+      expect(c.getSnapshot().conversationState).toBe("READY");
+    });
+
+    it("says the turn is still running when a later read finds it in progress", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, (read) =>
+        read
+          .mockResolvedValueOnce({ conversationState: "EXECUTION_INTERRUPTED" })
+          .mockResolvedValueOnce({ conversationState: "IN_PROGRESS" }),
+      );
+      const last = c.getSnapshot().messages.slice(-1)[0];
+      expect(last?.kind).toBe("notice");
+      expect(last?.content).toContain("still running on another server");
+      expect(texts(c)).toContain("Half a re");
+    });
+
+    it("a 409 means the turn had already finished: shown, not swallowed", async () => {
+      const transport = stoppable({ cancel: vi.fn(async () => Promise.reject(new ApiError(409, "nothing", "test"))) });
+      const c = await stopMidTurn(transport, (read) =>
+        read.mockResolvedValue({ conversationState: "READY", conversationOutputs: [output("Complete")] }),
+      );
+      expect(transport.read).toHaveBeenCalledTimes(2); // the turn's re-read, then one check
+      expect(texts(c).slice(-2)).toEqual([expect.stringContaining("Stop came too late"), "Complete"]);
+    });
+
+    it("says so when the cancel could not reach the server", async () => {
+      const transport = stoppable({ cancel: vi.fn(async () => Promise.reject(new TypeError("offline"))) });
+      const c = await stopMidTurn(transport);
+      expect(transport.read).toHaveBeenCalledTimes(1); // only the turn's own re-read
+      expect(texts(c).slice(-1)[0]).toContain("Stop could not reach the server");
+    });
+
+    it("stops checking once the user sends the next turn", async () => {
+      const transport = stoppable();
+      const c = await opened(transport, { stopVerifyDelaysMs: [30] });
+      transport.read.mockReset().mockResolvedValue({ conversationState: "READY", conversationOutputs: [output("next")] });
+      const turn = c.send("long");
+      await vi.waitFor(() => expect(texts(c).slice(-1)[0]).toBe("Half a re"));
+      const stopping = c.stop();
+      await turn;
+      transport.stream = vi.fn(() => events(done({ conversationState: "READY", conversationOutputs: [output("next")] })));
+      transport.read.mockResolvedValue({ conversationState: "READY", conversationOutputs: [output("next")] });
+      await c.send("again");
+      await stopping;
+      expect(texts(c).some((t) => t.includes("Stop came too late"))).toBe(false);
+    });
   });
 
   it("the refresh after a pause re-reads without duplicating the shown placeholder", async () => {

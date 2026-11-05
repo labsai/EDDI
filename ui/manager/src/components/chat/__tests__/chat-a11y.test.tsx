@@ -65,10 +65,14 @@ describe("ChatPanel — transcript and agent selector accessibility", () => {
     );
   });
 
-  it("exposes the transcript as a polite live log", () => {
+  it("exposes the transcript as a log, and says replies through one polite status region", () => {
     renderWithProviders(<ChatPanel />);
     const log = screen.getByRole("log");
-    expect(log).toHaveAttribute("aria-live", "polite");
+    // Not live itself: a streamed reply would be read token by token.
+    expect(log).toHaveAttribute("aria-live", "off");
+    const announcer = screen.getByTestId("reply-announcer");
+    expect(announcer).toHaveAttribute("role", "status");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
   });
 
   it("filters agents with the search box and picks one with the keyboard", async () => {

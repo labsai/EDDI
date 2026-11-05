@@ -186,7 +186,9 @@
       "errDisabled": "Esta versão do agente não pede avaliações.",
       "errOwner": "Somente a pessoa que teve esta conversa pode avaliá-la.",
       "errGeneric": "Não foi possível salvar a avaliação."
-    }
+    },
+    "stop": "Parar",
+    "stopWithKey": "Parar (Esc)"
   },
   "editor": {
     "deployFailed": "Falha na implantação",

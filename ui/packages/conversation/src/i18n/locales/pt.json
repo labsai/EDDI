@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "Analisando com mais cuidado…",
   "conversation.indicator.thinking": "Pensando…",
   "conversation.indicator.guardrail": "Verificando a resposta…",
+  "conversation.indicator.reconnecting": "Conexão perdida. Reconectando…",
   "conversation.message.noResponse": "Sem resposta",
   "conversation.speaker.you": "Você disse:",
   "conversation.speaker.agent": "{{name}} disse:",
@@ -114,5 +115,8 @@
   "conversation.guardrail.actionBlock": "bloqueou",
   "conversation.guardrail.actionRedact": "ocultou texto",
   "conversation.guardrail.actionReprompt": "repetiu a pergunta ao modelo",
-  "conversation.guardrail.actionWarn": "emitiu um aviso"
+  "conversation.guardrail.actionWarn": "emitiu um aviso",
+  "conversation.stop.finished": "A parada chegou tarde: a resposta já tinha terminado no servidor e vale. Aqui está ela completa.",
+  "conversation.stop.stillRunning": "A parada não alcançou este turno: ele continua em execução em outro servidor e o que ele faz ainda vale. A resposta aparece quando você reabrir a conversa.",
+  "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou."
 }

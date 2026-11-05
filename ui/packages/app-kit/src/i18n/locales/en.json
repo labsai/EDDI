@@ -184,7 +184,9 @@
       "errDisabled": "This agent version does not ask for ratings.",
       "errOwner": "Only the person who had this conversation can rate it.",
       "errGeneric": "The rating could not be saved."
-    }
+    },
+    "stop": "Stop",
+    "stopWithKey": "Stop (Esc)"
   },
   "commandPalette": {
     "openChat": "Open Chat"

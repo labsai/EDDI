@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "더 자세히 살펴보는 중…",
   "conversation.indicator.thinking": "생각하는 중…",
   "conversation.indicator.guardrail": "답변을 확인하는 중…",
+  "conversation.indicator.reconnecting": "연결이 끊겼습니다. 다시 연결하는 중…",
   "conversation.message.noResponse": "응답 없음",
   "conversation.speaker.you": "내가 한 말:",
   "conversation.speaker.agent": "{{name}}의 말:",
@@ -114,5 +115,8 @@
   "conversation.guardrail.actionBlock": "차단됨",
   "conversation.guardrail.actionRedact": "마스킹됨",
   "conversation.guardrail.actionReprompt": "모델에 재요청됨",
-  "conversation.guardrail.actionWarn": "경고됨"
+  "conversation.guardrail.actionWarn": "경고됨",
+  "conversation.stop.finished": "중지가 늦었습니다. 답변은 이미 서버에서 완료되었고 유효합니다. 전체 답변은 다음과 같습니다.",
+  "conversation.stop.stillRunning": "중지가 이번 차례에 닿지 않았습니다. 다른 서버에서 계속 실행 중이며, 그 작업은 여전히 유효합니다. 대화를 다시 열면 답변이 표시됩니다.",
+  "conversation.stop.unreachable": "중지 요청이 서버에 닿지 못했습니다. 차례가 아직 실행 중일 수 있으니 대화를 다시 열어 결과를 확인하세요."
 }

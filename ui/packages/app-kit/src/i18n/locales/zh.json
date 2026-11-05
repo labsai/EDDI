@@ -184,7 +184,9 @@
       "errDisabled": "此智能体版本不收集评价。",
       "errOwner": "只有进行此对话的人才能评价。",
       "errGeneric": "无法保存评价。"
-    }
+    },
+    "stop": "停止",
+    "stopWithKey": "停止 (Esc)"
   },
   "editor": {
     "deployFailed": "部署失败",

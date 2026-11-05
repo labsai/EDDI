@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "กำลังตรวจสอบให้ละเอียดขึ้น…",
   "conversation.indicator.thinking": "กำลังคิด…",
   "conversation.indicator.guardrail": "กำลังตรวจสอบคำตอบ…",
+  "conversation.indicator.reconnecting": "การเชื่อมต่อขาดหาย กำลังเชื่อมต่อใหม่…",
   "conversation.message.noResponse": "ไม่มีคำตอบ",
   "conversation.speaker.you": "คุณพูดว่า:",
   "conversation.speaker.agent": "{{name}} พูดว่า:",
@@ -114,5 +115,8 @@
   "conversation.guardrail.actionBlock": "ถูกบล็อก",
   "conversation.guardrail.actionRedact": "ถูกปกปิด",
   "conversation.guardrail.actionReprompt": "ถามโมเดลซ้ำ",
-  "conversation.guardrail.actionWarn": "ถูกเตือน"
+  "conversation.guardrail.actionWarn": "ถูกเตือน",
+  "conversation.stop.finished": "หยุดช้าเกินไป: คำตอบเสร็จสมบูรณ์บนเซิร์ฟเวอร์แล้วและมีผล นี่คือคำตอบฉบับเต็ม",
+  "conversation.stop.stillRunning": "การหยุดไปไม่ถึงรอบนี้: รอบนี้ยังทำงานอยู่บนเซิร์ฟเวอร์อื่น และสิ่งที่ทำยังมีผล คำตอบจะปรากฏเมื่อคุณเปิดการสนทนาอีกครั้ง",
+  "conversation.stop.unreachable": "การหยุดติดต่อเซิร์ฟเวอร์ไม่ได้ รอบนี้อาจยังทำงานอยู่ที่นั่น เปิดการสนทนาอีกครั้งเพื่อดูว่าจบอย่างไร"
 }

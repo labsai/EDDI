@@ -116,6 +116,18 @@ export const ChatMessage = memo(function ChatMessage({
       .join("\n\n");
   }, [structured, verdict, message.content, t]);
 
+  // Text the client wrote (Stop came too late, a step that could not be
+  // undone): a system line, not the agent speaking.
+  if (message.kind === "notice") {
+    return (
+      <div className="flex justify-center px-4 py-2" data-testid="chat-notice">
+        <p className="max-w-[min(85%,40rem)] rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-center text-xs text-muted-foreground">
+          {message.content}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -149,9 +161,12 @@ export const ChatMessage = memo(function ChatMessage({
             "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
             isUser
               ? "bg-primary text-primary-foreground rounded-ee-md"
-              : "bg-card border border-border text-card-foreground rounded-es-md",
-            message.isStreaming && "animate-pulse"
+              : "bg-card border border-border text-card-foreground rounded-es-md"
           )}
+          // Streamed text stays steady while it grows (a pulsing bubble is hard
+          // to read); assistive tech is told it is still being written.
+          aria-busy={message.isStreaming || undefined}
+          data-streaming={message.isStreaming ? "true" : undefined}
         >
           {isUser ? (
             <div className="flex flex-col gap-2">

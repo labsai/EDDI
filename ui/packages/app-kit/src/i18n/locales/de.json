@@ -184,7 +184,9 @@
       "errDisabled": "Diese Agentenversion fragt nicht nach Bewertungen.",
       "errOwner": "Nur die Person, die diese Unterhaltung geführt hat, kann sie bewerten.",
       "errGeneric": "Die Bewertung konnte nicht gespeichert werden."
-    }
+    },
+    "stop": "Anhalten",
+    "stopWithKey": "Anhalten (Esc)"
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

@@ -329,6 +329,27 @@ describe("ChatWidget — stop generating", () => {
 
     await waitFor(() => expect(cancelled).toBe(true));
   });
+
+  it("Esc stops the running turn as the Stop button does (T1.10)", async () => {
+    let cancelled = false;
+    mockHangingStream(() => {
+      cancelled = true;
+    });
+
+    renderWidget();
+    const input = await screen.findByTestId("chat-input");
+    // Nothing runs yet: Esc is the composer's, and nothing is cancelled.
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(cancelled).toBe(false);
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByTestId("chat-stop");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(cancelled).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("chat-stop")).not.toBeInTheDocument());
+  });
 });
 
 describe("ChatWidget — a turn that pauses vs a turn that is dropped", () => {

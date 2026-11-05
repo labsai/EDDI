@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "جارٍ التدقيق أكثر…",
   "conversation.indicator.thinking": "جارٍ التفكير…",
   "conversation.indicator.guardrail": "جارٍ التحقق من الرد…",
+  "conversation.indicator.reconnecting": "انقطع الاتصال. جارٍ إعادة الاتصال…",
   "conversation.message.noResponse": "لا يوجد رد",
   "conversation.speaker.you": "قلتَ:",
   "conversation.speaker.agent": "قال {{name}}:",
@@ -114,5 +115,8 @@
   "conversation.guardrail.actionBlock": "حظر",
   "conversation.guardrail.actionRedact": "نقّح",
   "conversation.guardrail.actionReprompt": "أعاد السؤال للنموذج",
-  "conversation.guardrail.actionWarn": "حذّر"
+  "conversation.guardrail.actionWarn": "حذّر",
+  "conversation.stop.finished": "جاء الإيقاف متأخرًا: كان الرد قد اكتمل على الخادم وهو محسوب. إليك الرد كاملًا.",
+  "conversation.stop.stillRunning": "لم يصل الإيقاف إلى هذه الجولة: ما زالت تعمل على خادم آخر، وما تفعله يبقى محسوبًا. سيظهر ردها عند إعادة فتح المحادثة.",
+  "conversation.stop.unreachable": "تعذّر وصول الإيقاف إلى الخادم. قد تكون الجولة ما زالت تعمل هناك؛ أعد فتح المحادثة لترى كيف انتهت."
 }

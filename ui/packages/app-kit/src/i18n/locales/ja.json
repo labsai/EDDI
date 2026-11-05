@@ -184,7 +184,9 @@
       "errDisabled": "このエージェントのバージョンは評価を求めていません。",
       "errOwner": "この会話を行った本人だけが評価できます。",
       "errGeneric": "評価を保存できませんでした。"
-    }
+    },
+    "stop": "停止",
+    "stopWithKey": "停止 (Esc)"
   },
   "editor": {
     "deployFailed": "デプロイに失敗しました",

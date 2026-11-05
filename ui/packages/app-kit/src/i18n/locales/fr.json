@@ -186,7 +186,9 @@
       "errDisabled": "Cette version de l'agent ne demande pas d'évaluation.",
       "errOwner": "Seule la personne qui a eu cette conversation peut l'évaluer.",
       "errGeneric": "La note n'a pas pu être enregistrée."
-    }
+    },
+    "stop": "Arrêter",
+    "stopWithKey": "Arrêter (Échap)"
   },
   "editor": {
     "deployFailed": "Échec du déploiement",
