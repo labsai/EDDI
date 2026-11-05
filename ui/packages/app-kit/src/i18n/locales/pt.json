@@ -188,7 +188,11 @@
       "errGeneric": "Não foi possível salvar a avaliação."
     },
     "stop": "Parar",
-    "stopWithKey": "Parar (Esc)"
+    "stopWithKey": "Parar (Esc)",
+    "editLast": "Editar",
+    "editLastHint": "Editar e enviar de novo (↑)",
+    "regenerate": "Gerar novamente",
+    "regenerateHint": "Pedir uma nova resposta"
   },
   "editor": {
     "deployFailed": "Falha na implantação",

@@ -186,7 +186,11 @@
       "errGeneric": "評価を保存できませんでした。"
     },
     "stop": "停止",
-    "stopWithKey": "停止 (Esc)"
+    "stopWithKey": "停止 (Esc)",
+    "editLast": "編集",
+    "editLastHint": "編集して再送信 (↑)",
+    "regenerate": "再生成",
+    "regenerateHint": "新しい返信を求める"
   },
   "editor": {
     "deployFailed": "デプロイに失敗しました",

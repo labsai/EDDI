@@ -186,7 +186,11 @@
       "errGeneric": "Die Bewertung konnte nicht gespeichert werden."
     },
     "stop": "Anhalten",
-    "stopWithKey": "Anhalten (Esc)"
+    "stopWithKey": "Anhalten (Esc)",
+    "editLast": "Bearbeiten",
+    "editLastHint": "Bearbeiten und erneut senden (↑)",
+    "regenerate": "Neu erzeugen",
+    "regenerateHint": "Um eine neue Antwort bitten"
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

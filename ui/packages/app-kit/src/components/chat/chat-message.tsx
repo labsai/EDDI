@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useMemo } from "react";
+import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 import { ConversationMarkdown } from "@eddi/conversation/i18next";
@@ -65,6 +65,11 @@ interface ChatMessageProps {
   ratingProfile?: RatingProfile | null;
   /** Stable across renders, or every memoised bubble re-renders. */
   onRateStep?: (stepIndex: number, input: RatingInput | null) => Promise<boolean>;
+  /**
+   * The host's controls for this message (the `messageActions` slot): Edit on
+   * the last message the person sent, Regenerate on the last reply.
+   */
+  actions?: ReactNode;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -73,6 +78,7 @@ export const ChatMessage = memo(function ChatMessage({
   rating,
   ratingProfile,
   onRateStep,
+  actions,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -247,6 +253,9 @@ export const ChatMessage = memo(function ChatMessage({
               <CopyMessageButton content={copyContent} />
             </div>
           )}
+          {/* The host's own (Edit, Regenerate): always visible — the last turn
+              is where they are reached for, on touch screens too. */}
+          {actions}
         </div>
 
         {/* Reply thumbs: shown on hover/focus, always once rated, always on touch */}

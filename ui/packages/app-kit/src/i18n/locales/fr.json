@@ -188,7 +188,11 @@
       "errGeneric": "La note n'a pas pu être enregistrée."
     },
     "stop": "Arrêter",
-    "stopWithKey": "Arrêter (Échap)"
+    "stopWithKey": "Arrêter (Échap)",
+    "editLast": "Modifier",
+    "editLastHint": "Modifier et renvoyer (↑)",
+    "regenerate": "Régénérer",
+    "regenerateHint": "Demander une nouvelle réponse"
   },
   "editor": {
     "deployFailed": "Échec du déploiement",

@@ -186,7 +186,11 @@
       "errGeneric": "The rating could not be saved."
     },
     "stop": "Stop",
-    "stopWithKey": "Stop (Esc)"
+    "stopWithKey": "Stop (Esc)",
+    "editLast": "Edit",
+    "editLastHint": "Edit and send again (↑)",
+    "regenerate": "Regenerate",
+    "regenerateHint": "Ask for a new reply"
   },
   "commandPalette": {
     "openChat": "Open Chat"

@@ -194,7 +194,11 @@
       "errGeneric": "تعذّر حفظ التقييم."
     },
     "stop": "إيقاف",
-    "stopWithKey": "إيقاف (Esc)"
+    "stopWithKey": "إيقاف (Esc)",
+    "editLast": "تعديل",
+    "editLastHint": "تعديل وإرسال مرة أخرى (↑)",
+    "regenerate": "إعادة التوليد",
+    "regenerateHint": "طلب رد جديد"
   },
   "editor": {
     "deployFailed": "فشل النشر",

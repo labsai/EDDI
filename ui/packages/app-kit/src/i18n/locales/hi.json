@@ -186,7 +186,11 @@
       "errGeneric": "रेटिंग सहेजी नहीं जा सकी।"
     },
     "stop": "रोकें",
-    "stopWithKey": "रोकें (Esc)"
+    "stopWithKey": "रोकें (Esc)",
+    "editLast": "संपादित करें",
+    "editLastHint": "संपादित करके फिर से भेजें (↑)",
+    "regenerate": "फिर से बनाएँ",
+    "regenerateHint": "नया जवाब माँगें"
   },
   "editor": {
     "deployFailed": "परिनियोजन विफल",

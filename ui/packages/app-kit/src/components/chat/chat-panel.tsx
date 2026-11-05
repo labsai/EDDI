@@ -1,6 +1,6 @@
 import { ReviewNotice } from "./review-notice";
 import { useAgentReviewProfile } from "../../hooks/use-agent-review-profile";
-import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "../../lib/constants";
@@ -75,6 +75,7 @@ import {
   Star,
   Square,
   WifiOff,
+  Pencil,
 } from "lucide-react";
 
 export interface ChatPanelProps {
@@ -93,7 +94,24 @@ export interface ChatPanelProps {
   initialMessage?: InitialChatMessage | null;
   /** Called once the initial message has been taken, so the host can drop it. */
   onInitialMessageConsumed?: () => void;
+  /**
+   * A notice beside "Edit" and "Regenerate" on the last turn — the seam for
+   * "this turn ran tools whose effects stay" once the stream reports which
+   * tools a turn ran (plan B6). Undo and rerun take back the reply, never what
+   * a tool did. Nothing is shown when it returns null or is not passed.
+   */
+  renderTurnNotice?: (context: TurnNoticeContext) => ReactNode;
 }
+
+/** What the last turn's Edit / Regenerate notice is about. */
+export interface TurnNoticeContext {
+  action: "edit" | "regenerate";
+  /** The step being taken back or rerun, when the transcript knows it. */
+  stepIndex: number | null;
+}
+
+/** What the secret bubble shows: never offered for editing. */
+const MASKED_BUBBLE = "●●●●●●●●";
 
 /** The query parameters as one comparable value. */
 function paramKey(agentId: string | null, conversationId: string | null): string {
@@ -105,6 +123,7 @@ export function ChatPanel({
   urlSync = false,
   initialMessage = null,
   onInitialMessageConsumed,
+  renderTurnNotice,
 }: ChatPanelProps = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -565,6 +584,55 @@ export function ChatPanel({
     [t, selectedAgentName],
   );
 
+  // ── Edit the last message, regenerate the last reply (T1.6) ──
+  // Edit is undo + say: the last step is taken back and its text put into the
+  // composer to be changed and sent again. Regenerate reruns the last step.
+  // Both only where the agent allows undo/redo (conversationControls, B4).
+  // Neither takes back what a tool did — see `renderTurnNotice`.
+  const [draft, setDraft] = useState<{ text: string; nonce: number } | null>(null);
+  const lastTurn = useMemo(() => {
+    let user = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "user") {
+        user = i;
+        break;
+      }
+    }
+    let reply = -1;
+    for (let i = messages.length - 1; i > user; i--) {
+      const m = messages[i]!;
+      if (m.role === "agent" && m.kind !== "notice" && !m.isError && m.content) {
+        reply = i;
+        break;
+      }
+    }
+    return { user, reply };
+  }, [messages]);
+  const lastUser = lastTurn.user >= 0 ? messages[lastTurn.user] : undefined;
+  const turnIdle = Boolean(conversationId) && !isProcessing && !conversationBusy && !isPaused && !isLoadingConversation && !reviewPending;
+  const canEditLast =
+    controls.undo &&
+    turnIdle &&
+    undoAvailable &&
+    !!lastUser &&
+    !!lastUser.content.trim() &&
+    lastUser.content !== MASKED_BUBBLE &&
+    // Its files are not re-sent by an edit; say nothing that would lose them.
+    !lastUser.attachments?.length;
+  const canRegenerate = controls.undo && controls.redo && turnIdle && lastTurn.reply >= 0;
+
+  const handleEditLast = useCallback(() => {
+    if (!canEditLast || !lastUser) return;
+    const text = lastUser.content;
+    undoConversation.mutate(undefined, {
+      onSuccess: (moved) => {
+        if (moved === false) return;
+        setDraft({ text, nonce: Date.now() });
+      },
+      onError: (err) => toast.error(getErrorMessage(err)),
+    });
+  }, [canEditLast, lastUser, undoConversation]);
+
   const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
     // A rerun replaces the last reply, so its thumb no longer applies (locally;
@@ -946,6 +1014,10 @@ export function ChatPanel({
             <div className={embedded ? "py-2" : "py-4"}>
               {messages.map((msg, i) => {
                 const ratingStep = ratings.profile?.messageRating ? (ratableByPosition[i] ?? null) : null;
+                const editHere = i === lastTurn.user && canEditLast;
+                const regenerateHere = i === lastTurn.reply && canRegenerate;
+                const action: TurnNoticeContext["action"] | null = editHere ? "edit" : regenerateHere ? "regenerate" : null;
+                const notice = action ? renderTurnNotice?.({ action, stepIndex: lastStepIndex(messages) }) : null;
                 return (
                   <ChatMessage
                     key={msg.id}
@@ -954,6 +1026,27 @@ export function ChatPanel({
                     rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
                     ratingProfile={ratings.profile}
                     onRateStep={ratings.rateReply}
+                    actions={
+                      action ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={editHere ? handleEditLast : handleRerun}
+                            className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            title={editHere ? t("chat.editLastHint", "Edit and send again (↑)") : t("chat.regenerateHint", "Ask for a new reply")}
+                            data-testid={editHere ? "edit-last" : "regenerate-last"}
+                          >
+                            {editHere ? <Pencil className="h-3 w-3" aria-hidden="true" /> : <RefreshCw className="h-3 w-3" aria-hidden="true" />}
+                            <span>{editHere ? t("chat.editLast", "Edit") : t("chat.regenerate", "Regenerate")}</span>
+                          </button>
+                          {notice ? (
+                            <span className="text-[10px] text-warn-600 dark:text-warn-400" data-testid="turn-notice">
+                              {notice}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : undefined
+                    }
                   />
                 );
               })}
@@ -1115,6 +1208,8 @@ export function ChatPanel({
             // Disabled while either move (or a rerun) is pending: the flags
             // only change after the re-read, so a double click would otherwise
             // undo a second turn.
+            onEditLast={canEditLast ? handleEditLast : undefined}
+            draft={draft}
             onUndo={controls.undo && conversationId && undoAvailable && !isProcessing && !conversationBusy
               ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
@@ -1149,6 +1244,8 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment = false,
   onUndo,
   onRedo,
+  onEditLast,
+  draft = null,
   embedded = false,
   allowAttachments = true,
 }: {
@@ -1171,6 +1268,10 @@ function ChatInputWithSecretToggle({
   hasReadyAttachment?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  /** Set when the last message may be edited: ↑ in an empty composer does it. */
+  onEditLast?: () => void;
+  /** Text to put into the composer (an edited message coming back), once per nonce. */
+  draft?: { text: string; nonce: number } | null;
   embedded?: boolean;
   /** False when the agent switched attachments off (`conversationControls.attachments`). */
   allowAttachments?: boolean;
@@ -1205,6 +1306,22 @@ function ChatInputWithSecretToggle({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   }, []);
+
+  // An edited message comes back into the composer, caret at its end.
+  const draftNonce = draft?.nonce;
+  useEffect(() => {
+    if (!draft) return;
+    setValue(draft.text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      handleInput();
+      el.focus();
+      el.setSelectionRange(draft.text.length, draft.text.length);
+    });
+    // Once per nonce: the same text sent twice still comes back twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftNonce]);
 
   const canSend =
     (value.trim().length > 0 || hasReadyAttachment) &&
@@ -1364,6 +1481,19 @@ function ChatInputWithSecretToggle({
               if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 handleSend();
+              } else if (
+                e.key === "ArrowUp" &&
+                !value &&
+                onEditLast &&
+                !e.shiftKey &&
+                !e.altKey &&
+                !e.ctrlKey &&
+                !e.metaKey &&
+                !isImeComposing(e)
+              ) {
+                // ↑ in an empty composer edits the last message, as in most chats.
+                e.preventDefault();
+                onEditLast();
               }
             }}
             onPaste={(e) => {

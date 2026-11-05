@@ -186,7 +186,11 @@
       "errGeneric": "无法保存评价。"
     },
     "stop": "停止",
-    "stopWithKey": "停止 (Esc)"
+    "stopWithKey": "停止 (Esc)",
+    "editLast": "编辑",
+    "editLastHint": "编辑后重新发送 (↑)",
+    "regenerate": "重新生成",
+    "regenerateHint": "请求新的回复"
   },
   "editor": {
     "deployFailed": "部署失败",

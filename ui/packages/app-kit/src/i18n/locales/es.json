@@ -188,7 +188,11 @@
       "errGeneric": "No se pudo guardar la valoración."
     },
     "stop": "Detener",
-    "stopWithKey": "Detener (Esc)"
+    "stopWithKey": "Detener (Esc)",
+    "editLast": "Editar",
+    "editLastHint": "Editar y volver a enviar (↑)",
+    "regenerate": "Regenerar",
+    "regenerateHint": "Pedir una respuesta nueva"
   },
   "editor": {
     "deployFailed": "Error en el despliegue",

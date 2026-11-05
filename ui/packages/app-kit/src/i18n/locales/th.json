@@ -186,7 +186,11 @@
       "errGeneric": "ไม่สามารถบันทึกคะแนนได้"
     },
     "stop": "หยุด",
-    "stopWithKey": "หยุด (Esc)"
+    "stopWithKey": "หยุด (Esc)",
+    "editLast": "แก้ไข",
+    "editLastHint": "แก้ไขแล้วส่งอีกครั้ง (↑)",
+    "regenerate": "สร้างใหม่",
+    "regenerateHint": "ขอคำตอบใหม่"
   },
   "editor": {
     "deployFailed": "การปรับใช้ล้มเหลว",
