@@ -38,6 +38,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -161,7 +162,7 @@ class AgentOpsToolsProviderTest {
         var board = new AgentGroupConfiguration();
         board.setTeamBudget(new TeamBudgetConfig(50.0, CostPolicy.SYNTHESIZE_NOW, new TeamBudgetConfig.Oversight(List.of("studio", "radar"))));
         when(budget.config("board")).thenReturn(board);
-        when(guard.principalMayView(anyString(), anyString(), org.mockito.ArgumentMatchers.anyBoolean()))
+        when(guard.principalMayView(anyString(), anyString(), anyBoolean()))
                 .thenAnswer(inv -> !"radar".equals(inv.getArgument(0)));
         var task = task(true);
         var agentOps = new AgentOpsConfig();

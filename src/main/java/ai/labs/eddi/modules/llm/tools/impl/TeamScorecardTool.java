@@ -27,7 +27,6 @@ import org.jboss.logging.Logger;
 
 import java.time.Clock;
 import java.time.DayOfWeek;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -176,7 +175,7 @@ public class TeamScorecardTool {
      * zeros rather than as a short list.
      */
     static Map<String, Object> throughput(List<TaskItem> tasks, Instant now, int weeks) {
-        LocalDate thisMonday = now.atZone(ZoneOffset.UTC).toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate thisMonday = mondayOf(now);
         Map<LocalDate, int[]> byWeek = new TreeMap<>();
         for (int i = weeks - 1; i >= 0; i--) {
             byWeek.put(thisMonday.minusWeeks(i), new int[2]);
@@ -213,9 +212,21 @@ public class TeamScorecardTool {
         return out;
     }
 
+    private static LocalDate mondayOf(Instant instant) {
+        return instant.atZone(ZoneOffset.UTC).toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    }
+
+    /**
+     * Midnight UTC of the Monday that starts the oldest week {@link #throughput}
+     * lists, so the approval numbers cover exactly the weeks shown beside them.
+     */
+    static Instant windowStart(Instant now, int weeks) {
+        return mondayOf(now).minusWeeks(Math.max(weeks, 1) - 1L).atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
     private Object approvalSection(String groupId) {
         try {
-            Instant from = clock.instant().minus(Duration.ofDays(7L * config.effectiveWeeks()));
+            Instant from = windowStart(clock.instant(), config.effectiveWeeks());
             ApprovalSummary.Result result = analytics.summarize(new DecisionFilter(null, groupId, null, from, null, null, null, null, null),
                     ApprovalAnalyticsService.GroupBy.NONE);
             return approvals(result, config.effectiveWeeks());

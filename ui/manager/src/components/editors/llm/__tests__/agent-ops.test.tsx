@@ -19,15 +19,24 @@ describe("withOpsTool", () => {
     ]);
   });
 
-  it("removes only its slug and drops an emptied whitelist", () => {
-    expect(
-      withOpsTool({ builtInToolsWhitelist: ["calculator", "team_scorecard"] }, "team_scorecard", false)
-        .builtInToolsWhitelist,
-    ).toEqual(["calculator"]);
-    expect(
-      withOpsTool({ builtInToolsWhitelist: ["team_scorecard"] }, "team_scorecard", false)
-        .builtInToolsWhitelist,
-    ).toBeUndefined();
+  it("removes only its slug and keeps built-ins on while others remain", () => {
+    const next = withOpsTool(
+      { enableBuiltInTools: true, builtInToolsWhitelist: ["calculator", "team_scorecard"] },
+      "team_scorecard",
+      false,
+    );
+    expect(next.builtInToolsWhitelist).toEqual(["calculator"]);
+    expect(next.enableBuiltInTools).toBe(true);
+  });
+
+  it("switches built-ins off when the last listed tool is unticked, never widening to all", () => {
+    const next = withOpsTool(
+      { enableBuiltInTools: true, builtInToolsWhitelist: ["team_scorecard"] },
+      "team_scorecard",
+      false,
+    );
+    expect(next.enableBuiltInTools).toBe(false);
+    expect(next.builtInToolsWhitelist).toBeUndefined();
   });
 });
 

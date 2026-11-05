@@ -58,15 +58,29 @@ zero, and the others still answer. At most 10 teams are returned per call.
 `propose_team_budget_transfer(fromGroupId, toGroupId, amountUsd, reason)`.
 
 **A human approves; nothing applies on the model's say-so.** The approval is the ordinary
-[tool-call approval](hitl.md#tool-level-approval-gating) — same card in the Manager, Slack, e-mail and MCP — so the
-tool is **assembled only when the task's effective `toolApprovals` requires approval for both tools**. Add:
+[tool-call approval](hitl.md#tool-level-approval-gating) — decided on the same card in the Manager, in Slack or over
+MCP (an [e-mail notification](hitl.md#email-notifications) only says that something is waiting and links to the
+Manager; it approves nothing) — so the tool is **assembled only when the task's effective `toolApprovals` requires
+approval for both tools**. At agent level that is `hitlConfig.toolApprovals`:
 
 ```json
 { "hitlConfig": { "toolApprovals": { "requireApproval": ["propose_team_budget_*"] } } }
 ```
 
-at agent or task level (and do not exempt them). Without it the agent has no budget tool at all and the engine logs a
-warning; so does turning tool approvals off cluster-wide (`eddi.hitl.tool.enabled=false`).
+and on the LLM task itself the same block sits directly under `toolApprovals` (no `hitlConfig` wrapper):
+
+```json
+{ "toolApprovals": { "requireApproval": ["propose_team_budget_*"] } }
+```
+
+Do not exempt them. Without the gate the agent has no budget tool at all and the engine logs a warning; so does
+turning tool approvals off cluster-wide (`eddi.hitl.tool.enabled=false`).
+
+**Not from inside a group discussion.** A group member's gated tool call is
+[auto-rejected](hitl.md#group-members) (`system:group`): it never reaches an approver, so a member agent proposing a
+budget change during a discussion turn is always told no. Propose budget changes from a standalone oversight agent —
+an ordinary conversation that reads the teams through `agentOps.scorecard.groupIds` — and let the discussion's
+members use the read-only scorecard.
 
 **Only an `eddi-admin`'s approval applies.** Moving budget is admin-only on REST and MCP, and an approval by the
 conversation's owner or an `eddi-approver` must not widen that. The approved call runs as its approver; if that is not
@@ -97,7 +111,7 @@ one.
 
 | Limit (`agentOps.followUp`) | Default | Meaning |
 |---|---|---|
-| `maxPending` | 5 | Check-backs waiting at once, per agent |
+| `maxPending` | 5 | Check-backs waiting at once, per agent and booking user (each user of the agent has their own allowance) |
 | `maxPerTurn` | 2 | Bookings one turn may make |
 | `maxHorizonDays` | 30 (never above 90) | How far ahead `at` may be; at least a minute ahead |
 | `maxCostPerFireUsd` | 0.5 | Becomes the schedule's `maxCostPerFire`; a booked fire is never unlimited |

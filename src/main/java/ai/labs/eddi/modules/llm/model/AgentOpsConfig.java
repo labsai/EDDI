@@ -8,12 +8,13 @@ import java.util.List;
 
 /**
  * Limits for the three agent-operations tools — {@code read_team_scorecard},
- * {@code propose_team_budget_change} and {@code schedule_followup}. Which of
- * the tools an agent gets is decided by its {@code builtInToolsWhitelist}: each
- * is <b>off unless its slug is named there</b> ({@code team_scorecard},
- * {@code propose_team_budget}, {@code schedule_followup}); an omitted whitelist
- * does not admit them. This block only tunes the limits, and every field has a
- * default, so an absent block (or an absent field) is a working configuration.
+ * {@code propose_team_budget_raise}/{@code propose_team_budget_transfer} and
+ * {@code schedule_followup}. Which of the tools an agent gets is decided by its
+ * {@code builtInToolsWhitelist}: each is <b>off unless its slug is named
+ * there</b> ({@code team_scorecard}, {@code propose_team_budget},
+ * {@code schedule_followup}); an omitted whitelist does not admit them. This
+ * block only tunes the limits, and every field has a default, so an absent
+ * block (or an absent field) is a working configuration.
  *
  * @since 6.7.0
  */
@@ -21,7 +22,7 @@ public class AgentOpsConfig {
 
     /** Slug admitting {@code read_team_scorecard}. */
     public static final String SLUG_SCORECARD = "team_scorecard";
-    /** Slug admitting {@code propose_team_budget_change}. */
+    /** Slug admitting the two {@code propose_team_budget_*} tools. */
     public static final String SLUG_BUDGET_PROPOSAL = "propose_team_budget";
     /** Slug admitting the follow-up tools. */
     public static final String SLUG_FOLLOW_UP = "schedule_followup";
@@ -139,7 +140,7 @@ public class AgentOpsConfig {
         }
     }
 
-    /** Caps on {@code propose_team_budget_change}. */
+    /** Caps on the {@code propose_team_budget_*} tools. */
     public static class BudgetProposal {
         private Integer maxPerTurn;
         private Integer maxPerDay;
@@ -195,7 +196,10 @@ public class AgentOpsConfig {
         private Integer maxHorizonDays;
         private Double maxCostPerFireUsd;
 
-        /** Check-backs one agent may have waiting at once; default 5. */
+        /**
+         * Check-backs one agent may have waiting at once for one booking user; default
+         * 5.
+         */
         public Integer getMaxPending() {
             return maxPending;
         }

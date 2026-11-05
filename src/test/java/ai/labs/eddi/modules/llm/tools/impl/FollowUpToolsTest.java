@@ -144,6 +144,47 @@ class FollowUpToolsTest {
     }
 
     @Test
+    void aRefusedCallDoesNotUseUpTheTurnsQuota() throws Exception {
+        var tools = tools();
+        assertFalse(parse(tools.scheduleFollowup("next tuesday", "m", null)).get("booked").asBoolean());
+        assertFalse(parse(tools.scheduleFollowup("2026-11-04T12:00:30Z", "m", null)).get("booked").asBoolean());
+        doThrow(new IllegalStateException("db")).doAnswer(inv -> {
+            ScheduleConfiguration schedule = inv.getArgument(0);
+            schedule.setId("sched-" + (stored.size() + 1));
+            stored.add(schedule);
+            return schedule.getId();
+        }).when(store).createSchedule(any());
+        assertFalse(parse(tools.scheduleFollowup(SOON, "m", null)).get("booked").asBoolean(), "store failure");
+
+        assertTrue(parse(tools.scheduleFollowup(SOON, "one", null)).get("booked").asBoolean());
+        assertTrue(parse(tools.scheduleFollowup(SOON, "two", null)).get("booked").asBoolean());
+        assertFalse(parse(tools.scheduleFollowup(SOON, "three", null)).get("booked").asBoolean());
+        assertEquals(2, stored.size());
+    }
+
+    @Test
+    void aCheckBackPastTheFirstPageOfSchedulesStillCounts() throws Exception {
+        List<ScheduleConfiguration> firstPage = new ArrayList<>();
+        for (int i = 0; i < FollowUpTools.SCAN_LIMIT; i++) {
+            ScheduleConfiguration other = new ScheduleConfiguration();
+            other.setId("other-" + i);
+            other.setAgentId("agent-1");
+            firstPage.add(other);
+        }
+        ScheduleConfiguration mine = new ScheduleConfiguration();
+        mine.setId("late");
+        mine.setEnabled(true);
+        mine.setNextFire(Instant.parse(SOON));
+        mine.setCreatedBy("alice");
+        mine.setMetadata(Map.of(FollowUpTools.METADATA_TYPE_KEY, FollowUpTools.METADATA_TYPE_VALUE, FollowUpTools.METADATA_BOOKED_BY, "agent-1"));
+        when(store.readSchedulesByAgentId(anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenAnswer(inv -> (int) inv.getArgument(2) == 0 ? firstPage : List.of(mine));
+
+        assertEquals(1, parse(tools().listFollowups()).get("followups").size());
+        assertTrue(parse(tools().cancelFollowup("late")).get("cancelled").asBoolean());
+    }
+
+    @Test
     void anAgentMayHaveOnlyMaxPendingWaiting() throws Exception {
         var limits = new AgentOpsConfig.FollowUp();
         limits.setMaxPending(2);

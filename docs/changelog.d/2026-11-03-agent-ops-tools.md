@@ -35,3 +35,17 @@ tools (revision bump).
 ### Tests
 
 Plain JUnit 5 + Mockito for the three tools, the provider and the validator; Vitest for the Manager helpers.
+
+### Review follow-ups (PR #1259)
+
+- `schedule_followup` reserves its per-turn slot only when a booking is about to be written and releases it on a
+  pending-cap refusal or store failure, so a malformed call no longer locks the model out for the turn.
+- `pending()` pages through all of the agent's schedules (bounded at 40 pages of 500) before filtering, so a
+  check-back past the first page still counts, lists and cancels.
+- The scorecard's approval window now starts at midnight UTC on the Monday of the oldest throughput week shown.
+- Manager: unticking the last whitelisted tool switches built-ins off instead of leaving an empty whitelist that
+  means "all built-in tools"; the limit blocks use the logical `ms-5` for RTL.
+- Docs: e-mail is a notification, not an approval channel; the task-level `toolApprovals` shape is shown; a group
+  member's gated call is auto-rejected, so budget proposals belong to a standalone oversight agent; `maxPending` is
+  per agent and booking user. The Platform Operator prompt says the same about group turns and `maxPending`
+  (revision 55). Inline Mockito FQNs in two tests replaced by static imports.

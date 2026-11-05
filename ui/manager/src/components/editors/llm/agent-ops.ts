@@ -26,7 +26,11 @@ export function withOpsTool(task: LlmTask, slug: AgentOpsSlug, on: boolean): Llm
     };
   }
   const next = current.filter((item) => item !== slug);
-  return { ...task, builtInToolsWhitelist: next.length > 0 ? next : undefined };
+  if (next.length > 0) return { ...task, builtInToolsWhitelist: next };
+  // An absent or empty whitelist means "all built-in tools": unticking the last
+  // listed tool must switch built-ins off, never widen the agent to every one.
+  if (current.length > 0) return { ...task, enableBuiltInTools: false, builtInToolsWhitelist: undefined };
+  return { ...task, builtInToolsWhitelist: undefined };
 }
 
 /**

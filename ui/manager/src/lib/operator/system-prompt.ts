@@ -849,6 +849,11 @@ const BODY_TEAM_BUDGETS = `Team budgets (a monthly dollar cap per standing team)
   \`eddi-approver\` who is not an admin, or a timeout auto-approval, changes
   nothing and the model is told why. The adjustment is recorded with the
   approving admin as actor and \`[agent:<id>]\` in the reason. You cannot approve it.
+  Inside a group discussion a member's gated call is auto-rejected
+  (\`system:group\`) and never reaches an approver, so budget proposals must come
+  from a standalone oversight agent (an ordinary conversation reading the teams
+  via \`agentOps.scorecard.groupIds\`). followUp \`maxPending\` counts per agent
+  and booking user.
   Follow-ups are ordinary one-shot schedules (metadata \`followupType:
   agent_followup\`) in the schedule list; an agent sees and cancels only its own.`;
 

@@ -37,8 +37,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>
  * Bounds, all enforced here rather than trusted to the model: the time must be
  * at least a minute away and within {@code maxHorizonDays} (never more than
- * 90); an agent may have {@code maxPending} check-backs waiting and book
- * {@code maxPerTurn} in one turn; and every fire carries
+ * 90); an agent may have {@code maxPending} check-backs waiting per booking
+ * user and book {@code maxPerTurn} in one turn; and every fire carries
  * {@code maxCostPerFireUsd} as its {@code maxCostPerFire}, so a booked
  * check-back is never unlimited. A check-back is the creating user's: it fires
  * as that user, an agent can list and cancel only the ones it booked, and in a
@@ -68,6 +68,8 @@ public class FollowUpTools {
     static final int MIN_LEAD_SECONDS = 60;
     static final int MAX_MESSAGE_CHARS = 2000;
     static final int SCAN_LIMIT = 500;
+    /** Bounds the scan at 20,000 schedules per agent, so a read cannot run away. */
+    static final int MAX_SCAN_PAGES = 40;
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** What the booking is made for: the identity of the conversation asking. */
@@ -97,8 +99,8 @@ public class FollowUpTools {
                                    @P("What to tell yourself when it fires: what to check and what to do about the result") String message,
                                    @P(value = "'conversation' continues this conversation (default); 'agent' starts a fresh one with the same agent. In a team discussion only 'agent' is available.",
                                       required = false) String target) {
-        if (booked.incrementAndGet() > limits.effectiveMaxPerTurn()) {
-            return refused("You have already booked " + limits.effectiveMaxPerTurn() + " check-back(s) this turn.");
+        if (booked.get() >= limits.effectiveMaxPerTurn()) {
+            return perTurnRefusal();
         }
         if (message == null || message.isBlank()) {
             return refused("A message is required: say what to check when it fires.");
@@ -130,6 +132,14 @@ public class FollowUpTools {
         if (when.isAfter(horizon)) {
             return refused("A check-back may be booked at most " + limits.effectiveMaxHorizonDays() + " days ahead (until " + horizon + ").");
         }
+        // The per-turn slot is reserved only now, when a booking is about to be
+        // written, and released unless it is: a refused call must not use up the
+        // turn's quota. Reserve-then-check keeps it exact under parallel tool calls.
+        if (booked.incrementAndGet() > limits.effectiveMaxPerTurn()) {
+            booked.decrementAndGet();
+            return perTurnRefusal();
+        }
+        boolean written = false;
         try {
             if (pending().size() >= limits.effectiveMaxPending()) {
                 return refused("You already have " + limits.effectiveMaxPending()
@@ -165,6 +175,7 @@ public class FollowUpTools {
             }
             schedule.setMetadata(metadata);
             String id = scheduleStore.createSchedule(schedule);
+            written = true;
             LOGGER.infof("Agent %s booked check-back %s for %s", LogSanitizer.sanitize(booker.agentId()), LogSanitizer.sanitize(id), when);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("booked", true);
@@ -177,7 +188,15 @@ public class FollowUpTools {
             LOGGER.warnf("Check-back booking failed for agent %s: %s", LogSanitizer.sanitize(booker.agentId()),
                     LogSanitizer.sanitize(e.getMessage()));
             return refused("The check-back could not be booked right now; nothing was scheduled.");
+        } finally {
+            if (!written) {
+                booked.decrementAndGet();
+            }
         }
+    }
+
+    private String perTurnRefusal() {
+        return refused("You have already booked " + limits.effectiveMaxPerTurn() + " check-back(s) this turn.");
     }
 
     @Tool(name = LIST_TOOL, value = "List the check-backs you have booked that are still waiting to fire.")
@@ -218,15 +237,26 @@ public class FollowUpTools {
         }
     }
 
-    /** This agent's, for this user, enabled and still due. */
+    /**
+     * This agent's, for this user, enabled and still due. Reads every page of the
+     * agent's schedules (up to {@link #MAX_SCAN_PAGES} pages of
+     * {@link #SCAN_LIMIT}) before filtering, so a check-back past the first page
+     * still counts, lists and cancels.
+     */
     List<ScheduleConfiguration> pending() throws Exception {
         List<ScheduleConfiguration> mine = new ArrayList<>();
-        for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(booker.agentId(), SCAN_LIMIT, 0, true)) {
-            Map<String, Object> metadata = schedule.getMetadata();
-            boolean followup = metadata != null && METADATA_TYPE_VALUE.equals(metadata.get(METADATA_TYPE_KEY))
-                    && booker.agentId().equals(metadata.get(METADATA_BOOKED_BY));
-            if (followup && schedule.isEnabled() && schedule.getNextFire() != null && booker.userId().equals(schedule.getCreatedBy())) {
-                mine.add(schedule);
+        for (int page = 0; page < MAX_SCAN_PAGES; page++) {
+            List<ScheduleConfiguration> batch = scheduleStore.readSchedulesByAgentId(booker.agentId(), SCAN_LIMIT, page * SCAN_LIMIT, true);
+            for (ScheduleConfiguration schedule : batch) {
+                Map<String, Object> metadata = schedule.getMetadata();
+                boolean followup = metadata != null && METADATA_TYPE_VALUE.equals(metadata.get(METADATA_TYPE_KEY))
+                        && booker.agentId().equals(metadata.get(METADATA_BOOKED_BY));
+                if (followup && schedule.isEnabled() && schedule.getNextFire() != null && booker.userId().equals(schedule.getCreatedBy())) {
+                    mine.add(schedule);
+                }
+            }
+            if (batch.size() < SCAN_LIMIT) {
+                break;
             }
         }
         return mine;

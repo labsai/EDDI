@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -151,7 +152,7 @@ class TeamScorecardToolTest {
         assertTrue(asked.has("error"), asked.toString());
         assertFalse(asked.toString().contains("secret\""), "the answer does not confirm the group exists: " + asked);
         verify(workspaces, never()).find("secret");
-        verify(analytics, never()).summarize(org.mockito.ArgumentMatchers.argThat(f -> f != null && "secret".equals(f.groupId())), any());
+        verify(analytics, never()).summarize(argThat(f -> f != null && "secret".equals(f.groupId())), any());
     }
 
     @Test
@@ -206,12 +207,17 @@ class TeamScorecardToolTest {
     }
 
     @Test
-    void theApprovalWindowFollowsTheConfiguredWeeks() throws Exception {
+    void theApprovalWindowStartsOnTheMondayOfTheOldestThroughputWeek() throws Exception {
         var config = new AgentOpsConfig.Scorecard();
         config.setWeeks(2);
         tool(scopeOf("studio"), config).readTeamScorecard(null);
-        verify(analytics).summarize(org.mockito.ArgumentMatchers.argThat(f -> f != null && "studio".equals(f.groupId())
-                && NOW.minusSeconds(14L * 86_400).equals(f.from())), any());
+        // NOW is Wednesday 2026-11-04: the two weeks shown start on Mondays 10-26 and
+        // 11-02
+        Instant firstMonday = Instant.parse("2026-10-26T00:00:00Z");
+        verify(analytics).summarize(argThat(f -> f != null && "studio".equals(f.groupId()) && firstMonday.equals(f.from())), any());
+        @SuppressWarnings("unchecked")
+        var weeks = (List<Map<String, Object>>) TeamScorecardTool.throughput(List.of(), NOW, 2).get("weeks");
+        assertEquals("2026-10-26", weeks.get(0).get("weekStarting"), "both sections cover the same weeks");
     }
 
     @Test

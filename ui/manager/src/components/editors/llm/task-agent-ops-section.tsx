@@ -105,7 +105,7 @@ export function TaskAgentOpsSection({ task, onChange, readOnly }: TaskSectionPro
           ),
         )}
         {on("team_scorecard") && (
-          <div className="ml-5 space-y-2" data-testid="agent-ops-scorecard-limits">
+          <div className="ms-5 space-y-2" data-testid="agent-ops-scorecard-limits">
             {field("scorecard", "weeks", t("llmEditor.agentOpsWeeks", "Weeks of history"), DEFAULTS.weeks, { integer: true })}
             {field("scorecard", "maxLessons", t("llmEditor.agentOpsMaxLessons", "Retro lessons per team"), DEFAULTS.maxLessons, { integer: true })}
             <div className="flex items-center gap-2">
@@ -142,7 +142,7 @@ export function TaskAgentOpsSection({ task, onChange, readOnly }: TaskSectionPro
           ),
         )}
         {on("propose_team_budget") && (
-          <div className="ml-5 space-y-2" data-testid="agent-ops-budget-limits">
+          <div className="ms-5 space-y-2" data-testid="agent-ops-budget-limits">
             <p className="text-[10px] text-warn-600 dark:text-warn-400 leading-relaxed" data-testid="agent-ops-budget-gate-hint">
               {t(
                 "llmEditor.agentOpsBudgetGateHint",
@@ -164,7 +164,7 @@ export function TaskAgentOpsSection({ task, onChange, readOnly }: TaskSectionPro
           ),
         )}
         {on("schedule_followup") && (
-          <div className="ml-5 space-y-2" data-testid="agent-ops-followup-limits">
+          <div className="ms-5 space-y-2" data-testid="agent-ops-followup-limits">
             {field("followUp", "maxPending", t("llmEditor.agentOpsMaxPending", "Waiting at once"), DEFAULTS.maxPending, { integer: true })}
             {field("followUp", "maxPerTurn", t("llmEditor.agentOpsPerTurn", "Calls per turn"), DEFAULTS.followUpsPerTurn, { integer: true })}
             {field("followUp", "maxHorizonDays", t("llmEditor.agentOpsHorizon", "Horizon (days, max 90)"), DEFAULTS.horizonDays, { integer: true })}
