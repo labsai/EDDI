@@ -2715,18 +2715,49 @@ public class GroupConversationService implements IGroupConversationService, User
         return leaseManager != null && clusterRpc != null && leaseManager.isClustered() && clusterRpc.isClustered();
     }
 
+    /**
+     * Pauses between the tries of {@link #holdGroupLease}. The previous leg of a
+     * discussion persists its state and fires its completion before its
+     * {@code finally} releases the lease, so a continuation started on another node
+     * in that gap would otherwise take the discussion for running elsewhere.
+     */
+    long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
+
     void holdGroupLease(String groupConversationId) {
         if (clustered()) {
-            var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
+            String key = IConversationLeaseManager.GROUP + groupConversationId;
+            var lease = leaseManager.tryAcquireKey(key);
+            for (int i = 0; lease.isEmpty() && i < groupLeaseRetryMillis.length; i++) {
+                var current = leaseManager.peekKey(key);
+                if (current.isEmpty() || nodeIdentity == null || nodeIdentity.nodeId().equals(current.get().node())) {
+                    break;
+                }
+                try {
+                    Thread.sleep(groupLeaseRetryMillis[i]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                lease = leaseManager.tryAcquireKey(key);
+            }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
-            } else {
-                // Held elsewhere — most likely a stale lease of a node that died, which
-                // expires with its TTL. The discussion still runs; a cancel forwarded to
-                // that holder is answered "not here" and falls back to the database path.
-                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)",
-                        LogSanitizer.sanitize(groupConversationId));
+                return;
             }
+            // A11: the lease is exclusive. A lease of a node that died or restarted is
+            // taken over by tryAcquireKey itself, so one still held by another node means
+            // that node runs this discussion: running it here as well made two legs write
+            // the same discussion, and a cancel was forwarded to only one of them. This
+            // leg stops without writing (the persisted state stands).
+            var holder = leaseManager.peekKey(key);
+            if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
+                throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
+                        new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
+            }
+            // No holder could be read (NATS unreachable): the discussion runs, as every
+            // turn does in degraded mode; a cancel then takes the database path.
+            LOGGER.warnf("Group discussion %s runs without its group lease (NATS unreachable or the lease could not be read)",
+                    LogSanitizer.sanitize(groupConversationId));
         }
     }
 
