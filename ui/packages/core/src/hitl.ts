@@ -221,3 +221,41 @@ export type HitlApi = ReturnType<typeof createHitlApi>;
 
 /** The HITL API over {@link defaultHttp}. */
 export const { getApprovalStatus, cancelConversation, resumeConversation } = createHitlApi(defaultHttp);
+
+// ── Group HITL: what a stored group discussion carries about its pause ──
+
+export type HitlTimeoutPolicy =
+  | "WAIT_INDEFINITELY"
+  | "AUTO_APPROVE"
+  | "AUTO_REJECT"
+  | "ABORT";
+
+export type HitlGranularity = "PHASE" | "TASK";
+
+/** One block of the designer's `approvalContext`, as rendered when the pause was committed. */
+export interface ApprovalContextItem {
+  label: string;
+  /** Plain text — conversation data, already redacted; never markup. */
+  text: string;
+  /** The text was cut at the block's `maxChars`. */
+  truncated?: boolean;
+  /** `agent`, `group`, `rule:<match>`, or another producer such as `guardrail`. */
+  source?: string | null;
+  /** The gated call a `rule:` block belongs to. */
+  callId?: string | null;
+  /** `render_failed` or `too_large` — the block could not be rendered; `text` is empty. */
+  error?: string | null;
+}
+
+/**
+ * `approvalContext` of `GET …/approval-status` (regular and group) and of the
+ * group conversation itself: rendered once at pause time, re-redacted at serve
+ * time. `null` when nothing is configured or the conversation is not paused.
+ */
+export interface ApprovalContextView {
+  items: ApprovalContextItem[];
+  /** Further blocks were dropped to stay within the total cap. */
+  truncated?: boolean;
+  /** SHA-256 of what was shown, for an audit trail. */
+  digest?: string | null;
+}
