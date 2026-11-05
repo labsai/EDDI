@@ -54,6 +54,7 @@ import { TaskPricingSection } from "./llm/task-pricing-section";
 import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
+import { TaskAgentOpsSection } from "./llm/task-agent-ops-section";
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
 import { TaskGuardrailsSection } from "./llm/task-guardrails-section";
@@ -2029,6 +2030,8 @@ function TaskEditor({
 
 
           <TaskToolApprovalsSection task={task} onChange={onChange} readOnly={readOnly} />
+
+          <TaskAgentOpsSection task={task} onChange={onChange} readOnly={readOnly} />
 
 
           {/* ══════ Pre/Post Instructions ══════ */}

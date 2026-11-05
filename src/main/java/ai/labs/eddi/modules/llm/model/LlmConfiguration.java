@@ -380,6 +380,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private HandoffPolicies.TeamHandoffConfig teamHandoff;
 
         /**
+         * Limits for the agent-operations tools ({@code read_team_scorecard},
+         * {@code propose_team_budget_change}, {@code schedule_followup}). The tools
+         * themselves are off unless named in {@code builtInToolsWhitelist}; this only
+         * tunes their caps. See {@link AgentOpsConfig}.
+         *
+         * @since 6.7.0
+         */
+        private AgentOpsConfig agentOps;
+
+        /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
          * 120000 (two minutes).
          * <p>
@@ -1054,6 +1064,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public AgentOpsConfig getAgentOps() {
+            return agentOps;
+        }
+
+        public void setAgentOps(AgentOpsConfig agentOps) {
+            this.agentOps = agentOps;
         }
 
         public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {

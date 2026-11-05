@@ -1853,7 +1853,25 @@
     "grAddType": "要添加的防护栏类型",
     "grAdd": "添加防护栏",
     "grStreamingBuffered": "此任务已关闭流式传输：会拦截、脱敏或重新提示的输出防护栏会让任务先扣留回答，筛查后客户端才一次性收到。使用警告可保持流式传输。",
-    "grStreamingNote": "已流出的 token 无法收回，因此会拦截、脱敏或重新提示的输出防护栏会让任务先扣留回答，筛查后再发出。仅警告的防护栏会保持流式传输。"
+    "grStreamingNote": "已流出的 token 无法收回，因此会拦截、脱敏或重新提示的输出防护栏会让任务先扣留回答，筛查后再发出。仅警告的防护栏会保持流式传输。",
+    "agentOps": "智能体运营工具",
+    "agentOpsDesc": "让智能体读取团队数据、申请预算并预约自己的回访的工具。除非在此勾选，否则每一项都处于关闭状态，即使智能体拥有全部内置工具。",
+    "agentOpsScorecard": "团队记分卡（只读）",
+    "agentOpsScorecardDesc": "智能体所在团队及其监督团队的支出、剩余预算、每周完成和失败的任务、带原因代码的审批结果以及近期复盘经验。仅限对话用户有权查看的团队。",
+    "agentOpsWeeks": "历史周数",
+    "agentOpsMaxLessons": "每个团队的复盘经验数",
+    "agentOpsGroups": "额外的团队 ID",
+    "agentOpsBudget": "预算提案",
+    "agentOpsBudgetDesc": "建议提高团队上限或在团队之间转移预算。仅在管理员批准该调用后才会生效。只有当工具审批要求对 propose_team_budget_* 进行审批时才会提供该工具。",
+    "agentOpsBudgetGateHint": "请将 propose_team_budget_* 添加到工具审批（智能体或任务级别），否则智能体不会获得此工具。",
+    "agentOpsPerTurn": "每轮调用次数",
+    "agentOpsPerDay": "每日生效次数",
+    "agentOpsMaxAmount": "每个提案的最大金额（$）",
+    "agentOpsFollowUp": "回访预约",
+    "agentOpsFollowUpDesc": "为智能体自己的对话或新对话预约、列出和取消一次性回访。每次触发都有费用上限。",
+    "agentOpsMaxPending": "同时等待数量",
+    "agentOpsHorizon": "时间范围（天，最多 90）",
+    "agentOpsCostPerFire": "每次触发的费用上限（$）"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -2561,7 +2579,8 @@
     "finishedOneShot": "一次性计划：已运行并完成。",
     "oneTimeHelpZone": "仅在此时刻触发一次，然后完成。按 {{zone}} 时间解读（即下方的时区）。",
     "openKnowledgeBase": "打开知识库",
-    "serverOwnedHint": "由 {{productName}} 自身运行（告警重试、汇总和保留清理）。无法修改、停用或删除。"
+    "serverOwnedHint": "由 {{productName}} 自身运行（告警重试、汇总和保留清理）。无法修改、停用或删除。",
+    "typeFollowUp": "智能体回访"
   },
   "cascadeTrace": {
     "title": "模型级联",

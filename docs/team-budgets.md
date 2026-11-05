@@ -199,3 +199,8 @@ Metrics Reference dashboard under **Team Budgets**.
 - An administrator gets **Adjust this month** (cap and a required reason; refused below the spend) and **Transfer
   budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog). Other roles do not see the
   buttons; the server enforces it regardless.
+
+## Agents proposing budget changes
+
+An agent can read its team's numbers and propose a raise or transfer that an administrator approves, with the
+[Agent Operations Tools](agent-ops-tools.md). The change still goes through the admin-only operations above.
