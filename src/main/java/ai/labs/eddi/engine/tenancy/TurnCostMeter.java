@@ -111,7 +111,7 @@ public class TurnCostMeter {
             }
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Releasing the cost holds of conversation %s failed — they expire on their own",
-                    sanitize(memory != null ? memory.getConversationId() : null));
+                    sanitize(memory.getConversationId()));
         }
     }
 

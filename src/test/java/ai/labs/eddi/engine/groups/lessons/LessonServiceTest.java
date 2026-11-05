@@ -22,9 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,13 +43,11 @@ class LessonServiceTest {
     private IAgentGroupStore groups;
     private IUserMemoryStore memory;
     private LessonService service;
-    private final Map<String, AgentGroupConfiguration> configs = new HashMap<>();
 
     private void group(String id, String name, LessonConfig lessonConfig) throws Exception {
         var config = new AgentGroupConfiguration();
         config.setName(name);
         config.setLessonConfig(lessonConfig);
-        configs.put(id, config);
         var resourceId = mock(IResourceStore.IResourceId.class);
         when(resourceId.getVersion()).thenReturn(1);
         when(groups.getCurrentResourceId(id)).thenReturn(resourceId);
