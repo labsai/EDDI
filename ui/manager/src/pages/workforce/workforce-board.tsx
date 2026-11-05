@@ -42,6 +42,7 @@ import {
   getGroupConversation,
   pendingTurnTimeout,
   tieBreakOptions,
+  pendingHumanTask,
   type GroupAttachmentRef,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -1141,6 +1142,7 @@ function WorkforceBoard() {
               )}
               isSubmitting={submitHumanInputMutation.isPending}
               options={tieBreakOptions(selectedConversation.pendingHumanInput)}
+              task={pendingHumanTask(selectedConversation)}
               onSubmit={(content, choice) =>
                 handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content, choice)
               }

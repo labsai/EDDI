@@ -20,6 +20,11 @@ interface HumanTurnBannerProps {
    * rationale, instead of a free-text turn.
    */
   options?: string[];
+  /**
+   * The task-force task the pending input is about (a HUMAN executor's task). The
+   * banner then names the task and asks for its result.
+   */
+  task?: { subject: string; description?: string | null };
   onSubmit: (content: string, choice?: string) => void;
   isSubmitting?: boolean;
   /**
@@ -52,6 +57,7 @@ function HumanTurnBannerBody({
   requestedAt,
   turnTimeout,
   options,
+  task,
   onSubmit,
   isSubmitting,
 }: Omit<HumanTurnBannerProps, "pauseKey">) {
@@ -99,8 +105,16 @@ function HumanTurnBannerBody({
           <h3 className="text-sm font-semibold text-foreground">
             {tieBreak
               ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
-              : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
+              : task
+                ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
+                : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
           </h3>
+          {task && (
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="human-turn-task">
+              <span className="font-medium text-foreground">{task.subject}</span>
+              {task.description ? ` — ${task.description}` : ""}
+            </p>
+          )}
         </div>
       </div>
 
@@ -185,7 +199,9 @@ function HumanTurnBannerBody({
         placeholder={
           tieBreak
             ? t("groupTieBreak.rationalePlaceholder", "Why (optional)")
-            : t("groups.humanTurnResponsePlaceholder", "Your response")
+            : task
+              ? t("groupHumanTasks.resultPlaceholder", "Your result for this task")
+              : t("groups.humanTurnResponsePlaceholder", "Your response")
         }
         className="mb-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         rows={tieBreak ? 2 : 4}

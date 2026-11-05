@@ -629,14 +629,24 @@ class AgentGroupStoreTest {
     }
 
     @Test
-    void humanMember_inTaskForceGroup_isRejected_presetExpanded() {
+    void humanMember_asTaskForcePlanner_isRejected_presetExpanded() {
         // TASK_FORCE stores NO phases — the preset expansion is what makes this
-        // check reach PLAN/EXECUTE/VERIFY at all.
+        // check reach PLAN/VERIFY at all. Without a moderator the first member by
+        // speaking order plans and verifies, and here that is the human.
         var problems = AgentGroupStore.humanMemberProblems(humanConfig(DiscussionStyle.TASK_FORCE,
                 null, human("h-1", "Hannah")));
 
         assertFalse(problems.isEmpty());
-        assertTrue(problems.stream().anyMatch(p -> p.contains("task-force")), problems.toString());
+        assertTrue(problems.stream().anyMatch(p -> p.contains("plan or verify")), problems.toString());
+    }
+
+    @Test
+    void humanMember_asTaskForceExecutor_isAccepted() {
+        var config = humanConfig(DiscussionStyle.TASK_FORCE, null, human("h-1", "Hannah"),
+                new GroupMember("lead", "Lead", 2, null));
+        config.setModeratorAgentId("lead");
+
+        assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty());
     }
 
     @Test

@@ -397,9 +397,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 : event.memberId();
         String msg = event.detail() != null && event.detail().isTieBreak()
                 ? tieBreakNotice(name, event.phaseName(), event.detail().options())
-                : String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
-                        name, event.phaseName(),
-                        groupConversationId != null ? groupConversationId : "unknown");
+                : event.detail() != null && event.detail().isTask()
+                        ? String.format("📋 *%s* — a task assigned to you is ready in *%s*. Respond in EDDI (conversation `%s`).",
+                                name, event.phaseName(), groupConversationId != null ? groupConversationId : "unknown")
+                        : String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                                name, event.phaseName(),
+                                groupConversationId != null ? groupConversationId : "unknown");
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, msg);
         // A human pause is terminal for THIS listener instance — the discussion

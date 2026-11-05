@@ -5864,6 +5864,12 @@
     "backlogNote": "Chaque exécution de cadence prend d'abord les tâches de plus haute priorité (P5 avant P1). Une tâche ne peut plus être modifiée une fois ajoutée ; une exécution la termine, ou vous pouvez la supprimer.",
     "priorityHint": "Les nombres les plus élevés sont pris en premier par une exécution de cadence. 0 est la valeur par défaut."
   },
+  "groupHumanTasks": {
+    "bannerTitle": "Une tâche vous est assignée, {{name}}",
+    "resultPlaceholder": "Votre résultat pour cette tâche",
+    "inboxBadge": "Tâche",
+    "inboxReason": "En attente que {{member}} termine une tâche assignée"
+  },
   "workforceWizard": {
     "title": "Nouvelle équipe"
   },

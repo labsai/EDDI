@@ -41,6 +41,20 @@ class SlackTieBreakNoticeTest {
     }
 
     @Test
+    @DisplayName("a human task says a task is ready")
+    void taskNotice() {
+        var api = mock(SlackWebApiClient.class);
+        var listener = new SlackGroupDiscussionListener(api, TOKEN, "C1", "1.0");
+
+        listener.onHumanInputRequested(new HumanInputRequestedEvent("h1", "Hannah", 1, "Execute",
+                new HumanRequestDetail(HumanRequestDetail.KIND_TASK, null, "t-1", null, null)));
+
+        var text = ArgumentCaptor.forClass(String.class);
+        verify(api).postMessage(eq(TOKEN), eq("C1"), anyString(), text.capture());
+        assertTrue(text.getValue().startsWith("📋 *Hannah* — a task assigned to you is ready in *Execute*"), text.getValue());
+    }
+
+    @Test
     @DisplayName("a plain speaking turn keeps its notice")
     void plainTurn() {
         var api = mock(SlackWebApiClient.class);

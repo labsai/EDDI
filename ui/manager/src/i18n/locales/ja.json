@@ -5804,6 +5804,12 @@
     "backlogNote": "各ケイデンス実行は優先度の高いタスクから先に選びます（P5 は P1 より先）。追加したタスクは編集できません。実行が完了するか、削除できます。",
     "priorityHint": "数値が大きいほど、ケイデンス実行で先に選ばれます。0 が既定値です。"
   },
+  "groupHumanTasks": {
+    "bannerTitle": "{{name}} さんにタスクが割り当てられています",
+    "resultPlaceholder": "このタスクの結果",
+    "inboxBadge": "タスク",
+    "inboxReason": "{{member}} さんが割り当てられたタスクを終えるのを待っています"
+  },
   "workforceWizard": {
     "title": "新しいチーム"
   },

@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -116,6 +117,7 @@ public class PhaseExecutionEngine {
         private final int speakerIdx;
         private final String renderedPrompt;
         private final boolean parallel;
+        private final transient HumanRequestDetail detail;
 
         /**
          * @param member
@@ -131,11 +133,25 @@ public class PhaseExecutionEngine {
          *            whether this turn belongs to a PARALLEL phase's human tail
          */
         public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel) {
+            this(member, speakerIdx, renderedPrompt, parallel, null);
+        }
+
+        /**
+         * @param detail
+         *            what the pause asks for when it is not a speaking turn — a
+         *            task-force task ({@link GroupHumanTasks}); {@code null} for a turn
+         */
+        public HumanTurnRequired(GroupMember member, int speakerIdx, String renderedPrompt, boolean parallel, HumanRequestDetail detail) {
             super("Human member turn required: " + member.agentId(), null, false, false);
             this.member = member;
             this.speakerIdx = speakerIdx;
             this.renderedPrompt = renderedPrompt;
             this.parallel = parallel;
+            this.detail = detail;
+        }
+
+        public HumanRequestDetail detail() {
+            return detail;
         }
 
         public GroupMember member() {

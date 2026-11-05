@@ -5804,6 +5804,12 @@
     "backlogNote": "Jeder Kadenz-Lauf wählt zuerst die Aufgaben mit der höchsten Priorität (P5 vor P1). Eine Aufgabe lässt sich nach dem Hinzufügen nicht mehr bearbeiten; ein Lauf erledigt sie, oder Sie löschen sie.",
     "priorityHint": "Höhere Zahlen werden von einem Kadenz-Lauf zuerst gewählt. 0 ist der Standard."
   },
+  "groupHumanTasks": {
+    "bannerTitle": "Dir ist eine Aufgabe zugewiesen, {{name}}",
+    "resultPlaceholder": "Dein Ergebnis für diese Aufgabe",
+    "inboxBadge": "Aufgabe",
+    "inboxReason": "Wartet darauf, dass {{member}} eine zugewiesene Aufgabe erledigt"
+  },
   "workforceWizard": {
     "title": "Neues Team"
   },
