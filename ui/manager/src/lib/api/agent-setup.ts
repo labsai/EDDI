@@ -3,6 +3,18 @@ import { api } from "../api-client";
 import { parseVersionFromLocation } from "./location-version";
 import { getAgentCurrentVersion } from "./agents";
 
+/**
+ * The longest `systemPrompt` the backend's `setup` and `setup-api` accept
+ * (`AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH`); a longer one is a 400. The
+ * Platform Operator is provisioned through `setup-api`, so its prompt must fit:
+ * 6.7.0 shipped an Operator prompt of ~110,000 characters against a cap of
+ * 100,000, and no deployment could set up or upgrade its Operator.
+ * `SetupPromptCapMirrorTest` (backend) fails when this differs from the Java
+ * constant; `operator-prompt-size.test.ts` fails when the Operator prompt gets
+ * within 20% of it.
+ */
+export const SETUP_MAX_SYSTEM_PROMPT_LENGTH = 250_000;
+
 // ---------- Request types ----------
 
 export interface SetupAgentRequest {

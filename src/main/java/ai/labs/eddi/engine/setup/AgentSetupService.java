@@ -1412,8 +1412,18 @@ public class AgentSetupService {
      * Upper bound on a setup-supplied system prompt. Generous — a real system
      * prompt can be long — but bounded: this input reaches the service from
      * {@code create_sub_agent}, i.e. it is LLM-authored and retryable.
+     * <p>
+     * The Manager provisions the Platform Operator through {@code setup-api} with a
+     * prompt of its own, which has grown with every release (about 110,000
+     * characters in 6.7.0, which the old cap of 100,000 refused, so no 6.7.0
+     * deployment could set up or upgrade its Operator). The Manager mirrors this
+     * value as {@code SETUP_MAX_SYSTEM_PROMPT_LENGTH} in
+     * {@code ui/manager/src/lib/api/agent-setup.ts};
+     * {@code SetupPromptCapMirrorTest} fails when the two differ, and the Manager's
+     * {@code operator-prompt-size.test.ts} fails when the Operator prompt gets
+     * within 20% of it. Change all three together.
      */
-    public static final int MAX_SYSTEM_PROMPT_LENGTH = 100_000;
+    public static final int MAX_SYSTEM_PROMPT_LENGTH = 250_000;
 
     /**
      * Validates the two free-text fields every setup flow requires.
