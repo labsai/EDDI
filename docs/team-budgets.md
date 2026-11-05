@@ -212,3 +212,8 @@ Metrics Reference dashboard under **Team Budgets**.
   budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog, replaced after a 4xx answer,
   which applied nothing, and kept after a 5xx or network error, so the retry stays idempotent). Other roles do not see the
   buttons; the server enforces it regardless.
+
+## Agents proposing budget changes
+
+An agent can read its team's numbers and propose a raise or transfer that an administrator approves, with the
+[Agent Operations Tools](agent-ops-tools.md). The change still goes through the admin-only operations above.
