@@ -295,19 +295,57 @@ public final class SelfUngatingGuard {
             return !gatePaths.isEmpty() ? LLM_GATE_REMOVAL_REASON : LLM_GUARDRAIL_REMOVAL_REASON;
         }
         for (JsonNode operation : tree) {
+            String op = operation.path("op").asText("");
             String path = operation.path("path").asText("");
             for (String gatePath : gatePaths) {
-                if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
+                if (touchesStoredPath(op, path, gatePath)) {
                     return LLM_GATE_REMOVAL_REASON;
                 }
             }
             for (String guardrailPath : guardrailPaths) {
-                if (path.isEmpty() || guardrailPath.equals(path) || guardrailPath.startsWith(path + "/")) {
+                if (touchesStoredPath(op, path, guardrailPath)) {
                     return LLM_GUARDRAIL_REMOVAL_REASON;
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * True if an operation reaches a protected stored path: it targets the path or
+     * one of its ancestors, or it is an {@code add}/{@code remove} at an array
+     * index at or before the protected element's index under the same parent. That
+     * shift moves the protected element to an index the stored paths do not name,
+     * so a later operation in the same patch could drop it unseen
+     * ({@code remove /tasks/0} twice removes a gated {@code /tasks/1}).
+     * {@code move} and {@code copy} are refused by {@link #patchRefusal} already;
+     * an append ({@code /-}) shifts nothing.
+     */
+    static boolean touchesStoredPath(String op, String path, String storedPath) {
+        if (path.isEmpty() || storedPath.equals(path) || storedPath.startsWith(path + "/")) {
+            return true;
+        }
+        if (!"add".equals(op) && !"remove".equals(op)) {
+            return false;
+        }
+        int slash = path.lastIndexOf('/');
+        String parentPrefix = path.substring(0, slash + 1);
+        Long index = arrayIndex(path.substring(slash + 1));
+        if (index == null || !storedPath.startsWith(parentPrefix)) {
+            return false;
+        }
+        String rest = storedPath.substring(parentPrefix.length());
+        int next = rest.indexOf('/');
+        Long storedIndex = arrayIndex(next < 0 ? rest : rest.substring(0, next));
+        return storedIndex != null && storedIndex >= index;
+    }
+
+    /** The segment as an RFC 6901 array index, or null if it is not one. */
+    private static Long arrayIndex(String segment) {
+        if (segment.isEmpty() || segment.length() > 18 || !segment.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            return null;
+        }
+        return Long.valueOf(segment);
     }
 
     /**

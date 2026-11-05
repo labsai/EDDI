@@ -16586,7 +16586,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_guardrail_toolcall_decisions_total` — one per tool call screened by `toolCallGuardrails`, by `stage` (live: before the approval gate; resume: an approved or edited call, block-only) and `outcome` (allowed, rewritten, blocked, reprompted, undecided). live/blocked is approvals never asked for; resume/blocked is edits refused. Flat is normal when no task configures toolCallGuardrails.",
+          "description": "`eddi_guardrail_toolcall_decisions_total` — one per tool call screened by `toolCallGuardrails`, by `stage` (live: before the approval gate; resume: an approved or edited call, block-only) and `outcome` (allowed, rewritten, blocked, reprompted, undecided). live/blocked includes calls that would not need approval, and resume/blocked can include an unchanged approved call; the labels do not separate those cases. Flat is normal when no task configures toolCallGuardrails.",
           "gridPos": {
             "h": 7,
             "w": 12,

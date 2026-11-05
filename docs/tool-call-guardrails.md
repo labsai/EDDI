@@ -132,7 +132,7 @@ Every finding is recorded like any other guardrail outcome, with phase `tool_cal
 - `eddi_guardrail_triggered_total{phase="tool_call"}`;
 - a `tool_call_guardrail` step in the tool trace.
 
-Per screened call, `eddi_guardrail_toolcall_decisions_total{stage, outcome}` counts `allowed`, `rewritten`, `blocked`, `reprompted` and `undecided` — `stage="live", outcome="blocked"` is approvals that never had to be asked for, `stage="resume", outcome="blocked"` is edits that were refused. No tool tag: tool names are unbounded.
+Per screened call, `eddi_guardrail_toolcall_decisions_total{stage, outcome}` counts `allowed`, `rewritten`, `blocked`, `reprompted` and `undecided` — `stage="live"` counts every screened call before the approval gate, gated or not, and `stage="resume"` counts approved calls as they are re-screened, edited or not (an unchanged one with the deterministic types only). So `live/blocked` also includes calls that would never have needed approval, and `resume/blocked` can include an approved call whose arguments were not changed. The labels do not tell those cases apart. No tool tag: tool names are unbounded.
 
 ## Tool results
 
