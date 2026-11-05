@@ -40,10 +40,10 @@
              coverage gate. It follows skipTests, so -DskipTests still skips both. -->
         <skipTests>false</skipTests>
         <skipUTs>${skipTests}</skipUTs>
-        <!-- The Manager and Chat UIs (ui/manager, ui/chat) are built by Maven in
+        <!-- The three UIs (ui/manager, ui/workforce, ui/chat) are built by Maven in
              prepare-package and copied into target/classes just before the jar is
              assembled. compile, test and quarkus:dev therefore never run npm, while
-             package, verify and install always build both UIs unless -DskipUi=true.
+             package, verify and install always build all three unless -DskipUi=true.
              CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
         <!-- 2.x needs Java 17 and Maven 3.6 (both far below this build) and changes no
@@ -1075,7 +1075,7 @@
                     <skip>${skipUi}</skip>
                     <nodeVersion>${node.version}</nodeVersion>
                     <!-- Node lands in ui/node/<node.version>/node (all of ui/node is gitignored),
-                         shared by both UIs. One directory PER VERSION: the plugin swaps in a new
+                         shared by every UI. One directory PER VERSION: the plugin swaps in a new
                          node binary over an existing install but unpacks the new npm over the old
                          one without clearing it, and the mixed npm tree crashes ("Class extends
                          value undefined"). A fixed ui/node therefore broke `package` on every
@@ -1086,7 +1086,7 @@
                 </configuration>
                 <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
                      `quarkus:dev` never need the UI, and binding it earlier made every one of
-                     them reinstall node_modules and rebuild both UIs (and delete node_modules
+                     them reinstall node_modules and rebuild every UI (and delete node_modules
                      under a running `npm run dev`). copy-ui-bundles below shares the phase;
                      executions of one phase run in POM order, so this plugin must stay
                      declared before maven-clean-plugin (which drops the previous run's
@@ -1100,7 +1100,7 @@
                         <phase>prepare-package</phase>
                     </execution>
                     <execution>
-                        <!-- One install for both UIs: ui/ is an npm workspaces root with a
+                        <!-- One install for all three UIs: ui/ is an npm workspaces root with a
                              single package-lock.json (ui/package.json), and the per-app
                              builds below resolve their dependencies from ui/node_modules. -->
                         <id>ui-install</id>
@@ -1126,6 +1126,20 @@
                                 <!-- keeps the sidebar version in lockstep with this pom -->
                                 <EDDI_VERSION>${project.version}</EDDI_VERSION>
                             </environmentVariables>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- Workforce, its own app since phase 5 of the frontend
+                             unification plan: workforce.html and its chunks, copied
+                             beside the Manager's by copy-ui-bundles. -->
+                        <id>workforce-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                            <workingDirectory>${project.basedir}/ui/workforce</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1181,6 +1195,9 @@
                                 </fileset>
                                 <fileset>
                                     <directory>ui/manager/dist</directory>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/workforce/dist</directory>
                                 </fileset>
                                 <fileset>
                                     <directory>ui/chat/dist</directory>
@@ -1264,6 +1281,22 @@
                                         <!-- The MSW dev worker is needed in public/ for the dev
                                              server and the Playwright MSW tier, and must never
                                              ship in the production jar. -->
+                                        <exclude>mockServiceWorker.js</exclude>
+                                    </excludes>
+                                </resource>
+                                <resource>
+                                    <!-- workforce.html at the root (RestWorkforceResource serves
+                                         it for every /workforce/** path) and its hashed chunks
+                                         under assets/, beside the Manager's: Vite names each
+                                         chunk by its content, so the two builds never collide. -->
+                                    <directory>${project.basedir}/ui/workforce/dist</directory>
+                                    <excludes>
+                                        <!-- Backend-owned files the default resource copy already
+                                             put here, as for the Manager above. -->
+                                        <exclude>index.html</exclude>
+                                        <exclude>robots.txt</exclude>
+                                        <exclude>scripts/js/landing-redirect.js</exclude>
+                                        <!-- The MSW dev worker never ships in the jar. -->
                                         <exclude>mockServiceWorker.js</exclude>
                                     </excludes>
                                 </resource>
