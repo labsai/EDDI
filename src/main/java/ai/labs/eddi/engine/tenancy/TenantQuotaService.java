@@ -19,8 +19,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.OptionalDouble;
+import java.util.List;
 
 /**
  * Tenant quota enforcement engine.

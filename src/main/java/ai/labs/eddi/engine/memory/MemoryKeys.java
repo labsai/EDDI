@@ -236,6 +236,15 @@ public final class MemoryKeys {
     public static final String AUDIT_SPEND_REPORTED = "audit:spend_reported";
 
     /**
+     * The unpriced-call and token attribution ({@code unpricedCalls},
+     * {@code inputTokens}, {@code outputTokens}) of a charge that
+     * {@link #AUDIT_PENDING_COST} carries, so the spend event of the settle that
+     * finally records it reports the whole amount's attribution. Newest value wins,
+     * like the pending cost; an all-zero map is how a recovered charge is recorded.
+     */
+    public static final String AUDIT_PENDING_SPEND = "audit:pending_spend";
+
+    /**
      * Prefix of the guardrail evidence keys,
      * {@code audit:guardrail:<phase>:<type>}: a {@code List} of {@code {phase,
      * type, action, reason, retryCount, taskId}} records, one per time that

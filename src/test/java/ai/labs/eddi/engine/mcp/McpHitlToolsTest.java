@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -198,7 +200,7 @@ class McpHitlToolsTest {
 
     @Test
     void resume_forbidden_returnsForbiddenError() {
-        doThrow(new ForbiddenException("no")).when(guard).requireConversationHitlAccess("c1");
+        doThrow(new ForbiddenException("no")).when(guard).requireConversationResumeAccess("c1");
         String out = tools.resumeConversation("c1", "APPROVED", null);
         assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
         verifyNoInteractions(conversationService);
@@ -440,6 +442,29 @@ class McpHitlToolsTest {
         assertFalse(out.contains(canary), "raw arguments, transcript or trace leaked: " + out);
         assertTrue(out.contains("visible-to-approver"),
                 "the redacted arguments are the approver's contract and must still be served: " + out);
+    }
+
+    /** As the REST surface: no VIEW on the agent, no compiled system prompt. */
+    @Test
+    void getApprovalStatus_detailFull_withholdsCompiledPromptWithoutView() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setAgentId("agent-1");
+        var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+        var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+        workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("audit:compiled_prompt", "SYSTEM PROMPT", null,
+                new Date(), null, false));
+        step.getWorkflows().add(workflow);
+        snapshot.getConversationSteps().add(step);
+        when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
+        when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        when(resourceAccessGuard.hasAccess("agent-1", AccessLevel.VIEW)).thenReturn(false);
+        json = new JsonSerialization(new ObjectMapper());
+        tools = build(true, true);
+
+        String out = tools.getApprovalStatus("c1", "full");
+
+        assertFalse(out.contains("SYSTEM PROMPT"), "the compiled prompt must not be served without VIEW: " + out);
     }
 
     @Test

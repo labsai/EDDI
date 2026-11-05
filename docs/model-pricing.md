@@ -3,8 +3,8 @@
 EDDI turns every model call's token usage into dollars, and those dollars feed the
 conversation's tracked cost (`audit:cost`), the agent's `maxCostPerConversationUsd`, a
 cascade's `maxCostPerRun`, a group's `maxCostPerDiscussion`, the tenant's
-[monthly cost budget](tenant-quotas.md#the-monthly-cost-budget), the audit ledger and the
-`/v1` usage block. This page explains how a call is priced, where the prices come from,
+[monthly cost budget](tenant-quotas.md#the-monthly-cost-budget) and the audit ledger. (The
+`/v1` usage block reports tokens only.) This page explains how a call is priced, where the prices come from,
 how to see spend that has no price, and how to refuse it.
 
 ## In short
@@ -34,12 +34,19 @@ long-context tier's — is chosen in this order:
    `cacheReadPricePer1M`, `cacheWritePricePer1M`, `longContext`.
 3. The catalog entry matched by the model that answered (see [Matching](#matching)).
 4. Fallbacks:
-   - a cache price that is still unknown is the **input price** — conservative: an
-     over-count is safe under a hard budget, an under-count is not;
+   - a cache price that is still unknown is the **input price**. That is conservative for
+     cache reads (they cost less than input) but **not** for cache writes, which several
+     providers price above input (Anthropic: $3.75 against $3.00): an absent cache-write
+     price under-counts those writes, and an under-count can let spend pass a hard
+     budget. Set `cacheWritePricePer1M` whenever it exceeds the input price;
    - a long-context price that is unknown is the base price of the same kind;
    - **no input and no output price anywhere is _unpriced_**: the call costs $0 and
      is counted. An explicit `0` is a real price (self-hosted models) and is never
-     counted as unpriced.
+     counted as unpriced. A price for only one side is enough to make the call _priced_
+     (strict mode admits it), but the side with no price costs $0, so **set both the
+     input and the output price** to account for both token buckets. This is deliberate:
+     a model that is genuinely free on one side is priced `0` on it, and treating every
+     half-priced entry as unpriced would refuse those.
 
 When a config sets no price of its own, each call is priced at the catalog entry it
 matched **when it returned** — a catalog edit in the middle of a turn cannot tear one
@@ -48,10 +55,10 @@ call's price.
 The cost of a call is
 
 ```text
-cost = max(0, input − cacheRead − cacheWrite) × inputPrice
-     + cacheRead  × cacheReadPrice
-     + cacheWrite × cacheWritePrice
-     + output     × outputPrice
+cost = ( max(0, input − cacheRead − cacheWrite) × inputPrice
+       + cacheRead  × cacheReadPrice
+       + cacheWrite × cacheWritePrice
+       + output     × outputPrice ) / 1,000,000
 ```
 
 where `input` is **all** prompt tokens (cached ones included) and `output` includes
@@ -125,9 +132,7 @@ The prices above illustrate the shape; take real prices from the provider.
   `If-Match` or in the body); a stale one answers `409` with `currentRevision`.
 - **Only `eddi-admin` writes.** The catalog is a budget lever — lowering a price to $0
   is raising a budget — so there is no MCP write tool and no Platform Operator write
-  grant. Editors can read it and resolve a model, also over MCP (`read_model_prices`,
-  see [MCP Server](mcp-server.md#model-price-tool-1)), and the Platform Operator can
-  read the catalog, resolve a model and list unpriced calls.
+  grant. Editors can read it and resolve a model.
 - **Limits**: at most 500 entries; `model` is 1–128 characters of `A–Z a–z 0–9 . _ : / @ + -`
   with `*` only as a leading and/or trailing wildcard; `provider` is a model type of
   this deployment or `*`; prices 0–10 000; `thresholdTokens` 1 000–10 000 000; `note`
@@ -270,11 +275,13 @@ tenant the increase and notifies the sinks.
 
 **Receiving spend** — implement `ISpendSink` as an `@ApplicationScoped` bean. Its
 `onSpend(SpendEvent)` is called synchronously after every charge the tenant counter
-accepted: settled turns (`TURN`, from `TurnCostMeter`, exactly once per step even
-across a pause and resume), Dream runs (`DREAM`) and group machinery (`GROUP_SYSTEM`).
+accepted: settled turns (`TURN`, from `TurnCostMeter`: one per accepted charge, so a step
+that pauses and resumes can produce two), Dream runs (`DREAM`) and group machinery (`GROUP_SYSTEM`).
 A `SpendEvent` carries `tenantId, conversationId, agentId, agentVersion, userId,
 groupId, groupConversationId, kind, detail, usd` (the delta just charged),
-`unpricedCalls, inputTokens, outputTokens` (a turn's are the step's totals) and `at`.
+`unpricedCalls, inputTokens, outputTokens` (a turn's are the increase since that
+step's previous event, i.e. deltas, not step totals; sum them across the events of a
+step) and `at`.
 A member turn's `groupId` is the group the orchestrator put on the turn. A sink's
 exception is logged and swallowed.
 

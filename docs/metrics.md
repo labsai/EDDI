@@ -1124,9 +1124,14 @@ eddi_cluster_nats_reconnects_total          # Reconnects of this node
 eddi_cluster_members                        # Members in the presence bucket (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
-eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released|unconfirmed|gone}; unconfirmed = no renewal acknowledged for ttl - 2 x heartbeat
 eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
 eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
+eddi_cluster_lease_adopted_total            # Writes of this node applied by NATS although the reply was lost, recognised and kept {op=create|renew}
+eddi_cluster_lease_orphans_deleted_total    # Leases this node wrote but never took (the reply was lost), deleted
+eddi_cluster_lease_handoffs_total           # Leases handed to the next turn queued on the same node, without a release
+eddi_cluster_lease_renew_failures_total     # Lease renewals that could not reach NATS (the lease stays valid until ttl - 2 x heartbeat)
+eddi_cluster_kv_reopens_total               # KV bucket handles (re)opened {bucket}; a steady rise means calls keep failing on stale handles
 eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
 eddi_cluster_kv_seconds                     # KV calls {bucket, op, outcome} (timer)
 eddi_cluster_kv_cas_conflicts_total         # Lost compare-and-sets {bucket}

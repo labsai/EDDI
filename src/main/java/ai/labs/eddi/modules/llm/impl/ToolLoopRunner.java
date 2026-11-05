@@ -1249,8 +1249,13 @@ class ToolLoopRunner {
 
             @Override
             public void charge(Map<String, Object> tokenUsage) {
-                LoopSideCallSpend.charge(toolExecutionService, conversationId, enableCostTracking, SUMMARIZER_DISPATCH_NAME,
-                        ModelPrices.forToolSummarizer(task).cost(tokenUsage));
+                if (!enableCostTracking || conversationId == null || toolExecutionService == null
+                        || toolExecutionService.getCostTracker() == null) {
+                    return;
+                }
+                double price = ModelPrices.forToolSummarizer(task).cost(tokenUsage);
+                toolExecutionService.getCostTracker()
+                        .trackToolCall(new ToolInvocation(SUMMARIZER_DISPATCH_NAME, SUMMARIZER_DISPATCH_NAME, price), conversationId);
             }
         };
     }

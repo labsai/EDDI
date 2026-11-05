@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -116,17 +117,24 @@ public class TurnCostMeter {
             step.storeData(new Data<>(MemoryKeys.AUDIT_METERED_COST, cost));
             if (result.accountingUnavailable()) {
                 step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, charge));
+                // the dollars are carried, so their attribution is too
+                long[] carriedSpend = outstandingSpend(memory, step);
+                long[] unreported = SpendEvents.takeUnreported(memory);
+                step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, spendMap(carriedSpend[0] + unreported[0],
+                        carriedSpend[1] + unreported[1], carriedSpend[2] + unreported[2])));
                 count("unavailable");
                 LOGGER.warnf("Could not charge $%.6f of conversation %s to tenant '%s' — quota accounting unavailable; "
                         + "carried to its next settle", charge, sanitize(memory.getConversationId()), sanitize(tenantId));
                 return 0.0;
             }
+            long[] carriedSpend = pending > 0.0 ? outstandingSpend(memory, step) : new long[3];
             if (pending > 0.0) {
                 step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.0));
+                step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, spendMap(0, 0, 0)));
             }
             count(result.allowed() ? "recorded" : "over_budget");
             if (spendSinks != null) {
-                spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge));
+                spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge, carriedSpend));
             }
             return charge;
         } catch (RuntimeException e) {
@@ -161,6 +169,32 @@ public class TurnCostMeter {
             }
         }
         return 0.0;
+    }
+
+    /**
+     * The attribution carried with the pending charge, newest value wins; zeros
+     * when none.
+     */
+    private static long[] outstandingSpend(IConversationMemory memory, IWritableConversationStep step) {
+        IData<?> own = step.getData(MemoryKeys.AUDIT_PENDING_SPEND);
+        if (own == null && memory.getPreviousSteps() != null) {
+            List<IData<Object>> perStep = memory.getPreviousSteps().getExactDataPerStep(MemoryKeys.AUDIT_PENDING_SPEND);
+            for (int i = perStep.size() - 1; i >= 0 && own == null; i--) {
+                own = perStep.get(i);
+            }
+        }
+        if (own != null && own.getResult() instanceof Map<?, ?> map) {
+            return new long[]{asLong(map.get("unpricedCalls")), asLong(map.get("inputTokens")), asLong(map.get("outputTokens"))};
+        }
+        return new long[3];
+    }
+
+    private static Map<String, Long> spendMap(long unpricedCalls, long inputTokens, long outputTokens) {
+        return Map.of("unpricedCalls", unpricedCalls, "inputTokens", inputTokens, "outputTokens", outputTokens);
+    }
+
+    private static long asLong(Object value) {
+        return value instanceof Number n ? Math.max(0L, n.longValue()) : 0L;
     }
 
     private static double finiteOrZero(double value) {

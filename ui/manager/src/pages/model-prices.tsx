@@ -7,6 +7,7 @@ import { ModelPriceEntrySheet } from "@/components/model-prices/model-price-entr
 import { useModelPrices, useReferencePrices, useSaveModelPrices, useUnpricedSightings } from "@/hooks/use-model-prices";
 import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   UNPRICED_POLICIES,
@@ -31,7 +32,7 @@ function money(v: number | null | undefined): string {
 export function ModelPricesPage() {
   const { t } = useTranslation();
   const { data: view, isLoading, isError, error, refetch } = useModelPrices();
-  const { data: sightings } = useUnpricedSightings();
+  const { data: sightings, isError: sightingsError, refetch: refetchSightings } = useUnpricedSightings();
   const save = useSaveModelPrices();
   // GET is open to editors; every write is admin-only on the server, so the page offers none to others.
   const isAdmin = useIsAdminOrUnknown();
@@ -49,7 +50,11 @@ export function ModelPricesPage() {
 
   useEffect(() => {
     // an older view (the refetch after a save has not landed yet) must not overwrite a newer form
-    if (view && !dirty && (!form || view.catalog.revision >= form.revision)) setForm(view.catalog);
+    if (view && !dirty && (!form || view.catalog.revision >= form.revision)) {
+      setForm(view.catalog);
+      // server data replaced the form: a reference preview merged against the old entries is stale
+      if (form && form.entries !== view.catalog.entries) setPreview(null);
+    }
   }, [view, dirty, form]);
 
   useEffect(() => {
@@ -75,14 +80,28 @@ export function ModelPricesPage() {
   const update = useCallback((next: Partial<ModelPriceCatalog>) => {
     setForm((prev) => (prev ? { ...prev, ...next } : prev));
     setDirty(true);
+    // A reference preview is a snapshot of the entries it was merged against.
+    if (next.entries) setPreview(null);
   }, []);
+
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   const handleSave = useCallback(() => {
     if (!form || invalid) return;
+    const submitted = form;
     save.mutate(form, {
       onSuccess: (stored) => {
-        setForm(stored);
-        setDirty(false);
+        if (formRef.current === submitted) {
+          setForm(stored);
+          setPreview(null);
+          setDirty(false);
+        } else {
+          // edited while the save was in flight: keep those edits, on top of the stored revision
+          setForm((prev) => (prev ? { ...prev, revision: stored.revision } : stored));
+        }
         setConflict(false);
         toast.success(t("modelPrices.saved", "Prices saved"));
       },
@@ -99,6 +118,7 @@ export function ModelPricesPage() {
   const reload = useCallback(() => {
     setDirty(false);
     setConflict(false);
+    setPreview(null);
     void refetch();
   }, [refetch]);
 
@@ -143,8 +163,8 @@ export function ModelPricesPage() {
   if (isLoading || (!form && !isError)) {
     return (
       <div className="space-y-4" data-testid="model-prices-loading">
-        <div className="h-10 w-64 animate-pulse rounded-md bg-muted" />
-        <div className="h-48 animate-pulse rounded-xl bg-muted" />
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-48 rounded-xl" />
       </div>
     );
   }
@@ -437,7 +457,19 @@ data-testid="model-prices-delete"
             "Model calls that had no price, on the node serving this page since it started. They cost $0 against every budget.",
           )}
         </p>
-        {!sightings || sightings.length === 0 ? (
+        {sightingsError ? (
+          <div className="mt-3 flex items-center gap-2 text-xs text-destructive" role="alert" data-testid="model-prices-unpriced-error">
+            <span>{t("modelPrices.unpricedError", "The list of unpriced models could not be loaded.")}</span>
+            <button
+              type="button"
+              onClick={() => void refetchSightings()}
+              className="rounded-md px-2 py-1 font-medium text-primary hover:bg-primary/10"
+              data-testid="model-prices-unpriced-retry"
+            >
+              {t("common.retry", "Retry")}
+            </button>
+          </div>
+        ) : !sightings || sightings.length === 0 ? (
           <p className="mt-3 text-xs text-muted-foreground" data-testid="model-prices-unpriced-empty">
             {t("modelPrices.unpricedNone", "None seen.")}
           </p>

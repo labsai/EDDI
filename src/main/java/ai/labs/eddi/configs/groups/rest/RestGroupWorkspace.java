@@ -87,6 +87,9 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             return Response.ok(workspace).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard\'s denial is a 403, not a failure of this endpoint
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to read workspace for group %s", sanitize(groupId));
             return Response.serverError().build();
@@ -102,6 +105,9 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
             return Response.ok(workspace.getBacklog().getTasks()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard\'s denial is a 403, not a failure of this endpoint
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to read backlog for group %s", sanitize(groupId));
             return Response.serverError().build();
@@ -172,6 +178,9 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard\'s denial is a 403, not a failure of this endpoint
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to add backlog task for group %s", sanitize(groupId));
             return Response.serverError().build();
@@ -333,6 +342,9 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
         } catch (IllegalArgumentException | DateTimeException e) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Invalid cadence definition: " + e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard\'s denial is a 403, not a failure of this endpoint
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to add cadence for group %s", sanitize(groupId));
             return Response.serverError().build();
@@ -389,6 +401,9 @@ public class RestGroupWorkspace implements IRestGroupWorkspace {
                     .build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
+        } catch (ForbiddenException e) {
+            // the access guard\'s denial is a 403, not a failure of this endpoint
+            throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to delete cadence %s for group %s", sanitize(cadenceId), sanitize(groupId));
             return Response.serverError().build();
