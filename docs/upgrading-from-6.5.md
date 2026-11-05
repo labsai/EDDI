@@ -269,6 +269,20 @@ Applies only if you run more than one node.
   field before enabling `allowResultEdits` on a mixed-version cluster. New collections and tables
   (settings, model prices, team budgets, approval analytics) are created on first use and ignored
   by older nodes.
+- **Rolling upgrades — the later 6.7 features.** Everything below is created on first use or is an
+  optional field, and nothing writes it until you configure it, so a mixed-version cluster is safe
+  as long as you finish the rollout before switching the feature on. A backlog task's `bet` is an
+  optional field of `TaskItem`, and `lessonConfig` is an optional field of a group: stored documents are
+  read leniently, so an older pod ignores them, but an older pod that saves the same document
+  silently drops the field. Do not set either until every pod is upgraded.
+  New collections and tables (`group_outcomes`, `group_lesson_history`, `conversation_ratings`,
+  `alert_rules`, `alert_events`, `alert_windows`, and the email channel's `email_mailbox_state`,
+  `email_mailbox_notices`, `email_message_ledger` and `email_suppressions`) are created on first use
+  and ignored by older nodes. `ratingConfig` is an optional agent field. The tenant cost reservation
+  and `toolQuotas` `"window": "RUN"` store nothing new beyond their own counters.
+- **Alerts run their maintenance schedule by default.** `eddi.alerts.enabled` defaults to `true`, which
+  creates one background maintenance schedule (retries and digests) at startup; with no alert rules
+  nothing is delivered. Set it to `false` to create nothing.
 
 ### New opt-in features
 
@@ -285,6 +299,15 @@ None of these changes behaviour until configured; each has its own page.
 | Cross-team handoff | `teamHandoff.targets`, `handoffConfig` | [group-conversations](group-conversations.md) |
 | Model-backed convergence judge | `convergence.judge: SERVICE` | [group-conversations](group-conversations.md) |
 | Team budgets | `teamBudget` on a group | [group-conversations](group-conversations.md) |
+| Bets on backlog tasks | `bet` on a team backlog task | [team-learning-loop](team-learning-loop.md) |
+| Team outcome events | `outcomeConfig` on a group | [team-learning-loop](team-learning-loop.md) |
+| Team lessons — sharing between teams and cost-capped consolidation | `lessonConfig` on a group | [team-learning-loop](team-learning-loop.md#lessons) |
+| Agent operations tools — team scorecard, budget proposals, follow-ups | `team_scorecard`, `propose_team_budget`, `schedule_followup` in `builtInToolsWhitelist`; optional `agentOps` | [agent-ops-tools](agent-ops-tools.md) |
+| Hard tenant ceiling (cost reservation) | `eddi.tenant.quota.cost-reservation.enabled=true` (default `false`) | [tenant-quotas](tenant-quotas.md) |
+| Per-run tool caps | `"window": "RUN"` in `toolQuotas` | [langchain](langchain.md#per-run-caps-window-run) |
+| Email channel | A channel integration with `channelType: "email"` (`mode: trigger` or `conversation`); `eddi.email.allowed-hosts` confines servers | [email-integration](email-integration.md) |
+| Conversation ratings | `ratingConfig` on the agent | [conversation-ratings](conversation-ratings.md) |
+| Alert rules | Create rules in the Manager's Alerts page; `eddi.alerts.enabled` (default `true`) | [alerts](alerts.md) |
 
 ### Dependency advisories
 
