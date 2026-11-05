@@ -5283,7 +5283,18 @@
       "useStarterPrompt": "Inserir um prompt inicial",
       "yourAdvisors": "Seus consultores"
     },
-    "workforce": "Equipa"
+    "workforce": "Equipa",
+    "operatorLink": "Operador da plataforma",
+    "catalog": {
+      "emptyTitle": "Ainda não há nada para mostrar",
+      "emptyAuthorHint": "Os utilizadores finais só veem agentes e equipas listados. Abra um agente ou um grupo no Manager e ative \"Listado no catálogo\" — ou, com os espaços de trabalho ativos, torne-o publicado ou interno. Continua a ser preciso ter acesso para o usar.",
+      "openAgents": "Abrir agentes no Manager",
+      "emptyUserHint": "Ainda não foram disponibilizados agentes nem equipas para si. Volte mais tarde.",
+      "agents": "Agentes",
+      "teams": "Equipas",
+      "previewTitle": "O que os utilizadores finais veem",
+      "previewCounts": "{{agents}} agentes listados e {{teams}} equipas listadas são oferecidos às pessoas autorizadas a usá-los."
+    }
   },
   "operator": {
     "title": "Operador da plataforma",
@@ -7352,5 +7363,12 @@
       "lte": "é no máximo",
       "contains": "contém"
     }
+  },
+  "catalogListing": {
+    "label": "Listado no catálogo",
+    "agentDescription": "Oferece este agente aos utilizadores finais no Workforce. Só o veem as pessoas que o podem usar, e só depois de implementado. Com os espaços de trabalho ativos, os agentes publicados e internos são listados de qualquer forma.",
+    "groupDescription": "Oferece esta equipa aos utilizadores finais no Workforce. Só a veem as pessoas que a podem usar. Com os espaços de trabalho ativos, as equipas publicadas e internas são listadas de qualquer forma.",
+    "listedToast": "Listado no catálogo",
+    "unlistedToast": "Removido do catálogo"
   }
 }

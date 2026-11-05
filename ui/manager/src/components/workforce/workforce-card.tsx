@@ -50,6 +50,12 @@ interface WorkforceCardProps {
   isPinned?: boolean;
   onTogglePin?: () => void;
   lastConversationState?: string;
+  /**
+   * Show the authoring actions (settings, duplicate, delete). False for an
+   * `eddi-user`, who may run a listed team but not change it — the group store
+   * behind those actions would answer 403.
+   */
+  canManage?: boolean;
 }
 
 // ─── Stacked Avatars (inline, not exported) ──────────────────────
@@ -107,6 +113,7 @@ function WorkforceCard({
   isPinned,
   onTogglePin,
   lastConversationState,
+  canManage = true,
 }: WorkforceCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -236,6 +243,7 @@ function WorkforceCard({
                   e.preventDefault();
                   e.stopPropagation();
                 }}>
+                  {canManage && (
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
@@ -245,6 +253,7 @@ function WorkforceCard({
                     <Settings className="h-4 w-4" />
                     {t("Workforce.card.settings", "Settings")}
                   </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
@@ -254,6 +263,8 @@ function WorkforceCard({
                     <History className="h-4 w-4" />
                     {t("Workforce.card.history", "History")}
                   </DropdownMenuItem>
+                  {canManage && (
+                  <>
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation();
@@ -274,6 +285,8 @@ function WorkforceCard({
                     <Trash2 className="h-4 w-4" />
                     {t("Workforce.card.delete", "Delete")}
                   </DropdownMenuItem>
+                  </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               </div>
@@ -422,6 +435,7 @@ function WorkforceCard({
                 e.preventDefault();
                 e.stopPropagation();
               }}>
+                {canManage && (
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
@@ -431,6 +445,7 @@ function WorkforceCard({
                   <Settings className="h-4 w-4" />
                   {t("Workforce.card.settings", "Settings")}
                 </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
@@ -440,6 +455,8 @@ function WorkforceCard({
                   <History className="h-4 w-4" />
                   {t("Workforce.card.history", "History")}
                 </DropdownMenuItem>
+                {canManage && (
+                <>
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
@@ -460,6 +477,8 @@ function WorkforceCard({
                   <Trash2 className="h-4 w-4" />
                   {t("Workforce.card.delete", "Delete")}
                 </DropdownMenuItem>
+                </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </>

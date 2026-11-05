@@ -1,3 +1,4 @@
+import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -304,6 +305,7 @@ function WorkforceSettings() {
   const [dynamicAgents, setDynamicAgents] = useState<DynamicAgentConfig>(DEFAULT_DYNAMIC);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [recordDissents, setRecordDissents] = useState(false);
+  const [listed, setListed] = useState(false);
   /** Reworks per task after a failed VERIFY (E2); 0 = a failed verification is final. */
   const [maxReworks, setMaxReworks] = useState(0);
   const [taskListConfig, setTaskListConfig] = useState<GroupTaskConfig>(DEFAULT_GROUP_TASK_CONFIG);
@@ -345,6 +347,7 @@ function WorkforceSettings() {
     );
     setTasks(cfg.tasks ?? []);
     setRecordDissents(!!cfg.recordDissents);
+    setListed(cfg.listed === true);
     setMaxReworks(cfg.maxReworks ?? 0);
     setTaskListConfig(
       cfg.taskListConfig ? normalizeGroupTaskConfig(cfg.taskListConfig) : DEFAULT_GROUP_TASK_CONFIG,
@@ -382,6 +385,7 @@ function WorkforceSettings() {
     ) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(cfg.tasks ?? [])) return true;
     if (recordDissents !== !!cfg.recordDissents) return true;
+    if (listed !== (cfg.listed === true)) return true;
     if (maxReworks !== (cfg.maxReworks ?? 0)) return true;
     if (
       JSON.stringify(taskListConfig) !==
@@ -392,7 +396,7 @@ function WorkforceSettings() {
       )
     ) return true;
     return false;
-  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, maxReworks, taskListConfig]);
+  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, listed, maxReworks, taskListConfig]);
 
   const isDirty = useMemo(() => (config ? formDiffersFrom(config) : false), [config, formDiffersFrom]);
 
@@ -472,6 +476,9 @@ function WorkforceSettings() {
       dynamicAgents,
       tasks: style === "TASK_FORCE" ? tasks : config.tasks,
       recordDissents,
+      // Written only once on, or when it was set before, so a team that never
+      // touched it stays free of the field (absent reads as unlisted).
+      ...(listed || config.listed !== undefined ? { listed } : {}),
       // 0 is the default: keep a group that never set it free of the field.
       ...(maxReworks > 0 || config.maxReworks ? { maxReworks } : {}),
       // Absent means the addGroupTask/listGroupTasks tools are never assembled.
@@ -521,6 +528,7 @@ function WorkforceSettings() {
     dynamicAgents,
     tasks,
     recordDissents,
+    listed,
     maxReworks,
     taskListConfig,
     version,
@@ -1659,6 +1667,12 @@ function WorkforceSettings() {
           </div>
         </section>
       )}
+
+      {/* End-user catalog listing (opt-in, IRestCatalog). Placed after the
+          collaboration sections, which address their switches by position. */}
+      <section className="mb-10">
+        <CatalogListingToggle kind="group" listed={listed} onChange={setListed} />
+      </section>
 
       {/* ═══════════════════════════════════════════════════════════
           SECTION 7: Danger Zone

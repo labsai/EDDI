@@ -6,11 +6,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useWorkforceGroup } from "@/hooks/use-workforce-group";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import {
-  useGroup,
   useGroupConversations,
   useGroupConversation,
-  useResolvedGroupVersion,
   isActiveConversationState,
   GROUP_CONVERSATIONS_KEY,
 } from "@/hooks/use-groups";
@@ -144,9 +144,15 @@ function WorkforceBoard() {
   const { boardId } = useParams<{ boardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   // Resolved rather than defaulted to 1: a version-less link used to open the
-  // group's FIRST version (see `useResolvedGroupVersion`).
-  const resolvedVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  // group's FIRST version (see `useResolvedGroupVersion`). An end user reads the
+  // catalog entry instead of the group store (see `useWorkforceGroup`).
+  const {
+    version: resolvedVersion,
+    data: groupConfig,
+    isLoading: configLoading,
+  } = useWorkforceGroup(boardId, searchParams.get("version"));
   const version = resolvedVersion ?? 1;
+  const { canAuthor } = useWorkforceAccess();
 
   // ─── Selected conversation (URL-backed) ────────────────────────
   // The selection lives in the URL so a page reload — or a shared link — lands
@@ -176,12 +182,6 @@ function WorkforceBoard() {
   const panelTriggerRef = useRef<HTMLElement | null>(null);
 
   // ─── Data ──────────────────────────────────────────────────────
-  const { data: groupConfig, isLoading: groupLoading } = useGroup(
-    resolvedVersion ? (boardId ?? "") : "",
-    resolvedVersion,
-  );
-  // A disabled query reports isLoading false, so the version lookup counts too.
-  const configLoading = groupLoading || resolvedVersion === undefined;
   const { data: conversations } = useGroupConversations(boardId ?? "");
   const { data: selectedConversation } = useGroupConversation(
     boardId ?? "",
@@ -896,6 +896,8 @@ function WorkforceBoard() {
               conversation={selectedConversation ?? null}
               groupName={groupConfig?.name}
             />
+            {/* Team settings change the group — authors only. */}
+            {canAuthor && (
             <Link
               to={`/workforce/${boardId}/settings?version=${version}`}
               className={cn(
@@ -904,9 +906,11 @@ function WorkforceBoard() {
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               )}
               aria-label={t("Workforce.settings.title", "Settings")}
+              data-testid="board-settings-link"
             >
               <SettingsIcon />
             </Link>
+            )}
             <Button
               variant="ghost"
               size="icon"

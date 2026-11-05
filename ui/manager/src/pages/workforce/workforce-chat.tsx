@@ -10,6 +10,7 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { useChatStore } from "@/hooks/use-chat";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { cn } from "@/lib/utils";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 
 /**
  * workforce-native chat page.
@@ -20,6 +21,8 @@ export function WorkforceChat() {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = usePersistedBoolean("workforce-chat-details-panel", true);
   const [searchParams] = useSearchParams();
+  // The details panel reads the agent and deployment stores — authors only.
+  const { canAuthor } = useWorkforceAccess();
 
   // Read selected agent from Zustand store, fallback to URL searchParams ?agentId=, fallback to first deployed agent
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -42,6 +45,7 @@ export function WorkforceChat() {
         </h2>
 
         {/* Details panel toggle */}
+        {canAuthor && (
         <button
           type="button"
           onClick={() => setShowDetails((v) => !v)}
@@ -68,6 +72,7 @@ export function WorkforceChat() {
             <PanelRightOpen className="h-4 w-4" />
           )}
         </button>
+        )}
       </div>
 
       {/* Main area — chat + optional right details panel */}
@@ -81,7 +86,7 @@ export function WorkforceChat() {
         </div>
 
         {/* Right details panel */}
-        {showDetails && (
+        {canAuthor && showDetails && (
           <AgentDetailsPanel
             agentId={effectiveAgentId}
             agentName={selectedAgentName}
