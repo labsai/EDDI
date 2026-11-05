@@ -556,7 +556,7 @@
         "streaming": "Streaming",
         "rawHtml": "Mostrar HTML en las respuestas"
       },
-      "rawHtmlNote": "Desactivado por defecto: el HTML de las respuestas se muestra como texto. Actívalo solo para un agente cuyas respuestas deban contener HTML.",
+      "rawHtmlNote": "Desactivado por defecto. El widget de chat aplica este ajuste solo a partir de la versión cuyo widget lee los controles de conversación; hasta entonces, muestra el HTML para todos los agentes. Actívalo ya para un agente cuyas respuestas deban contener HTML.",
       "titles": "Títulos de conversación",
       "titlesEnable": "Dejar que un modelo escriba los títulos de conversación",
       "titlesNote": "Si no, una conversación se titula con su primer mensaje. El modelo se ejecuta una vez por conversación, en segundo plano, y se carga al presupuesto de costes. Un título puesto por el usuario nunca se reemplaza.",

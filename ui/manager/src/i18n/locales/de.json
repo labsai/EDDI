@@ -555,7 +555,7 @@
         "streaming": "Streaming",
         "rawHtml": "HTML in Antworten darstellen"
       },
-      "rawHtmlNote": "Standardmäßig aus: HTML in Antworten wird als Text gezeigt. Nur für einen Agenten einschalten, dessen Antworten HTML enthalten sollen.",
+      "rawHtmlNote": "Standardmäßig aus. Das Chat-Widget wendet diese Einstellung erst ab der Version an, deren Widget die Gesprächseinstellungen liest; bis dahin rendert es HTML für jeden Agenten. Schalten Sie sie schon jetzt für einen Agenten ein, dessen Antworten HTML enthalten sollen.",
       "titles": "Gesprächstitel",
       "titlesEnable": "Gesprächstitel von einem Modell schreiben lassen",
       "titlesNote": "Sonst erhält ein Gespräch seine erste Nachricht als Titel. Das Modell läuft einmal pro Gespräch im Hintergrund und wird dem Kostenbudget belastet. Ein vom Nutzer gesetzter Titel wird nie ersetzt.",

@@ -584,7 +584,7 @@
         "streaming": "Streaming",
         "rawHtml": "Render HTML in replies"
       },
-      "rawHtmlNote": "Off by default: HTML in replies is shown as text. Turn it on only for an agent whose replies are meant to contain HTML.",
+      "rawHtmlNote": "Off by default. The chat widget applies this setting only from the release whose widget reads conversation controls; until then it renders HTML for every agent. Turn it on now for an agent whose replies are meant to contain HTML.",
       "titles": "Conversation titles",
       "titlesEnable": "Let a model write conversation titles",
       "titlesNote": "Otherwise a conversation is titled with its first message. The model runs once per conversation, in the background, and is charged to the cost budget. A title the user set is never replaced.",

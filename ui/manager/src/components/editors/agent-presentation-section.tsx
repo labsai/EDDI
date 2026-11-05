@@ -191,7 +191,7 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
           <p className="text-[10px] text-muted-foreground">
             {t(
               "agentDetail.presentation.rawHtmlNote",
-              "Off by default: HTML in replies is shown as text. Turn it on only for an agent whose replies are meant to contain HTML."
+              "Off by default. The chat widget applies this setting only from the release whose widget reads conversation controls; until then it renders HTML for every agent. Turn it on now for an agent whose replies are meant to contain HTML."
             )}
           </p>
         </fieldset>

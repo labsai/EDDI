@@ -97,6 +97,18 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a vault reference in a connection string's password slot survives the shape scan")
+    void scrubJson_vaultReferenceInConnectionStringSurvives() throws Exception {
+        String json = """
+                { "connectionString": "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi" }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi"), scrubbed);
+    }
+
+    @Test
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {

@@ -556,7 +556,7 @@
         "streaming": "Streaming",
         "rawHtml": "Afficher le HTML des réponses"
       },
-      "rawHtmlNote": "Désactivé par défaut : le HTML des réponses est affiché comme du texte. À activer uniquement pour un agent dont les réponses doivent contenir du HTML.",
+      "rawHtmlNote": "Désactivé par défaut. Le widget de chat n’applique ce réglage qu’à partir de la version dont le widget lit les contrôles de conversation ; d’ici là, il affiche le HTML pour tous les agents. Activez-le dès maintenant pour un agent dont les réponses doivent contenir du HTML.",
       "titles": "Titres des conversations",
       "titlesEnable": "Laisser un modèle écrire les titres des conversations",
       "titlesNote": "Sinon, une conversation prend son premier message pour titre. Le modèle s'exécute une fois par conversation, en arrière-plan, et est imputé au budget de coûts. Un titre défini par l'utilisateur n'est jamais remplacé.",

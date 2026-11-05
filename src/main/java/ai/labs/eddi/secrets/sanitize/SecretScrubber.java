@@ -482,21 +482,41 @@ public class SecretScrubber {
         if (text == null || text.isEmpty()) {
             return null;
         }
-        // Vault references are masked first: they are pointers, kept legible, and a
-        // key NAME can itself look like a credential ("${vault:sk-prod-support-key}"),
+        // Vault references are left out of the scan: they are pointers, kept legible,
+        // and a key NAME can itself look like a credential ("${vault:sk-prod-key}"),
         // which the shape rules would otherwise rewrite into a pointer to another key.
-        // The text around them is still scanned.
-        List<String> masked = new ArrayList<>();
-        String input = VAULT_REFERENCE.replaceAll(text, reference -> {
-            masked.add(reference.text());
-            return MASK_OPEN + Integer.toString(masked.size() - 1) + MASK_CLOSE;
-        });
-        String redacted = SecretRedactionFilter.redactCredentialShapes(input);
+        // Only the text between references is scanned, segment by segment, so no
+        // match can reach into a reference — a connection string's password rule
+        // would otherwise swallow the ${vault:pw} in
+        // "jdbc:postgresql://u:${vault:pw}@db".
+        var references = VAULT_REFERENCE.findAll(text);
+        if (references.isEmpty()) {
+            String redacted = redactShapesIn(text);
+            return redacted.equals(text) ? null : redacted;
+        }
+        var out = new StringBuilder(text.length());
+        int from = 0;
+        for (var reference : references) {
+            out.append(redactShapesIn(text.substring(from, reference.start()))).append(reference.text());
+            from = reference.end();
+        }
+        out.append(redactShapesIn(text.substring(from)));
+        String redacted = out.toString();
+        return redacted.equals(text) ? null : redacted;
+    }
+
+    /**
+     * The credential shape rules over one stretch of text that holds no reference.
+     */
+    private static String redactShapesIn(String segment) {
+        if (segment.isEmpty()) {
+            return segment;
+        }
+        String redacted = SecretRedactionFilter.redactCredentialShapes(segment);
         for (Pattern shape : EXPORT_CREDENTIAL_SHAPES) {
             redacted = shape.matcher(redacted).replaceAll(Matcher.quoteReplacement(SecretRedactionFilter.REDACTED));
         }
-        redacted = MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
-        return redacted.equals(input) ? null : restoreMasks(redacted, masked);
+        return MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
     }
 
     /**
