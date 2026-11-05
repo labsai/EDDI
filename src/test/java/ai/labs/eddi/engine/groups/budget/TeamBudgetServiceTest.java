@@ -14,7 +14,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -282,13 +284,72 @@ class TeamBudgetServiceTest {
         // the first attempt died between debit and credit: debit recorded, no credit,
         // no reversal
         t.store.applyAdjustment("radar", MONTH, -5.0, 30.0,
-                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT", -5.0, 25.0, "x", "studio", "crash"), "crash:out",
+                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT", -5.0, 25.0, "x", "studio", "crash"),
+                TeamBudgetService.stepKey("crash", "radar", "studio", 5.0, "out"),
                 NOW.plusSeconds(86_400));
 
         var result = t.service.transfer("radar", "studio", 5.0, "x", "alice", "crash");
 
         assertEquals(40.0, result.to().capUsd());
         assertEquals(25.0, result.from().capUsd());
+    }
+
+    @Test
+    void aRetriedKeyWithAnotherAmountOrTargetIsRefusedAndCreditsNothing() {
+        // the first attempt debited radar 5.0 for studio and died before the credit
+        t.store.applyAdjustment("radar", MONTH, -5.0, 30.0,
+                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT", -5.0, 25.0, "x", "studio", "k"),
+                TeamBudgetService.stepKey("k", "radar", "studio", 5.0, "out"), NOW.plusSeconds(86_400));
+        t.group("ops", "Ops", 20.0, null);
+
+        var amount = assertThrows(IllegalArgumentException.class, () -> t.service.transfer("radar", "studio", 9.0, "x", "alice", "k"));
+        assertTrue(amount.getMessage().contains("different transfer"), amount.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> t.service.transfer("radar", "ops", 5.0, "x", "alice", "k"));
+
+        assertEquals(35.0, t.service.snapshot("studio").capUsd(), "no money appeared");
+        assertEquals(20.0, t.service.snapshot("ops").capUsd());
+        assertEquals(25.0, t.service.snapshot("radar").capUsd(), "nothing debited twice");
+        // the original request still completes
+        assertEquals(40.0, t.service.transfer("radar", "studio", 5.0, "x", "alice", "k").to().capUsd());
+    }
+
+    @Test
+    void aReversalIsRecognisedFromTheAppliedIdsWhenItsHistoryEntryIsGone() {
+        String key = "evicted";
+        t.store.applyAdjustment("radar", MONTH, -5.0, 30.0,
+                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT", -5.0, 25.0, "x", "studio", key),
+                TeamBudgetService.stepKey(key, "radar", "studio", 5.0, "out"), NOW.plusSeconds(86_400));
+        t.store.applyAdjustment("radar", MONTH, 5.0, 30.0,
+                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT_REVERSED", 5.0, 30.0, "r", "studio", key),
+                TeamBudgetService.stepKey(key, "radar", "studio", 5.0, "rev"), NOW.plusSeconds(86_400));
+        // the bounded history has dropped both entries; the applied ids remain
+        var trimmed = new InMemoryTeamBudgetStore() {
+            @Override
+            public synchronized Optional<TeamBudgetMonth> read(String g, String m) {
+                return t.store.read(g, m).map(x -> new TeamBudgetMonth(x.groupId(), x.month(), x.spentUsd(), x.adjustmentUsd(),
+                        x.appliedTransferIds(), List.of()));
+            }
+
+            @Override
+            public synchronized AdjustOutcome applyAdjustment(String g, String m, double d, double b, TeamBudgetMonth.Adjustment e, String id,
+                                                              Instant x) {
+                return t.store.applyAdjustment(g, m, d, b, e, id, x);
+            }
+        };
+        var service = new TeamBudgetService(trimmed, t.groupStore, t.tenant, t.registry, t.audit, TeamBudgetTestSupport.CLOCK);
+
+        var e = assertThrows(IllegalArgumentException.class, () -> service.transfer("radar", "studio", 5.0, "x", "alice", key));
+
+        assertTrue(e.getMessage().contains("reversed"), e.getMessage());
+        assertEquals(35.0, t.service.snapshot("studio").capUsd(), "no money appeared");
+    }
+
+    @Test
+    void anUnreadableGroupIsAnOutageNotAMissingGroup() throws Exception {
+        doThrow(new IResourceStore.ResourceStoreException("db down")).when(t.groupStore).read(eq("radar"), anyInt());
+        assertThrows(TeamBudgetAccountingUnavailableException.class, () -> t.service.setCurrentMonthCap("radar", 50.0, "x", "alice"));
+        assertThrows(TeamBudgetAccountingUnavailableException.class, () -> t.service.readConfig("radar"));
+        assertNull(t.service.config("radar"), "the lenient read stays lenient");
     }
 
     @Test

@@ -52,6 +52,15 @@ class TeamBudgetEditPolicyTest {
     }
 
     @Test
+    void anUnreadableStoredVersionCountsAsAChange() {
+        // null-to-null would compare equal; with the stored block unknown it must not
+        assertThrows(ForbiddenException.class, () -> TeamBudgetEditPolicy.checkAgainstUnreadable(null, true, guard));
+        assertThrows(ForbiddenException.class, () -> TeamBudgetEditPolicy.checkAgainstUnreadable(cap(10), true, guard));
+        when(guard.isAdmin()).thenReturn(true);
+        assertDoesNotThrow(() -> TeamBudgetEditPolicy.checkAgainstUnreadable(null, true, guard));
+    }
+
+    @Test
     void editorsMayEditWhenAdminOnlyIsSwitchedOff() {
         assertDoesNotThrow(() -> TeamBudgetEditPolicy.check(cap(10), cap(50), false, guard));
     }

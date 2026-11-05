@@ -17,10 +17,14 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.OptionalDouble;
@@ -48,6 +52,9 @@ public class TeamBudgetService {
 
     /** The limit on a free-text reason. */
     public static final int MAX_REASON_LENGTH = 1000;
+
+    /** Hex characters of the request fingerprint in a transfer step id. */
+    private static final int FINGERPRINT_LENGTH = 16;
 
     /** Where an admission was asked; a metric tag. */
     public enum Surface {
@@ -145,9 +152,13 @@ public class TeamBudgetService {
 
     /**
      * As {@link #config}, but a read that FAILED is an exception, not {@code null}:
-     * {@code null} here means the group does not exist.
+     * {@code null} here means the group does not exist. Callers that answer "not
+     * found" use this one, so a store outage is never reported as a missing group.
+     *
+     * @throws TeamBudgetAccountingUnavailableException
+     *             when the group store cannot answer
      */
-    private AgentGroupConfiguration readConfig(String groupId) {
+    public AgentGroupConfiguration readConfig(String groupId) {
         try {
             IResourceStore.IResourceId id = groupStore.getCurrentResourceId(groupId);
             return id == null ? null : groupStore.read(groupId, id.getVersion());
@@ -166,7 +177,7 @@ public class TeamBudgetService {
      *             when the store or the tenant counter cannot answer
      */
     public TeamBudgetSnapshot snapshot(String groupId) {
-        return snapshot(groupId, config(groupId));
+        return snapshot(groupId, readConfig(groupId));
     }
 
     public TeamBudgetSnapshot snapshot(String groupId, AgentGroupConfiguration config) {
@@ -313,12 +324,58 @@ public class TeamBudgetService {
     }
 
     /**
-     * Whether the team's month already records an adjustment of this kind for the
-     * transfer id.
+     * Whether the team's month records this step of the transfer: the applied id
+     * ({@code appliedTransferIds}, the store's dedup record) or, as a fallback, the
+     * adjustment history entry. The applied ids are checked first because the
+     * history is the shorter of the two bounded lists, so an entry can leave it
+     * while the step's id is still retained.
      */
-    private boolean hasAdjustment(String groupId, String month, String kind, String transferId) {
-        return store.read(groupId, month).map(m -> m.adjustments().stream()
+    private boolean hasStep(String groupId, String month, String stepKey, String kind, String transferId) {
+        return store.read(groupId, month).map(m -> m.appliedTransferIds().contains(stepKey) || m.adjustments().stream()
                 .anyMatch(adj -> kind.equals(adj.kind()) && transferId.equals(adj.transferId()))).orElse(false);
+    }
+
+    /**
+     * The applied-id of one step ({@code out}, {@code in}, {@code rev}) of a
+     * transfer: {@code <transferId>:<fingerprint>:<step>}. The fingerprint binds
+     * the id to the request (source, target, amount), so the store's dedup record
+     * is also the record a retry is compared with -- it lives exactly as long as
+     * the dedup itself.
+     */
+    static String stepKey(String transferId, String fromGroupId, String toGroupId, double amountUsd, String step) {
+        return transferId + ":" + fingerprint(fromGroupId, toGroupId, amountUsd) + ":" + step;
+    }
+
+    static String fingerprint(String fromGroupId, String toGroupId, double amountUsd) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((fromGroupId + '\n' + toGroupId + '\n' + amountUsd).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, FINGERPRINT_LENGTH);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /**
+     * Whether {@code month} records a step of {@code transferId} made for a
+     * different request than {@code fingerprint}.
+     */
+    static boolean usedForAnotherRequest(TeamBudgetMonth month, String transferId, String fingerprint) {
+        if (month == null) {
+            return false;
+        }
+        for (String applied : month.appliedTransferIds()) {
+            int stepSeparator = applied.lastIndexOf(':');
+            int fingerprintStart = stepSeparator - FINGERPRINT_LENGTH;
+            if (stepSeparator < 0 || fingerprintStart < 1 || applied.charAt(fingerprintStart - 1) != ':') {
+                continue;
+            }
+            if (applied.substring(0, fingerprintStart - 1).equals(transferId)
+                    && !applied.substring(fingerprintStart, stepSeparator).equals(fingerprint)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -327,7 +384,10 @@ public class TeamBudgetService {
      * Debit first, conditional on the source keeping a cap at or above its spend,
      * then credit; if the credit fails the debit is reversed. Money only ever
      * disappears from caps, never appears, so a failure in between is conservative.
-     * Idempotent by {@code transferId} (a generated one when null).
+     * Idempotent by {@code transferId} (a generated one when null), and bound to
+     * the request: reusing an id for other teams or another amount is refused
+     * rather than crediting what the first request never debited. The id is looked
+     * up in the current UTC month only.
      */
     public TransferResult transfer(String fromGroupId, String toGroupId, double amountUsd, String reason, String actor, String transferId) {
         requireReason(reason);
@@ -342,12 +402,20 @@ public class TeamBudgetService {
         String tid = transferId == null || transferId.isBlank() ? UUID.randomUUID().toString() : transferId;
         String month = currentMonth();
         Instant now = clock.instant();
-        TeamBudgetSnapshot fromBefore = snapshot(fromGroupId, from, month, store.read(fromGroupId, month).orElse(null));
-        TeamBudgetSnapshot toBefore = snapshot(toGroupId, to, month, store.read(toGroupId, month).orElse(null));
+        TeamBudgetMonth fromMonth = store.read(fromGroupId, month).orElse(null);
+        TeamBudgetMonth toMonth = store.read(toGroupId, month).orElse(null);
+        String fingerprint = fingerprint(fromGroupId, toGroupId, amountUsd);
+        if (usedForAnotherRequest(fromMonth, tid, fingerprint) || usedForAnotherRequest(toMonth, tid, fingerprint)) {
+            throw new IllegalArgumentException("Transfer " + tid
+                    + " was already used for a different transfer (other teams or another amount); start it again with a new Idempotency-Key.");
+        }
+        TeamBudgetSnapshot fromBefore = snapshot(fromGroupId, from, month, fromMonth);
+        TeamBudgetSnapshot toBefore = snapshot(toGroupId, to, month, toMonth);
 
         TeamBudgetMonth.Adjustment out = new TeamBudgetMonth.Adjustment(now, actor, "TRANSFER_OUT", -amountUsd, fromBefore.capUsd() - amountUsd,
                 reason, toGroupId, tid);
-        ITeamBudgetStore.AdjustOutcome debit = store.applyAdjustment(fromGroupId, month, -amountUsd, fromBefore.baseUsd(), out, tid + ":out",
+        ITeamBudgetStore.AdjustOutcome debit = store.applyAdjustment(fromGroupId, month, -amountUsd, fromBefore.baseUsd(), out,
+                stepKey(tid, fromGroupId, toGroupId, amountUsd, "out"),
                 expiresAt(month));
         if (debit == ITeamBudgetStore.AdjustOutcome.REFUSED) {
             throw new IllegalArgumentException(String.format(Locale.ROOT, "Team '%s' has only $%.2f left this month; it cannot give up $%.2f.",
@@ -358,23 +426,25 @@ public class TeamBudgetService {
             // reversed after
             // a failed credit, or died between debit and credit: only the last needs the
             // credit.
-            if (hasAdjustment(fromGroupId, month, "TRANSFER_OUT_REVERSED", tid)) {
+            if (hasStep(fromGroupId, month, stepKey(tid, fromGroupId, toGroupId, amountUsd, "rev"), "TRANSFER_OUT_REVERSED", tid)) {
                 throw new IllegalArgumentException(
                         "Transfer " + tid + " was reversed after its credit failed; start it again with a new Idempotency-Key.");
             }
-            if (hasAdjustment(toGroupId, month, "TRANSFER_IN", tid)) {
+            if (hasStep(toGroupId, month, stepKey(tid, fromGroupId, toGroupId, amountUsd, "in"), "TRANSFER_IN", tid)) {
                 return new TransferResult(snapshot(fromGroupId, from), snapshot(toGroupId, to), tid);
             }
         }
         TeamBudgetMonth.Adjustment in = new TeamBudgetMonth.Adjustment(now, actor, "TRANSFER_IN", amountUsd, toBefore.capUsd() + amountUsd, reason,
                 fromGroupId, tid);
         try {
-            store.applyAdjustment(toGroupId, month, amountUsd, toBefore.baseUsd(), in, tid + ":in", expiresAt(month));
+            store.applyAdjustment(toGroupId, month, amountUsd, toBefore.baseUsd(), in, stepKey(tid, fromGroupId, toGroupId, amountUsd, "in"),
+                    expiresAt(month));
         } catch (RuntimeException creditFailure) {
             try {
                 TeamBudgetMonth.Adjustment back = new TeamBudgetMonth.Adjustment(clock.instant(), actor, "TRANSFER_OUT_REVERSED", amountUsd,
                         fromBefore.capUsd(), "reversal: credit to the target failed", toGroupId, tid);
-                store.applyAdjustment(fromGroupId, month, amountUsd, fromBefore.baseUsd(), back, tid + ":rev", expiresAt(month));
+                store.applyAdjustment(fromGroupId, month, amountUsd, fromBefore.baseUsd(), back,
+                        stepKey(tid, fromGroupId, toGroupId, amountUsd, "rev"), expiresAt(month));
                 audit.transferred(actor, fromGroupId, toGroupId, month, amountUsd, reason, tid, "REVERSED");
             } catch (RuntimeException reverseFailure) {
                 LOGGER.errorf(reverseFailure, "Team budget transfer %s PARTIAL: debited %s but could not credit %s nor reverse",
@@ -395,7 +465,7 @@ public class TeamBudgetService {
     }
 
     private AgentGroupConfiguration requireBudgeted(String groupId) {
-        AgentGroupConfiguration config = config(groupId);
+        AgentGroupConfiguration config = readConfig(groupId);
         if (config == null) {
             throw new IllegalArgumentException("Group '" + LogSanitizer.sanitize(groupId) + "' does not exist");
         }

@@ -39,6 +39,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -2144,6 +2145,12 @@ public class GroupConversationService implements IGroupConversationService, User
      * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
      * and falls back to a default, so it would not catch this either.)
      * <p>
+     * F6: a follow-up is also a leg of the run for its team budget. This starts
+     * that leg ({@link TeamSpendMeter#beginLeg}: sweep what is uncharged, refresh
+     * the team ceiling) and tightens the result by the team ceiling, the same one
+     * every phase turn sees through {@code TeamBudgetCeilings}. The follow-up's
+     * cost is charged by its callback ({@link #chargeTeamBudget}).
+     * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
     public Double resolveEffectiveCostCeiling(GroupConversation gc)
@@ -2154,7 +2161,16 @@ public class GroupConversationService implements IGroupConversationService, User
         }
         AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
         Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
-        return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        Double ceiling = effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        if (teamSpendMeter != null && config != null) {
+            teamSpendMeter.beginLeg(gc, config);
+            TeamBudgetState state = gc.getTeamBudgetState();
+            Double team = state == null ? null : state.getCeilingUsd();
+            if (team != null && !team.isNaN() && (ceiling == null || team < ceiling)) {
+                ceiling = team;
+            }
+        }
+        return ceiling;
     }
 
     /**

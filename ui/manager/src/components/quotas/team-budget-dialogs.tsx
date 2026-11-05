@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { Button } from "@/components/ui/button";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { formatUsd } from "@/lib/utils";
 import { useSetCurrentMonthCap, useTransferTeamBudget } from "@/hooks/use-team-budget";
 import { TEAM_BUDGET_MAX_REASON_LENGTH, newIdempotencyKey, parseUsd, type TeamBudgetSnapshot } from "@/lib/api/team-budget";
@@ -143,7 +143,14 @@ export function TransferBudgetDialog({
           toast.success(t("teamBudget.transferred", "Budget transferred"));
           close();
         },
-        onError: (e) => setError(getErrorMessage(e)),
+        onError: (e) => {
+          setError(getErrorMessage(e));
+          // A 4xx left nothing applied (refused, or a transfer the server reversed and
+          // asks to start again), so the next attempt is a new transfer with a new key.
+          // A 5xx or a network error may have debited: keep the key so a retry stays
+          // idempotent; the server refuses that key for an edited request.
+          if (isApiError(e) && e.status >= 400 && e.status < 500) setKey(newIdempotencyKey());
+        },
       },
     );
   }

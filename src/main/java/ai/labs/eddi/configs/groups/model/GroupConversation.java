@@ -56,13 +56,21 @@ public class GroupConversation {
      * skew mis-indexes resume bookmarks — corruption, not conservatism. A version
      * bump signals "an old pod must not touch this document"; this field does not
      * earn that.
+     * <p>
+     * Version 5 — {@code teamBudgetState} (F6, team budgets). Unlike the tombstones
+     * it does not fail soft: an older pod re-saving a paused document drops what
+     * the run has already charged to its team, so the resume would meter the run
+     * from a fresh state. The bump makes such a pod refuse the document instead. No
+     * migration entry: a v4 document has no state and Jackson leaves it null, which
+     * is what an unbudgeted run carries (identity hop).
      */
-    // v4 (this release): the release shape — adds I11's negotiationState, I12's
+    // v4: the 2026-08 release shape — adds I11's negotiationState, I12's
     // runtimePhases, I6's pausedRepeatSliceBase and the teardown tombstone set
     // (tornDownAgentIds), all resume-consumed. No migration entries needed:
     // Jackson defaults each on legacy documents to its pre-v4 behavior
     // (null / null / -1 / empty set).
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    // v5 (this release): teamBudgetState (F6). Identity hop as well.
+    public static final int CURRENT_SCHEMA_VERSION = 5;
     /**
      * The version a stored document claims when its JSON carries no
      * {@code schemaVersion} key — i.e. it was written before F6 existed, which is

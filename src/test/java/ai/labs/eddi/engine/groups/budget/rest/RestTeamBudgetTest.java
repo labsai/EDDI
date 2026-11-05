@@ -50,13 +50,14 @@ class RestTeamBudgetTest {
 
     private InMemoryTeamBudgetStore store;
     private ResourceAccessGuard guard;
+    private IAgentGroupStore groups;
     private RestGroupBudget groupRest;
     private RestTeamBudgets teamsRest;
 
     @BeforeEach
     void setUp() throws Exception {
         store = new InMemoryTeamBudgetStore();
-        IAgentGroupStore groups = mock(IAgentGroupStore.class);
+        groups = mock(IAgentGroupStore.class);
         for (String id : List.of("studio", "radar", "secret")) {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
             config.setName(id);
@@ -104,6 +105,15 @@ class RestTeamBudgetTest {
         store.down = true;
         assertEquals(503, groupRest.readBudget("studio").getStatus());
         assertEquals(503, teamsRest.listBudgets("studio").getStatus());
+        assertEquals(503, groupRest.setCurrentMonthCap("studio", new IRestGroupBudget.CapRequest(40.0, "x")).getStatus());
+    }
+
+    @Test
+    void aGroupStoreFailureIs503NotAMissingGroup() throws Exception {
+        doThrow(new IResourceStore.ResourceStoreException("db down")).when(groups).read(eq("studio"), anyInt());
+        assertEquals(503, groupRest.readBudget("studio").getStatus());
+        assertEquals(503, groupRest.readHistory("studio", 6).getStatus());
+        assertEquals(503, teamsRest.listBudgets("studio,radar").getStatus(), "not a listing that silently drops the team");
         assertEquals(503, groupRest.setCurrentMonthCap("studio", new IRestGroupBudget.CapRequest(40.0, "x")).getStatus());
     }
 

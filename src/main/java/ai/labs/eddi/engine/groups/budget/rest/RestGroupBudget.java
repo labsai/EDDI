@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.groups.budget.rest;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetAccountingUnavailableException;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetMonth;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
@@ -40,11 +41,13 @@ public class RestGroupBudget implements IRestGroupBudget {
     @Override
     public Response readBudget(String groupId) {
         accessGuard.requireAccess(groupId, AccessLevel.VIEW, "group");
-        if (service.config(groupId) == null) {
-            return BudgetResponses.error(Response.Status.NOT_FOUND, "Group not found.");
-        }
         try {
-            return BudgetResponses.ok(service.snapshot(groupId));
+            // readConfig, not config: a store outage is 503, only a missing group is 404.
+            AgentGroupConfiguration config = service.readConfig(groupId);
+            if (config == null) {
+                return BudgetResponses.error(Response.Status.NOT_FOUND, "Group not found.");
+            }
+            return BudgetResponses.ok(service.snapshot(groupId, config));
         } catch (TeamBudgetAccountingUnavailableException e) {
             return BudgetResponses.unavailable(e);
         }
@@ -53,10 +56,10 @@ public class RestGroupBudget implements IRestGroupBudget {
     @Override
     public Response readHistory(String groupId, int months) {
         accessGuard.requireAccess(groupId, AccessLevel.VIEW, "group");
-        if (service.config(groupId) == null) {
-            return BudgetResponses.error(Response.Status.NOT_FOUND, "Group not found.");
-        }
         try {
+            if (service.readConfig(groupId) == null) {
+                return BudgetResponses.error(Response.Status.NOT_FOUND, "Group not found.");
+            }
             List<TeamBudgetMonth> history = service.history(groupId, months);
             return BudgetResponses.ok(Map.of("groupId", groupId, "months", history));
         } catch (TeamBudgetAccountingUnavailableException e) {

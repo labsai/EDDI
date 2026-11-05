@@ -241,11 +241,12 @@ class GroupConversationServiceTeamBudgetTest {
     void nestedChildIsNeverGated() throws Exception {
         config(10.0, null, protocol(null, null));
         budgetStore.addSpend(GROUP_ID, MONTH, 12.0, Instant.parse("2027-12-01T00:00:00Z"));
-        stubAgentSayCosting(0.0);
+        stubAgentSayCosting(2.0);
 
         GroupConversation child = service.discuss(GROUP_ID, "Q?", USER_ID, 1);
 
         assertNotNull(child);
+        assertTrue(child.getTotalCost() > 0.0, "the child spent something, so the unchanged team total is meaningful");
         assertNull(child.getTeamBudgetState(), "a child charges nothing; its parent pays");
         assertEquals(12.0, teamSpent(), 1e-9);
     }
@@ -264,6 +265,25 @@ class GroupConversationServiceTeamBudgetTest {
         var e = assertThrows(TeamBudgetRefusedException.class, () -> service.continueDiscussion("gc-existing", "more", null));
         assertEquals("exhausted", e.reason());
         assertThrows(TeamBudgetRefusedException.class, () -> service.followUpWithMember("gc-existing", AGENT_A, "why?"));
+    }
+
+    @Test
+    @DisplayName("a follow-up runs under the team ceiling: its ceiling is tightened by what the team has left")
+    void followUpCeilingIncludesTheTeamCeiling() throws Exception {
+        config(10.0, null, protocol(50.0, null));
+        budgetStore.addSpend(GROUP_ID, MONTH, 9.0, Instant.parse("2027-12-01T00:00:00Z"));
+        var gc = new GroupConversation();
+        gc.setId("gc-existing");
+        gc.setGroupId(GROUP_ID);
+        gc.setDepth(0);
+        gc.setTotalCost(3.0);
+
+        Double ceiling = service.resolveEffectiveCostCeiling(gc);
+
+        // the run's own 3.0 (its baseline, not back-filled) plus the team's last 1.0
+        assertEquals(4.0, ceiling, 1e-9);
+        assertTrue(ceiling < 50.0, "the team ceiling binds, not the protocol's");
+        assertEquals(9.0, teamSpent(), 1e-9);
     }
 
     @Test

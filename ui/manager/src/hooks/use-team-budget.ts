@@ -30,12 +30,14 @@ export function useTeamBudgetHistory(groupId: string | undefined, enabled: boole
   });
 }
 
+/** Several teams' budgets. Polled like `useTeamBudget`, so an open page picks up the next month's caps. */
 export function useTeamBudgets(groupIds: readonly string[]) {
   return useQuery({
     queryKey: [...KEY, "list", groupIds],
     queryFn: () => listTeamBudgets(groupIds),
     enabled: groupIds.length > 0,
     retry: false,
+    refetchInterval: 60_000,
   });
 }
 
