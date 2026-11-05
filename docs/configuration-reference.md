@@ -479,15 +479,25 @@ EDDI's own outbound requests — the built-in tools, the RAG crawler, OAuth toke
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.http.outbound.engine` | `jdk` | The HTTP engine. `jdk` (`java.net.http`) is the only one in this release; any other value fails startup |
+| `eddi.http.outbound.engine` | `jdk` | The default HTTP engine for every profile: `jdk` (`java.net.http`) or `vertx` (the Vert.x core client of the Quarkus Vert.x instance). Any other value fails startup. Set explicitly, it also applies to `apicalls` |
+| `eddi.http.outbound.default.engine` | value of `eddi.http.outbound.engine` | Engine of the `default` profile (tools, crawler, OAuth, attachments) |
+| `eddi.http.outbound.llm-provider.engine` | value of `eddi.http.outbound.engine` | Engine of the `llm-provider` profile |
+| `eddi.http.outbound.apicalls.engine` | `vertx`, unless `eddi.http.outbound.engine` is set | Engine of the `apicalls` profile. `httpcalls.json` does not send through the facade yet, so this has no effect until it does |
+| `eddi.http.outbound.internal-peer.engine` | value of `eddi.http.outbound.engine` | Engine of the `internal-peer` profile (remote agent sync) |
+| `eddi.http.outbound.default.max-connections-per-host` | `50` on `vertx` | Pooled HTTP/1 connections per host and port; a request beyond it waits for one within its deadline. Only for a profile on the `vertx` engine — set on a `jdk` profile, it fails startup, because the JDK client has no such limit |
+| `eddi.http.outbound.llm-provider.max-connections-per-host` | `50` on `vertx` | As above, for `llm-provider` |
+| `eddi.http.outbound.apicalls.max-connections-per-host` | value of `httpClient.maxConnectionPerRoute` (200) | As above, for `apicalls` |
+| `eddi.http.outbound.internal-peer.max-connections-per-host` | `50` on `vertx` | As above, for `internal-peer` |
 | `eddi.http.outbound.default.connect-timeout` | value of `httpClient.connectTimeoutInMillis` (10 s) | TCP + TLS connect timeout per hop, as a duration (`10s`, `500ms`) |
 | `eddi.http.outbound.default.total-timeout` | 3 × connect timeout | Least wall-clock budget for reaching the final response, every redirect hop included. A request whose own timeout is longer gets that instead. The final response body is bounded separately, by 4 × the request's per-hop timeout |
-| `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2` |
+| `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2`. On the `vertx` engine `auto` speaks plain HTTP/1.1 in cleartext (no `h2c` upgrade) |
 | `eddi.http.outbound.default.tls.configuration-name` | *(empty)* | A named Quarkus TLS configuration (`quarkus.tls.<name>.*`) for trust and client certificates. Empty uses the JVM's default trust store. An unknown name fails the first request |
 | `eddi.http.outbound.proxy.host` | *(empty)* | Forward proxy for all of the above. Empty means no proxy |
 | `eddi.http.outbound.proxy.port` | *(none)* | Required when `eddi.http.outbound.proxy.host` is set |
 | `eddi.http.outbound.proxy.non-proxy-hosts` | *(empty)* | `\|`-separated hosts that bypass the proxy; `*` is a wildcard at either end, e.g. `localhost\|*.internal` |
-| `eddi.http.outbound.proxy.credentials` | *(empty)* | `user:password` for the proxy, ideally a `${vault:...}` reference. Answered only to the proxy's challenges, never a target server's. An unresolvable vault reference fails closed. The JDK does not send Basic credentials when tunnelling HTTPS through a proxy unless `jdk.http.auth.tunneling.disabledSchemes` allows it |
+| `eddi.http.outbound.proxy.credentials` | *(empty)* | `user:password` for the proxy, ideally a `${vault:...}` reference. Answered only to the proxy's challenges, never a target server's. An unresolvable vault reference fails closed. The JDK does not send Basic credentials when tunnelling HTTPS through a proxy unless `jdk.http.auth.tunneling.disabledSchemes` allows it; the `vertx` engine does |
+
+On the `vertx` engine, the address each connection actually reached is checked before the request is written ([security.md → DNS rebinding](security.md#dns-rebinding)), and nothing is decompressed: a response comes back as sent, and body caps count the bytes on the wire. The outbound request counter and duration timer carry an `engine` tag ([metrics.md](metrics.md#outbound-http-metrics)).
 
 ---
 
