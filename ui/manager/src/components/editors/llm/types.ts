@@ -107,6 +107,22 @@ export interface TaskModelPricing {
   } | null;
 }
 
+/** Slugs of the agent-operations tools; off unless named in `builtInToolsWhitelist`. */
+export const AGENT_OPS_SLUGS = ["team_scorecard", "propose_team_budget", "schedule_followup"] as const;
+export type AgentOpsSlug = (typeof AGENT_OPS_SLUGS)[number];
+
+/** Limits of the agent-operations tools (`task.agentOps`); every field is optional. */
+export interface AgentOpsConfig {
+  scorecard?: { groupIds?: string[]; weeks?: number; maxLessons?: number };
+  budgetProposal?: { maxPerTurn?: number; maxPerDay?: number; maxAmountUsd?: number };
+  followUp?: {
+    maxPending?: number;
+    maxPerTurn?: number;
+    maxHorizonDays?: number;
+    maxCostPerFireUsd?: number;
+  };
+}
+
 export interface LlmTask {
   actions?: string[];
   id?: string;
@@ -123,6 +139,7 @@ export interface LlmTask {
   enableHttpCallTools?: boolean;
   enableMcpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
+  agentOps?: AgentOpsConfig;
   conversationHistoryLimit?: number;
   // Token-aware context window (Strategy 1)
   maxContextTokens?: number;

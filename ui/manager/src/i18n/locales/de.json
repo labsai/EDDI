@@ -1868,7 +1868,25 @@
     "toolQuotasWindowDay": "Pro Tag (UTC)",
     "toolQuotasWindowWeek": "Pro 7 Tage",
     "toolQuotasWindowMonth": "Pro 31 Tage",
-    "toolQuotasDuplicate": "Ein anderes Kontingent verwendet diesen Tool-Namen bereits. Die Umbenennung wird erst gespeichert, wenn der Name eindeutig ist."
+    "toolQuotasDuplicate": "Ein anderes Kontingent verwendet diesen Tool-Namen bereits. Die Umbenennung wird erst gespeichert, wenn der Name eindeutig ist.",
+    "agentOps": "Agenten-Betriebswerkzeuge",
+    "agentOpsDesc": "Werkzeuge, mit denen ein Agent die Zahlen seines Teams liest, Budget anfragt und eigene Wiedervorlagen bucht. Jedes ist aus, solange es hier nicht angehakt ist, auch wenn der Agent alle eingebauten Werkzeuge hat.",
+    "agentOpsScorecard": "Team-Scorecard (nur lesen)",
+    "agentOpsScorecardDesc": "Ausgaben, Restbudget, erledigte und fehlgeschlagene Aufgaben pro Woche, Freigabeergebnisse mit Grundcodes und aktuelle Retro-Lektionen für das eigene Team und die Teams, die der Agent überwacht. Nur Teams, die der Nutzer der Unterhaltung sehen darf.",
+    "agentOpsWeeks": "Wochen Verlauf",
+    "agentOpsMaxLessons": "Retro-Lektionen pro Team",
+    "agentOpsGroups": "Zusätzliche Team-IDs",
+    "agentOpsBudget": "Budgetvorschlag",
+    "agentOpsBudgetDesc": "Vorschlag, das Limit eines Teams zu erhöhen oder Budget zwischen Teams zu verschieben. Wird nur angewendet, wenn ein Administrator den Aufruf freigibt. Das Werkzeug wird nur angeboten, wenn die Werkzeugfreigabe für propose_team_budget_* eine Freigabe verlangt.",
+    "agentOpsBudgetGateHint": "Fügen Sie propose_team_budget_* zur Werkzeugfreigabe hinzu (Agenten- oder Aufgabenebene), sonst erhält der Agent dieses Werkzeug nicht.",
+    "agentOpsPerTurn": "Aufrufe pro Runde",
+    "agentOpsPerDay": "Angewendet pro Tag",
+    "agentOpsMaxAmount": "Max. Betrag pro Vorschlag ($)",
+    "agentOpsFollowUp": "Wiedervorlagen",
+    "agentOpsFollowUpDesc": "Einmalige Wiedervorlagen für die eigene Unterhaltung des Agenten oder eine neue buchen, auflisten und stornieren. Jeder Lauf hat eine Kostenobergrenze.",
+    "agentOpsMaxPending": "Gleichzeitig wartend",
+    "agentOpsHorizon": "Horizont (Tage, max. 90)",
+    "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -2576,7 +2594,8 @@
     "finishedOneShot": "Einmaliger Zeitplan: Er wurde ausgeführt und ist abgeschlossen.",
     "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten).",
     "openKnowledgeBase": "Wissensbasis öffnen",
-    "serverOwnedHint": "Wird von {{productName}} selbst ausgeführt (Alarm-Wiederholungen, Sammelmeldungen und Aufbewahrung). Er kann nicht geändert, deaktiviert oder gelöscht werden."
+    "serverOwnedHint": "Wird von {{productName}} selbst ausgeführt (Alarm-Wiederholungen, Sammelmeldungen und Aufbewahrung). Er kann nicht geändert, deaktiviert oder gelöscht werden.",
+    "typeFollowUp": "Wiedervorlage des Agenten"
   },
   "cascadeTrace": {
     "title": "Modellkaskade",

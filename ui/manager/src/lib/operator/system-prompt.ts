@@ -844,7 +844,37 @@ const BODY_TEAM_BUDGETS = `Team budgets (a monthly dollar cap per standing team)
   exact call — \`PUT /groupstore/groups/<groupId>/budget/current-month\` with
   capUsd and reason, or \`POST /administration/team-budgets/transfers\` with
   fromGroupId, toGroupId, amountUsd and reason — or the team budget card on the
-  group's workspace page.`;
+  group's workspace page.
+- Agent operations tools (an agent reading its own team's numbers, asking for
+  budget, booking its own check-backs). Each is OFF unless its slug is in the
+  LLM task's \`builtInToolsWhitelist\` (with \`enableBuiltInTools\`); an omitted
+  whitelist does NOT admit them. Slugs: \`team_scorecard\` (tool
+  \`read_team_scorecard\`, read-only: spend, budget left, tasks done/failed per
+  week, approval outcomes with reason codes, retro lessons — for the agent's
+  group, its \`oversight.teams\` and \`agentOps.scorecard.groupIds\`, each only if
+  the conversation's user may view it), \`propose_team_budget\` (tools
+  \`propose_team_budget_raise\` and \`propose_team_budget_transfer\`) and
+  \`schedule_followup\` (\`schedule_followup\`, \`list_followups\`,
+  \`cancel_followup\`). Limits live in the task's \`agentOps\` block: scorecard
+  \`weeks\`, \`maxLessons\`, \`groupIds\`; budgetProposal \`maxPerTurn\` (1),
+  \`maxPerDay\` (3), \`maxAmountUsd\` (25); followUp \`maxPending\` (5),
+  \`maxPerTurn\` (2), \`maxHorizonDays\` (30, never above 90),
+  \`maxCostPerFireUsd\` (0.5, every fire is capped).
+- The budget proposal is only assembled when the task's effective
+  \`toolApprovals\` requires approval for BOTH budget tools (for example
+  \`requireApproval: ["propose_team_budget_*"]\`, and not exempted); otherwise the
+  agent silently has no such tool and the engine log warns. The change is applied
+  only after an \`eddi-admin\` approves the call; an approval by the owner or an
+  \`eddi-approver\` who is not an admin, or a timeout auto-approval, changes
+  nothing and the model is told why. The adjustment is recorded with the
+  approving admin as actor and \`[agent:<id>]\` in the reason. You cannot approve it.
+  Inside a group discussion a member's gated call is auto-rejected
+  (\`system:group\`) and never reaches an approver, so budget proposals must come
+  from a standalone oversight agent (an ordinary conversation reading the teams
+  via \`agentOps.scorecard.groupIds\`). followUp \`maxPending\` counts per agent
+  and booking user.
+  Follow-ups are ordinary one-shot schedules (metadata \`followupType:
+  agent_followup\`) in the schedule list; an agent sees and cancels only its own.`;
 
 /**
  * HITL oversight — gated on {@link grantsOversightReads}.

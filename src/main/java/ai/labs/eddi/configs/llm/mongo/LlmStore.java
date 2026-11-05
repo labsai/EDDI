@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.guardrail.ToolCallGuardrailConfigValidator;
@@ -66,6 +67,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 ToolCallGuardrailConfigValidator.validate(task.getToolCallGuardrails(), "langchain.task[" + i + "].toolCallGuardrails");
                 ToolQuotaConfigValidator.validate(task.getToolQuotas(), "langchain.task[" + i + "].toolQuotas");
                 HandoffConfigValidator.validateTask(task.getTeamHandoff(), "langchain.task[" + i + "].teamHandoff");
+                AgentOpsConfigValidator.validate(task.getAgentOps(), "langchain.task[" + i + "].agentOps");
                 SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");
                 SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");

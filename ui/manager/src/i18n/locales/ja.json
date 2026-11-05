@@ -1868,7 +1868,25 @@
     "toolQuotasWindowDay": "1日ごと（UTC）",
     "toolQuotasWindowWeek": "7日ごと",
     "toolQuotasWindowMonth": "31日ごと",
-    "toolQuotasDuplicate": "別のクォータがすでにこのツール名を使用しています。名前が一意になるまで名前の変更は保存されません。"
+    "toolQuotasDuplicate": "別のクォータがすでにこのツール名を使用しています。名前が一意になるまで名前の変更は保存されません。",
+    "agentOps": "エージェント運用ツール",
+    "agentOpsDesc": "エージェントがチームの数値を読み取り、予算を申請し、自分のフォローアップを予約できるツールです。エージェントがすべての組み込みツールを持っていても、ここでチェックしない限りそれぞれ無効です。",
+    "agentOpsScorecard": "チームスコアカード（読み取り専用）",
+    "agentOpsScorecardDesc": "エージェント自身のチームと監督対象チームの支出、残り予算、週ごとの完了・失敗タスク、理由コード付きの承認結果、最近の振り返りの教訓。会話のユーザーが閲覧できるチームのみ。",
+    "agentOpsWeeks": "履歴の週数",
+    "agentOpsMaxLessons": "チームごとの振り返り教訓数",
+    "agentOpsGroups": "追加のチーム ID",
+    "agentOpsBudget": "予算提案",
+    "agentOpsBudgetDesc": "チームの上限引き上げ、またはチーム間の予算移動を提案します。管理者が呼び出しを承認した場合のみ適用されます。ツール承認が propose_team_budget_* の承認を必須としない限り、このツールは提供されません。",
+    "agentOpsBudgetGateHint": "propose_team_budget_* をツール承認（エージェントまたはタスクレベル）に追加してください。追加しないとエージェントはこのツールを利用できません。",
+    "agentOpsPerTurn": "ターンあたりの呼び出し数",
+    "agentOpsPerDay": "1日あたりの適用数",
+    "agentOpsMaxAmount": "提案あたりの最大金額（$）",
+    "agentOpsFollowUp": "フォローアップのスケジュール",
+    "agentOpsFollowUpDesc": "エージェント自身の会話または新しい会話向けに、1回限りのフォローアップを予約・一覧・キャンセルします。各実行にはコスト上限があります。",
+    "agentOpsMaxPending": "同時に待機できる数",
+    "agentOpsHorizon": "期間（日、最大90）",
+    "agentOpsCostPerFire": "実行あたりのコスト上限（$）"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -2576,7 +2594,8 @@
     "finishedOneShot": "1 回限りのスケジュール：実行済みで完了しています。",
     "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。",
     "openKnowledgeBase": "ナレッジベースを開く",
-    "serverOwnedHint": "{{productName}} 自身が実行します（アラートの再試行、ダイジェスト、保持期間の管理）。変更、無効化、削除はできません。"
+    "serverOwnedHint": "{{productName}} 自身が実行します（アラートの再試行、ダイジェスト、保持期間の管理）。変更、無効化、削除はできません。",
+    "typeFollowUp": "エージェントのフォローアップ"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",

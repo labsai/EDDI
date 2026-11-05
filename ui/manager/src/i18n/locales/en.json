@@ -1910,7 +1910,25 @@
     "toolQuotasWindowDay": "Per day (UTC)",
     "toolQuotasWindowWeek": "Per 7 days",
     "toolQuotasWindowMonth": "Per 31 days",
-    "toolQuotasDuplicate": "Another quota already uses this tool name. The rename is not saved until the name is unique."
+    "toolQuotasDuplicate": "Another quota already uses this tool name. The rename is not saved until the name is unique.",
+    "agentOps": "Agent Operations Tools",
+    "agentOpsDesc": "Tools that let an agent read its team's numbers, ask for budget and book its own check-backs. Each is off unless ticked here, even when the agent has all built-in tools.",
+    "agentOpsScorecard": "Team scorecard (read-only)",
+    "agentOpsScorecardDesc": "Spend, budget left, tasks done and failed per week, approval outcomes with reason codes and recent retro lessons, for the agent's own team and the teams it oversees. Only teams the conversation's user may view.",
+    "agentOpsWeeks": "Weeks of history",
+    "agentOpsMaxLessons": "Retro lessons per team",
+    "agentOpsGroups": "Extra team ids",
+    "agentOpsBudget": "Budget proposal",
+    "agentOpsBudgetDesc": "Propose raising a team's cap or moving budget between teams. Applied only when an administrator approves the call. The tool is not offered unless Tool Approval Gating requires approval for propose_team_budget_*.",
+    "agentOpsBudgetGateHint": "Add propose_team_budget_* to Tool Approval Gating (agent or task level) or the agent will not get this tool.",
+    "agentOpsPerTurn": "Calls per turn",
+    "agentOpsPerDay": "Applied per day",
+    "agentOpsMaxAmount": "Max amount per proposal ($)",
+    "agentOpsFollowUp": "Follow-up scheduling",
+    "agentOpsFollowUpDesc": "Book, list and cancel one-off check-backs for the agent's own conversation or a fresh one. Every fire carries a cost ceiling.",
+    "agentOpsMaxPending": "Waiting at once",
+    "agentOpsHorizon": "Horizon (days, max 90)",
+    "agentOpsCostPerFire": "Cost ceiling per fire ($)"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -2659,7 +2677,8 @@
     "finishedOneShot": "One-time schedule: it ran and is finished.",
     "oneTimeHelpZone": "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below).",
     "openKnowledgeBase": "Open the knowledge base",
-    "serverOwnedHint": "Run by {{productName}} itself (alert retries, digests and retention). It cannot be changed, disabled or deleted."
+    "serverOwnedHint": "Run by {{productName}} itself (alert retries, digests and retention). It cannot be changed, disabled or deleted.",
+    "typeFollowUp": "Agent check-back"
   },
   "cascadeTrace": {
     "title": "Model Cascade",
