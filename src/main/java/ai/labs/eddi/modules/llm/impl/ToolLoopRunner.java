@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -14,6 +16,7 @@ import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -28,6 +31,8 @@ import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
+import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
+import ai.labs.eddi.modules.llm.tools.spi.ToolArgumentValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
@@ -63,6 +68,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -107,6 +113,11 @@ class ToolLoopRunner {
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
     private final ToolResultGuardrail toolResultGuardrail;
+    /**
+     * Told about every allowed call after it ran (the sampled audit); set by the
+     * owner.
+     */
+    private volatile AllowedToolCallObserver allowedCallObserver = AllowedToolCallObserver.NONE;
 
     ToolLoopRunner(ToolExecutionService toolExecutionService, ToolResponseTruncator toolResponseTruncator,
             TenantQuotaService tenantQuotaService, MemorySnapshotService memorySnapshotService,
@@ -120,6 +131,10 @@ class ToolLoopRunner {
         this.gateSupport = gateSupport;
         this.toolContextBudgetGuard = toolContextBudgetGuard;
         this.toolResultGuardrail = toolResultGuardrail;
+    }
+
+    void setAllowedCallObserver(AllowedToolCallObserver observer) {
+        this.allowedCallObserver = observer != null ? observer : AllowedToolCallObserver.NONE;
     }
 
     /**
@@ -189,6 +204,11 @@ class ToolLoopRunner {
 
         // Active specs: what the LLM currently sees (LAZY starts narrow).
         List<ToolSpecification> activeSpecs = computeInitialActiveSpecs(setup, isLazy);
+        if (isLazy) {
+            // What discover_tools already activated in this turn (a cascade step
+            // before this one) or, with lazyRetention: conversation, earlier.
+            LazyToolCatalog.reactivate(memory, task, setup.builtInSpecs(), activeSpecs);
+        }
 
         // Build message list with system message if provided
         List<ChatMessage> messages = new ArrayList<>();
@@ -531,8 +551,22 @@ class ToolLoopRunner {
                     // results in the order the model listed the calls (the refused ones are
                     // always the tail).
                     CallAdmission admission = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap, toolCallsThisTurn);
+                    toolCallsThisTurn += admission.admitted().size();
                     List<ToolExecutionRequest> admitted = admission.admitted();
-                    toolCallsThisTurn += admitted.size();
+                    // LAZY: a lazily-managed tool the model calls without discover_tools
+                    // having activated it is refused here, before the gate — never run,
+                    // and never put in front of a human for approval.
+                    if (isLazy) {
+                        admitted = refuseUnactivated(admitted, builtInSpecs, activeSpecs, toolSources, aiMessage, currentMessages, trace,
+                                exchangeRecorder);
+                    }
+                    // === Argument schema (before the gate) ===
+                    // A call whose arguments break its tool's declared schema is answered
+                    // NOT_EXECUTED here and never reaches the gate: no human is asked to
+                    // approve a request that cannot be right. Only executors that declare
+                    // a schema check anything (ToolArgumentValidator).
+                    admitted = refuseInvalidArguments(admitted, toolExecutors, toolSources, currentMessages, aiMessage, trace,
+                            exchangeRecorder);
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
@@ -543,8 +577,10 @@ class ToolLoopRunner {
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(
                             refuseExhaustedGatedCalls(
-                                    toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                            effectiveToolApprovals, clearedCalls),
+                                    admitted.isEmpty()
+                                            ? new ToolApprovalGate.GateResult(List.of(), List.of(), Map.of())
+                                            : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                                    effectiveToolApprovals, clearedCalls),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     var gateResult = screened.gateResult();
@@ -565,6 +601,7 @@ class ToolLoopRunner {
                                 Map<String, Object> capStep = new HashMap<>();
                                 capStep.put("type", "tool_error");
                                 capStep.put("tool", gatedReq.name());
+                                withCallId(capStep, gatedReq);
                                 capStep.put("error", "hitl_pause_cap");
                                 trace.add(capStep);
                             }
@@ -603,10 +640,15 @@ class ToolLoopRunner {
                                         exchangeRecorder)) {
                                     continue;
                                 }
-                                executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                                boolean executed = executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources,
+                                        exchangeRecorder,
                                         () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                                 toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                                if (executed) {
+                                    allowedCallObserver.afterAllowed(memory, allowedReq, toolSources, setup.toolEndpoints(), effectiveToolApprovals,
+                                            trace);
+                                }
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -682,10 +724,14 @@ class ToolLoopRunner {
                             continue;
                         }
 
-                        executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                        boolean executed = executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                 () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                         toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                         enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                        if (executed) {
+                            allowedCallObserver.afterAllowed(memory, toolRequest, toolSources, setup.toolEndpoints(), effectiveToolApprovals,
+                                    trace);
+                        }
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 
@@ -768,6 +814,95 @@ class ToolLoopRunner {
         addResult(currentMessages, call, request, SELF_CONVERSATION_REFUSAL, exchangeRecorder);
         trace.add(Map.of("type", "hitl_self_conversation", "tool", request.name(), "detail", selfTargeted));
         return true;
+    }
+
+    /**
+     * Answers every call to a lazily-managed tool that is not active with
+     * {@link LazyToolCatalog#NOT_ACTIVATED_REFUSAL} and returns the rest. A refused
+     * call reaches no gate, no executor and no mock; it is traced as
+     * {@code tool_not_activated}.
+     */
+    private static List<ToolExecutionRequest> refuseUnactivated(List<ToolExecutionRequest> admitted, List<ToolSpecification> lazySpecs,
+                                                                List<ToolSpecification> activeSpecs, Map<String, String> toolSources,
+                                                                AiMessage call, List<ChatMessage> currentMessages,
+                                                                List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        List<ToolExecutionRequest> kept = null;
+        for (int i = 0; i < admitted.size(); i++) {
+            ToolExecutionRequest request = admitted.get(i);
+            if (!LazyToolCatalog.isUnactivated(request, lazySpecs, activeSpecs)) {
+                if (kept != null) {
+                    kept.add(request);
+                }
+                continue;
+            }
+            if (kept == null) {
+                kept = new ArrayList<>(admitted.subList(0, i));
+            }
+            String source = toolSources == null ? null : toolSources.get(request.name());
+            LOGGER.debugf("Refusing call to not-yet-activated LAZY tool '%s'", sanitize(request.name()));
+            LazyToolCatalog.countRefusal(source);
+            addResult(currentMessages, call, request, LazyToolCatalog.NOT_ACTIVATED_REFUSAL, exchangeRecorder);
+            trace.add(Map.of("type", "tool_not_activated", "tool", request.name()));
+        }
+        return kept != null ? kept : admitted;
+    }
+
+    /**
+     * Answers, with a {@code NOT_EXECUTED} result listing each violation, every
+     * call whose executor is a {@link ToolArgumentValidator} and finds its
+     * arguments invalid, and returns the rest in order. Runs before the approval
+     * gate, so a refused call is never paused for a human and never executed; the
+     * model reads the violations and corrects the call on its next iteration.
+     * <p>
+     * Traced as {@code tool_error} with {@code error: "argument_schema"} and
+     * counted in {@code eddi.tool.arguments.refused}. A validator that throws
+     * refuses the call (fail closed): a call that could not be checked is never
+     * shown to the gate as if it had passed.
+     */
+    static List<ToolExecutionRequest> refuseInvalidArguments(List<ToolExecutionRequest> admitted, Map<String, ToolExecutor> toolExecutors,
+                                                             Map<String, String> toolSources, List<ChatMessage> currentMessages,
+                                                             AiMessage aiMessage, List<Map<String, Object>> trace,
+                                                             ToolExchangeRecorder exchangeRecorder) {
+        if (admitted.isEmpty() || toolExecutors == null) {
+            return admitted;
+        }
+        List<ToolExecutionRequest> valid = null;
+        for (int index = 0; index < admitted.size(); index++) {
+            ToolExecutionRequest request = admitted.get(index);
+            List<String> violations = List.of();
+            if (toolExecutors.get(request.name()) instanceof ToolArgumentValidator validator) {
+                try {
+                    violations = validator.argumentViolations(request);
+                } catch (RuntimeException e) {
+                    // Fail closed: a call whose arguments could not be checked is not
+                    // shown to the gate unchecked.
+                    LOGGER.warnf("Argument check of tool '%s' failed (%s); the call is refused", sanitize(request.name()),
+                            e.getClass().getSimpleName());
+                    violations = List.of("$: the arguments of this call could not be checked; the call was refused");
+                }
+            }
+            if (violations == null || violations.isEmpty()) {
+                if (valid != null) {
+                    valid.add(request);
+                }
+                continue;
+            }
+            if (valid == null) {
+                valid = new ArrayList<>(admitted.subList(0, index));
+            }
+            LOGGER.infof("Refusing tool '%s' before the approval gate: %d argument schema violation(s)", sanitize(request.name()),
+                    violations.size());
+            addResult(currentMessages, aiMessage, request, ToolArgumentSchemaValidator.refusal(violations), exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", request.name());
+            step.put("error", "argument_schema");
+            step.put("violations", List.copyOf(violations));
+            trace.add(step);
+            String source = toolSources != null ? toolSources.get(request.name()) : null;
+            Metrics.globalRegistry.counter("eddi.tool.arguments.refused", "source", source != null ? source : "unknown").increment();
+        }
+        return valid == null ? admitted : valid;
     }
 
     /** Tool result for a call refused by {@link #refusedAsSelfTargeted}. */
@@ -887,6 +1022,7 @@ class ToolLoopRunner {
             Map<String, Object> step = new HashMap<>();
             step.put("type", "tool_error");
             step.put("tool", req.name());
+            withCallId(step, req);
             step.put("error", "tool_quota_refused");
             trace.add(step);
         }
@@ -948,6 +1084,7 @@ class ToolLoopRunner {
                 Map<String, Object> step = new HashMap<>();
                 step.put("type", "tool_error");
                 step.put("tool", req.name());
+                withCallId(step, req);
                 step.put("error", "credential_reference_refused");
                 trace.add(step);
             } catch (Exception e) {
@@ -1087,17 +1224,23 @@ class ToolLoopRunner {
      * <p>
      * The one place both live execution sites share, so a rule enforced on the
      * ungated half of a gated batch cannot be missing from the main loop.
+     *
+     * @return true only when the call really ran: a repeat-guard refusal or a
+     *         {@code notExecuted} pipeline outcome returns false, so an observer of
+     *         allowed calls never correlates a stale earlier result of the same
+     *         tool
      */
-    private static void executeGuarded(ToolRepeatGuard guard, ToolExecutionRequest request, AiMessage call,
-                                       List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
-                                       Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
-                                       Supplier<ToolCallResult> execution) {
+    private static boolean executeGuarded(ToolRepeatGuard guard, ToolExecutionRequest request, AiMessage call,
+                                          List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
+                                          Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
+                                          Supplier<ToolCallResult> execution) {
         // A nameless call (the approval gate sends it through) has no identity to track
         // and no name for a trace entry; it stays on the unguarded path and degrades to
         // "tool not found" as before.
         if (guard == null || request.name() == null) {
-            addResult(currentMessages, call, request, execution.get().governed(), exchangeRecorder);
-            return;
+            ToolCallResult unguarded = execution.get();
+            addResult(currentMessages, call, request, unguarded.governed(), exchangeRecorder);
+            return !unguarded.notExecuted();
         }
         ToolRepeatGuard.Refusal refusal = guard.check(request.name(), request.arguments());
         if (refusal != null) {
@@ -1108,7 +1251,7 @@ class ToolLoopRunner {
             String source = toolSources == null ? null : toolSources.get(request.name());
             Metrics.globalRegistry.counter("eddi.tool.repeat.refused", "source", source != null ? source : "unknown", "reason",
                     refusal.reasonCode()).increment();
-            return;
+            return false;
         }
         ToolCallResult result = execution.get();
         ToolOutcomeClassifier.Outcome outcome = result.notExecuted()
@@ -1116,6 +1259,7 @@ class ToolLoopRunner {
                 : ToolOutcomeClassifier.classify(result.raw());
         guard.record(request.name(), request.arguments(), outcome, result.raw());
         addResult(currentMessages, call, request, result.governed(), exchangeRecorder);
+        return !result.notExecuted();
     }
 
     /**
@@ -1254,12 +1398,88 @@ class ToolLoopRunner {
                                    boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                    LlmConfiguration.Task task, boolean isLazy,
                                    List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
-        // Live "Using {tool}…" signal for streaming clients — name only, before
-        // execution, so the status line moves the moment work starts rather than
-        // when the whole loop summarizes at turn end.
-        if (memory != null && memory.getEventSink() != null) {
-            memory.getEventSink().onToolCall(toolRequest.name());
+        // Live signals for streaming clients, announced here - the one place every
+        // call passes through - so each call is closed exactly once whichever of the
+        // many exits of the pipeline below it leaves by. Name, call id, status and
+        // duration only: arguments and results may hold user data. The one exception
+        // is what the designer allow-listed in toolDisplay.
+        ConversationEventSink sink = memory != null ? memory.getEventSink() : null;
+        long startedNanos = System.nanoTime();
+        String status = TOOL_STATUS_ERROR;
+        if (sink != null) {
+            announceToolCall(sink, toolRequest, task, toolCanonicalNames);
         }
+        try {
+            ToolCallResult result = executeToolCallPipeline(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
+                    toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task,
+                    isLazy, builtInSpecs, activeSpecs, runSpend);
+            status = toolStatusOf(result);
+            return result;
+        } finally {
+            if (sink != null) {
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                try {
+                    sink.onToolResult(toolRequest.name(), toolRequest.id(), status, durationMs);
+                } catch (RuntimeException e) {
+                    LOGGER.debug("Event sink failed on tool_result; ignoring", e);
+                }
+            }
+        }
+    }
+
+    /** {@code tool_result} status of a call that ran and succeeded. */
+    public static final String TOOL_STATUS_OK = "ok";
+    /** A call that failed, or threw. */
+    public static final String TOOL_STATUS_ERROR = "error";
+    /** A call refused or skipped before the tool ran. */
+    public static final String TOOL_STATUS_NOT_EXECUTED = "not_executed";
+    /** A call a human declined. */
+    public static final String TOOL_STATUS_REJECTED = "rejected";
+
+    private static String toolStatusOf(ToolCallResult result) {
+        if (result.notExecuted()) {
+            return TOOL_STATUS_NOT_EXECUTED;
+        }
+        return ToolOutcomeClassifier.classify(result.raw()).isFailure() ? TOOL_STATUS_ERROR : TOOL_STATUS_OK;
+    }
+
+    /** Tells the sink a call is starting; a failing sink never breaks the loop. */
+    private static void announceToolCall(ConversationEventSink sink, ToolExecutionRequest toolRequest, LlmConfiguration.Task task,
+                                         Map<String, String> toolCanonicalNames) {
+        try {
+            ToolDisplay display = task != null
+                    ? ToolDisplayResolver.resolve(task.getToolDisplay(), toolRequest.name(),
+                            ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames), toolRequest.arguments())
+                    : null;
+            sink.onToolCall(toolRequest.name(), toolRequest.id(), display);
+        } catch (RuntimeException e) {
+            LOGGER.debug("Event sink failed on tool_call; ignoring", e);
+        }
+    }
+
+    /**
+     * Records the model's call id on a trace step, so a stored trace keeps call
+     * identity.
+     */
+    private static void withCallId(Map<String, Object> step, ToolExecutionRequest request) {
+        if (request != null && request.id() != null) {
+            step.put("callId", request.id());
+        }
+    }
+
+    /**
+     * The per-request pipeline itself - see {@link #executeToolCall}, which wraps
+     * it in the live tool_call / tool_result events.
+     */
+    private ToolCallResult executeToolCallPipeline(ToolExecutionRequest toolRequest, IConversationMemory memory,
+                                                   List<Map<String, Object>> trace,
+                                                   Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                                   Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
+                                                   int defaultRateLimit, Double maxBudget, String conversationId,
+                                                   boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
+                                                   LlmConfiguration.Task task, boolean isLazy,
+                                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs,
+                                                   DoubleSupplier runSpend) {
         // Name-only observer for plain (non-streamed) turns, e.g. a group member's.
         // An observer must never break the tool loop.
         if (memory != null && memory.getToolCallObserver() != null) {
@@ -1285,6 +1505,7 @@ class ToolLoopRunner {
         Map<String, Object> callStep = new HashMap<>();
         callStep.put("type", "tool_call");
         callStep.put("tool", toolRequest.name());
+        withCallId(callStep, toolRequest);
         // The trace is a DISPLAY/audit record (task summaries, SSE, memory,
         // traceSoFar merge on resume) — never an execution input, so it takes
         // the redacted form. Execution keeps using toolRequest directly; a
@@ -1314,6 +1535,7 @@ class ToolLoopRunner {
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
             mockedStep.put("tool", toolRequest.name());
+            withCallId(mockedStep, toolRequest);
             mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
             mockedStep.put("mocked", true);
             trace.add(mockedStep);
@@ -1330,6 +1552,11 @@ class ToolLoopRunner {
         // tracking itself is unaffected by the flag.
         AgentOrchestrator.warnAboutUnenforcedBudgets(task);
         boolean enforceBudget = AgentOrchestrator.isBudgetEnforced(task);
+        // An enforced ceiling is checked against the tracker, so every charge it
+        // counts — the call's and a summarize truncation's — is recorded whatever
+        // enableCostTracking says; otherwise turning the reporting off would leave
+        // the ceiling counting nothing.
+        boolean chargeTracker = enableCostTracking || (enforceBudget && maxBudget != null);
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -1338,6 +1565,7 @@ class ToolLoopRunner {
             Map<String, Object> budgetStep = new HashMap<>();
             budgetStep.put("type", "tool_error");
             budgetStep.put("tool", toolRequest.name());
+            withCallId(budgetStep, toolRequest);
             budgetStep.put("error", budgetError);
             trace.add(budgetStep);
 
@@ -1364,6 +1592,7 @@ class ToolLoopRunner {
                 Map<String, Object> errorStep = new HashMap<>();
                 errorStep.put("type", "tool_error");
                 errorStep.put("tool", toolRequest.name());
+                withCallId(errorStep, toolRequest);
                 errorStep.put("error", checkError);
                 trace.add(errorStep);
                 // The exception class stays in the trace and the log; the model gets
@@ -1385,6 +1614,7 @@ class ToolLoopRunner {
                 Map<String, Object> quotaStep = new HashMap<>();
                 quotaStep.put("type", "tool_error");
                 quotaStep.put("tool", toolRequest.name());
+                withCallId(quotaStep, toolRequest);
                 quotaStep.put("error", costCheck.reason());
                 trace.add(quotaStep);
 
@@ -1469,7 +1699,7 @@ class ToolLoopRunner {
                 Supplier<String> execution = mock != null
                         ? () -> mockingExecutor.executeMocked(toolRequest, mock)
                         : () -> executor.execute(toolRequest, null);
-                boolean trackCost = enableCostTracking && mock == null;
+                boolean trackCost = chargeTracker && mock == null;
                 // Without a quota gate the call takes exactly the path it always took.
                 toolResult = quotaGate == null
                         ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
@@ -1510,11 +1740,12 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, enableCostTracking, runSpend));
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
+        withCallId(resultStep, toolRequest);
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
         // toolResult was redacted above; it is scanned again because truncation
@@ -1533,7 +1764,10 @@ class ToolLoopRunner {
         // a provenance envelope first would make that parse fail. The envelope is
         // for the model's benefit, and the model still gets one.
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
+            int before = activeSpecs.size();
             activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
+            LazyToolCatalog.countActivation(activeSpecs.size() - before);
+            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
         }
 
         // Govern what comes back. Until now the comment on the live loop's caller

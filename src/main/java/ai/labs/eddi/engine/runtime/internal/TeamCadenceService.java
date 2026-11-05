@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.runtime.internal.handoff.HandoffLineage;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -277,6 +278,7 @@ public class TeamCadenceService {
             GroupConversationService.CadenceDiscussion prepared = groupConversationService.prepareCadenceDiscussion(
                     groupId, question, userId, toTaskDefinitions(pulled), cadence.maxCostPerRun(), null);
             GroupConversation gc = prepared.conversation();
+            HandoffLineage.stamp(gc, pulled, workspace);
 
             // 4. Claim: a revision-checked write (H14c), retried against a fresh read
             // while the workspace is still idle and every pulled task still waits.
@@ -621,7 +623,7 @@ public class TeamCadenceService {
     private String renderQuestion(Cadence cadence, GroupWorkspace workspace, List<TaskItem> pulled) {
         StringBuilder summary = new StringBuilder("Work the following backlog tasks:\n");
         for (TaskItem task : pulled) {
-            summary.append("- ").append(task.subject());
+            summary.append("- ").append(HandoffLineage.promptPrefix(task, workspace)).append(task.subject());
             if (task.description() != null && !task.description().isBlank()) {
                 summary.append(": ").append(task.description());
             }

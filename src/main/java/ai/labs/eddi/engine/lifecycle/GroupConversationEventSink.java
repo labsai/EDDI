@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
 import java.util.List;
@@ -83,6 +86,12 @@ public final class GroupConversationEventSink {
      * queue until the executor drains it.
      */
     public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
+    /**
+     * A handoff attempt to another team (see {@code docs/team-handoff.md}), from a
+     * member's {@code handoff_to_team} tool call or an {@code onDecision} rule.
+     * Carries the outcome, so a refusal is visible too.
+     */
+    public static final String EVENT_TEAM_HANDOFF = "team_handoff";
     /**
      * A member turn's dollar cost landed in the discussion's ledger. Fires after
      * every turn that produced a cost attribution, so an observer can watch spend
@@ -202,11 +211,21 @@ public final class GroupConversationEventSink {
      *            channel that posts an approval card bind the card to THIS pause,
      *            so a stale card cannot resolve a later one. {@code null} when not
      *            known.
+     * @param approvalContext
+     *            the context rendered for this pause ({@code approvalContext}), for
+     *            the channel that posts the approval card; {@code null} when none
+     *            is configured. Never serialized: the SSE stream carries the pause,
+     *            not the approver-facing text.
      */
-    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
+            @JsonIgnore RenderedApprovalContext approvalContext) {
+
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, null);
+        }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
-            this(phaseIndex, phaseName, reason, granularity, null);
+            this(phaseIndex, phaseName, reason, granularity, null, null);
         }
     }
 
@@ -219,7 +238,13 @@ public final class GroupConversationEventSink {
      * member's UI reads; an SSE frame is the wrong place for a full transcript
      * rendering.
      */
-    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName,
+            HumanRequestDetail detail) {
+
+        /** A plain speaking turn: no {@code detail}. */
+        public HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+            this(memberId, displayName, phaseIndex, phaseName, null);
+        }
     }
 
     /**
@@ -278,6 +303,23 @@ public final class GroupConversationEventSink {
      */
     public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
             String status, boolean created) {
+    }
+
+    /**
+     * A handoff attempt. Carries the subject (author-visible, bounded to 200
+     * characters) but never the description.
+     *
+     * @param outcome
+     *            the {@code HandoffResult.Outcome} name, e.g.
+     *            {@code QUEUED_FOR_REVIEW}
+     * @param mode
+     *            {@code AUTO}/{@code REVIEW}, or {@code null} when the attempt
+     *            ended before the target's rule was known
+     * @param trigger
+     *            {@code TOOL} or {@code DECISION}
+     */
+    public record TeamHandoffEvent(String handoffId, String targetAlias, String targetGroupId, String outcome, String mode, String trigger,
+            String subject) {
     }
 
     /**

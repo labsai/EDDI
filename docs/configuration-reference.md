@@ -45,9 +45,11 @@ Quarkus profiles prefix the key: `%dev.eddi.usermemories.deleteOlderThanDays=-1`
 applies in dev mode only.
 
 > **Empty is not the same as unset.** Several properties ship deliberately empty
-> (`eddi.vault.master-key`, `eddi.deployment.env`). An empty value is a real
-> value that disables or defaults the feature; it is not an error, and startup
-> will not complain.
+> (`eddi.vault.master-key`, `eddi.openai-compat.api-key`). An empty value is a real
+> value that disables or defaults the feature; it is not an error. One exception:
+> with `authorization.enabled=true`, the OpenAI-compatible API enabled and an empty
+> `eddi.openai-compat.api-key`, startup fails (`OpenAiStartupGuard`) unless
+> `eddi.openai-compat.http-policy=authenticated` is set or the API is disabled.
 
 ---
 
@@ -213,7 +215,8 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when a `/stream` SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.resume-cancel-on-client-disconnect` | `false` | The same for `POST /agents/{id}/resume/stream` only. Off by default: a resume is a deliberate human decision whose approved tool calls may already have run, so a dropped connection must not discard the turn. `true` cancels (and discards) the resumed turn |
 | `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream), and one MCP server response to the MCP client. Past it the call fails instead of reading on |
@@ -296,6 +299,7 @@ Full narrative: [agent-testing.md](agent-testing.md).
 
 | Property | Default | Description |
 |---|---|---|
+| `eddi.security.unauthenticated-reminder-interval` | `off` | Repeat the "OIDC is DISABLED" WARN at this interval (e.g. `1h`) when running unauthenticated in production; `off` logs only the startup ERROR. Values under `5m` are throttled to `5m` |
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
 | `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects; also every configured LLM/embedding endpoint, vector-store host and OpenAPI spec location (exempt: `eddi.self.base-url` and the `allowed-hosts` below). Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.security.ssrf-protection.allowed-hosts` | *(unset)* | Internal hosts httpCalls, LLM/embedding endpoints, vector stores and OpenAPI spec locations may still reach with `eddi.security.ssrf-protection.enabled=true`: comma-separated exact `host` or `host:port` entries, case-insensitive, no wildcards (a bare host matches any port). Listed hosts skip the private-address check, never the cloud-metadata check. While protection is **off**, an httpCall whose host or port is a template is refused at deploy time, and production logs a `[SECURITY]` WARN at startup. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
@@ -413,11 +417,21 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
+| `eddi.hitl.approval-context.max-total-chars` | `8000` | Cap on the text of all `approvalContext` blocks of one pause, summed; further blocks are dropped and the context is marked truncated. See [hitl-approval-context.md](hitl-approval-context.md) |
+| `eddi.hitl.approval-context.render-timeout-ms` | `500` | Wall-clock limit for rendering one `approvalContext` block. A block that exceeds it shows as `render_failed`; the pause is committed regardless |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
+| `eddi.hitl.analytics.retention` | `P400D` | How long approval-decision facts (the analytics projection of `hitl.approval` ledger entries) are kept. The ledger itself keeps the evidence. See [hitl-oversight.md](hitl-oversight.md) |
+| `eddi.hitl.analytics.initial-backfill` | `P90D` | How far back the one-time first-start rebuild reads the ledger into approval analytics. `P0D` disables it; `POST /hitl/analytics/rebuild` runs one by hand |
+| `eddi.hitl.samples.enabled` | `true` | Cluster-wide switch for the sampled audit of ungated tool calls (`hitlConfig.oversight.sampledAudit`) |
+| `eddi.hitl.samples.retention` | `P180D` | How long audit samples are kept |
+| `eddi.hitl.autonomy.maintenance-interval` | `PT1H` | How often the `hitl-autonomy-maintenance` system schedule runs (sample expiry, earned-autonomy evaluation, retention); at least 60 s |
+| `eddi.hitl.autonomy.suspension-cache-ttl` | `PT15S` | How long a node trusts its cached list of an agent's suspended categories — the longest a suspension takes to reach every pod |
+| `eddi.hitl.autonomy.max-agents-per-run` | `500` | Deployed agents one maintenance run evaluates (round-robin) |
+| `eddi.hitl.oversight.self-hosts` | *(empty)* | Extra names this deployment is reached by (`host` or `host:port`, comma-separated; a bare host matches any port). An httpcall to one of them, to `eddi.self.base-url`'s origin or to a loopback address carries `X-EDDI-Agent-Call`, so the oversight API can refuse an agent's own write. No other host ever sees the header |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
 
 ---
@@ -659,6 +673,8 @@ below. See [Enabling connections](connections.md#enabling-connections).
 |---|---|---|
 | `eddi.groups.max-depth` | `3` | Nesting limit for groups-of-groups |
 | `eddi.groups.cadence.claim-ttl` | `PT24H` | How long a standing-team cadence claim is held |
+| `eddi.groups.handoff.max-hops` | `3` | How many team boundaries one piece of work may cross by [cross-team handoff](team-handoff.md) before further handoffs are refused as a loop |
+| `eddi.groups.handoff.decline-memory` | `P30D` | How long a declined handoff blocks the same handoff being filed again. An upper limit, not a guarantee: only the 200 most recent decline tombstones are kept per workspace, so older declines can be forgotten sooner |
 | `eddi.groups.team-budget.admin-only-edits` | `true` | Changing a group's `teamBudget` needs `eddi-admin`; `false` lets editors change it (and so raise their own cap). See [Team Budgets](team-budgets.md#who-may-change-what) |
 | `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget of groups that configure a `teamBudget` (a group without one is never metered or gated). `false` is one global kill switch: no metering, no in-run ceiling, and no admission refusals for any team. A discussion already running when it is switched keeps its team ceiling until its current leg ends; its next leg (a resume, continuation or follow-up) drops it |
 | `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
@@ -730,6 +746,19 @@ The Helm chart sets each of these from its `eddi.branding.*` values, and mounts 
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
+
+## Other keys EDDI reads
+
+Outside the `eddi.*` namespace, EDDI reads a few keys of its own from `application.properties`:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `httpClient.maxConnectionPerRoute` | `200` | Legacy HTTP client: connections per route |
+| `httpClient.connectTimeoutInMillis` | `10000` | Legacy HTTP client: connect timeout |
+| `httpClient.idleTimeoutInMillis` | `60000` | Legacy HTTP client: idle connection timeout |
+| `httpClient.maxRedirects` | `5` | Legacy HTTP client: redirects followed |
+
+Standard Quarkus keys (for example `quarkus.http.ssl.certificate.*` for TLS on the HTTPS port, `quarkus.http.non-application-root-path`, `quarkus.oidc.*`) are documented by Quarkus and are not repeated here.
 
 ## Migration
 

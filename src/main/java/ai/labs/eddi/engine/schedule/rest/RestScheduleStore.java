@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.rest;
 
 import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomySchedules;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
@@ -1061,7 +1062,8 @@ public class RestScheduleStore implements IRestScheduleStore {
      * and a same-named row without the marker would pass for the real one by name.
      */
     private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
-        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName()))) {
+        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName())
+                || HitlAutonomySchedules.claims(schedule))) {
             LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
                     AlertSchedules.METADATA_TYPE_KEY);
             return Response.status(Response.Status.BAD_REQUEST)
@@ -1124,7 +1126,8 @@ public class RestScheduleStore implements IRestScheduleStore {
     /** Whether the schedule is managed by the server itself. */
     public static boolean isSystemSchedule(ScheduleConfiguration schedule) {
         return schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata())
-                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null);
+                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null
+                || HitlAutonomySchedules.isSystem(schedule));
     }
 
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {

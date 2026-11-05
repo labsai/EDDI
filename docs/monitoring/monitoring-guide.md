@@ -12,10 +12,10 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 #   EDDI API:        http://localhost:7070
 #   Prometheus:      http://localhost:9090
 #   Grafana:         http://localhost:3000  (admin/admin unless GRAFANA_ADMIN_PASSWORD is set)
-# Every port above except EDDI's is published on 127.0.0.1 only.
 #   Jaeger UI:       http://localhost:16686
 #   EDDI Metrics:    http://localhost:7070/q/metrics
 #   EDDI Health:     http://localhost:7070/q/health
+# Every port above except EDDI's is published on 127.0.0.1 only.
 ```
 
 ## Scraping with authentication on
@@ -326,7 +326,10 @@ Notes and caveats:
 ## Alerting Rules
 
 The rules ship with EDDI: [`eddi-alerts.yml`](eddi-alerts.yml) (25 rules, nine
-groups). Where they are loaded:
+groups), which is the file provisioned below. The cluster rules (`EddiClusterDegraded`, `EddiClusterFenceRejected`,
+`EddiClusterLeaseTimeouts`, `EddiDeadLetters`) live in
+[`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) and are runbooked in
+[Clustering](../clustering.md#runbook); they are not loaded by the paths below and must be added to `rule_files` yourself when cluster mode is enabled. Where `eddi-alerts.yml` is loaded:
 
 | Delivery path | How |
 |---|---|
@@ -615,14 +618,15 @@ EddiHeapAfterGcHigh, urgently.
 
 ## Grafana Dashboards
 
-`docker-compose.monitoring.yml` provisions all three automatically. To load one by
+`docker-compose.monitoring.yml` provisions these three automatically, plus the cluster dashboard
+(`eddi-cluster-dashboard.json`, uid `eddi-cluster`; the Kubernetes component does not ship it). To load one by
 hand: Grafana → Dashboards → Import → upload the JSON → pick your Prometheus data
 source.
 
 | File | Dashboard | Shape |
 |------|-----------|-------|
 | `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 58 panels |
-| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 22 rows, 166 panels — **every** meter EDDI registers, enforced by `MetricsDashboardCoverageTest` |
+| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 26 rows, 212 panels — **every** meter EDDI registers, enforced by `MetricsDashboardCoverageTest` |
 | `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original dashboard, 6 groups: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM |
 
 Start at **Operations Command Center** — it answers "is the platform healthy".

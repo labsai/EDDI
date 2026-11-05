@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
 import ai.labs.eddi.engine.lifecycle.IAnswerRevisingTask;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -20,6 +21,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
+import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -342,6 +344,27 @@ public class LifecycleManager implements ILifecycleManager {
             auditCollector.collect(buildAuditEntry(conversationMemory, task, absoluteIndex, durationMs, summary));
         }
         return true;
+    }
+
+    /**
+     * Has the task at {@code absoluteIndex} replace its answer with an approver's
+     * edit ({@code hitlConfig.review.allowAnswerEdits}). Not a pipeline run:
+     * nothing executes again.
+     */
+    @Override
+    public ReviewerEditRequest.Outcome replaceAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, ReviewerEditRequest request)
+            throws LifecycleException {
+        checkNotNull(conversationMemory, "conversationMemory");
+        if (request == null || absoluteIndex < 0 || absoluteIndex >= this.lifecycleTasks.size()) {
+            return ReviewerEditRequest.Outcome.refused("CONFIG_DRIFT", null);
+        }
+        ILifecycleTask task = this.lifecycleTasks.get(absoluteIndex);
+        if (!(task instanceof IAnswerEditingTask editor) || task.getId() == null) {
+            return ReviewerEditRequest.Outcome.refused("CONFIG_DRIFT", null);
+        }
+        var components = componentCache.getComponentMap(task.getId().name());
+        var component = components.getOrDefault(createComponentKey(workflowId.getId(), workflowId.getVersion(), absoluteIndex), null);
+        return editor.replaceAnswer(conversationMemory, component, request);
     }
 
     /**

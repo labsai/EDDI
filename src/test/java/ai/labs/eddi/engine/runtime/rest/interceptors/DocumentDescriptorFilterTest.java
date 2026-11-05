@@ -549,6 +549,27 @@ class DocumentDescriptorFilterTest {
         }
 
         @Test
+        @DisplayName("a DELETE elsewhere whose key is spelled like a configuration id leaves that configuration's descriptor alone")
+        void deleteOfAnotherKindOfResourceDoesNotMarkAConfigurationDeleted() throws Exception {
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(response.getStatus()).thenReturn(204);
+            when(request.getMethod()).thenReturn("DELETE");
+            when(response.getHeaderString("Location")).thenReturn(null);
+            when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:7070/spacestore/variables/aabbccdd11223344eeff5566?version=1"));
+            when(uriInfo.getPath()).thenReturn("/spacestore/variables/aabbccdd11223344eeff5566");
+
+            var descriptor = mock(DocumentDescriptor.class);
+            when(descriptor.getResource()).thenReturn(URI.create("eddi://ai.labs.output/outputstore/outputsets/aabbccdd11223344eeff5566?version=1"));
+            doReturn(descriptor).when(documentDescriptorStore).readDescriptor("aabbccdd11223344eeff5566", 1);
+
+            filter.filter(request, response);
+
+            verify(descriptor, never()).setDeleted(true);
+            verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+        }
+
+        @Test
         @DisplayName("a DELETE of a sub-resource leaves the descriptor alone — its last segment is not a configuration id")
         void subResourceDeleteDoesNotTouchDescriptors() throws Exception {
             // The upload-file delete: a 32-hex file id that extractResourceId accepts.

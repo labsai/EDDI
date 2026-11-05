@@ -668,6 +668,7 @@ public class GroupLifecycleOps {
                     }
                     if (gc.getPendingHumanInput() != null) {
                         summary.setPendingMemberId(gc.getPendingHumanInput().memberId());
+                        summary.setPendingKind(PendingHumanInputView.kindOf(gc));
                     }
                     return summary;
                 })

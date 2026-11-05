@@ -906,7 +906,7 @@ function LogRow({
             {entry.conversationId}
           </span>
         )}
-        <span className="min-w-[12rem] flex-1 break-all text-foreground">
+        <span data-log-content="" className="min-w-[12rem] flex-1 break-all text-foreground">
           {main}
         </span>
         {/* Copy button: shown on hover, and always on keyboard focus and touch
@@ -942,7 +942,7 @@ function LogRow({
                 })}
           </button>
           {expanded && (
-            <pre className="mt-1 overflow-x-auto whitespace-pre rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-[10px] leading-relaxed text-red-300/80">
+            <pre data-log-content="" className="mt-1 overflow-x-auto whitespace-pre rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-[10px] leading-relaxed text-red-300/80">
               {frames.trim()}
             </pre>
           )}

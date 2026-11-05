@@ -48,6 +48,15 @@ import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
+import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
+import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
+import ai.labs.eddi.datastore.postgres.PostgresAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.mongo.MongoApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.mongo.MongoAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.IAuditSampleStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.mongo.MongoAuditSampleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -124,7 +133,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * CDI producer that selects the correct datastore implementation at
- * <b>runtime</b> based on the {@code eddi.datastore} configuration property.
+ * <b>runtime</b> based on the {@code eddi.datastore.type} configuration
+ * property.
  * <p>
  * Both MongoDB and PostgreSQL store implementations are compiled into the same
  * JAR. All stores are annotated {@code @DefaultBean}, so these non-default
@@ -134,7 +144,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * <b>Design rationale:</b> {@code @IfBuildProfile} is build-time only (requires
  * separate JARs per database). This producer enables a single Docker image that
  * supports both MongoDB and PostgreSQL, controlled by the
- * {@code EDDI_DATASTORE} environment variable.
+ * {@code EDDI_DATASTORE_TYPE} environment variable.
  *
  * @since 6.0.0
  */
@@ -179,6 +189,25 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConversationRatingStore conversationRatingStore(Instance<ConversationRatingStore> mongo,
                                                             Instance<PostgresConversationRatingStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IApprovalDecisionStore approvalDecisionStore(Instance<MongoApprovalDecisionStore> mongo,
+                                                        Instance<PostgresApprovalDecisionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAuditSampleStore auditSampleStore(Instance<MongoAuditSampleStore> mongo, Instance<PostgresAuditSampleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAutonomyStateStore autonomyStateStore(Instance<MongoAutonomyStateStore> mongo, Instance<PostgresAutonomyStateStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

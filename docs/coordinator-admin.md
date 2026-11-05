@@ -83,7 +83,10 @@ Retention: in-memory, `eddi.coordinator.max-dead-letters` (default `1000`; `-1` 
 retains none), oldest evicted first. In cluster mode the entries live in the JetStream stream
 `<prefix>_DEAD_LETTERS`, shared by every node and kept for `eddi.coordinator.dead-letter.max-age`
 (default `7d`); while NATS is unreachable a node keeps its new entries locally (ids `local-…`) under
-the same in-memory cap. GDPR erasure removes a user's entries.
+the same in-memory cap. That local copy lives in memory only: past the cap the oldest entries are
+evicted, and a restart of the node loses all of them, so forward them (below) once NATS is back
+rather than restarting a node that still holds some (`LOCAL_DEAD_LETTERS` in the health verdict).
+GDPR erasure removes a user's entries.
 
 > `turn.input` (and `turn.context`) is what the user sent. It can contain material they would not
 > expect an administrator to read, so treat this endpoint as carrying conversation content. Set
@@ -96,15 +99,22 @@ the same in-memory cap. GDPR erasure removes a user's entries.
 POST /administration/coordinator/dead-letters/{entryId}/replay
 ```
 
-Submits the captured input as a **new turn** of the same conversation, as the calling admin, with
-the context entry `replayOf=<entryId>`, and removes the entry once the turn was accepted. The
-failed task itself is never re-run.
+Submits the captured input as a **new turn** of the same conversation, with the context entry
+`replayOf=<entryId>`. The failed task itself is never re-run. This is the same replay as the
+cluster console's (below): the entry is claimed first, so two administrators replaying it at once
+run it once; the replay is written to the audit ledger with the calling admin; and the entry is
+removed only **once the replayed turn commits**. A replayed turn that is skipped, waits too long
+for its lease, is drained or fails leaves the entry in place, and it can be replayed again. Every
+replay of one entry carries the same `Idempotency-Key` (`dead-letter-replay:<entryId>`), so if a
+replay committed but its entry could not be removed (the node died in between), replaying it again
+is answered from the stored outcome instead of running the turn twice, within the
+`eddi.turns.idempotency.ttl-seconds` window.
 
 | Status | Meaning |
 |---|---|
-| `204` | Replay submitted; the entry is gone. |
+| `204` | Replay submitted; the entry disappears when the turn commits. |
 | `404` | No such entry — discarded, purged or expired. |
-| `409` | Not replayable (no captured input: a HITL resume, a group member's turn, or capture switched off), or the conversation cannot take a turn right now. The entry is kept. |
+| `409` | Not replayable (no captured input: a HITL resume, a group member's turn, or capture switched off; or its caller was already told to retry), being replayed by someone else right now, or the conversation cannot take a turn right now. The entry is kept. |
 
 Replaying re-runs the turn's side effects, so replay a failure whose cause you have actually fixed,
 not one you are still diagnosing.
@@ -190,7 +200,10 @@ screen for 15 minutes.
 ### Leases
 
 Each lease shows its holder, age, revision (the fencing token), its last renewal (the server's
-write time of the current revision) and these flags:
+write time of the current revision) and these flags. One scan of the lease bucket is shared for 3 s
+by every console polling a node (a force-release on that node drops it), and so is each page read
+from the dead-letter stream (a replay, discard or forward drops those), so an open console no longer
+costs the bucket's leader a full scan per tab and poll:
 
 | Flag | Means |
 |---|---|
@@ -203,18 +216,24 @@ write time of the current revision) and these flags:
 ### Dead letters in the console
 
 Every entry now records **why** it was dead-lettered (`reason`: `fenced`, `lease-lost` (the
-node lost the lease while the turn ran, so the turn was stopped before it was stored), `timeout`
-or `failed`; the console shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
+node lost the lease while the turn ran, so the turn was stopped before it was stored),
+`conflict` (cluster mode: the turn ran and its reply went out, but its write lost to another
+writer of the conversation, so nothing of it was stored), `timeout` or `failed`; the console
+shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
 `token` — what the refused write carried — and `storedFence`, what the conversation already
 had). An entry that cannot be replayed says why (`notReplayableReason`): `SECRET_INPUT` (the
 client flagged the turn `secretInput`, or the agent carries a `scope: secret` property
 instruction and so expects secrets in its input — either way the input was never stored), `INPUT_NOT_CAPTURED`
-(`eddi.coordinator.dead-letter.capture-input=false`) or `NOT_A_TURN` (a HITL resume or a group
-member's turn). A replay claims its entry first (`replay.<id>` in the `<prefix>_ADMIN` KV bucket,
-TTL 60 s), so two administrators replaying one entry run its turn once; the other gets
-`IN_PROGRESS`. Bulk replay and discard report one outcome per id — `REPLAYED`, `DISCARDED`, `IN_PROGRESS`,
-`NOT_FOUND`, `NOT_REPLAYABLE`, `REJECTED` (the conversation would not take the turn; the entry
-is kept) or `UNAVAILABLE` (NATS unreachable).
+(`eddi.coordinator.dead-letter.capture-input=false`), `NOT_A_TURN` (a HITL resume or a group
+member's turn) or `ANSWERED_RETRY` (the turn never ran and its caller was told to retry it, so a
+replay could run it a second time; the entry is a trace only). A replay claims its entry first
+(`replay.<id>` in the `<prefix>_ADMIN` KV bucket, TTL 60 s) and holds the claim until its turn has
+answered, so two administrators replaying one entry run its turn once; the other gets
+`IN_PROGRESS`. `REPLAYED` means the turn was submitted: the entry is removed when the turn commits
+(`admin.deadletters.replay.committed` on the activity timeline) and kept when it does not
+(`admin.deadletters.replay.not-committed`). Bulk replay and discard report one outcome per id —
+`REPLAYED`, `DISCARDED`, `IN_PROGRESS`, `NOT_FOUND`, `NOT_REPLAYABLE`, `REJECTED` (the
+conversation would not take the turn; the entry is kept) or `UNAVAILABLE` (NATS unreachable).
 
 ### Activity
 
@@ -242,7 +261,7 @@ timeline, and counted on `eddi_cluster_admin_actions_total{action,outcome}`.
 | Force-release a lease | A compare-and-set delete at the revision found — or refused as `RENEWED` when `expectedRevision` no longer matches, which means the holder is alive and renewing. The next holder's lease has a higher revision, which it raises on the conversation before its turn runs, so a still-alive former holder's late write is **refused by the fence and dead-lettered**; its next heartbeat finds the lease gone and cancels its turn at the next task boundary. A lease nobody holds answers `ALREADY_RELEASED`. |
 | Resync caches | The flush a node already does by itself after missing events; caches reload from the database. Costs a short burst of reads, changes no data. |
 | Reconcile deployments | Runs the 10-second deployment sweep now on every node. |
-| Drain / undrain a node | The node takes no new leases — turns that reach it are answered `409` with `Retry-After` and retried elsewhere — and its readiness check reports `DOWN` (`draining: true`), so a Kubernetes Service stops routing to it; running turns finish. Refused (`409 LAST_NODE`) for the last node still taking turns — decided under a cluster-wide `gate.drain` (a concurrent decision answers `409 BUSY`) and counted from the `drain.<node>` keys every drained node keeps in the `<prefix>_ADMIN` bucket, not from presence. Lasts until undrain or restart. |
+| Drain / undrain a node | The node takes no new leases — turns that reach it are answered `409` with `Retry-After` and retried elsewhere — and its readiness check reports `DOWN` (`draining: true`), so a Kubernetes Service stops routing to it; running turns finish. Refused (`409 LAST_NODE`) for the last node still taking turns — decided under a cluster-wide `gate.drain` (a concurrent decision answers `409 BUSY`) and counted from the `drain.<node>` keys every drained node keeps in the `<prefix>_ADMIN` bucket, not from presence. The drained node checks again when the request reaches it: it drains only while the drain gate is held, its own `drain.<node>` key was written and another live node still takes turns, so a drain request published straight onto the RPC subject (a broadcast to every node included) drains nothing. What a node applies or refuses on another node's request is audited there too (actor `cluster-rpc`), as are reconcile and forward requests. Lasts until undrain or restart. |
 | Forward local dead letters | Each node appends the entries it kept while NATS was down to the shared stream, then removes its copy; serialised per node, so two runs never forward an entry twice. Refused while the answering node has no NATS. |
 
 Not offered, on purpose: deleting a stream or bucket, purging every dead letter from the console

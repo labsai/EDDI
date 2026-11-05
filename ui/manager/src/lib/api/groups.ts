@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { HITL_CLIENT_HEADERS } from "./hitl";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
 import { repairNegotiationArbitration } from "../hitl-config";
@@ -235,10 +236,13 @@ export interface ConvergenceConfig {
   /** Agreement score at or above which the phase is converged (default 0.8, compared with >=). */
   threshold: number;
   /**
-   * `"MODERATOR"` (default) runs the group's moderator as judge. `"SERVICE"` is
-   * accepted but currently falls back to MODERATOR with a backend warning.
+   * `"MODERATOR"` (default) runs the group's moderator as judge. `"SERVICE"`
+   * calls the model named in `service` directly (no moderator needed); without a
+   * `service` model it falls back to the moderator with a backend warning.
    */
   judge: ConvergenceJudge;
+  /** The model `judge: "SERVICE"` calls. Ignored for MODERATOR. */
+  service?: ServiceJudgeConfig | null;
   /**
    * What the judge decides (E2). `"SIMILARITY"` (default, absent on configs saved
    * before 6.6) scores agreement with the previous repeat against `threshold`.
@@ -249,6 +253,23 @@ export interface ConvergenceConfig {
 }
 
 export type ConvergenceJudge = "MODERATOR" | "SERVICE";
+
+/**
+ * Backend `ServiceJudgeConfig`: the model a SERVICE convergence judge calls. A
+ * credential-named parameter (`apiKey`, ...) must be a `${vault:...}` or
+ * `${vars:...}` reference — a literal is refused at save time.
+ */
+export interface ServiceJudgeConfig {
+  llmProvider?: string | null;
+  llmModel?: string | null;
+  parameters?: Record<string, string> | null;
+  /** USD per 1M input tokens; absent = unpriced ($0). */
+  inputPricePer1M?: number | null;
+  /** USD per 1M output tokens; absent = unpriced ($0). */
+  outputPricePer1M?: number | null;
+  /** Per-call timeout in ms (default 20000, ceiling 60000). */
+  timeoutMs?: number | null;
+}
 
 export type ConvergenceMode = "SIMILARITY" | "VERDICT";
 
@@ -267,13 +288,27 @@ export type VoteMethod = "MAJORITY" | "APPROVAL";
 export type VoteOptionsSource = "LAST_SYNTHESIS" | "EXPLICIT";
 
 /**
- * How a tied ballot resolves (I14). `HUMAN_DECIDES` is a real enum value but is
- * still save-time REJECTED by the backend pending its resume machinery — despite
- * I6 (human members) having since shipped, that cross-reference in the backend's
- * own docs is stale. Treat it as unselectable, matching backend reality, not the
- * aspirational doc.
+ * How a tied ballot resolves (I14). `HUMAN_DECIDES` pauses the discussion until
+ * the `humanTieBreak` decider chooses one of the tied options.
  */
 export type VoteTiePolicy = "MODERATOR_DECIDES" | "HUMAN_DECIDES" | "NO_DECISION";
+
+/** What an unanswered human tie-break resolves to. */
+export type TieBreakTimeoutPolicy = "NO_DECISION" | "MODERATOR_DECIDES" | "ABORT";
+
+/**
+ * Backend `HumanTieBreakConfig`: who breaks a tie under `HUMAN_DECIDES`. Without
+ * a `decider` the group's single HUMAN member decides; a group with none or
+ * several must name one (save-time 400).
+ */
+export interface HumanTieBreakConfig {
+  /** Principal id of the decider. Need not be a member. */
+  decider?: string | null;
+  /** ISO-8601 duration; absent = `humanMemberConfig.turnTimeout`, else no timeout. */
+  timeout?: string | null;
+  /** Default NO_DECISION. MODERATOR_DECIDES needs a moderatorAgentId. */
+  onTimeout?: TieBreakTimeoutPolicy | null;
+}
 
 /** Backend `AgentGroupConfiguration.VoteConfig.DEFAULT_QUORUM`. Valid range (0,1]. */
 export const DEFAULT_VOTE_QUORUM = 0.5;
@@ -296,6 +331,8 @@ export interface VoteConfig {
   /** Scale each ballot's weight by the voter's stated confidence, if parsed. */
   weightByConfidence: boolean;
   tiePolicy: VoteTiePolicy;
+  /** Only read when `tiePolicy === "HUMAN_DECIDES"`. */
+  humanTieBreak?: HumanTieBreakConfig | null;
 }
 
 /**
@@ -588,6 +625,12 @@ export interface AgentGroupConfiguration {
    * checkpoint ever runs and the discussion costs nothing extra.
    */
   facilitator?: FacilitatorConfig | null;
+  /**
+   * Cross-team handoff, both halves (see `team-handoffs.ts`): the teams this
+   * group may file tasks into, and the sources it accepts from. `null` = the
+   * group neither sends nor receives.
+   */
+  handoffConfig?: import("./team-handoffs").GroupHandoffConfig | null;
   /**
    * Monthly dollar budget for the team (docs/team-budgets.md). Declared so a save that
    * spreads the loaded config sends it back unchanged; only an administrator can change it.
@@ -969,6 +1012,47 @@ export interface PendingHumanInput {
   renderedPrompt: string;
   onTimeout: OnHumanTimeout;
   requestedAt: string;
+  /** Set when the pending input is not a plain speaking turn — a tie-break or a task. */
+  detail?: HumanRequestDetail | null;
+}
+
+/**
+ * Backend `HumanRequestDetail`: what a pending human input asks for when it is
+ * not a speaking turn. A `TIE_BREAK` is answered with `choice` (one of `options`);
+ * `content` is then an optional rationale.
+ */
+export interface HumanRequestDetail {
+  kind: "TIE_BREAK" | "TASK" | string;
+  options?: string[];
+  taskId?: string | null;
+  transcriptFrom?: number | null;
+  timeoutResolution?: string | null;
+}
+
+/** The task a pending human task-force task is about, or `undefined` for any other pending input. */
+export function pendingHumanTask(conversation?: GroupConversation | null): TaskItem | undefined {
+  const pending = conversation?.pendingHumanInput;
+  if (pending?.detail?.kind !== "TASK" || !pending.detail.taskId) return undefined;
+  return conversation?.taskList?.tasks?.find((t) => t.id === pending.detail!.taskId);
+}
+
+/** The options a pending tie-break offers, or `undefined` for any other pending input. */
+export function tieBreakOptions(pending?: PendingHumanInput | null): string[] | undefined {
+  return pending?.detail?.kind === "TIE_BREAK" ? (pending.detail.options ?? []) : undefined;
+}
+
+/**
+ * The timeout to show on a pending HUMAN input. A tie-break runs on the timeout
+ * the engine resolved when it paused (`humanTieBreak.timeout`, else the group's
+ * `humanMemberConfig.turnTimeout`) and stored as `hitlApprovalTimeout`; any other
+ * human turn uses the group's `humanMemberConfig.turnTimeout`.
+ */
+export function pendingTurnTimeout(
+  pending: PendingHumanInput | null | undefined,
+  hitlApprovalTimeout: string | null | undefined,
+  humanMemberTurnTimeout: string | null | undefined,
+): string | null | undefined {
+  return tieBreakOptions(pending) !== undefined ? (hitlApprovalTimeout ?? null) : humanMemberTurnTimeout;
 }
 
 /** How consumers should read a `SharedArtifact.content` string (I17). */
@@ -1092,6 +1176,8 @@ export interface GroupConversation {
   hitlPauseReason?: string;
   hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
   hitlApprovalTimeout?: string;
+  /** The group's `approvalContext` rendered when this pause was committed; `null` when none is configured. */
+  hitlApprovalContext?: import("./hitl").ApprovalContextView | null;
   /** Where inside a SEQUENTIAL phase the pause landed, so a resume skips what already ran (F2). */
   resumePoint?: ResumePoint | null;
   /**
@@ -1436,7 +1522,9 @@ export function isHumanInputAcknowledgement(result: HumanInputResult): result is
  * separate from the HITL approve endpoints even though both resume a paused
  * discussion.
  * POST /groups/{groupId}/conversations/{groupConversationId}/human-input
- * Body: HumanInputRequest { memberId, content }.
+ * Body: HumanInputRequest { memberId, content, choice? } — `choice` answers a
+ * tie-break (one of `pendingHumanInput.detail.options`), with `content` then an
+ * optional rationale.
  * Response: the full GroupConversation only for its owner or an admin; the
  * pending member gets `{ groupConversationId, accepted, state }` instead, so
  * callers must not read conversation fields off the result.
@@ -1449,10 +1537,11 @@ export function submitHumanInput(
   gcId: string,
   memberId: string,
   content: string,
+  choice?: string,
 ): Promise<HumanInputResult> {
   return api.post<HumanInputResult>(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/human-input`,
-    { memberId, content },
+    choice !== undefined ? { memberId, content, choice } : { memberId, content },
   );
 }
 
@@ -1652,6 +1741,8 @@ export interface HumanInputRequestedPayload {
   displayName: string;
   phaseIndex: number;
   phaseName: string;
+  /** Set for a tie-break or a task; absent for a speaking turn. */
+  detail?: HumanRequestDetail | null;
 }
 
 /** Payload of `retro_recorded` (I8). */
@@ -1845,11 +1936,17 @@ async function streamRefusalMessage(response: Response): Promise<string> {
 }
 
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
-function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+function postSSE(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
+): Promise<Response> {
   return fetch(`${api.getBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...extraHeaders,
       ...api.getAuthHeader(),
     },
     body: JSON.stringify(body),
@@ -1917,6 +2014,7 @@ export async function* streamGroupApproval(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve/stream`,
     request,
     signal,
+    HITL_CLIENT_HEADERS,
   );
   yield* readGroupSSE(response);
 }
