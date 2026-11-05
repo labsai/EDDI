@@ -265,6 +265,7 @@
     "GET /workspaces/settings",
     "PATCH /agents/{conversationId}/state",
     "PATCH /apicallstore/apicalls/{id}",
+    "PATCH /conversationstore/conversations/{conversationId}",
     "PATCH /descriptorstore/descriptors/{id}",
     "PATCH /dictionarystore/dictionaries/{id}",
     "PATCH /llmstore/llms/{id}",
