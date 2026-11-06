@@ -27,6 +27,29 @@ function agentDoc(version: number) {
   };
 }
 
+/**
+ * agent1 with every agent-level setting switched on, so that each section, once
+ * opened, renders all of its fields.
+ */
+function fullyConfiguredDoc(version: number) {
+  return {
+    ...agentDoc(version),
+    channels: [{ type: "slack", config: { channelId: "C1", botToken: "fixturefixture", signingSecret: "fixturefixture" } }],
+    a2aEnabled: true,
+    a2aSkills: ["search"],
+    identity: { agentDid: "did:web:agent1.example" },
+    security: { signInterAgentMessages: true },
+    capabilities: [{ skill: "search", confidence: "high", attributes: { region: "eu" } }],
+    enableMemoryTools: true,
+    userMemoryConfig: { dream: { enabled: true } },
+    memoryPolicy: { strictWriteDiscipline: { enabled: true } },
+    sessionManagement: { autoSnapshot: { enabled: true } },
+    conversationReview: { enabled: true },
+    maxContinuations: 2,
+    hitlConfig: { approvalTimeout: "PT15M", timeoutPolicy: "REJECT", pauseReason: "Needs sign-off" },
+  };
+}
+
 function descriptor(version: number, callerLevel?: string) {
   return {
     resource: `eddi://ai.labs.agent/agentstore/agents/agent1?version=${version}`,
@@ -44,7 +67,7 @@ const versionOf = (request: Request) => Number(new URL(request.url).searchParams
  * agent1 at v3, recording the `version` of every agent document read and the
  * number of writes. Requests for other agents fall through to the defaults.
  */
-function agentAtLatest() {
+function agentAtLatest(doc: (version: number) => object = agentDoc) {
   const requested: string[] = [];
   const writes = { count: 0 };
   let currentVersionReads = 0;
@@ -58,7 +81,7 @@ function agentAtLatest() {
       if (params.id !== "agent1") return undefined;
       const version = new URL(request.url).searchParams.get("version");
       requested.push(version ?? "none");
-      return HttpResponse.json(agentDoc(Number(version)));
+      return HttpResponse.json(doc(Number(version)));
     }),
     http.put("*/agentstore/agents/:id", () => {
       writes.count++;
@@ -153,8 +176,8 @@ describe("AgentDetailPage — switching versions", () => {
 });
 
 describe("AgentDetailPage — viewers", () => {
-  function sharedForViewing() {
-    const backend = agentAtLatest();
+  function sharedForViewing(doc?: (version: number) => object) {
+    const backend = agentAtLatest(doc);
     server.use(
       http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
         if (params.id !== "agent1") return undefined;
@@ -183,6 +206,31 @@ describe("AgentDetailPage — viewers", () => {
     expect(screen.queryByTestId("add-workflow-btn")).not.toBeInTheDocument();
     expect(screen.queryByTestId("remove-workflow-wf1")).not.toBeInTheDocument();
     expect(screen.getByTestId("max-cost-per-conversation")).toBeDisabled();
+  });
+
+  it("leaves no field in any section that a viewer can change", async () => {
+    sharedForViewing(fullyConfiguredDoc);
+    renderDetail();
+    await screen.findByTestId("version-picker");
+    const sections = screen.getByTestId("agent-config-sections");
+
+    // Open every collapsed section, and every collapsed block inside one.
+    for (let round = 0; round < 5; round++) {
+      const closed = within(sections).queryAllByRole("button", { expanded: false });
+      if (closed.length === 0) break;
+      for (const toggle of closed) await userEvent.click(toggle);
+    }
+
+    const fields = [...sections.querySelectorAll<HTMLInputElement>("input, select, textarea")];
+    // Enough fields that this cannot pass on a page that rendered no section.
+    expect(fields.length).toBeGreaterThan(25);
+    const changeable = fields
+      .filter((field) => !field.matches(":disabled") && !field.readOnly)
+      .map((field) => field.dataset.testid ?? field.getAttribute("aria-label") ?? field.outerHTML.slice(0, 120));
+    expect(changeable).toEqual([]);
+    // Buttons that edit a list: the A2A skills.
+    expect(screen.getByTestId("a2a-add-skill")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove search" })).toBeDisabled();
   });
 
   it("can still open a section to read it, and Ctrl+S writes nothing", async () => {

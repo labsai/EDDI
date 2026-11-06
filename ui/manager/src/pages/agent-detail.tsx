@@ -1884,6 +1884,7 @@ function A2ASection({
                 type="text"
                 value={agent.description ?? ""}
                 onChange={(e) => onChange({ ...agent, description: e.target.value })}
+                disabled={disabled}
                 placeholder={t("agentDetail.a2aDescPlaceholder", "What does this agent do?")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
                 data-testid="a2a-description"
@@ -1908,7 +1909,8 @@ function A2ASection({
                     <button
                       type="button"
                       onClick={() => handleRemoveSkill(i)}
-                      className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                      disabled={disabled}
+                      className="rounded p-0.5 hover:bg-primary/20 transition-colors disabled:opacity-50"
                       aria-label={t("common.removeItem", { item: skill, defaultValue: "Remove {{item}}" })}
                     >
                       <X className="h-3 w-3" />
@@ -1927,6 +1929,7 @@ function A2ASection({
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
+                  disabled={disabled}
                   onKeyDown={(e) => {
                     if (isImeComposing(e)) return;
                     if (e.key === "Enter") {
@@ -1941,7 +1944,8 @@ function A2ASection({
                 <button
                   type="button"
                   onClick={handleAddSkill}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  disabled={disabled}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
                   aria-label={t("agentDetail.a2aAddSkill", "Add skill")}
                   data-testid="a2a-add-skill"
                 >
