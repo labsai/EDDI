@@ -13,6 +13,9 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
@@ -1478,6 +1481,51 @@ class ScheduleFireExecutorTest {
         verify(scheduleStore).logFire(log);
         // Never the strategy path: no say() from the executor itself.
         verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_continuation_failed_tellsTheConversationOwnerOnTheirEventStream() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var publisher = mock(UserEventPublisher.class);
+        setField(executor, "userEventPublisher", publisher);
+        // The owner comes from the conversation, never from the schedule.
+        when(publisher.conversationOwner("conv-9")).thenReturn(new UserEventPublisher.ConversationOwner("owner-1", "agent-1"));
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-3");
+        schedule.setUserId("somebody-else");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 2, 10));
+        when(handler.fire(any(), any(), any(), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+
+        executor.fire(schedule, "instance-1", 1);
+
+        var event = ArgumentCaptor.forClass(UserEvent.class);
+        var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+        verify(publisher).publish(event.capture(), audience.capture());
+        assertEquals(UserEvent.KIND_JOB_FAILED, event.getValue().kind());
+        assertEquals(UserEvent.JOB_CONTINUATION, event.getValue().jobKind());
+        assertEquals("conv-9", event.getValue().conversationId());
+        assertEquals("cont-3", event.getValue().scheduleId());
+        assertEquals(UserEventAudience.principal("owner-1"), audience.getValue());
+    }
+
+    @Test
+    void fire_continuation_completed_announcesNothingHere() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var publisher = mock(UserEventPublisher.class);
+        setField(executor, "userEventPublisher", publisher);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-4");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 2, 10));
+        when(handler.fire(any(), any(), any(), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.COMPLETED.name(), null));
+
+        executor.fire(schedule, "instance-1", 1);
+
+        // Whether the job goes on is decided when the turn commits (job.finished).
+        verify(publisher, never()).publish(any(), any());
     }
 
     @Test

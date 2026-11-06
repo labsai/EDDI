@@ -570,6 +570,11 @@ public class GroupHitlCoordinator {
             auditHitlCancellation(gc, mode, cancelledPausedAt);
             cleanupAfterTerminalState(gc);
         }
+        // No running leg ends here, so the leg's own end-of-leg announcement never
+        // runs: tell the owner and the human members that it ended.
+        if (groupConversationService != null) {
+            groupConversationService.announceUserEvents(gc);
+        }
         return true;
     }
 

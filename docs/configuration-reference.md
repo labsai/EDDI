@@ -216,6 +216,13 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
 | `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
+| `eddi.user-events.enabled` | `true` | The per-user event stream `GET /me/events` ([User Events](user-events.md)). `false` answers it `404` and raises no events |
+| `eddi.user-events.max-connections-per-user` | `8` | Open `/me/events` streams one principal may hold on one node (one per browser tab); the next is refused `429`. With authorization off every caller shares one bucket, so this caps the whole node |
+| `eddi.user-events.max-connections` | `10000` | Open `/me/events` streams on one node, all users together; the next is refused `429` |
+| `eddi.user-events.buffer-size` | `64` | Frames a stream may have written but not yet acknowledged; a client further behind is closed as a slow consumer and reconnects |
+| `eddi.user-events.dispatch-queue-size` | `10000` | Events waiting for fan-out on one node; an event that finds the queue full is dropped and counted (`eddi_user_events_dropped_total{reason="dispatch_queue_full"}`) |
+| `eddi.user-events.heartbeat-interval` | `20s` | How often each stream gets a keep-alive comment line — also how soon a vanished client is noticed and its slot freed |
+| `eddi.user-events.max-connection-age` | `1h` | A stream is closed after this long, and at its access token's expiry, so the roles captured when it opened are re-read on reconnect |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream), and one MCP server response to the MCP client. Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
