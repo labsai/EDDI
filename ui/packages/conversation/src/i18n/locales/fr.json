@@ -118,5 +118,6 @@
   "conversation.guardrail.actionWarn": "signalé",
   "conversation.stop.finished": "L’arrêt est arrivé trop tard : la réponse était déjà terminée sur le serveur et elle compte. La voici en entier.",
   "conversation.stop.stillRunning": "L’arrêt n’a pas atteint ce tour : il continue sur un autre serveur et ce qu’il fait compte toujours. Sa réponse apparaîtra quand vous rouvrirez la conversation.",
-  "conversation.stop.unreachable": "L’arrêt n’a pas pu joindre le serveur. Le tour s’y exécute peut-être encore ; rouvrez la conversation pour voir comment il s’est terminé."
+  "conversation.stop.unreachable": "L’arrêt n’a pas pu joindre le serveur. Le tour s’y exécute peut-être encore ; rouvrez la conversation pour voir comment il s’est terminé.",
+  "conversation.diagram.label": "Diagramme"
 }

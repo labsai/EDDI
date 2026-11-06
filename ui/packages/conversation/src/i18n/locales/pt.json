@@ -118,5 +118,6 @@
   "conversation.guardrail.actionWarn": "emitiu um aviso",
   "conversation.stop.finished": "A parada chegou tarde: a resposta já tinha terminado no servidor e vale. Aqui está ela completa.",
   "conversation.stop.stillRunning": "A parada não alcançou este turno: ele continua em execução em outro servidor e o que ele faz ainda vale. A resposta aparece quando você reabrir a conversa.",
-  "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou."
+  "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou.",
+  "conversation.diagram.label": "Diagrama"
 }

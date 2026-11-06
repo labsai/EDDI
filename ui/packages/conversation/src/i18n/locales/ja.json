@@ -118,5 +118,6 @@
   "conversation.guardrail.actionWarn": "フラグ付け",
   "conversation.stop.finished": "停止が間に合いませんでした。返信はサーバー上ですでに完了しており、有効です。全文を表示します。",
   "conversation.stop.stillRunning": "停止はこのターンに届きませんでした。別のサーバーで実行が続いており、その処理は有効です。会話を開き直すと返信が表示されます。",
-  "conversation.stop.unreachable": "停止がサーバーに届きませんでした。ターンはまだ実行中かもしれません。会話を開き直して結果を確認してください。"
+  "conversation.stop.unreachable": "停止がサーバーに届きませんでした。ターンはまだ実行中かもしれません。会話を開き直して結果を確認してください。",
+  "conversation.diagram.label": "図"
 }

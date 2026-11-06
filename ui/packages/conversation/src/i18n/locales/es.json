@@ -118,5 +118,6 @@
   "conversation.guardrail.actionWarn": "advirtió",
   "conversation.stop.finished": "La detención llegó tarde: la respuesta ya había terminado en el servidor y cuenta. Aquí está completa.",
   "conversation.stop.stillRunning": "La detención no alcanzó este turno: sigue ejecutándose en otro servidor y lo que haga cuenta. Su respuesta aparecerá cuando vuelvas a abrir la conversación.",
-  "conversation.stop.unreachable": "La detención no pudo llegar al servidor. Puede que el turno siga ejecutándose allí; vuelve a abrir la conversación para ver cómo terminó."
+  "conversation.stop.unreachable": "La detención no pudo llegar al servidor. Puede que el turno siga ejecutándose allí; vuelve a abrir la conversación para ver cómo terminó.",
+  "conversation.diagram.label": "Diagrama"
 }
