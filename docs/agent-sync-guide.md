@@ -277,7 +277,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `sourceUrl` | Yes | Base URL of the source EDDI instance |
-| `sourceAgentId` | Yes (single) | Agent ID on the remote instance |
+| `sourceAgentId` | Yes (single) | Agent ID on the remote instance. It has to be an EDDI resource id (hex, or a UUID): it becomes part of the paths read from the source, so anything else is a `400` before a request is sent — in a batch, that entry's error |
 | `sourceAgentVersion` | No | Version to sync (null = latest) |
 | `targetAgentId` | No | Local agent to upgrade. When omitted, the target is **the agent an earlier sync or import promoted from this source agent**, recognised by the `originId` its descriptor records — so repeating a sync never creates a second copy. Only when there is none (or `createNew=true`) is the agent created: the source's own export archive is fetched and imported with `strategy=create`, and the new agent records the source's id as its `originId`. The preview marks a target found this way with `matchStrategy: "originId"` on the agent row |
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
