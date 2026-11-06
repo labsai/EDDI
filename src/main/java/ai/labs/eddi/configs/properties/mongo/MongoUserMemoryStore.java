@@ -232,6 +232,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     }
 
     private String write(UserMemoryEntry entry) {
+        entry = entry.asStatement();
         RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
@@ -264,6 +265,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException {
         IUserMemoryStore.checkOwnedWrite(entry, agentId);
+        entry = entry.asStatement();
         Bson keyFilter = buildUpsertFilter(entry);
         if (!globalKeyUnique && globalKeyHeldByAnother(keyFilter, agentId)) {
             return false;
@@ -368,6 +370,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         RuntimeUtilities.checkNotNull(entryId, "entryId");
         RuntimeUtilities.checkNotNull(entry, "entry");
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()), Updates.set(FIELD_CONFLICTED, entry.conflicted()),
@@ -620,6 +623,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Same refusal as upsert: reserved keys are written only through
         // upsertReserved.
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         String now = Instant.now().toString();
         Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),

@@ -279,6 +279,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public String insertIfAbsent(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         ensureSchema();
         String sql = entry.visibility() == Visibility.global ? INSERT_IF_ABSENT_GLOBAL : INSERT_IF_ABSENT_SCOPED;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -305,6 +306,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException {
         IUserMemoryStore.checkOwnedWrite(entry, agentId);
+        entry = entry.asStatement();
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(UPSERT_GLOBAL_IF_OWNED)) {
             ps.setString(1, entry.userId());
@@ -327,6 +329,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     }
 
     private String write(UserMemoryEntry entry) throws IResourceStore.ResourceStoreException {
+        entry = entry.asStatement();
         ensureSchema();
         String visibility = entry.visibility() != null ? entry.visibility().name() : "self";
 
@@ -449,6 +452,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     public boolean replaceIfUnchanged(String entryId, UserMemoryEntry entry, Instant expectedUpdatedAt)
             throws IResourceStore.ResourceStoreException {
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         ensureSchema();
         String sql = "UPDATE usermemories SET value = ?::jsonb, category = ?, visibility = ?, group_ids = ?::jsonb,"
                 + " source_conversation_id = ?, conflicted = ?, assessment = ?, superseded_by = ?, source_entry_ids = ?::jsonb,"

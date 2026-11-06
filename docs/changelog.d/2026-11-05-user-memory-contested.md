@@ -16,9 +16,14 @@ See [User Memory → Contradiction resolution](../user-memory.md#contradiction-r
   now mirrors `CONTESTED`.
 - **Stores** — MongoDB and PostgreSQL read and write both fields on every path (upsert, `insertIfAbsent`,
   `upsertIfOwnedBy`, `replaceIfUnchanged`, the mappers); the flat `mergeProperties` resets to `ACCEPTED`. PostgreSQL adds
-  the two columns with `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (default `ACCEPTED` for existing rows). New
+  the two columns with `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (default `ACCEPTED` for existing rows). Every value
+  write — upsert, `upsertReserved`, `insertIfAbsent`, `upsertIfOwnedBy`, `replaceIfUnchanged`, on both stores — stores
+  the entry as `UserMemoryEntry.asStatement()` (`ACCEPTED`, no `supersededBy`, `conflicted=false`) whatever it carries,
+  so a REST client that PUTs back an edited contested entry cannot keep the old verdict (review finding on PR #1295);
+  `UserMemoryWriteRules.withDefaults` applies the same rule at the REST boundary. New
   `IUserMemoryStore.setAssessmentIfUnchanged` — a compare-and-set on `updatedAt` that deliberately does **not** bump
-  `updatedAt`, one conditional statement on both backends.
+  `updatedAt`, one conditional statement on both backends, and now the only write that can record a verdict (its
+  interface default refuses instead of going through `upsert`).
 - **Dream** — the decision is a pure function,
   [`UserMemoryContradictions`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/UserMemoryContradictions.java);
   `DreamService.resolveContradictions` (replacing `detectContradictions`) logs exactly as before and writes the changes.
@@ -31,7 +36,7 @@ See [User Memory → Contradiction resolution](../user-memory.md#contradiction-r
   entry; contested entries load as usual plus a conversation-scoped `contestedMemories` map (`key → true`). Persisting a
   rewritten key drops it from the marker. `UserMemoryTool` marks contested/superseded lines in recall and search, and a
   re-statement of a contested value is a write (it confirms the fact).
-- **Metrics** — `eddi.dream.contradictions.contested`, `.superseded`, `.cleared`, charted on the Full Metrics dashboard
+- **Metrics** — `eddi.dream.contradictions.contested`, `.superseded`, `.cleared`, charted with a legend on the Full Metrics dashboard
   (Kubernetes copy re-synced) and listed in [metrics.md](../metrics.md). GDPR export carries the new fields
   ([gdpr-compliance.md](../gdpr-compliance.md)).
 

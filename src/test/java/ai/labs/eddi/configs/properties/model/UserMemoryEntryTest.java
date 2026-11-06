@@ -325,4 +325,21 @@ class UserMemoryEntryTest {
                 Assessment.ACCEPTED, null);
         assertEquals(List.of(), fifteenArgs.sourceEntryIds());
     }
+
+    @Test
+    void asStatement_clearsEveryVerdict() {
+        var base = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null);
+        assertSame(base, base.asStatement(), "an accepted entry is returned as is");
+
+        var superseded = base.withAssessment(Assessment.SUPERSEDED, "2").asStatement();
+        assertEquals(Assessment.ACCEPTED, superseded.assessment());
+        assertNull(superseded.supersededBy());
+
+        var contested = base.withAssessment(Assessment.CONTESTED, null).asStatement();
+        assertEquals(Assessment.ACCEPTED, contested.assessment());
+        assertFalse(contested.conflicted());
+
+        var flaggedOnly = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, true, 0, null, null);
+        assertFalse(flaggedOnly.asStatement().conflicted(), "conflicted without CONTESTED is not kept either");
+    }
 }
