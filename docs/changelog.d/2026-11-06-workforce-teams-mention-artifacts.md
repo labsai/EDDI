@@ -1,0 +1,58 @@
+## ✨ feat(workforce): teams beside chats, @mention hand-off, artifact versions, turn notes (2026-11-06)
+
+**Repo:** EDDI · **Branch:** `feat/workforce-teams-mention-artifacts` (on `feat/conversation-search-tool-ui`)
+
+Part of phase 8 of the frontend unification plan (`planning/frontend-unification-plan.md` §5, Tier 2): T2.1, T2.2, T2.6 and T2.7. Frontend only; no backend change. T2.4 (memory), T2.5 (composer modes), T2.9 (embed launcher) and B12 (the per-user event stream) are other branches.
+
+### T2.1 — Teams beside chats
+
+**Already there (phases 2–6):** a team's board streams the discussion live (phase rail, member turns, task board), shows the structured decision (`DecisionRecordCard`: winner, tally, ballots, minority report), the HUMAN member's turn with its prompt and timeout (`HumanTurnBanner`, `POST …/human-input`), the approval pause linked to the Manager, Stop, follow-ups, history; the sidebar lists team sessions; the catalog lists the teams an `eddi-user` may use.
+
+**Added:**
+
+- **Home starts a team session.** Home's picker lists the catalog's teams under the agents (`<optgroup>`s). With a team picked, sending opens its board with the question in **router state, never the URL** ([`workforce-team-start.ts`](../../ui/workforce/src/lib/workforce-team-start.ts)), and the board starts a new session with it once (guarded by identity, dropped from the history entry so a reload cannot start it again, ignored when it names another team).
+- **Templates.** The preset templates (`/groupstore/templates`, `instantiate`) answer `eddi-editor` and `eddi-admin` only (`IRestGroupTemplates`), and creating a team is authoring — the wizard already offers them to authors. For an `eddi-user`, the listed teams are where a session starts; the guide says so.
+- **The decision in plain words.** `decisionSummary` ([`decision-summary.ts`](../../ui/packages/conversation/src/team/decision-summary.ts)) turns the record's typed fields into one or two sentences — "The team voted, and “Ship it” won. Members who disagreed: 2." — the decision card's first line, and the board announces it politely when it arrives. Never an agreement's `winner` (a proposal id). Worded without plural forms, so each locale needs one string.
+- **Whose turn.** `HumanTurnBanner` takes `viewerIsMember`: "It's your turn, Gregor" for the member, "Gregor's turn — only Gregor or an administrator can answer" for anyone else. The board compares the signed-in username or e-mail with `pendingHumanInput.memberId` only for the wording; the form stays, because the client cannot know which claim the server reads as the principal, and the server decides. A refused submission (`403`) is explained in those words. The banner is a labelled region; the board's status line announces the turn.
+
+### T2.2 — @mention hand-off: the design decision
+
+**No backend support exists for this.** EDDI's one hand-off concept, [cross-team handoff](../team-handoff.md), is an *agent* filing a *task* into a standing team's backlog under two-sided author consent — not a person moving their own question from one conversation to another, and it records nothing in the origin conversation.
+
+So the client-side version, said plainly: typing **@** in a Workforce chat opens a combobox over the catalog's agents and teams (`GET /catalog/*`, so only listed entries the caller may USE; never the agent store, never the chat's own agent). Picking one shows "Hand over to …" above the box; sending **starts a new chat with that agent, or a new team session, with the question as its first message** — through the existing router-state start paths — instead of sending it to this chat's agent. A marker in the origin chat says where it went and links to it; the new conversation shows where it came from and links back.
+
+The hand-off is **recorded in this browser only** ([`workforce-handoffs.ts`](../../ui/packages/app-kit/src/lib/workforce-handoffs.ts): keyed by principal, at most 100, the question cut to 140 characters, removed at sign-out like the pinned responses). The marker says so in its title, the guide says so. **Why that is the honest version:** the target agent or team receives an ordinary first message, which is exactly what happened on the server; a marker written *into* the transcript would claim a server-side record that does not exist, and faking one as a message would put client text into the agent's conversation and its context. Recording it properly is a backend item (a `handoffFrom` on the descriptor, readable by its owner), listed below.
+
+- `ChatPanel` gets two optional props the Manager does not pass: `mention` (the textarea becomes a `role="combobox"` with `aria-expanded`, `aria-controls`, `aria-activedescendant` over a `listbox`; ↑ ↓, Enter or Tab to choose, Esc closes only the popup — a running turn's Esc-to-stop does not fire — Backspace in an empty box drops the choice; a polite status says how many suggestions and the choice) and `transcriptMarkers` (host lines after a step's last message, at the top for none, at the end when the step was undone). The pure parts are [`lib/chat-mention.ts`](../../ui/packages/app-kit/src/lib/chat-mention.ts).
+- `ChatPanel` now takes a second initial message while mounted (by identity), so a hand-off from one chat to another agent on the same page starts, and reports the conversation it started (`onInitialConversationStarted`) so the record is linked. Files are not handed over; secret mode has no mentions.
+
+### T2.6 — Shared artifacts with versions
+
+**Already there:** `ArtifactsPanel` in the transcript header (current content, a revision count). **Added:** an artifacts button on the board (shown when the session has any, with the count) opens a side panel — the same non-modal slide-over as the Team and Sessions panels, full width on a phone, loaded lazily ([`artifacts-drawer.tsx`](../../ui/workforce/src/components/workforce/artifacts-drawer.tsx)). Inside, `ArtifactVersions` ([`artifact-versions.tsx`](../../ui/packages/conversation/src/team/artifact-versions.tsx)): the list, one artifact opened, a **Version** select over the current content plus every revision its `history` keeps (`ARTIFACT_HISTORY_CAP` = 10), each with editor and time; an earlier version says so and offers the current one; "versions before vN are no longer kept" when the history dropped some. No request: the versions arrive with the status read, which the board polls while a discussion runs. Focus goes to the panel's close button once loaded and back to the trigger on Escape or close. One rendering policy for every artifact view, `ArtifactContent` ([`artifact-content.tsx`](../../ui/packages/conversation/src/team/artifact-content.tsx)): MARKDOWN through the one renderer with raw HTML escaped, JSON pretty-printed, TEXT plain — `ArtifactsPanel` now uses it too. **Not built:** a diff between versions (a line diff over 256 KB documents needs its own bounded algorithm; switching covers reading), and editing (no endpoint lets a person write an artifact).
+
+### T2.7 — Cascades and guardrails in plain words
+
+What the backend exposes per streamed turn, and nothing more: `cascade_escalation {fromStep, toStep, confidence, threshold, reason, durationMs}`, `llm_retry {reason, attempt}` (in the SSE union since phase 7) and `guardrail_triggered {type, phase, action}`. A new [`turn-notes.ts`](../../ui/packages/conversation/src/tool-activity/turn-notes.ts) in `@eddi/conversation/tool-activity` reads the first two (`reason` only), files them per conversation and step like the tool cards (`TurnNotesLog`), and `TurnNotes` renders a sentence per reason — "Answered by a larger model because the first answer wasn't confident enough." (`low_confidence`), took too long (`timeout`), failed (`error`, `retryable_error`), couldn't be used (`invalid_output`); "The model was asked again because its first reply was empty / was cut off / was stopped by the provider's content filter / wasn't in the expected format / the conversation was too long for it". The guardrail notices the controller already keeps on a reply now read "A safety check removed part of the answer (pii-redaction)." instead of "Guardrail (output): pii-redaction redacted" (`GuardrailNote`; three `chat-message.test.tsx` assertions changed with the wording, the seven `chat.guardrail*` keys they used were removed). Wired into `ChatPanel` (Manager and Workforce chat) under each turn's last message, and into Workforce's member thread. Nothing renders when the stream said nothing.
+
+**Gaps, documented:** a cascade stopped early by `maxCostPerRun` or `maxTotalDurationMs` sends no event, so users are told nothing; the model's name and cost are not shown to end users (the widget's escalation indicator is unchanged); like the tool cards, notes are live only (the stored trace is not client-safe); a turn answered without streaming has none; group member turns stream no such events.
+
+### Bundles, i18n, operator
+
+- First load, gzip: Workforce 256.7 → 256.7 KB (budget 280), Manager 615.3 → 615.3 KB (620), both measured on the base commit and on this branch, the widget 169.4 → 169.4 KB (170): it imports none of this. No budget raised.
+- 70 new keys in the eleven locales (turn notes in the tool-activity bundle, team strings in the team bundle, `chat.mention.*` in app-kit's, `Workforce.handoff.*` / board / home in Workforce's).
+- **Platform Operator:** the prompt explains the turn notes and their gaps, the browser-only hand-off (not cross-team handoff), Home's teams, the plain decision, the human-turn wording, the artifacts panel, and that templates need an author role. No allow-list change. Revision **57**.
+- Docs: [`workforce-guide.md`](../workforce-guide.md) (Home, why an answer came the way it did, @ hand-off, keyboard, a team, administrator notes), [`group-conversations.md`](../group-conversations.md) (humans in Workforce, artifacts in Workforce), `ui/workforce/AGENTS.md`, `ui/manager/AGENTS.md`, the `@eddi/conversation` README.
+
+### Follow-ups
+
+- A server-side hand-off record (the origin on the new conversation's descriptor, owner-readable) so the marker survives devices.
+- A `member_tool_result` / member cascade events for group turns; a client-readable redacted trace so tool cards and turn notes survive a reload.
+- An event when a cascade's cost or duration ceiling ends escalation.
+- A bounded line diff between artifact versions.
+
+```decision-log
+| 2026-11-06 | The @mention hand-off is client-side: a new conversation with the question as its first message, linked by markers kept in the browser | The backend's handoff is agent-to-team-backlog under author consent, not a person moving a question; writing a marker into the transcript would claim a record that does not exist | Reusing cross-team handoff; a fake marker message in the origin conversation; blocking T2.2 on a backend record |
+| 2026-11-06 | Turn notes explain only cascade_escalation, llm_retry and guardrail_triggered, live only | Those are the only per-turn signals the stream carries; the stored trace is not client-safe | Inferring an escalation from timing or the model name; restoring from the detailed snapshot |
+| 2026-11-06 | The human-turn banner's wording follows the viewer, but its form stays for everyone | The client cannot know which token claim the server takes as the principal; the server's check decides, and a 403 is explained | Hiding the form from non-members (would lock out a member whose principal is another claim) |
+| 2026-11-06 | Artifact versions switch, not diff | The history arrives with each version's full content, so switching needs no request; a diff over 256 KB documents needs its own bounded algorithm | A naive LCS line diff |
+```

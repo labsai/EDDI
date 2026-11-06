@@ -82,7 +82,15 @@
       "confirmNewDescription": "Ainda há uma discussão em curso. Iniciar uma nova para-a primeiro — qualquer trabalho em curso é abandonado.",
       "confirmNewButton": "Parar e iniciar nova",
       "keepRunning": "Manter em curso",
-      "questionRequired": "Adicione uma pergunta para a sua equipa — os ficheiros são partilhados quando a discussão começa."
+      "questionRequired": "Adicione uma pergunta para a sua equipa — os ficheiros são partilhados quando a discussão começa.",
+      "humanTurnForbidden": "Só o membro da vez, ou um administrador, pode responder nesta vez.",
+      "announceOtherTurn": "A discussão está aguardando {{name}}.",
+      "announceYourTurn": "É a sua vez nesta discussão.",
+      "artifacts": "Artefatos compartilhados ({{n}})",
+      "artifactsPanel": "Painel de artefatos compartilhados",
+      "artifactsTitle": "Artefatos compartilhados",
+      "artifactsClose": "Fechar artefatos compartilhados",
+      "artifactsHint": "Os membros da equipe os escrevem com suas ferramentas. Você pode ler cada versão que o servidor ainda mantém."
     },
     "thread": {
       "fileTooLarge": "O arquivo deve ter menos de 20MB",
@@ -569,7 +577,11 @@
       "agentLabel": "Agente",
       "send": "Enviar",
       "starters": "Sugestões",
-      "recent": "Recentes"
+      "recent": "Recentes",
+      "placeholderTeam": "Pergunte à equipe {{team}}…",
+      "recipientLabel": "Agente ou equipe",
+      "agentsGroup": "Agentes",
+      "teamsGroup": "Equipes"
     },
     "switcher": {
       "newChat": "Nova conversa",
@@ -593,6 +605,16 @@
       "clear": "Limpar pesquisa",
       "more": "Mais resultados",
       "moreFailed": "Não foi possível carregar mais. Tentar novamente"
+    },
+    "handoff": {
+      "localOnly": "Registrado apenas neste navegador",
+      "toTeam": "Você passou “{{question}}” para a equipe {{name}}.",
+      "toAgent": "Você passou “{{question}}” para {{name}}.",
+      "openSession": "Abrir a sessão da equipe",
+      "openChat": "Abrir esse chat",
+      "notStarted": "Não chegou a começar.",
+      "fromChat": "Passado do seu chat com {{name}}.",
+      "backToChat": "Voltar para esse chat"
     }
   },
   "analyticsPage": {

@@ -68,7 +68,7 @@ import {
   type TurnFailure,
   type TurnFailureContext,
 } from "@eddi/conversation";
-import { ToolActivityLog } from "@eddi/conversation/tool-activity";
+import { ToolActivityLog, TurnNotesLog, turnNoteListener } from "@eddi/conversation/tool-activity";
 import { toolResultListener } from "@eddi/core/tool-events";
 import { useDebugStore, type ToolTraceEntry } from "./use-debug-events";
 import { getErrorMessage } from "../lib/api-client";
@@ -885,6 +885,18 @@ const recordChatToolResult = toolResultListener((result) => {
   chatToolActivity.record(conversationId, lastStepIndex(messages), result);
 });
 
+/**
+ * What the stream said about how each turn's answer was reached (T2.7): a
+ * cascade that moved to another model, a re-ask of the same model. Live only,
+ * filed like the tool calls — see `TurnNotesLog`.
+ */
+export const chatTurnNotes = new TurnNotesLog();
+
+const recordChatTurnNote = turnNoteListener((note) => {
+  const { conversationId, messages } = useChatStore.getState();
+  chatTurnNotes.record(conversationId, lastStepIndex(messages), note);
+});
+
 /** The Manager's conversation controller: one for the chat store. */
 export const chatConversation = new AgentConversation({
   transport: chatTransport,
@@ -909,6 +921,7 @@ export const chatConversation = new AgentConversation({
   onStreamEvent: (event) => {
     recordDebugEvent(event);
     recordChatToolResult(event);
+    recordChatTurnNote(event);
   },
   // Turn boundary at turn START, not only on the happy endings: a previous
   // turn that ended without a done/error frame leaves its events in the debug
@@ -923,6 +936,7 @@ export const chatConversation = new AgentConversation({
     // steps after it (an undone timeline) are gone for good.
     const { conversationId, messages } = useChatStore.getState();
     chatToolActivity.beginTurn(conversationId, lastStepIndex(messages));
+    chatTurnNotes.beginTurn(conversationId, lastStepIndex(messages));
   },
   onTurnEnd: () => useDebugStore.getState().finalizeTurn(),
   onTurnSnapshot: (snapshot) => {
@@ -1650,6 +1664,7 @@ export function useRerunConversation() {
       // The rerun ran without a stream: the tools it called were never
       // reported, so what the first run's calls said no longer applies.
       chatToolActivity.clearStep(conversationId, lastStepIndex(messages));
+      chatTurnNotes.clearStep(conversationId, lastStepIndex(messages));
       return snapshot;
     },
   });

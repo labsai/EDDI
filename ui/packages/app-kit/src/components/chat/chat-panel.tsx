@@ -20,6 +20,7 @@ import {
   useRedoConversation,
   useRerunConversation,
   chatToolActivity,
+  chatTurnNotes,
 } from "../../hooks/use-chat";
 import type { SentAttachment } from "../../hooks/use-chat";
 import {
@@ -33,7 +34,7 @@ import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "../../hooks/use-chat-ratings";
-import { lastStepIndex, ratableSteps } from "@eddi/core";
+import { lastStepIndex, ratableSteps, stepIndexes } from "@eddi/core";
 import { ReplyAnnouncer, type AnnouncedMessage } from "@eddi/conversation";
 import {
   ToolActivityCards,
@@ -42,7 +43,19 @@ import {
   toolCardPositions,
   toolNames,
   useToolTurns,
+  TurnNotes,
+  useTurnNotes,
 } from "@eddi/conversation/tool-activity";
+import { MentionListbox, MentionTargetChip } from "./chat-mention";
+import {
+  filterMentionCandidates,
+  markerPositions,
+  mentionOptionId,
+  mentionQueryAt,
+  type ChatMentionCandidate,
+  type ChatMentionConfig,
+  type ChatTranscriptMarker,
+} from "../../lib/chat-mention";
 import { ChatActivity } from "./chat-activity";
 import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
@@ -104,6 +117,12 @@ export interface ChatPanelProps {
   /** Called once the initial message has been taken, so the host can drop it. */
   onInitialMessageConsumed?: () => void;
   /**
+   * Called with the id of the conversation the initial message started, once
+   * the server has given it (before the message is sent) — Workforce links an
+   * @mention hand-off to it.
+   */
+  onInitialConversationStarted?: (conversationId: string, message: InitialChatMessage) => void;
+  /**
    * A notice beside "Edit" and "Regenerate" on the last turn. Undo and rerun
    * take back the reply, never what a tool did, so by default a turn that ran
    * tools says which (T1.6, from the stream's `tool_result` events — the
@@ -111,7 +130,21 @@ export interface ChatPanelProps {
    * something else; returning null shows nothing.
    */
   renderTurnNotice?: (context: TurnNoticeContext) => ReactNode;
+  /**
+   * @mention in the composer (T2.2): who may be mentioned and what handing a
+   * message over does. Workforce sets it from the catalog; without it the
+   * composer has no mentions.
+   */
+  mention?: ChatMentionConfig;
+  /**
+   * Lines the host puts into the transcript — Workforce's hand-off markers.
+   * Each goes after the last message of `afterStep` (the turn on screen when
+   * it was made), at the top when that is null, and at the end when the
+   * transcript no longer shows that step (it was undone).
+   */
+  transcriptMarkers?: readonly ChatTranscriptMarker[];
 }
+
 
 /** What the last turn's Edit / Regenerate notice is about. */
 export interface TurnNoticeContext {
@@ -133,7 +166,10 @@ export function ChatPanel({
   urlSync = false,
   initialMessage = null,
   onInitialMessageConsumed,
+  onInitialConversationStarted,
   renderTurnNotice,
+  mention,
+  transcriptMarkers,
 }: ChatPanelProps = {}) {
   const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -352,12 +388,15 @@ export function ChatPanel({
   // Workforce Home handed over a first message: start a NEW conversation with
   // that agent and send it, once the agent is selected and its review notice
   // has been looked up (Home showed the notice beside its composer).
-  const initialTakenRef = useRef(false);
+  // The message taken last, by identity: the page stays mounted when a second
+  // one arrives (an @mention hand-off from this chat to another agent), and
+  // that one must be taken too — but the same one never twice.
+  const initialTakenRef = useRef<InitialChatMessage | null>(null);
   useEffect(() => {
-    if (!initialMessage || initialTakenRef.current) return;
+    if (!initialMessage || initialTakenRef.current === initialMessage) return;
     if (deployedAgents === undefined || reviewPending) return;
     if (useChatStore.getState().selectedAgentId !== initialMessage.agentId) return;
-    initialTakenRef.current = true;
+    initialTakenRef.current = initialMessage;
     onInitialMessageConsumed?.();
     useChatStore.getState().clearMessages();
     startConversation
@@ -365,10 +404,11 @@ export function ChatPanel({
       .then((started) => {
         // Installed only if nothing replaced the transcript meanwhile.
         if (useChatStore.getState().conversationId !== started) return;
+        onInitialConversationStarted?.(started, initialMessage);
         sendMessage.mutate({ message: initialMessage.text });
       })
       .catch((err) => toast.error(getErrorMessage(err)));
-  }, [initialMessage, deployedAgents, reviewPending, selectedAgentId, onInitialMessageConsumed, startConversation, sendMessage, environmentFor]);
+  }, [initialMessage, deployedAgents, reviewPending, selectedAgentId, onInitialMessageConsumed, onInitialConversationStarted, startConversation, sendMessage, environmentFor]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
   const {
@@ -635,6 +675,23 @@ export function ChatPanel({
   // The tool calls of the turns this page watched (T1.9), and where their cards go.
   const toolTurns = useToolTurns(chatToolActivity, conversationId);
   const toolCardsAt = useMemo(() => toolCardPositions(messages, toolTurns), [messages, toolTurns]);
+  // What the stream said about how each turn's answer was reached (T2.7),
+  // under the turn's last message.
+  const turnNotes = useTurnNotes(chatTurnNotes, conversationId);
+  const turnNotesAt = useMemo(() => {
+    const at = new Map<number, number>();
+    if (turnNotes.size === 0) return at;
+    const lastAt = new Map<number, number>();
+    stepIndexes(messages).forEach((step, i) => {
+      if (step !== null) lastAt.set(step, i);
+    });
+    for (const step of turnNotes.keys()) {
+      const position = lastAt.get(step);
+      if (position !== undefined) at.set(position, step);
+    }
+    return at;
+  }, [messages, turnNotes]);
+  const markersAt = useMemo(() => markerPositions(messages, transcriptMarkers ?? []), [messages, transcriptMarkers]);
   const turnNoticeId = useId();
 
   const handleEditLast = useCallback(() => {
@@ -1052,6 +1109,9 @@ export function ChatPanel({
             </div>
           ) : (
             <div className={embedded ? "py-2" : "py-4"}>
+              {markersAt.top.map((marker) => (
+                <TranscriptMarker key={marker.id} marker={marker} />
+              ))}
               {messages.map((msg, i) => {
                 const ratingStep = ratings.profile?.messageRating ? (ratableByPosition[i] ?? null) : null;
                 const editHere = i === lastTurn.user && canEditLast;
@@ -1060,6 +1120,8 @@ export function ChatPanel({
                 const notice = action ? turnNotice({ action, stepIndex: lastStepIndex(messages) }) : null;
                 const toolStep = toolCardsAt.get(i);
                 const toolActivity = toolStep === undefined ? undefined : toolTurns.get(toolStep);
+                const notesStep = turnNotesAt.get(i);
+                const notes = notesStep === undefined ? undefined : turnNotes.get(notesStep);
                 return (
                   <Fragment key={msg.id}>
                   <ChatMessage
@@ -1097,9 +1159,20 @@ export function ChatPanel({
                       <ToolActivityCards activity={toolActivity} className="max-w-[min(75%,48rem)] text-xs" />
                     </div>
                   )}
+                  {notes && (
+                    <div className="ps-15 pe-4 pb-1">
+                      <TurnNotes notes={notes} className="flex max-w-[min(75%,48rem)] flex-col gap-0.5 text-[11px] text-muted-foreground" />
+                    </div>
+                  )}
+                  {markersAt.after.get(i)?.map((marker) => (
+                    <TranscriptMarker key={marker.id} marker={marker} />
+                  ))}
                   </Fragment>
                 );
               })}
+              {markersAt.end.map((marker) => (
+                <TranscriptMarker key={marker.id} marker={marker} />
+              ))}
 
               {ratings.cardOpen && ratings.profile && (
                 <ChatRatingCard
@@ -1268,8 +1341,20 @@ export function ChatPanel({
               ? () => redoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
             embedded={embedded}
+            mention={mention}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+/** One host line in the transcript, set apart from the messages around it. */
+function TranscriptMarker({ marker }: { marker: ChatTranscriptMarker }) {
+  return (
+    <div className="flex justify-center px-4 py-2" data-testid="chat-transcript-marker">
+      <div className="max-w-[min(90%,40rem)] rounded-2xl border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+        {marker.content}
       </div>
     </div>
   );
@@ -1300,6 +1385,7 @@ function ChatInputWithSecretToggle({
   draft = null,
   embedded = false,
   allowAttachments = true,
+  mention,
 }: {
   /** Returns whether the message was sent; the draft is kept when it was not. */
   onSend: (message: string, isSecret?: boolean) => boolean;
@@ -1328,14 +1414,77 @@ function ChatInputWithSecretToggle({
   embedded?: boolean;
   /** False when the agent switched attachments off (`conversationControls.attachments`). */
   allowAttachments?: boolean;
+  /** @mention an agent or a team to hand the message over (T2.2). */
+  mention?: ChatMentionConfig;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [secretVisible, setSecretVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ─── @mention: a combobox over the textarea ─────────────
+  const mentionListId = useId();
+  const mentionTargetId = useId();
+  const [caret, setCaret] = useState(0);
+  const [mentionTarget, setMentionTarget] = useState<ChatMentionCandidate | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  /** The `@` the person dismissed with Esc: its popup stays closed until they type another. */
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [pickedStatus, setPickedStatus] = useState("");
+  const mentionQuery = mention && !isSecretMode && !mentionTarget ? mentionQueryAt(value, caret) : null;
+  const mentionOptions = useMemo(
+    () => (mention && mentionQuery ? filterMentionCandidates(mention.candidates, mentionQuery.query) : []),
+    [mention, mentionQuery],
+  );
+  const mentionOpen = !!mentionQuery && mentionOptions.length > 0 && dismissedAt !== mentionQuery.start;
+  const activeMention = mentionOpen ? Math.min(mentionIndex, mentionOptions.length - 1) : -1;
+  // Said politely: how many there are while the popup is open, the choice once made.
+  const mentionStatus = mentionOpen
+    ? t("chat.mention.count", "Suggestions: {{n}}. Use the arrow keys, Enter to choose.", { n: mentionOptions.length })
+    : pickedStatus;
+
+  const pickMention = useCallback(
+    (option: ChatMentionCandidate) => {
+      if (!mentionQuery) return;
+      const end = mentionQuery.start + 1 + mentionQuery.query.length;
+      const next = (value.slice(0, mentionQuery.start) + value.slice(end)).replace(/^\s+/, "");
+      setValue(next);
+      setMentionTarget(option);
+      setMentionIndex(0);
+      setPickedStatus(
+        option.kind === "team"
+          ? t("chat.mention.handOffToTeam", "Hand over to the team {{name}}", { name: option.name })
+          : t("chat.mention.handOffToAgent", "Hand over to {{name}}", { name: option.name }),
+      );
+      const at = Math.min(mentionQuery.start, next.length);
+      setCaret(at);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(at, at);
+      });
+    },
+    [mentionQuery, value, t],
+  );
+
+  const removeMentionTarget = useCallback(() => {
+    setMentionTarget(null);
+    setPickedStatus("");
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
+    if (mention && mentionTarget) {
+      // A hand-off carries the text only; it never sends to this chat's agent.
+      if (!trimmed || disabled || isProcessing) return;
+      if (mention.onHandOff(mentionTarget, trimmed) === false) return;
+      setValue("");
+      setMentionTarget(null);
+      setPickedStatus("");
+      return;
+    }
     // Allow an attachment-only turn (empty text) once a file is uploaded.
     if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
     if (!onSend(trimmed, isSecretMode)) return;
@@ -1350,7 +1499,7 @@ function ChatInputWithSecretToggle({
       // in the composer. (A touch keyboard stays as the person left it.)
       if (!window.matchMedia?.("(pointer: coarse)").matches) textareaRef.current.focus();
     }
-  }, [value, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
+  }, [value, mention, mentionTarget, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current;
@@ -1376,11 +1525,9 @@ function ChatInputWithSecretToggle({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftNonce]);
 
-  const canSend =
-    (value.trim().length > 0 || hasReadyAttachment) &&
-    !disabled &&
-    !isProcessing &&
-    !isUploading;
+  const canSend = mentionTarget
+    ? value.trim().length > 0 && !disabled && !isProcessing
+    : (value.trim().length > 0 || hasReadyAttachment) && !disabled && !isProcessing && !isUploading;
 
   return (
     <div className="border-t border-border bg-background p-4 min-w-0" data-tour="chat-input-area">
@@ -1408,7 +1555,24 @@ function ChatInputWithSecretToggle({
           ))}
         </div>
       )}
-      <div className="flex items-end gap-2 min-w-0">
+      {mention && mentionTarget && !isSecretMode && (
+        <MentionTargetChip id={mentionTargetId} target={mentionTarget} onRemove={removeMentionTarget} />
+      )}
+      {mention && (
+        <span className="sr-only" role="status" data-testid="chat-mention-status">
+          {mentionStatus}
+        </span>
+      )}
+      <div className="relative flex items-end gap-2 min-w-0">
+        {mentionOpen && (
+          <MentionListbox
+            id={mentionListId}
+            options={mentionOptions}
+            activeIndex={activeMention}
+            onPick={pickMention}
+            onHover={setMentionIndex}
+          />
+        )}
         {/* 📎 Attach button */}
         {allowAttachments && (
         <button
@@ -1530,9 +1694,53 @@ function ChatInputWithSecretToggle({
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
+              const nextCaret = e.target.selectionStart ?? e.target.value.length;
+              setCaret(nextCaret);
+              setMentionIndex(0);
+              // A dismissed popup stays closed only while its own @ is still being typed.
+              if (dismissedAt !== null && mentionQueryAt(e.target.value, nextCaret)?.start !== dismissedAt) {
+                setDismissedAt(null);
+              }
               handleInput();
             }}
+            onSelect={mention ? (e) => setCaret(e.currentTarget.selectionStart ?? 0) : undefined}
+            {...(mention
+              ? {
+                  role: "combobox",
+                  "aria-autocomplete": "list" as const,
+                  "aria-haspopup": "listbox" as const,
+                  "aria-expanded": mentionOpen,
+                  "aria-controls": mentionOpen ? mentionListId : undefined,
+                  "aria-activedescendant": activeMention >= 0 ? mentionOptionId(mentionListId, activeMention) : undefined,
+                  "aria-describedby": mentionTarget ? mentionTargetId : undefined,
+                }
+              : {})}
             onKeyDown={(e) => {
+              if (mentionOpen && !isImeComposing(e)) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setMentionIndex((activeMention + step + mentionOptions.length) % mentionOptions.length);
+                  return;
+                }
+                if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+                  e.preventDefault();
+                  const option = mentionOptions[activeMention];
+                  if (option) pickMention(option);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  // Closes the popup only: a running turn's Esc-to-stop checks defaultPrevented.
+                  e.preventDefault();
+                  setDismissedAt(mentionQuery?.start ?? null);
+                  return;
+                }
+              }
+              if (e.key === "Backspace" && mentionTarget && !value && !isImeComposing(e)) {
+                e.preventDefault();
+                removeMentionTarget();
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 handleSend();
@@ -1559,7 +1767,13 @@ function ChatInputWithSecretToggle({
               e.preventDefault();
               onPasteFiles(files);
             }}
-            placeholder={t("chat.placeholder")}
+            placeholder={
+              mentionTarget
+                ? t("chat.mention.placeholder", "Your question for {{name}}…", { name: mentionTarget.name })
+                : mention
+                  ? t("chat.mention.hint", "Message — type @ to hand over to another agent or team")
+                  : t("chat.placeholder")
+            }
             disabled={disabled}
             rows={1}
             className={cn(

@@ -82,7 +82,15 @@
       "confirmNewDescription": "ディスカッションがまだ実行中です。新しく開始すると先に停止され、進行中の作業は破棄されます。",
       "confirmNewButton": "停止して新規開始",
       "keepRunning": "実行を続ける",
-      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。"
+      "questionRequired": "タスクフォースへの質問を入力してください。ファイルはディスカッション開始時に共有されます。",
+      "humanTurnForbidden": "この番に回答できるのは、番が回ってきたメンバーか管理者だけです。",
+      "announceOtherTurn": "ディスカッションは {{name}} を待っています。",
+      "announceYourTurn": "このディスカッションであなたの番です。",
+      "artifacts": "共有アーティファクト（{{n}}）",
+      "artifactsPanel": "共有アーティファクトパネル",
+      "artifactsTitle": "共有アーティファクト",
+      "artifactsClose": "共有アーティファクトを閉じる",
+      "artifactsHint": "チームのメンバーがツールで作成します。サーバーに残っているすべてのバージョンを読めます。"
     },
     "thread": {
       "fileTooLarge": "ファイルは20MB以下にしてください",
@@ -567,7 +575,11 @@
       "agentLabel": "エージェント",
       "send": "送信",
       "starters": "おすすめ",
-      "recent": "最近"
+      "recent": "最近",
+      "placeholderTeam": "チーム {{team}} に質問…",
+      "recipientLabel": "エージェントまたはチーム",
+      "agentsGroup": "エージェント",
+      "teamsGroup": "チーム"
     },
     "switcher": {
       "newChat": "新しいチャット",
@@ -591,6 +603,16 @@
       "clear": "検索をクリア",
       "more": "さらに表示",
       "moreFailed": "これ以上読み込めませんでした。再試行"
+    },
+    "handoff": {
+      "localOnly": "このブラウザーにのみ記録されています",
+      "toTeam": "「{{question}}」をチーム {{name}} に引き継ぎました。",
+      "toAgent": "「{{question}}」を {{name}} に引き継ぎました。",
+      "openSession": "チームセッションを開く",
+      "openChat": "そのチャットを開く",
+      "notStarted": "開始されませんでした。",
+      "fromChat": "{{name}} とのチャットから引き継がれました。",
+      "backToChat": "そのチャットに戻る"
     }
   },
   "analyticsPage": {

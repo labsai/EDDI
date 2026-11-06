@@ -167,13 +167,6 @@
     "searchAgents": "البحث عن وكلاء",
     "noAgentMatches": "لا يوجد وكيل يطابق بحثك",
     "transcript": "المحادثة",
-    "guardrailPhaseInput": "الإدخال",
-    "guardrailPhaseOutput": "الإخراج",
-    "guardrailActionBlock": "حظر",
-    "guardrailActionRedact": "نقّح",
-    "guardrailActionReprompt": "أعاد السؤال للنموذج",
-    "guardrailActionWarn": "حذّر",
-    "guardrailNotice": "حاجز الحماية ({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "قيّم هذه المحادثة",
       "reply": "قيّم هذا الرد",
@@ -202,7 +195,18 @@
     "attachUploadingPercent": "جارٍ الرفع… {{percent}}٪",
     "attachProgress": "رفع {{name}}",
     "attachRetry": "حاول مرة أخرى",
-    "attachHint": "إرفاق ملفات — أو الصقها أو أفلتها هنا"
+    "attachHint": "إرفاق ملفات — أو الصقها أو أفلتها هنا",
+    "mention": {
+      "listLabel": "تسليم إلى",
+      "team": "فريق",
+      "agent": "وكيل",
+      "handOffToTeam": "تسليم إلى الفريق {{name}}",
+      "handOffToAgent": "تسليم إلى {{name}}",
+      "remove": "إلغاء التسليم",
+      "count": "الاقتراحات: {{n}}. استخدم مفاتيح الأسهم وEnter للاختيار.",
+      "placeholder": "سؤالك إلى {{name}}…",
+      "hint": "رسالة — اكتب @ لتسليمها إلى وكيل آخر أو فريق"
+    }
   },
   "editor": {
     "deployFailed": "فشل النشر",

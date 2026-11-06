@@ -82,7 +82,15 @@
       "confirmNewDescription": "토론이 아직 진행 중입니다. 새 토론을 시작하면 먼저 중지되며 진행 중인 작업은 버려집니다.",
       "confirmNewButton": "중지하고 새로 시작",
       "keepRunning": "계속 실행",
-      "questionRequired": "태스크포스에 대한 질문을 추가하세요. 파일은 토론이 시작될 때 공유됩니다."
+      "questionRequired": "태스크포스에 대한 질문을 추가하세요. 파일은 토론이 시작될 때 공유됩니다.",
+      "humanTurnForbidden": "이 차례에는 해당 멤버나 관리자만 답할 수 있습니다.",
+      "announceOtherTurn": "토론이 {{name}} 님을 기다리고 있습니다.",
+      "announceYourTurn": "이 토론에서 당신의 차례입니다.",
+      "artifacts": "공유 아티팩트({{n}})",
+      "artifactsPanel": "공유 아티팩트 패널",
+      "artifactsTitle": "공유 아티팩트",
+      "artifactsClose": "공유 아티팩트 닫기",
+      "artifactsHint": "팀 멤버가 도구로 작성합니다. 서버에 남아 있는 모든 버전을 읽을 수 있습니다."
     },
     "thread": {
       "fileTooLarge": "파일은 20MB 미만이어야 합니다",
@@ -567,7 +575,11 @@
       "agentLabel": "에이전트",
       "send": "보내기",
       "starters": "추천",
-      "recent": "최근"
+      "recent": "최근",
+      "placeholderTeam": "{{team}} 팀에게 질문…",
+      "recipientLabel": "에이전트 또는 팀",
+      "agentsGroup": "에이전트",
+      "teamsGroup": "팀"
     },
     "switcher": {
       "newChat": "새 채팅",
@@ -591,6 +603,16 @@
       "clear": "검색 지우기",
       "more": "결과 더 보기",
       "moreFailed": "더 불러올 수 없습니다. 다시 시도"
+    },
+    "handoff": {
+      "localOnly": "이 브라우저에만 기록됩니다",
+      "toTeam": "“{{question}}”을(를) {{name}} 팀에 넘겼습니다.",
+      "toAgent": "“{{question}}”을(를) {{name}}에게 넘겼습니다.",
+      "openSession": "팀 세션 열기",
+      "openChat": "그 채팅 열기",
+      "notStarted": "시작되지 않았습니다.",
+      "fromChat": "{{name}}와(과)의 채팅에서 넘어왔습니다.",
+      "backToChat": "그 채팅으로 돌아가기"
     }
   },
   "analyticsPage": {

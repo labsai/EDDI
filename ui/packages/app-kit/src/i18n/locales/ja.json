@@ -159,13 +159,6 @@
     "searchAgents": "エージェントを検索",
     "noAgentMatches": "検索に一致するエージェントはありません",
     "transcript": "会話",
-    "guardrailPhaseInput": "入力",
-    "guardrailPhaseOutput": "出力",
-    "guardrailActionBlock": "ブロック済み",
-    "guardrailActionRedact": "マスク済み",
-    "guardrailActionReprompt": "モデルに再度問い合わせ",
-    "guardrailActionWarn": "フラグ付け",
-    "guardrailNotice": "ガードレール（{{phase}}）：{{type}} {{action}}",
     "rating": {
       "card": "この会話を評価",
       "reply": "この返答を評価",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "アップロード中… {{percent}}%",
     "attachProgress": "{{name}} のアップロード",
     "attachRetry": "再試行",
-    "attachHint": "ファイルを添付（ここに貼り付けやドロップも可）"
+    "attachHint": "ファイルを添付（ここに貼り付けやドロップも可）",
+    "mention": {
+      "listLabel": "引き継ぎ先",
+      "team": "チーム",
+      "agent": "エージェント",
+      "handOffToTeam": "チーム {{name}} に引き継ぐ",
+      "handOffToAgent": "{{name}} に引き継ぐ",
+      "remove": "引き継がない",
+      "count": "候補：{{n}} 件。矢印キーで移動し、Enter で選択します。",
+      "placeholder": "{{name}} への質問…",
+      "hint": "メッセージ — @ を入力すると別のエージェントやチームに引き継げます"
+    }
   },
   "editor": {
     "deployFailed": "デプロイに失敗しました",

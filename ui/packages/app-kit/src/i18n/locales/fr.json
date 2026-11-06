@@ -161,13 +161,6 @@
     "searchAgents": "Rechercher des agents",
     "noAgentMatches": "Aucun agent ne correspond à votre recherche",
     "transcript": "Conversation",
-    "guardrailPhaseInput": "entrée",
-    "guardrailPhaseOutput": "sortie",
-    "guardrailActionBlock": "bloqué",
-    "guardrailActionRedact": "masqué",
-    "guardrailActionReprompt": "modèle relancé",
-    "guardrailActionWarn": "signalé",
-    "guardrailNotice": "Garde-fou ({{phase}}) : {{type}} {{action}}",
     "rating": {
       "card": "Évaluer cette conversation",
       "reply": "Évaluer cette réponse",
@@ -196,7 +189,18 @@
     "attachUploadingPercent": "Envoi… {{percent}} %",
     "attachProgress": "Envoi de {{name}}",
     "attachRetry": "Réessayer",
-    "attachHint": "Joindre des fichiers — ou les coller ou les déposer ici"
+    "attachHint": "Joindre des fichiers — ou les coller ou les déposer ici",
+    "mention": {
+      "listLabel": "Transmettre à",
+      "team": "Équipe",
+      "agent": "Agent",
+      "handOffToTeam": "Transmettre à l’équipe {{name}}",
+      "handOffToAgent": "Transmettre à {{name}}",
+      "remove": "Ne pas transmettre",
+      "count": "Suggestions : {{n}}. Flèches pour parcourir, Entrée pour choisir.",
+      "placeholder": "Votre question pour {{name}}…",
+      "hint": "Message — tapez @ pour transmettre à un autre agent ou à une équipe"
+    }
   },
   "editor": {
     "deployFailed": "Échec du déploiement",

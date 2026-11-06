@@ -6,7 +6,7 @@ import { Button } from "@eddi/ui";
 import { cn, getInitials } from "@eddi/app-kit/lib/utils";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useDeployedAgents } from "@eddi/app-kit/hooks/use-chat";
-import { useCatalogAgents } from "@/hooks/use-catalog";
+import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
 import { useWorkforceSessions } from "@/hooks/use-workforce-sessions";
 import { useAgentReviewProfile } from "@eddi/app-kit/hooks/use-agent-review-profile";
 import { ReviewNotice } from "@eddi/app-kit/components/chat/review-notice";
@@ -18,6 +18,7 @@ import {
 } from "@eddi/app-kit/lib/api/catalog";
 import { HOME_RECENT_COUNT, sessionLabel } from "@/lib/workforce-sessions";
 import { workforceChatStart } from "@eddi/app-kit/lib/workforce-chat-start";
+import { workforceTeamStart } from "@/lib/workforce-team-start";
 import { isNewChatState } from "@/lib/workforce-keyboard";
 
 /**
@@ -27,7 +28,14 @@ import { isNewChatState } from "@/lib/workforce-keyboard";
  * Sending (or a starter) opens the chat with the text handed over in router
  * state, never in the URL: a link can preselect an agent, but only the person
  * typing here starts a conversation (the chat's deep-link rule).
+ *
+ * The picker offers the catalog's teams too (T2.1, teams beside chats): with a
+ * team picked, sending opens its board and starts a new session with the text
+ * (`workforce-team-start.ts`, router state as well).
  */
+
+/** A picker value for a team; an agent's value is its bare id. */
+const TEAM_VALUE_PREFIX = "team:";
 
 interface PickerAgent {
   id: string;
@@ -41,6 +49,7 @@ export function HomeComposer() {
   const pickerId = useId();
   const { data: deployed } = useDeployedAgents();
   const { data: catalog } = useCatalogAgents();
+  const { data: catalogGroups } = useCatalogGroups();
   const { sessions } = useWorkforceSessions();
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
@@ -66,7 +75,15 @@ export function HomeComposer() {
     const recent = sessions.find((s) => s.kind === "chat" && agents.some((a) => a.id === s.ownerId));
     return recent?.ownerId ?? agents[0]?.id ?? null;
   }, [sessions, agents]);
-  const agentId = picked && agents.some((a) => a.id === picked) ? picked : defaultAgentId;
+  const teams = useMemo(
+    () => (catalogGroups ?? []).map((g) => ({ id: g.groupId, name: g.name || g.groupId, version: g.version })),
+    [catalogGroups],
+  );
+  const team =
+    picked?.startsWith(TEAM_VALUE_PREFIX)
+      ? (teams.find((g) => g.id === picked.slice(TEAM_VALUE_PREFIX.length)) ?? null)
+      : null;
+  const agentId = team ? null : picked && agents.some((a) => a.id === picked) ? picked : defaultAgentId;
   const agent = agents.find((a) => a.id === agentId) ?? null;
   const starters = (agentId ? appearanceById.get(agentId)?.appearance?.starters : undefined) ?? [];
 
@@ -77,6 +94,12 @@ export function HomeComposer() {
 
   const start = (message: string) => {
     const trimmed = message.trim();
+    if (team) {
+      if (!trimmed) return;
+      const next = workforceTeamStart(team.id, trimmed, { version: team.version });
+      navigate(next.to, { state: next.state });
+      return;
+    }
     if (!agentId || !trimmed || profilePending) return;
     const { to, state } = workforceChatStart(agentId, trimmed);
     navigate(to, { state });
@@ -97,12 +120,12 @@ export function HomeComposer() {
   // A new chat (⌘⇧O, the quick switcher's "New chat") lands here: the composer
   // takes the caret once it is there (it waits for the agents), once per visit.
   const newChat = isNewChatState(location.state);
-  const hasAgents = agents.length > 0;
+  const hasAgents = agents.length > 0 || teams.length > 0;
   useEffect(() => {
     if (newChat && hasAgents) inputRef.current?.focus();
   }, [newChat, hasAgents, location.key]);
 
-  if (agents.length === 0) return null;
+  if (agents.length === 0 && teams.length === 0) return null;
 
   return (
     <section aria-label={t("Workforce.home.composerLabel", "Start a conversation")} data-testid="home-composer">
@@ -119,33 +142,58 @@ export function HomeComposer() {
           onKeyDown={onKeyDown}
           rows={2}
           dir="auto"
-          placeholder={t("Workforce.home.placeholder", "Ask {{agent}}…", { agent: agent?.name ?? "" })}
+          placeholder={
+            team
+              ? t("Workforce.home.placeholderTeam", "Ask the team {{team}}…", { team: team.name })
+              : t("Workforce.home.placeholder", "Ask {{agent}}…", { agent: agent?.name ?? "" })
+          }
           aria-label={t("Workforce.home.messageLabel", "Your message")}
           className="w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           data-testid="home-composer-input"
         />
         <div className="mt-2 flex items-center gap-2">
           <label htmlFor={pickerId} className="sr-only">
-            {t("Workforce.home.agentLabel", "Agent")}
+            {teams.length > 0 ? t("Workforce.home.recipientLabel", "Agent or team") : t("Workforce.home.agentLabel", "Agent")}
           </label>
           <select
             id={pickerId}
-            value={agentId ?? ""}
+            value={team ? `${TEAM_VALUE_PREFIX}${team.id}` : (agentId ?? "")}
             onChange={(e) => setPicked(e.target.value)}
             className="min-w-0 max-w-[60%] truncate rounded-lg border border-input bg-background ps-2 pe-2 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             data-testid="home-agent-picker"
           >
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
+            {teams.length === 0 ? (
+              agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))
+            ) : (
+              <>
+                {agents.length > 0 && (
+                  <optgroup label={t("Workforce.home.agentsGroup", "Agents")}>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={t("Workforce.home.teamsGroup", "Teams")}>
+                  {teams.map((g) => (
+                    <option key={g.id} value={`${TEAM_VALUE_PREFIX}${g.id}`} data-testid={`home-team-option-${g.id}`}>
+                      {g.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </>
+            )}
           </select>
           <div className="flex-1" />
           <Button
             type="submit"
             size="icon"
-            disabled={!text.trim() || !agentId || profilePending}
+            disabled={!text.trim() || (team ? false : !agentId || profilePending)}
             aria-label={t("Workforce.home.send", "Send")}
             data-testid="home-composer-send"
           >
@@ -155,7 +203,7 @@ export function HomeComposer() {
         </div>
       </form>
 
-      {starters.length > 0 && (
+      {!team && starters.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-2" aria-label={t("Workforce.home.starters", "Suggestions")} data-testid="home-starters">
           {starters.map((starter, i) => (
             <li key={`${i}-${starter}`}>

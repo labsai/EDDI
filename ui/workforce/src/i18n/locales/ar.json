@@ -82,7 +82,15 @@
       "confirmNewDescription": "لا تزال هناك مناقشة جارية. بدء مناقشة جديدة يوقفها أولًا — ويُتخلّى عن أي عمل قيد التنفيذ.",
       "confirmNewButton": "إيقاف وبدء جديدة",
       "keepRunning": "متابعة التشغيل",
-      "questionRequired": "أضف سؤالًا لفريق العمل — تتم مشاركة الملفات معه عند بدء المناقشة."
+      "questionRequired": "أضف سؤالًا لفريق العمل — تتم مشاركة الملفات معه عند بدء المناقشة.",
+      "humanTurnForbidden": "لا يمكن الرد في هذا الدور إلا للعضو صاحب الدور أو لمسؤول.",
+      "announceOtherTurn": "المناقشة بانتظار {{name}}.",
+      "announceYourTurn": "حان دورك في هذه المناقشة.",
+      "artifacts": "العناصر المشتركة ({{n}})",
+      "artifactsPanel": "لوحة العناصر المشتركة",
+      "artifactsTitle": "العناصر المشتركة",
+      "artifactsClose": "إغلاق العناصر المشتركة",
+      "artifactsHint": "يكتب أعضاء الفريق هذه العناصر بأدواتهم. يمكنك قراءة كل إصدار لا يزال الخادم يحتفظ به."
     },
     "thread": {
       "fileTooLarge": "يجب أن يكون الملف أقل من 20 ميغابايت",
@@ -575,7 +583,11 @@
       "agentLabel": "الوكيل",
       "send": "إرسال",
       "starters": "اقتراحات",
-      "recent": "الأخيرة"
+      "recent": "الأخيرة",
+      "placeholderTeam": "اسأل الفريق {{team}}…",
+      "recipientLabel": "وكيل أو فريق",
+      "agentsGroup": "الوكلاء",
+      "teamsGroup": "الفرق"
     },
     "switcher": {
       "newChat": "محادثة جديدة",
@@ -599,6 +611,16 @@
       "clear": "مسح البحث",
       "more": "مزيد من النتائج",
       "moreFailed": "تعذّر تحميل المزيد. أعد المحاولة"
+    },
+    "handoff": {
+      "localOnly": "مسجَّل في هذا المتصفح فقط",
+      "toTeam": "سلّمتَ «{{question}}» إلى الفريق {{name}}.",
+      "toAgent": "سلّمتَ «{{question}}» إلى {{name}}.",
+      "openSession": "فتح جلسة الفريق",
+      "openChat": "فتح تلك المحادثة",
+      "notStarted": "لم تبدأ.",
+      "fromChat": "مُسلَّم من محادثتك مع {{name}}.",
+      "backToChat": "العودة إلى تلك المحادثة"
     }
   },
   "analyticsPage": {

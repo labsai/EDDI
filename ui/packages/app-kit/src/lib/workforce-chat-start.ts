@@ -11,6 +11,8 @@ export interface InitialChatMessage {
   /** The agent the message is for — must match the chat's `?agentId=`. */
   agentId: string;
   text: string;
+  /** The @mention hand-off this message came from (`workforce-handoffs.ts`), to link the new chat back to it. */
+  handoffId?: string;
 }
 
 export interface WorkforceChatStartState {
@@ -18,10 +20,14 @@ export interface WorkforceChatStartState {
 }
 
 /** Where to navigate, and the state to carry, to start a chat with `text`. */
-export function workforceChatStart(agentId: string, text: string): { to: string; state: WorkforceChatStartState } {
+export function workforceChatStart(
+  agentId: string,
+  text: string,
+  options: { handoffId?: string } = {},
+): { to: string; state: WorkforceChatStartState } {
   return {
     to: `/workforce/chat?agentId=${encodeURIComponent(agentId)}`,
-    state: { initialMessage: { agentId, text } },
+    state: { initialMessage: { agentId, text, ...(options.handoffId ? { handoffId: options.handoffId } : {}) } },
   };
 }
 
@@ -30,7 +36,7 @@ export function readInitialChatMessage(state: unknown): InitialChatMessage | nul
   if (!state || typeof state !== "object") return null;
   const candidate = (state as { initialMessage?: unknown }).initialMessage;
   if (!candidate || typeof candidate !== "object") return null;
-  const { agentId, text } = candidate as { agentId?: unknown; text?: unknown };
+  const { agentId, text, handoffId } = candidate as { agentId?: unknown; text?: unknown; handoffId?: unknown };
   if (typeof agentId !== "string" || typeof text !== "string" || !agentId || !text.trim()) return null;
-  return { agentId, text };
+  return { agentId, text, ...(typeof handoffId === "string" && handoffId ? { handoffId } : {}) };
 }

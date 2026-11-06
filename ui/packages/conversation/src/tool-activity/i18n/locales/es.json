@@ -12,5 +12,33 @@
       "regenerate": "Ejecutó {{tools}}. Lo que hicieron se mantiene, y una nueva respuesta puede volver a ejecutarlas.",
       "edited": "Tu mensaje ha vuelto al cuadro de texto. Lo que hizo {{tools}} no se ha deshecho."
     }
+  },
+  "turnNotes": {
+    "region": "Cómo se llegó a esta respuesta",
+    "escalation": {
+      "lowConfidence": "Respondió un modelo más grande porque la primera respuesta no era lo bastante fiable.",
+      "timeout": "Respondió otro modelo porque el primero tardaba demasiado.",
+      "error": "Respondió otro modelo porque el primero falló.",
+      "invalidOutput": "Respondió otro modelo porque la primera respuesta no se podía usar.",
+      "other": "Respondió un modelo distinto del que se probó primero."
+    },
+    "retry": {
+      "empty": "Se volvió a preguntar al modelo porque su primera respuesta estaba vacía.",
+      "truncated": "Se volvió a preguntar al modelo porque su primera respuesta quedó cortada.",
+      "contentFilter": "Se volvió a preguntar al modelo porque el filtro de contenido de su proveedor detuvo la primera respuesta.",
+      "format": "Se volvió a preguntar al modelo porque su primera respuesta no tenía el formato esperado.",
+      "contextTooLong": "Se volvió a preguntar al modelo porque la conversación era demasiado larga para él.",
+      "other": "Se volvió a preguntar al modelo porque su primera respuesta no se podía usar."
+    },
+    "guardrail": {
+      "inputBlock": "Un control de seguridad detuvo tu mensaje ({{type}}).",
+      "inputRedact": "Un control de seguridad quitó parte de tu mensaje antes de que el agente lo viera ({{type}}).",
+      "inputWarn": "Un control de seguridad marcó tu mensaje ({{type}}).",
+      "outputBlock": "Un control de seguridad retuvo la respuesta ({{type}}).",
+      "outputRedact": "Un control de seguridad quitó parte de la respuesta ({{type}}).",
+      "outputReprompt": "Un control de seguridad devolvió la respuesta para que se reescribiera ({{type}}).",
+      "outputWarn": "Un control de seguridad marcó la respuesta ({{type}}).",
+      "other": "Un control de seguridad actuó en este turno ({{type}}: {{phase}}, {{action}})."
+    }
   }
 }
