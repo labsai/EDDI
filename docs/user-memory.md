@@ -124,6 +124,8 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
 | `parameters` | `Map<String,String>` | `{}` | Model parameters for the consolidation LLM — `apiKey`, `baseUrl`, `temperature`, … — passed to the model registry exactly like an LLM task's `parameters` block, so `${vault:…}` and `${vars:…}` resolve. **Required when `summarizeInteractions` is `true`**: a background dream cycle has no parent LLM task to inherit credentials from, so without it every summarization step fails with a provider 401 while stale pruning keeps working. |
 | `schedule` | `String` | `"0 3 * * *"` | Cron expression the dream schedule should use |
+| `citeSources` | `boolean` | `false` | Make every consolidated entry name the originals it came from, check each one without a model, and record their ids in `sourceEntryIds`. See [Traceable consolidation](#traceable-consolidation-citesources) |
+| `onValidationFailure` | `String` | `"fallback_to_previous"` | What a consolidation group that fails the `citeSources` check does: `fallback_to_previous` (keep the originals), `retry_once` or `keep`. Ignored while `citeSources` is false |
 | `contradictionResolution` | `String` | `"keep_newest"` | What a cycle does with a detected contradiction: `keep_newest` (count and log only — the default and the behaviour of earlier releases), `mark_contested` (flag both sides `CONTESTED`, keep both) or `supersede_older` (retire the older side as `SUPERSEDED` where the newer one reaches all of its readers, otherwise contested). No value deletes an entry. An unknown value logs a WARN and acts as `keep_newest`. See [Contradiction resolution](#contradiction-resolution) |
 
 `rememberFact` resolves which stored entry a write lands on before writing: re-stating an unchanged fact answers `✅ Already remembered (unchanged)` without writing, and an update of an existing entry never counts against `maxEntriesPerUser`.
@@ -352,6 +354,50 @@ One limit: a property setter that re-sets a contested property to the value it a
 }
 ```
 
+### Traceable consolidation (`citeSources`)
+
+A consolidated memory replaces its originals — they are deleted once it is written — so a number
+the model rounded or invented replaces the user's fact for good. With `citeSources: true` each
+consolidation group is made extractive and checked before anything is written:
+
+```json
+"dream": {
+  "enabled": true,
+  "summarizeInteractions": true,
+  "citeSources": true,
+  "onValidationFailure": "retry_once"
+}
+```
+
+- **The request** numbers the group's entries (`"ref": 0`, `1`, …) and asks for a `"sources"` array of
+  refs on every consolidated entry, numbers copied verbatim, and "unclear in source" instead of a
+  guess. Refs are small integers, not the stored ids, so the model never has to copy an ObjectId.
+- **The check** (no model) fails an entry that cites no source, cites a ref that does not exist, or
+  states a number in its `value` that none of its cited sources (their key and value) contains
+  verbatim. Numbers are defined as for the [rolling summary](langchain.md#traceable-summaries-citesources):
+  `1,000` matches only `1,000`, `10%` does not match `10`, `-5` does not match `5`. The key is a label
+  and is not checked.
+
+**On failure**, `onValidationFailure` decides:
+
+| Value | What happens to the group | `outcome` |
+|---|---|---|
+| `fallback_to_previous` *(default)* | Nothing is written; the originals stay and the next cycle tries again | `fallback` |
+| `retry_once` | One more call with the problems listed. It is bounded like any other consolidation call — refused when `maxCostPerRun`, the legacy `maxSummarizationCalls` or the tenant budget is spent — and its cost is added to the cycle's. If it fails again, throws or is refused, the group falls back | `retried` on success, else `fallback` |
+| `keep` | The consolidation is written anyway. Out-of-range refs are dropped; an entry left with none records every original of the group | `kept` |
+
+Each checked group is counted on `eddi.summary.citation.checks{source="dream",outcome}`, a passing
+one as `passed`. The default differs from the rolling summary's on purpose: a rolling summary is a
+derived view over a conversation that is kept in full, while a consolidation deletes what it read.
+
+**Provenance.** Every entry written by a checked consolidation carries `sourceEntryIds`: the ids of
+  the originals it cited. The originals are deleted afterwards — except one the consolidation
+  overwrote in place (it reused that original's key), whose id is then among them — so these ids
+  identify the facts in logs, backups and the GDPR export rather than pointing at live entries. Any
+  ordinary write of the key (a conversation, `rememberFact`, REST, MCP, a property merge) states the
+  fact anew and clears them. Without `citeSources`, `sourceEntryIds` stays empty and the request,
+  parsing and writes are exactly as before.
+
 ### Scheduling a Dream Cycle
 
 Setting `dream.enabled: true` does not start anything on its own — it is the per-agent veto that is checked when a dream schedule fires. Dream runs through the regular cluster-aware schedule machinery, so a cycle only happens if you also create a `ScheduleConfiguration` that targets it:
@@ -389,6 +435,7 @@ The Dream service exposes Micrometer metrics (Prometheus names at `/q/metrics` r
 | `eddi.dream.summarization.failed` | Counter | Consolidation LLM calls that failed |
 | `eddi.dream.conflicts.skipped` | Counter | Prunes, overwrites, deletes and assessments skipped because the memory was written after the cycle read it — the newer fact is kept |
 | `eddi.dream.duration` | Timer | Duration of dream cycles |
+| `eddi.summary.citation.checks` | Counter | Consolidation groups checked under `citeSources`, tagged `source="dream"` and `outcome` (`passed`, `retried`, `kept`, `fallback`); the rolling summary counts under `source="conversation"` |
 
 ## Migration from Legacy Properties
 
@@ -444,10 +491,11 @@ Each memory entry contains:
   "conflicted": false,
   "assessment": "ACCEPTED",
   "supersededBy": null,
+  "sourceEntryIds": [],
   "accessCount": 12,
   "createdAt": "2026-01-15T10:30:00Z",
   "updatedAt": "2026-03-29T14:22:00Z"
 }
 ```
 
-`assessment` is `ACCEPTED`, `CONTESTED` or `SUPERSEDED` (see [Contradiction resolution](#contradiction-resolution)); `supersededBy` is set only on a `SUPERSEDED` entry. `conflicted` mirrors `assessment == "CONTESTED"` for clients that already read it. Entries stored before these fields existed read as `ACCEPTED`: MongoDB documents simply lack the fields, and PostgreSQL adds the `assessment` and `superseded_by` columns on startup with `ACCEPTED` as the default for existing rows.
+`assessment` is `ACCEPTED`, `CONTESTED` or `SUPERSEDED` (see [Contradiction resolution](#contradiction-resolution)); `supersededBy` is set only on a `SUPERSEDED` entry. `conflicted` mirrors `assessment == "CONTESTED"` for clients that already read it. Entries stored before these fields existed read as `ACCEPTED`: MongoDB documents simply lack the fields, and PostgreSQL adds the `assessment` and `superseded_by` columns on startup with `ACCEPTED` as the default for existing rows. `sourceEntryIds` lists the originals a [`citeSources`](#traceable-consolidation-citesources) consolidation built the entry from, and is empty otherwise; PostgreSQL adds the `source_entry_ids` column (JSONB, default `[]`) the same way.

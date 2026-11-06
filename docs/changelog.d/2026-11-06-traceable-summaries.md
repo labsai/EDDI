@@ -37,4 +37,42 @@ drill back, but nothing told the model where to look, and nothing caught a numbe
 
 ### What's next
 
-Dream consolidation gets the same check and records the ids of the entries a consolidated memory came from (next entry).
+Dream consolidation gets the same check and records the ids of the entries a consolidated memory came from (entry
+below).
+
+## ✨ feat(memory): traceable Dream consolidation — cited originals and sourceEntryIds (2026-11-06)
+
+**Repo:** EDDI (`feat/traceable-summaries`, stacked on `feat/user-memory-contested`)
+
+### What changed and why
+
+A Dream consolidation replaces its originals and then deletes them, so a number the model rounded or invented replaced
+the user's fact for good, and nothing recorded what a consolidated memory was made of. `dream.citeSources: true` applies
+the rolling summary's check to every consolidation group. See
+[User Memory → Traceable consolidation](../user-memory.md#traceable-consolidation-citesources).
+
+- **Model** — [`UserMemoryEntry`](../../src/main/java/ai/labs/eddi/configs/properties/model/UserMemoryEntry.java) gains
+  `sourceEntryIds` (never null, `[]` by default; the 15-argument constructor stays). Every ordinary write clears it —
+  a value stated anew is not derived from those sources.
+- **Stores** — MongoDB and PostgreSQL write it on every path `assessment` is written on (upsert, `insertIfAbsent`,
+  `upsertIfOwnedBy`, `replaceIfUnchanged`, the mappers) and the flat `mergeProperties` clears it. PostgreSQL adds
+  `source_entry_ids JSONB DEFAULT '[]'` with `ADD COLUMN IF NOT EXISTS`; a MongoDB document without the field reads as
+  `[]`. Covered by `DatastoreParityTest` on both backends. The GDPR export carries it (the record is serialised whole).
+- **Dream** — with `citeSources` the request numbers the originals (`"ref": 0..n-1`, not their ObjectIds), every
+  consolidated entry must carry `"sources"`, and `SummaryCitations.checkConsolidatedEntry` checks it (refs exist, every
+  number of the value verbatim in the cited originals' key and value). A separate parser reads the `sources` array; the
+  plain parser and request are untouched while the flag is off. Duplicate keys merge their sources.
+- **Policy** — `dream.onValidationFailure`, default `fallback_to_previous` (the group is skipped, originals kept);
+  `retry_once` is bounded by `maxCostPerRun`, the legacy call cap and the tenant budget and costed like any call;
+  `keep` writes anyway (an entry left without valid refs records the whole group). Counted on
+  `eddi.summary.citation.checks{source="dream"}`.
+
+### Design decisions
+
+- The Dream default differs from the conversation default (`keep`) on purpose: a rolling summary is a derived view over
+  a conversation that is kept in full; a consolidation deletes what it read.
+- `sourceEntryIds` points at deleted documents (except an original the consolidation overwrote in place). That is what
+  recording provenance can mean without changing what consolidation deletes; the ids identify the facts in logs,
+  backups and exports.
+- A retry that throws skips the group but does not abort the phase: the group's first call succeeded, so it is no
+  configuration fault.
