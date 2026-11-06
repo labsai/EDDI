@@ -3027,7 +3027,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * regex replacement also read {@code $} and {@code \} inside one as group
      * references).
      */
-    static String escapeConfigReferenceMentions(String value) {
+    public static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
