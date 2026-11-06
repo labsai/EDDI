@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { CONNECTION_PRESETS, applyPreset } from "../connection-presets";
 import { emptyConnection, toStoredConnection } from "../api/connections";
-import { isThumbprint, validateConnection } from "../connection-validation";
+import {
+  MAX_THUMBPRINT_CHARS,
+  isEntraTokenUrl,
+  isThumbprint,
+  validateConnection,
+} from "../connection-validation";
 
 const preset = (id: string) => {
   const found = CONNECTION_PRESETS.find((p) => p.id === id);
@@ -85,5 +90,57 @@ describe("signed-JWT conversion and validation", () => {
     // 43 base64url characters are 32 bytes.
     expect(isThumbprint("q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k", "x5t#S256")).toBe(true);
     expect(isThumbprint("not a thumbprint", "x5t#S256")).toBe(false);
+  });
+
+  it("reads a thumbprint exactly as the backend does", () => {
+    const sha256B64 = "q83vASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4k";
+    // Trailing padding decodes the same, until the value passes the backend's
+    // 128-character cap, which refuses it before parsing.
+    expect(isThumbprint(sha256B64 + "=", "x5t#S256")).toBe(true);
+    expect(
+      isThumbprint(sha256B64 + "=".repeat(MAX_THUMBPRINT_CHARS - sha256B64.length), "x5t#S256"),
+    ).toBe(true);
+    expect(isThumbprint(sha256B64 + "=".repeat(86), "x5t#S256")).toBe(false);
+    // Only colons and spaces are separators; a tab inside the value is not.
+    const sha256Hex = "AB".repeat(32);
+    expect(isThumbprint(`${sha256Hex.slice(0, 32)} ${sha256Hex.slice(32)}`, "x5t#S256")).toBe(true);
+    expect(isThumbprint(`${sha256Hex.slice(0, 32)}\t${sha256Hex.slice(32)}`, "x5t#S256")).toBe(false);
+    // Surrounding whitespace is trimmed, as Java's strip() does.
+    expect(isThumbprint(`\t${sha256Hex}\n`, "x5t#S256")).toBe(true);
+  });
+
+  it("Entra needs the certificate thumbprint; a provider identified by kid does not", () => {
+    const entra = applyPreset(preset("entra-app-certificate"), { name: "e", description: "" });
+    const withId = {
+      ...entra,
+      oauth: { ...entra.oauth, clientId: "app-id", certificateThumbprint: "" },
+    };
+    expect(validateConnection(toStoredConnection(withId))["oauth.certificateThumbprint"]).toBe(
+      "thumbprintRequiredEntra",
+    );
+
+    const kidProvider = {
+      ...withId,
+      oauth: { ...withId.oauth, tokenUrl: "https://idp.example.com/oauth2/token" },
+    };
+    expect(
+      validateConnection(toStoredConnection(kidProvider))["oauth.certificateThumbprint"],
+    ).toBeUndefined();
+
+    const filled = {
+      ...withId,
+      oauth: { ...withId.oauth, certificateThumbprint: "AB".repeat(32) },
+    };
+    expect(
+      validateConnection(toStoredConnection(filled))["oauth.certificateThumbprint"],
+    ).toBeUndefined();
+  });
+
+  it("recognises Entra token hosts and nothing that only resembles one", () => {
+    expect(isEntraTokenUrl("https://login.microsoftonline.com/tid/oauth2/v2.0/token")).toBe(true);
+    expect(isEntraTokenUrl("https://LOGIN.microsoftonline.us/tid/oauth2/v2.0/token")).toBe(true);
+    expect(isEntraTokenUrl("https://login.microsoftonline.com.evil.example/token")).toBe(false);
+    expect(isEntraTokenUrl("not a url")).toBe(false);
+    expect(isEntraTokenUrl(undefined)).toBe(false);
   });
 });

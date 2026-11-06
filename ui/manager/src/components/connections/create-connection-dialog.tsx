@@ -357,7 +357,8 @@ export function CreateConnectionDialog({
                       <option value="">{t("connections.presetNone", "None — fill in every field")}</option>
                       {CONNECTION_PRESETS.map((preset) => (
                         <option key={preset.id} value={preset.id}>
-                          {preset.label}
+                          {/* The JSON text is the fallback, so a new preset file works before it is translated. */}
+                          {t(`connections.presets.${preset.id}.label`, preset.label)}
                         </option>
                       ))}
                     </select>
@@ -366,7 +367,7 @@ export function CreateConnectionDialog({
                         className="text-xs text-muted-foreground"
                         data-testid="create-connection-preset-description"
                       >
-                        {selectedPreset.description}
+                        {t(`connections.presets.${selectedPreset.id}.description`, selectedPreset.description)}
                       </p>
                     )}
                   </div>

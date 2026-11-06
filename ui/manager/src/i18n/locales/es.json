@@ -6305,7 +6305,8 @@
       "paramValueReference": "Los valores de los parámetros se envían tal cual: una referencia ${…} aquí no se resuelve y pondría un puntero de la bóveda en una URL. Use solo valores de protocolo simples.",
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
       "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos.",
-      "thumbprintFormat": "No es una huella de la longitud correcta: x5t#S256 necesita la huella SHA-256 y x5t la SHA-1 — en hexadecimal o base64url."
+      "thumbprintFormat": "No es una huella de la longitud correcta: x5t#S256 necesita la huella SHA-256 y x5t la SHA-1 — en hexadecimal o base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación."
     },
     "backToList": "Volver a Conexiones",
     "headerSecret": "Secreto guardado",
@@ -6341,7 +6342,17 @@
     "audience": "Audiencia de la aserción (opcional)",
     "audienceHint": "El claim aud de la aserción firmada. Déjelo vacío para usar la URL del token, que es lo que espera Google.",
     "preset": "Empezar desde una plantilla",
-    "presetNone": "Ninguna — rellenar todos los campos"
+    "presetNone": "Ninguna — rellenar todos los campos",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Aplicación de Microsoft Entra con certificado",
+        "description": "Un registro de aplicación de Entra que se autentica con un certificado en lugar de un secreto de cliente (private_key_jwt). Sustituya <tenant-id> en la URL del token, indique el ID de aplicación (cliente) y la huella del certificado, y guarde la clave privada del certificado en el almacén como PEM PKCS#8 sin cifrar. Añada https://login.microsoftonline.com a la lista de permitidos de endpoints de credenciales."
+      },
+      "google-service-account": {
+        "label": "Cuenta de servicio de Google (clave JSON)",
+        "description": "Las API de Google como cuenta de servicio, firmadas con su clave privada (portador JWT, RFC 7523). Guarde el archivo de clave JSON descargado como UNA sola entrada del almacén y haga referencia a ella como clave privada; de ahí se leen el emisor y el ID de clave. Añada https://oauth2.googleapis.com a la lista de permitidos de endpoints de credenciales. Sin delegación en todo el dominio, la cuenta solo ve lo que se comparte con ella."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analizador de entrada",

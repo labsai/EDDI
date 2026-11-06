@@ -6305,7 +6305,8 @@
       "paramValueReference": "Les valeurs de paramètres sont envoyées telles quelles — une référence ${…} n'est pas résolue ici et placerait un pointeur de coffre dans une URL. N'utilisez que des valeurs de protocole simples.",
       "paramValueTooLong": "Une valeur de paramètre fait au plus 512 caractères.",
       "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici.",
-      "thumbprintFormat": "Ce n'est pas une empreinte de la bonne longueur : x5t#S256 exige l'empreinte SHA-256, x5t l'empreinte SHA-1 — en hexadécimal ou en base64url."
+      "thumbprintFormat": "Ce n'est pas une empreinte de la bonne longueur : x5t#S256 exige l'empreinte SHA-256, x5t l'empreinte SHA-1 — en hexadécimal ou en base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra n'identifie la clé que par l'empreinte de son certificat. Collez l'empreinte du certificat que vous avez chargé dans l'inscription de l'application."
     },
     "backToList": "Retour aux connexions",
     "headerSecret": "Secret enregistré",
@@ -6341,7 +6342,17 @@
     "audience": "Audience de l'assertion (facultatif)",
     "audienceHint": "La revendication aud de l'assertion signée. Laissez vide pour utiliser l'URL du jeton, ce qu'attend Google.",
     "preset": "Partir d'un modèle",
-    "presetNone": "Aucun — remplir tous les champs"
+    "presetNone": "Aucun — remplir tous les champs",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Application Microsoft Entra avec certificat",
+        "description": "Une inscription d'application Entra qui s'authentifie avec un certificat au lieu d'un secret client (private_key_jwt). Remplacez <tenant-id> dans l'URL du jeton, renseignez l'ID d'application (client) et l'empreinte du certificat, et stockez la clé privée du certificat dans le coffre au format PEM PKCS#8 non chiffré. Ajoutez https://login.microsoftonline.com à la liste d'autorisation des points de terminaison d'identifiants."
+      },
+      "google-service-account": {
+        "label": "Compte de service Google (clé JSON)",
+        "description": "Les API Google en tant que compte de service, signées avec sa clé privée (jeton porteur JWT, RFC 7523). Stockez le fichier de clé JSON téléchargé comme UNE seule entrée du coffre et référencez-la comme clé privée ; l'émetteur et l'ID de clé y sont lus. Ajoutez https://oauth2.googleapis.com à la liste d'autorisation des points de terminaison d'identifiants. Sans délégation à l'échelle du domaine, le compte ne voit que ce qui est partagé avec lui."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",

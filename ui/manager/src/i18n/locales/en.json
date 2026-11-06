@@ -6245,7 +6245,8 @@
       "paramValueReference": "Parameter values are sent exactly as written — a ${…} reference here is not resolved, and would put a vault pointer in a URL. Use plain protocol values only.",
       "paramValueTooLong": "A parameter value is at most 512 characters.",
       "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here.",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra identifies the key only by its certificate thumbprint. Paste the thumbprint of the certificate you uploaded to the app registration."
     },
     "backToList": "Back to Connections",
     "headerSecret": "Stored secret",
@@ -6281,7 +6282,17 @@
     "audience": "Assertion audience (optional)",
     "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
     "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "presetNone": "None — fill in every field",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Microsoft Entra app with a certificate",
+        "description": "An Entra app registration that authenticates with a certificate instead of a client secret (private_key_jwt). Replace <tenant-id> in the token URL, fill in the application (client) ID and the certificate's thumbprint, and store the certificate's private key as an unencrypted PKCS#8 PEM in the vault. Add https://login.microsoftonline.com to the credential endpoint allowlist."
+      },
+      "google-service-account": {
+        "label": "Google service account (JSON key)",
+        "description": "Google APIs as a service account, signed with its private key (RFC 7523 JWT bearer). Store the downloaded JSON key file as ONE vault entry and reference it as the private key; the issuer and key id are read from it. Add https://oauth2.googleapis.com to the credential endpoint allowlist. Without domain-wide delegation the account sees only what is shared with it."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Input Parser",

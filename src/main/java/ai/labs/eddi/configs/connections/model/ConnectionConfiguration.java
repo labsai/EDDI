@@ -466,8 +466,11 @@ public class ConnectionConfiguration {
             }
         } else {
             requireReference(oauth.getClientSecret(), "oauth.clientSecret");
-            String why = "it belongs to clientAuthMethod private_key_jwt, and with " + method + " it would never be used";
+            // null is what the token client treats as the default, client_secret_basic.
+            String effective = method == null ? OAuthConfig.CLIENT_AUTH_BASIC : method;
+            String why = "it belongs to clientAuthMethod private_key_jwt, and with " + effective + " it would never be used";
             requireAbsent(oauth.getPrivateKey(), "oauth.privateKey", why);
+            requireAbsent(oauth.getPrivateKeyId(), "oauth.privateKeyId", why);
             requireAbsent(oauth.getCertificateThumbprint(), "oauth.certificateThumbprint", why);
         }
         requireAbsent(oauth.getAudience(), "oauth.audience", "it is the audience of an OAUTH2_JWT_BEARER grant assertion; a "
@@ -493,10 +496,12 @@ public class ConnectionConfiguration {
             throw new IllegalArgumentException("oauth.extraAuthParams must be empty for OAUTH2_JWT_BEARER: they are added to an "
                     + "authorization request, and this flow has none.");
         }
-        if (OAuthConfig.CLIENT_AUTH_PRIVATE_KEY_JWT.equals(oauth.getClientAuthMethod())
-                || OAuthConfig.CLIENT_AUTH_POST.equals(oauth.getClientAuthMethod())) {
+        // The field defaults to client_secret_basic, so every stored config carries it;
+        // that one value is tolerated. Any other is a setting this flow ignores.
+        String method = oauth.getClientAuthMethod();
+        if (method != null && !OAuthConfig.CLIENT_AUTH_BASIC.equals(method)) {
             throw new IllegalArgumentException("oauth.clientAuthMethod does not apply to OAUTH2_JWT_BEARER — the assertion is the client's "
-                    + "proof and nothing else is sent. Remove it.");
+                    + "proof and nothing else is sent. Remove it (got: " + method + ").");
         }
         String audience = oauth.getAudience();
         if (audience != null) {

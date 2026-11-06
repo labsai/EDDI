@@ -137,6 +137,23 @@ class ConnectionConfigurationSignedJwtValidationTest {
         }
 
         @Test
+        @DisplayName("clientAuthMethod: the stored default is tolerated, every other value is refused")
+        void clientAuthMethod() {
+            // client_secret_basic is the field's default, so every stored config has it.
+            var defaulted = jwtBearer();
+            defaulted.getOauth().setClientAuthMethod(OAuthConfig.CLIENT_AUTH_BASIC);
+            assertDoesNotThrow(defaulted::validate);
+            var unset = jwtBearer();
+            unset.getOauth().setClientAuthMethod(null);
+            assertDoesNotThrow(unset::validate);
+            for (String ignored : List.of(OAuthConfig.CLIENT_AUTH_POST, OAuthConfig.CLIENT_AUTH_PRIVATE_KEY_JWT, "tls_client_auth")) {
+                var connection = jwtBearer();
+                connection.getOauth().setClientAuthMethod(ignored);
+                assertTrue(refusal(connection).contains("oauth.clientAuthMethod does not apply"), ignored);
+            }
+        }
+
+        @Test
         @DisplayName("the token URL is held to the same https rule as every credential endpoint")
         void tokenUrlHttps() {
             var plaintext = jwtBearer();
@@ -208,7 +225,29 @@ class ConnectionConfigurationSignedJwtValidationTest {
         void unknownMethod() {
             var connection = privateKeyJwt(AuthType.OAUTH2_CLIENT_CREDENTIALS);
             connection.getOauth().setClientAuthMethod("tls_client_auth");
-            assertTrue(refusal(connection).contains("private_key_jwt"));
+            String message = refusal(connection);
+            assertTrue(message.contains(OAuthConfig.CLIENT_AUTH_BASIC), message);
+            assertTrue(message.contains(OAuthConfig.CLIENT_AUTH_POST), message);
+            assertTrue(message.contains(OAuthConfig.CLIENT_AUTH_PRIVATE_KEY_JWT), message);
+        }
+
+        @Test
+        @DisplayName("a client-secret flow refuses a stray privateKeyId, and names the effective method when it is null")
+        void privateKeyIdBelongsToTheAssertion() {
+            var connection = privateKeyJwt(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+            connection.getOauth().setClientAuthMethod(null);
+            connection.getOauth().setClientSecret("${vault:secret}");
+            connection.getOauth().setPrivateKey(null);
+            connection.getOauth().setCertificateThumbprint(null);
+            connection.getOauth().setPrivateKeyId("0123abcd");
+
+            String message = refusal(connection);
+            assertTrue(message.contains("oauth.privateKeyId must not be set"), message);
+            assertTrue(message.contains(OAuthConfig.CLIENT_AUTH_BASIC), "null behaves as the default: " + message);
+            assertFalse(message.contains("null"), message);
+
+            connection.getOauth().setPrivateKeyId(null);
+            assertDoesNotThrow(connection::validate);
         }
 
         @Test

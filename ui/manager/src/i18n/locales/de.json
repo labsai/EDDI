@@ -6245,7 +6245,8 @@
       "paramValueReference": "Parameterwerte werden genau so gesendet, wie sie geschrieben sind – eine ${…}-Referenz wird hier nicht aufgelöst und würde einen Tresorverweis in eine URL setzen. Verwenden Sie nur einfache Protokollwerte.",
       "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
       "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter.",
-      "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url."
+      "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -6281,7 +6282,17 @@
     "audience": "Assertion-Zielgruppe (optional)",
     "audienceHint": "Der aud-Claim der signierten Assertion. Leer lassen, um die Token-URL zu verwenden — das erwartet Google.",
     "preset": "Mit einer Vorlage beginnen",
-    "presetNone": "Keine — alle Felder selbst ausfüllen"
+    "presetNone": "Keine — alle Felder selbst ausfüllen",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Microsoft-Entra-App mit Zertifikat",
+        "description": "Eine Entra-App-Registrierung, die sich mit einem Zertifikat statt eines Client-Geheimnisses anmeldet (private_key_jwt). Ersetzen Sie <tenant-id> in der Token-URL, tragen Sie die Anwendungs-(Client-)ID und den Fingerabdruck des Zertifikats ein und legen Sie den privaten Schlüssel des Zertifikats als unverschlüsseltes PKCS#8-PEM im Vault ab. Fügen Sie https://login.microsoftonline.com zur Allowlist der Credential-Endpunkte hinzu."
+      },
+      "google-service-account": {
+        "label": "Google-Dienstkonto (JSON-Schlüssel)",
+        "description": "Google-APIs als Dienstkonto, signiert mit dessen privatem Schlüssel (RFC 7523 JWT Bearer). Legen Sie die heruntergeladene JSON-Schlüsseldatei als EINEN Vault-Eintrag ab und referenzieren Sie ihn als privaten Schlüssel; Aussteller und Schlüssel-ID werden daraus gelesen. Fügen Sie https://oauth2.googleapis.com zur Allowlist der Credential-Endpunkte hinzu. Ohne domainweite Delegierung sieht das Konto nur, was mit ihm geteilt wurde."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",

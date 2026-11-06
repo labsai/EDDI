@@ -6245,7 +6245,8 @@
       "paramValueReference": "매개변수 값은 쓴 그대로 전송됩니다. 여기의 ${…} 참조는 해석되지 않으며 볼트 포인터가 URL에 실리게 됩니다. 일반 프로토콜 값만 사용하세요.",
       "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
       "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다.",
-      "thumbprintFormat": "올바른 길이의 지문이 아닙니다. x5t#S256에는 SHA-256 지문, x5t에는 SHA-1 지문이 필요합니다 — 16진수 또는 base64url로 입력하세요."
+      "thumbprintFormat": "올바른 길이의 지문이 아닙니다. x5t#S256에는 SHA-256 지문, x5t에는 SHA-1 지문이 필요합니다 — 16진수 또는 base64url로 입력하세요.",
+      "thumbprintRequiredEntra": "Microsoft Entra는 인증서 지문으로만 키를 식별합니다. 앱 등록에 업로드한 인증서의 지문을 붙여 넣으세요."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -6281,7 +6282,17 @@
     "audience": "어설션 대상(선택 사항)",
     "audienceHint": "서명된 어설션의 aud 클레임입니다. 비워 두면 토큰 URL을 사용하며, 이것이 Google이 기대하는 값입니다.",
     "preset": "템플릿에서 시작",
-    "presetNone": "없음 — 모든 필드 직접 입력"
+    "presetNone": "없음 — 모든 필드 직접 입력",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "인증서를 사용하는 Microsoft Entra 앱",
+        "description": "클라이언트 시크릿 대신 인증서로 인증하는 Entra 앱 등록입니다(private_key_jwt). 토큰 URL의 <tenant-id>를 바꾸고, 애플리케이션(클라이언트) ID와 인증서 지문을 입력한 뒤, 인증서의 개인 키를 암호화되지 않은 PKCS#8 PEM으로 볼트에 저장하세요. https://login.microsoftonline.com을 자격 증명 엔드포인트 허용 목록에 추가하세요."
+      },
+      "google-service-account": {
+        "label": "Google 서비스 계정(JSON 키)",
+        "description": "서비스 계정으로 Google API를 사용하며, 해당 계정의 개인 키로 서명합니다(RFC 7523 JWT 베어러). 다운로드한 JSON 키 파일을 볼트의 항목 하나로 저장하고 개인 키로 참조하세요. 발급자와 키 ID는 그 파일에서 읽습니다. https://oauth2.googleapis.com을 자격 증명 엔드포인트 허용 목록에 추가하세요. 도메인 전체 위임이 없으면 계정은 자신과 공유된 항목만 볼 수 있습니다."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "입력 파서",

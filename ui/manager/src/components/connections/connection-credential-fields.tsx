@@ -294,7 +294,8 @@ export function ConnectionCredentialFields({
               onChange={(privateKey) => onPatchOAuth({ privateKey })}
               referenceOnly
               readOnly={readOnly}
-              aria-describedby={fieldId("private-key-hint")}
+              aria-invalid={errors["oauth.privateKey"] !== undefined || undefined}
+              aria-describedby={`${fieldId("private-key-hint")} ${fieldId("private-key-error")}`}
               testId={`${idPrefix}-private-key`}
             />
             <p id={fieldId("private-key-hint")} className="text-xs text-muted-foreground">
@@ -349,9 +350,9 @@ export function ConnectionCredentialFields({
                 autoComplete="off"
                 readOnly={readOnly}
                 aria-invalid={errors["oauth.certificateThumbprint"] !== undefined || undefined}
-                aria-describedby={fieldId("certificate-thumbprint-error")}
+                aria-describedby={`${fieldId("certificate-thumbprint-hint")} ${fieldId("certificate-thumbprint-error")}`}
               />
-              <p className="text-xs text-muted-foreground">
+              <p id={fieldId("certificate-thumbprint-hint")} className="text-xs text-muted-foreground">
                 {t(
                   "connections.certificateThumbprintHint",
                   "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",

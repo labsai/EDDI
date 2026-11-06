@@ -192,7 +192,9 @@ header and no `client_secret` are sent.
   in use and never be sent.
 * **`certificateThumbprint`** is the thumbprint of the certificate registered at the
   provider, as hex (colons and spaces allowed, as portals and `openssl x509 -fingerprint`
-  show it) or base64url. It is public. **`certificateThumbprintHeader`** picks the JOSE
+  show it) or base64url. It is public. Name the digest when you compute it, because
+  `openssl` defaults to SHA-1: `openssl x509 -in cert.pem -noout -fingerprint -sha256` for
+  `x5t#S256`, `-sha1` for `x5t`. **`certificateThumbprintHeader`** picks the JOSE
   header: `x5t#S256` (SHA-256, the default and what Entra documents today) or `x5t`
   (SHA-1, still accepted by Entra and AD FS). The digest length must match the header —
   a SHA-1 thumbprint under `x5t#S256` is refused at save time with a message saying so.

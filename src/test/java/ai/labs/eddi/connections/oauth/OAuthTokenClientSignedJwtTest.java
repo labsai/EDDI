@@ -153,9 +153,7 @@ class OAuthTokenClientSignedJwtTest {
         assertEquals("https://graph.microsoft.com/.default", sent.get("scope"));
         assertEquals(connection.getOauth().getClientId(), sent.get("client_id"));
         assertEquals("urn:ietf:params:oauth:client-assertion-type:jwt-bearer", sent.get("client_assertion_type"));
-        JsonNode claims = JwtAssertionsTest.verify(sent.get("client_assertion"), JwtAssertionsTest.keyPair)[1];
-        assertEquals(connection.getOauth().getTokenUrl(), claims.get("aud").asText());
-        assertEquals(connection.getOauth().getClientId(), claims.get("sub").asText());
+        assertClientAssertion(connection, sent.get("client_assertion"));
         assertNull(sent.get("client_secret"));
         assertFalse(hasHeader(request, "Authorization"));
     }
@@ -177,7 +175,7 @@ class OAuthTokenClientSignedJwtTest {
         assertEquals("the-code", sent.get("code"));
         assertEquals("the-verifier", sent.get("code_verifier"));
         assertEquals("urn:ietf:params:oauth:client-assertion-type:jwt-bearer", sent.get("client_assertion_type"));
-        JwtAssertionsTest.verify(sent.get("client_assertion"), JwtAssertionsTest.keyPair);
+        assertClientAssertion(connection, sent.get("client_assertion"));
         assertFalse(hasHeader(request, "Authorization"));
     }
 
@@ -192,7 +190,19 @@ class OAuthTokenClientSignedJwtTest {
 
         Map<String, String> sent = form(sentRequest());
         assertEquals("refresh_token", sent.get("grant_type"));
-        JwtAssertionsTest.verify(sent.get("client_assertion"), JwtAssertionsTest.keyPair);
+        assertClientAssertion(connection, sent.get("client_assertion"));
+    }
+
+    /**
+     * RFC 7523 §3 for a client assertion: issued by and about the client, addressed
+     * to the token endpoint. A signature check alone would pass an assertion that
+     * names the wrong client or the wrong endpoint.
+     */
+    private static void assertClientAssertion(ConnectionConfiguration connection, String assertion) throws Exception {
+        JsonNode claims = JwtAssertionsTest.verify(assertion, JwtAssertionsTest.keyPair)[1];
+        assertEquals(connection.getOauth().getClientId(), claims.get("iss").asText());
+        assertEquals(connection.getOauth().getClientId(), claims.get("sub").asText());
+        assertEquals(connection.getOauth().getTokenUrl(), claims.get("aud").asText());
     }
 
     @Test

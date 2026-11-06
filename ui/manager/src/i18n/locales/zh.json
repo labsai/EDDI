@@ -6245,7 +6245,8 @@
       "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
       "paramValueTooLong": "参数值最多 512 个字符。",
       "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。",
-      "thumbprintFormat": "指纹长度不正确：x5t#S256 需要 SHA-256 指纹，x5t 需要 SHA-1 指纹——以十六进制或 base64url 表示。"
+      "thumbprintFormat": "指纹长度不正确：x5t#S256 需要 SHA-256 指纹，x5t 需要 SHA-1 指纹——以十六进制或 base64url 表示。",
+      "thumbprintRequiredEntra": "Microsoft Entra 仅通过证书指纹识别密钥。请粘贴您上传到应用注册中的证书的指纹。"
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -6281,7 +6282,17 @@
     "audience": "断言受众（可选）",
     "audienceHint": "签名断言的 aud 声明。留空则使用令牌 URL，这正是 Google 所期望的。",
     "preset": "从模板开始",
-    "presetNone": "无——填写所有字段"
+    "presetNone": "无——填写所有字段",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "使用证书的 Microsoft Entra 应用",
+        "description": "使用证书而非客户端密钥进行身份验证的 Entra 应用注册（private_key_jwt）。替换令牌 URL 中的 <tenant-id>，填写应用程序（客户端）ID 和证书指纹，并将证书私钥以未加密的 PKCS#8 PEM 格式存入保险库。将 https://login.microsoftonline.com 添加到凭据端点允许列表。"
+      },
+      "google-service-account": {
+        "label": "Google 服务账号（JSON 密钥）",
+        "description": "以服务账号身份调用 Google API，并用其私钥签名（RFC 7523 JWT 持有者）。将下载的 JSON 密钥文件作为保险库中的一个条目存储，并将其作为私钥引用；签发者和密钥 ID 从中读取。将 https://oauth2.googleapis.com 添加到凭据端点允许列表。未启用全网域委派时，该账号只能看到与其共享的内容。"
+      }
+    }
   },
   "extensionTypes": {
     "parser": "输入解析器",

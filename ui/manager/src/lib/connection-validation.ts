@@ -68,6 +68,7 @@ export type ValidationCode =
   | "secretMustBeReference"
   | "clientIdRequired"
   | "thumbprintFormat"
+  | "thumbprintRequiredEntra"
   | "endpointRequired"
   | "endpointNotHttps"
   | "endpointUserInfo"
@@ -400,16 +401,48 @@ export function isOAuthType(authType: string): boolean {
  * spaces allowed, as portals show it) or base64url. Mirrors
  * `ConnectionConfiguration.canonicalThumbprint`; the likeliest mistake is a
  * SHA-1 thumbprint pasted where SHA-256 is expected.
+ *
+ * Exactly as the backend reads it: only the ends are trimmed, only colons and
+ * spaces are removed (a tab inside the value is refused), and a value longer
+ * than {@link MAX_THUMBPRINT_CHARS} after that is refused before it is parsed.
  */
 export function isThumbprint(value: string, header?: string | null): boolean {
   const bytes = header === "x5t" ? 20 : 32;
-  const compact = value.trim().replace(/[:\s]/g, "");
+  const compact = value.trim().replace(/[: ]/g, "");
+  if (compact.length > MAX_THUMBPRINT_CHARS) return false;
   if (/^[0-9A-Fa-f]+$/.test(compact) && compact.length % 2 === 0) {
     return compact.length === bytes * 2;
   }
-  const base64 = compact.replace(/=+$/, "");
+  let end = compact.length;
+  while (end > 0 && compact[end - 1] === "=") end--;
+  const base64 = compact.slice(0, end);
   if (!/^[A-Za-z0-9_\-+/]+$/.test(base64)) return false;
   return Math.floor((base64.length * 3) / 4) === bytes;
+}
+
+/** `ConnectionConfiguration.MAX_THUMBPRINT_CHARS`: twice the longest valid spelling. */
+export const MAX_THUMBPRINT_CHARS = 128;
+
+/**
+ * Microsoft Entra ID's token hosts. Entra identifies a `private_key_jwt`
+ * client's key only by the certificate thumbprint header, so on these hosts a
+ * missing thumbprint is a connection that cannot authenticate. Other providers
+ * may identify the key by `kid` instead, which is why the generic rule leaves
+ * the thumbprint optional.
+ */
+const ENTRA_TOKEN_HOSTS = new Set([
+  "login.microsoftonline.com",
+  "login.microsoftonline.us",
+  "login.partner.microsoftonline.cn",
+]);
+
+/** Whether the token URL is an Entra ID endpoint. A malformed URL is not. */
+export function isEntraTokenUrl(tokenUrl?: string | null): boolean {
+  try {
+    return ENTRA_TOKEN_HOSTS.has(new URL((tokenUrl ?? "").trim()).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 /** The shape `validateConnection` reads. Structural, so the API type satisfies it. */
@@ -548,11 +581,11 @@ export function validateConnection(config: ValidatableConnection): ConnectionErr
         if (!isReference(oauth.privateKey)) {
           errors["oauth.privateKey"] = "secretMustBeReference";
         }
-        if (
-          (oauth.certificateThumbprint ?? "").trim() &&
-          !isThumbprint(oauth.certificateThumbprint ?? "", oauth.certificateThumbprintHeader)
-        ) {
+        const thumbprint = (oauth.certificateThumbprint ?? "").trim();
+        if (thumbprint && !isThumbprint(thumbprint, oauth.certificateThumbprintHeader)) {
           errors["oauth.certificateThumbprint"] = "thumbprintFormat";
+        } else if (!thumbprint && isEntraTokenUrl(oauth.tokenUrl)) {
+          errors["oauth.certificateThumbprint"] = "thumbprintRequiredEntra";
         }
       } else if (!isReference(oauth.clientSecret)) {
         errors["oauth.clientSecret"] = "secretMustBeReference";

@@ -157,6 +157,11 @@ function messageFor(
         "connections.validation.thumbprintFormat",
         "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url.",
       );
+    case "thumbprintRequiredEntra":
+      return t(
+        "connections.validation.thumbprintRequiredEntra",
+        "Microsoft Entra identifies the key only by its certificate thumbprint. Paste the thumbprint of the certificate you uploaded to the app registration.",
+      );
     case "endpointRequired":
       return t("connections.validation.endpointRequired", "This URL is required.");
     case "endpointNotHttps":

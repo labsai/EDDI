@@ -6245,7 +6245,8 @@
       "paramValueReference": "パラメーター値は書かれたとおりに送信されます。ここでの ${…} 参照は解決されず、ボールトへのポインターが URL に載ってしまいます。プレーンなプロトコル値のみを使用してください。",
       "paramValueTooLong": "パラメーター値は 512 文字以内です。",
       "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。",
-      "thumbprintFormat": "正しい長さのサムプリントではありません。x5t#S256 には SHA-256、x5t には SHA-1 のサムプリントが必要です（16 進数または base64url）。"
+      "thumbprintFormat": "正しい長さのサムプリントではありません。x5t#S256 には SHA-256、x5t には SHA-1 のサムプリントが必要です（16 進数または base64url）。",
+      "thumbprintRequiredEntra": "Microsoft Entra はキーを証明書のサムプリントでのみ識別します。アプリ登録にアップロードした証明書のサムプリントを貼り付けてください。"
     },
     "backToList": "接続一覧に戻る",
     "headerSecret": "保存済みシークレット",
@@ -6281,7 +6282,17 @@
     "audience": "アサーションのオーディエンス（任意）",
     "audienceHint": "署名付きアサーションの aud クレーム。空のままにするとトークン URL が使われ、これは Google が想定する値です。",
     "preset": "テンプレートから始める",
-    "presetNone": "なし — すべての項目を入力"
+    "presetNone": "なし — すべての項目を入力",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "証明書を使う Microsoft Entra アプリ",
+        "description": "クライアント シークレットの代わりに証明書で認証する Entra アプリ登録です (private_key_jwt)。トークン URL の <tenant-id> を置き換え、アプリケーション (クライアント) ID と証明書のサムプリントを入力し、証明書の秘密鍵を暗号化されていない PKCS#8 PEM として Vault に保存してください。https://login.microsoftonline.com を認証情報エンドポイントの許可リストに追加してください。"
+      },
+      "google-service-account": {
+        "label": "Google サービス アカウント (JSON キー)",
+        "description": "サービス アカウントとして Google API を使い、その秘密鍵で署名します (RFC 7523 JWT ベアラー)。ダウンロードした JSON キー ファイルを Vault の 1 つのエントリとして保存し、秘密鍵として参照してください。発行者とキー ID はそこから読み取られます。https://oauth2.googleapis.com を認証情報エンドポイントの許可リストに追加してください。ドメイン全体の委任がない場合、アカウントは共有されたものしか参照できません。"
+      }
+    }
   },
   "extensionTypes": {
     "parser": "入力パーサー",

@@ -43,6 +43,18 @@ registered with a certificate (`private_key_jwt`) both need EDDI to sign an asse
   the English text until translated.
 - **Docs**: `docs/connections.md` — two new quick-start sections, model and redaction updates, a
   security rule on private keys.
+- **Review follow-ups.**
+  - `oauth.privateKeyId` is refused on a client-secret flow, which never builds an assertion. The
+    refusal names the effective method, `client_secret_basic`, when the field is null.
+  - `OAUTH2_JWT_BEARER` now refuses every `clientAuthMethod` except the stored default.
+  - The Manager's `isThumbprint` reads a value exactly as `canonicalThumbprint` does: only colons and
+    spaces removed, a 128-character cap.
+  - A blank thumbprint is refused for `private_key_jwt` when the token URL is an Entra host. Entra
+    identifies the key only by the `x5t` header. Providers that use `kid` keep it optional.
+  - The two presets' labels and descriptions are translated in every locale. The JSON text is the
+    fallback.
+  - The private-key picker and the thumbprint field announce their hint and error.
+  - `docs/connections.md` names the `openssl -fingerprint` digest, because the default is SHA-1.
 
 ### Decisions
 
