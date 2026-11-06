@@ -40,6 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -285,11 +287,60 @@ class PgVectorSchemaTest {
         }
 
         @Test
+        @DisplayName("an index that exists is not created again: no DDL, so no SHARE lock behind open writers")
+        void existingIndexesSkipped() throws SQLException {
+            Settings hnsw = PgVectorSchema.settings(Map.of());
+            List<String> binds = new ArrayList<>();
+            Connection connection = connectionWithIndexes(binds, "\"t_hnsw_idx\"", "\"t_doc_src_idx\"");
+            Statement statement = connection.createStatement();
+            List<String> executed = new ArrayList<>();
+            when(statement.executeUpdate(anyString())).thenAnswer(inv -> {
+                executed.add(inv.getArgument(0));
+                return 0;
+            });
+            PgVectorSchema.createIndexes(connection, "t", hnsw, 1536);
+            assertEquals(List.of("\"t_doc_src_idx\"", "\"t_src_run_idx\"", "\"t_hnsw_idx\""), binds,
+                    "every index is looked up, by bound name");
+            assertEquals(1, executed.size(), executed.toString());
+            assertTrue(executed.get(0).contains("\"t_src_run_idx\""), "only the missing index is created");
+            assertTrue(executed.get(0).contains("IF NOT EXISTS"), "IF NOT EXISTS stays for concurrent builds");
+        }
+
+        @Test
+        @DisplayName("an index is looked up in its table's schema: the named one, else current_schema()")
+        void indexLookupSchema() throws SQLException {
+            List<String> sql = new ArrayList<>();
+            List<String> binds = new ArrayList<>();
+            Connection qualified = capturingConnection(sql, binds, false);
+            assertFalse(PgVectorSchema.indexExists(qualified, "Rag.KB", PgVectorSchema.SUFFIX_HNSW));
+            assertEquals("SELECT to_regclass(?) IS NOT NULL", sql.get(0));
+            assertEquals("\"rag\".\"kb_hnsw_idx\"", binds.get(0));
+
+            Connection plain = capturingConnection(sql, binds, true);
+            assertTrue(PgVectorSchema.indexExists(plain, "KB", PgVectorSchema.SUFFIX_HNSW));
+            assertEquals("SELECT to_regclass(quote_ident(current_schema()) || '.' || ?) IS NOT NULL", sql.get(1));
+            assertEquals("\"kb_hnsw_idx\"", binds.get(1));
+        }
+
+        @Test
+        @DisplayName("inspect: an unqualified table is looked up in current_schema(), where langchain4j creates it")
+        void inspectSchema() throws SQLException {
+            List<String> sql = new ArrayList<>();
+            List<String> binds = new ArrayList<>();
+            assertFalse(PgVectorSchema.inspect(capturingConnection(sql, binds, false), "docs").exists());
+            assertTrue(sql.get(0).contains("FROM (SELECT to_regclass(quote_ident(current_schema()) || '.' || ?) AS oid) r"), sql.get(0));
+            assertEquals("docs", binds.get(0));
+
+            assertFalse(PgVectorSchema.inspect(capturingConnection(sql, binds, false), "rag.docs").exists());
+            assertTrue(sql.get(1).contains("FROM (SELECT to_regclass(?) AS oid) r"), sql.get(1));
+            assertEquals("rag.docs", binds.get(1));
+        }
+
+        @Test
         @DisplayName("a failing HNSW build (old pgvector) is logged and the store works without it")
         void hnswFailureTolerated() throws SQLException {
-            Connection connection = mock(Connection.class);
-            Statement statement = mock(Statement.class);
-            when(connection.createStatement()).thenReturn(statement);
+            Connection connection = connectionWithIndexes(new ArrayList<>());
+            Statement statement = connection.createStatement();
             when(statement.executeUpdate(anyString())).thenAnswer(inv -> {
                 if (inv.<String>getArgument(0).contains("hnsw")) {
                     throw new SQLException("access method \"hnsw\" does not exist");
@@ -300,10 +351,59 @@ class PgVectorSchemaTest {
             verify(statement, times(3)).executeUpdate(anyString());
         }
 
-        private List<String> executedDdl(Settings settings, int dimension) throws SQLException {
+        /**
+         * A connection whose index lookups find the named indexes; each looked-up name
+         * is added to {@code binds}.
+         */
+        private Connection connectionWithIndexes(List<String> binds, String... existing) throws SQLException {
             Connection connection = mock(Connection.class);
             Statement statement = mock(Statement.class);
             when(connection.createStatement()).thenReturn(statement);
+            when(connection.prepareStatement(anyString())).thenAnswer(prepare -> {
+                PreparedStatement ps = mock(PreparedStatement.class);
+                String[] bound = new String[1];
+                doAnswer(inv -> {
+                    bound[0] = inv.getArgument(1);
+                    binds.add(bound[0]);
+                    return null;
+                }).when(ps).setString(eq(1), anyString());
+                when(ps.executeQuery()).thenAnswer(query -> {
+                    ResultSet rs = mock(ResultSet.class);
+                    boolean found = List.of(existing).contains(bound[0]);
+                    when(rs.next()).thenReturn(true);
+                    when(rs.getBoolean(1)).thenReturn(found);
+                    return rs;
+                });
+                return ps;
+            });
+            return connection;
+        }
+
+        /**
+         * A connection recording each prepared SQL and its bound name; every query
+         * answers {@code result}.
+         */
+        private Connection capturingConnection(List<String> sql, List<String> binds, boolean result) throws SQLException {
+            Connection connection = mock(Connection.class);
+            when(connection.prepareStatement(anyString())).thenAnswer(prepare -> {
+                sql.add(prepare.getArgument(0));
+                PreparedStatement ps = mock(PreparedStatement.class);
+                doAnswer(inv -> {
+                    binds.add(inv.getArgument(1));
+                    return null;
+                }).when(ps).setString(eq(1), anyString());
+                ResultSet rs = mock(ResultSet.class);
+                when(rs.next()).thenReturn(true);
+                when(rs.getBoolean(1)).thenReturn(result);
+                when(ps.executeQuery()).thenReturn(rs);
+                return ps;
+            });
+            return connection;
+        }
+
+        private List<String> executedDdl(Settings settings, int dimension) throws SQLException {
+            Connection connection = connectionWithIndexes(new ArrayList<>());
+            Statement statement = connection.createStatement();
             List<String> executed = new ArrayList<>();
             when(statement.executeUpdate(anyString())).thenAnswer(inv -> {
                 executed.add(inv.getArgument(0));

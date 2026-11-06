@@ -364,13 +364,18 @@ final class PgVectorSchema {
 
     /**
      * Whether {@code table} exists, and the type of its {@code metadata} column.
-     * {@code to_regclass} resolves the name the way the unquoted name in
-     * langchain4j's SQL is resolved — folded to lower case, through the
-     * {@code search_path} when unqualified.
+     * {@code to_regclass} folds the name to lower case, as PostgreSQL does with the
+     * unquoted name in langchain4j's SQL. An unqualified name is looked up in
+     * {@code current_schema()} only — not through the whole {@code search_path} —
+     * because that is where langchain4j's {@code CREATE TABLE IF NOT EXISTS}
+     * creates it: with {@code search_path = myschema, public} and only
+     * {@code public.docs} present, the store uses a new {@code myschema.docs}, so
+     * that, not {@code public.docs}, is the table whose layout matters.
      */
     static TableState inspect(Connection connection, String table) throws SQLException {
         String sql = "SELECT r.oid IS NOT NULL, (SELECT format_type(a.atttypid, NULL) FROM pg_attribute a "
-                + "WHERE a.attrelid = r.oid AND a.attname = 'metadata' AND NOT a.attisdropped) FROM (SELECT to_regclass(?) AS oid) r";
+                + "WHERE a.attrelid = r.oid AND a.attname = 'metadata' AND NOT a.attisdropped) FROM (SELECT "
+                + regclass(isQualified(table)) + " AS oid) r";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, table);
             try (ResultSet rs = statement.executeQuery()) {
@@ -383,15 +388,23 @@ final class PgVectorSchema {
     }
 
     /**
-     * Creates the {@code v2} indexes. {@code IF NOT EXISTS} makes this a catalog
-     * lookup on a table that has them; on the new, empty table EDDI just created it
-     * is instant. A failure to build the HNSW index (pgvector older than 0.5.0) is
-     * logged and the store works without it — exact scans, as before.
+     * Creates the {@code v2} indexes that are missing. Each index is looked up
+     * first and its DDL skipped when it exists: {@code CREATE INDEX IF NOT EXISTS}
+     * takes a {@code SHARE} lock on the table before it finds the index, so on
+     * every store build it would wait behind open write transactions and hold up
+     * the writers queued after it. {@code IF NOT EXISTS} stays for two builds
+     * racing to create the same index. A failure to build the HNSW index (pgvector
+     * older than 0.5.0) is logged and the store works without it — exact scans, as
+     * before.
      */
     static void createIndexes(Connection connection, String table, Settings settings, int dimension) throws SQLException {
+        List<String> suffixes = List.of(SUFFIX_DOC_SOURCE, SUFFIX_SOURCE_RUN);
+        List<String> ddl = metadataIndexSql(table);
         try (Statement statement = connection.createStatement()) {
-            for (String sql : metadataIndexSql(table)) {
-                statement.executeUpdate(sql);
+            for (int i = 0; i < ddl.size(); i++) {
+                if (!indexExists(connection, table, suffixes.get(i))) {
+                    statement.executeUpdate(ddl.get(i));
+                }
             }
         }
         if (!settings.hnsw()) {
@@ -403,12 +416,48 @@ final class PgVectorSchema {
                     sanitize(table), dimension, MAX_HNSW_DIMENSIONS, MAX_HNSW_DIMENSIONS);
             return;
         }
+        String hnswSql = hnswIndexSql(table, settings.m(), settings.efConstruction());
         try (Statement statement = connection.createStatement()) {
-            statement.executeUpdate(hnswIndexSql(table, settings.m(), settings.efConstruction()));
+            if (!indexExists(connection, table, SUFFIX_HNSW)) {
+                statement.executeUpdate(hnswSql);
+            }
         } catch (SQLException e) {
             LOGGER.warnf("Could not create the HNSW index on pgvector table %s (%s); retrieval scans every row. HNSW needs pgvector 0.5.0 "
                     + "or later.", sanitize(table), sanitize(e.getMessage()));
         }
+    }
+
+    /**
+     * Whether the index {@link #indexName(String, String) indexName(table, suffix)}
+     * exists in {@code table}'s schema — the schema named in {@code table}, else
+     * {@code current_schema()}, as for {@link #inspect}. The name is bound, never
+     * spliced into the SQL.
+     */
+    static boolean indexExists(Connection connection, String table, String suffix) throws SQLException {
+        String trimmed = table.trim();
+        boolean qualified = isQualified(trimmed);
+        String index = quotedIdentifier(indexName(trimmed, suffix));
+        String name = qualified ? quotedIdentifier(trimmed.substring(0, trimmed.lastIndexOf('.'))) + "." + index : index;
+        try (PreparedStatement statement = connection.prepareStatement("SELECT " + regclass(qualified) + " IS NOT NULL")) {
+            statement.setString(1, name);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    private static boolean isQualified(String table) {
+        return table.indexOf('.') >= 0;
+    }
+
+    /**
+     * {@code to_regclass} over one bound name: as given when schema-qualified,
+     * otherwise in {@code current_schema()} — where an unqualified
+     * {@code CREATE TABLE} or {@code CREATE INDEX} puts it — rather than the first
+     * match anywhere on the {@code search_path}.
+     */
+    private static String regclass(boolean qualified) {
+        return qualified ? "to_regclass(?)" : "to_regclass(quote_ident(current_schema()) || '.' || ?)";
     }
 
     private static String shortDigest(String value) {

@@ -66,6 +66,19 @@ million chunks retrieval took seconds and each document replacement scanned the 
   lower-cased identifier — the same table PostgreSQL resolves langchain4j's unquoted name to — and the
   index names are quoted too. `m`, `ef_construction` and `ef_search` are range-checked ints where they
   meet SQL; the table lookup in `inspect` was already a bind parameter.
+- **A store holds a handle, not a pool.** `PgVectorConnectionPools.get` returns a `DataSource` that
+  looks the login's pool up on every `getConnection()`, so a size eviction cannot strand a cached store
+  or a running ingestion: the next borrow reopens the pool, and each borrow counts as use of it. An
+  evicted pool with connections still borrowed (Agroal metrics, `activeCount()`) is retired rather than
+  closed under them, and closed on a later lookup once they are returned; `clearCache()` and
+  `@PreDestroy` still close every pool. Tested in `PgVectorConnectionPoolsTest` with fake pools.
+- **An unqualified table is inspected in `current_schema()`**, where langchain4j's
+  `CREATE TABLE IF NOT EXISTS` creates it, not wherever the `search_path` first finds the name — with
+  `search_path = myschema, public`, `public.docs` would otherwise decide the layout of the new
+  `myschema.docs`.
+- **Existing indexes are looked up before their DDL runs** (`to_regclass` on the bound, schema-qualified
+  index name): `CREATE INDEX IF NOT EXISTS` takes a `SHARE` lock before it finds the index, so on every
+  store build it would queue behind open write transactions. `IF NOT EXISTS` stays for concurrent builds.
 
 ### Follow-ups
 
