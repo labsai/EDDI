@@ -21,7 +21,7 @@ public enum BrandAssetSlot {
     LOGO("logo", "logo", "logo", "META-INF/resources/img/logo_eddi.png"),
     LOGO_DARK("logoDark", "logo-dark", "logo-dark", null),
     ICON("icon", "icon", "icon", "META-INF/resources/eddi-icon.svg"),
-    FAVICON("favicon", "favicon.ico", "favicon", "META-INF/resources/img/favicon.ico"),
+    FAVICON("favicon", "favicon.ico", "favicon", "META-INF/branding/favicon.ico"),
     OG_IMAGE("ogImage", "og-image", "og-image", null);
     // @formatter:on
 

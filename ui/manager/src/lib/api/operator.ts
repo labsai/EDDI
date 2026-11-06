@@ -12,9 +12,11 @@ import {
   deleteAgent,
   undeployAgent,
   getDeploymentStatus,
+  listDeploymentStatuses,
   getAgent,
   getAgentCurrentVersion,
   type Agent,
+  type DeploymentStatus,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import { markOperatorDescriptor } from "./operator-marker";
@@ -1145,11 +1147,41 @@ function looksLikeAuthFailure(result: string | undefined): boolean {
 
 /* ─── Lifecycle ─── */
 
-/** Deployment status for the configured operator agent. */
-export async function readOperatorStatus(config: OperatorConfig) {
+/**
+ * The version of the operator agent that actually serves its conversations.
+ *
+ * `config.version` is the version activation provisioned, and it is never
+ * refreshed (see {@link liveOperatorVersion}). An admin who edits the operator
+ * in place and deploys the result runs v2 while the config still says v1, and
+ * every reader of `config.version` then describes a version nobody talks to:
+ * the status card showed v1 (often NOT_FOUND once v1 was undeployed, which
+ * offered to redeploy v1), and the gate dry-run checked v1's approval gate.
+ * A new conversation is served by the highest version deployed in the
+ * environment, so that is the answer; an operator deployed nowhere (paused)
+ * falls back to the newest stored version, then to the recorded one.
+ */
+export async function servedOperatorVersion(config: OperatorConfig): Promise<number | null> {
   if (!config.agentId || config.version == null) return null;
+  try {
+    const deployed = await listDeploymentStatuses(operatorEnvironment(config));
+    const mine = deployed.find((d) => d.agentId === config.agentId);
+    if (mine && mine.agentVersion > 0) return mine.agentVersion;
+  } catch {
+    // Fall through: the per-agent lookups below still beat the recorded version.
+  }
+  return liveOperatorVersion(config.agentId, config.version);
+}
+
+/** Deployment status of the operator, with the version it describes. */
+export type OperatorStatus = DeploymentStatus & { version: number };
+
+/** Deployment status for the configured operator agent, at the version that serves it. */
+export async function readOperatorStatus(config: OperatorConfig): Promise<OperatorStatus | null> {
+  const version = await servedOperatorVersion(config);
+  if (!config.agentId || version == null) return null;
   // Detailed, so an ERROR says why (a refused vault grant, most often).
-  return getDeploymentStatus(config.environment, config.agentId, config.version, { detailed: true });
+  const status = await getDeploymentStatus(config.environment, config.agentId, version, { detailed: true });
+  return { ...status, version };
 }
 
 /**
@@ -1166,12 +1198,16 @@ export async function reactivateOperator(
   if (!config.agentId || config.version == null) {
     throw new Error("The operator has no provisioned agent to re-enable.");
   }
+  // The newest stored version, not the recorded one: an operator edited in place
+  // (v2) and then paused must come back as v2, not as the v1 activation recorded.
+  // Same rule as the kill switch below (see liveOperatorVersion).
+  const version = Math.max(await liveOperatorVersion(config.agentId, config.version), config.version);
   // Through the grant flow, like activation: an operator whose model key is
   // restricted needs its agent on the grant to come back up, and a plain deploy
   // here used to fail (or be refused) with no way to fix it from this screen.
   const outcome = await runDeployWithGrants({
     agentId: config.agentId,
-    version: config.version,
+    version,
     environment: config.environment,
   });
   if (outcome.kind === "cancelled") {
@@ -1374,9 +1410,12 @@ export async function gateDryRun(
   endpoint: string,
 ): Promise<GateDryRunResult> {
   const [method = "", path = ""] = endpoint.split(" ", 2);
+  // The gate of the version that serves the conversation, not the one
+  // activation recorded: after an in-place edit the two have different gates.
+  const version = (await servedOperatorVersion(config)) ?? config.version;
   return api.post<GateDryRunResult>("/administration/operator/gate-dry-run", {
     agentId: config.agentId,
-    version: config.version,
+    version,
     toolName,
     source: "http",
     // Backend address form: lowercase `method:path`, the same shape discovery

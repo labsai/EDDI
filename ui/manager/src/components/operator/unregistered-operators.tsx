@@ -195,7 +195,11 @@ export function RegisteredOperatorHealth({
   status,
 }: {
   config: OperatorConfig;
-  status: { status: DeploymentStatus["status"]; failure?: DeploymentStatus["failure"] } | null | undefined;
+  /** `version` is the one the status describes (`servedOperatorVersion`), when known. */
+  status:
+    | { status: DeploymentStatus["status"]; failure?: DeploymentStatus["failure"]; version?: number }
+    | null
+    | undefined;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -248,7 +252,10 @@ export function RegisteredOperatorHealth({
   const handleDeploy = () => {
     const options = {
       agentId: config.agentId!,
-      version: config.version!,
+      // The version whose failure is on screen, not the one activation recorded:
+      // after an in-place edit, redeploying the recorded version would bring the
+      // old operator back.
+      version: status?.version ?? config.version!,
       environment: config.environment,
       failure: isGrantFailure(failure) ? failure : undefined,
     };

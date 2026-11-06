@@ -18,12 +18,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import type { OperatorConfig, GateVerificationResult } from "@/lib/api/operator";
-import type { DeploymentStatus } from "@/lib/api/agents";
+import type { OperatorConfig, GateVerificationResult, OperatorStatus } from "@/lib/api/operator";
 
 interface OperatorStatusPanelProps {
   config: OperatorConfig;
-  status: DeploymentStatus | null | undefined;
+  /** At the version that serves the operator (`servedOperatorVersion`), not `config.version`. */
+  status: OperatorStatus | null | undefined;
   statusLoading: boolean;
   /** Result of re-reading the approval gate off the live agent document. */
   gate: GateVerificationResult | null | undefined;
@@ -103,8 +103,14 @@ export function OperatorStatusPanel({
             label={t("operator.status.authMode", "Authenticates as")}
             value={t(`operator.authMode.${config.authMode}.label`)}
           />
-          {config.version != null && (
-            <Row label={t("operator.status.version", "Version")} value={String(config.version)} />
+          {/* The version that serves the chat, not the one activation recorded:
+              after an in-place edit and deploy those differ, and this row said
+              v1 while every conversation ran on v2. */}
+          {(status?.version ?? config.version) != null && (
+            <Row
+              label={t("operator.status.version", "Version")}
+              value={String(status?.version ?? config.version)}
+            />
           )}
           {/* The agent id, on screen, because a reconfigure REPLACES the agent
               rather than versioning it in place. Two deployed operators once
@@ -342,7 +348,7 @@ function DeploymentBadge({
   state,
   loading,
 }: {
-  state: DeploymentStatus["status"] | undefined;
+  state: OperatorStatus["status"] | undefined;
   loading: boolean;
 }) {
   const { t } = useTranslation();

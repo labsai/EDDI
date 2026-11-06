@@ -122,6 +122,25 @@ git tag 6.3.0-RC2
 git push origin 6.3.0-RC2
 ```
 
+### Before tagging a stable release
+
+A tag publishes `latest` within the hour and cannot be taken back, so check the
+commit you are about to tag — not main in general — against the running image:
+
+1. **CI is green on that exact commit**, including `Build & Test` and the E2E
+   jobs. A red or cancelled run on the commit counts as no run.
+2. **Activate the Platform Operator against that commit's `-b` image, end to
+   end, with a real model key** — on a fresh install, then once more as an
+   upgrade of an Operator provisioned by the previous release. Every Operator
+   test in the Manager runs against a mocked backend, so this is the only check
+   of the real `setup-api` call. 6.7.0 skipped it and shipped an Operator prompt
+   the backend refuses: no deployment could activate or upgrade its Operator
+   until the next release. `operator-prompt-size.test.ts` now guards that particular cause;
+   this step catches the next one.
+3. **The release-notes draft's claims are true of the image**, not of the plan
+   — in particular anything it says about external services (the docs site,
+   registries) and every dependency advisory it lists as fixed.
+
 ### General Availability Release
 
 ```bash

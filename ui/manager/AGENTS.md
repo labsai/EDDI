@@ -343,6 +343,19 @@ what it finds. Off by default. Worth knowing before touching it:
   new default. **Changing the prompt, the allow-list or the gate means bumping
   the revision**: `operator-revision.test.ts` pins a fingerprint of all three
   and fails until you do, printing the new fingerprint.
+- **The prompt has a hard size limit — the backend's, not ours.** `setup-api`
+  refuses a `systemPrompt` longer than `AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH`
+  (mirrored here as `SETUP_MAX_SYSTEM_PROMPT_LENGTH` in `src/lib/api/agent-setup.ts`).
+  6.7.0 shipped a ~110,000-character prompt against a cap of 100,000, so no
+  deployment could activate or upgrade its Operator, and every Operator test
+  passed because they all run against MSW. `operator-prompt-size.test.ts` now
+  holds the prompt (every scope, the longest brand name) to **80% of the cap**,
+  and the backend's `SetupPromptCapMirrorTest` fails if the two copies of the
+  cap disagree. When the guard fails, shorten the prompt — or raise the cap in
+  both places — but never loosen the 80% budget to make room: it is the warning
+  that arrives a release early. Every prompt addition costs tokens on every
+  Operator call as well, so prefer pointing at `/administration/docs` over
+  restating a page.
 - **`authMode: "caller-identity"`** makes tool calls run as the signed-in user
   via the backend's `${caller:token}` resolver (EDDI 6.2.0+). `"none"` is
   blocked at activation when OIDC is on, because every tool call would 401.
