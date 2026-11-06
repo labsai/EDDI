@@ -24,6 +24,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -52,48 +54,56 @@ import static org.mockito.Mockito.when;
 class RuntimeWorkspaceSettingsTest {
 
     /**
-     * An in-memory store with a controllable failure, a read counter, and a read
-     * that can be held open: a database call that has not answered yet.
+     * A store read held open: a database call that has reached the store and not
+     * answered yet.
+     */
+    private static final class HeldRead {
+        final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch gate = new CountDownLatch(1);
+
+        void release() {
+            gate.countDown();
+        }
+    }
+
+    /**
+     * An in-memory store with a controllable failure, a read counter, and reads
+     * that can be held open.
      */
     private static final class Store implements IWorkspaceSettingsStore {
         final AtomicReference<StoredWorkspaceSettings> value = new AtomicReference<>();
         final AtomicInteger reads = new AtomicInteger();
         volatile boolean failing;
-        volatile CountDownLatch entered;
-        private volatile CountDownLatch gate;
+        private final Queue<HeldRead> held = new ConcurrentLinkedQueue<>();
 
         /**
-         * The next read counts down {@link #entered}, then waits for {@link #release}.
+         * The next read not yet held signals it has arrived, then waits for release.
          */
-        void holdNextRead() {
-            entered = new CountDownLatch(1);
-            gate = new CountDownLatch(1);
-        }
-
-        void release() {
-            CountDownLatch held = gate;
-            gate = null;
-            if (held != null) {
-                held.countDown();
-            }
+        HeldRead holdNextRead() {
+            HeldRead read = new HeldRead();
+            held.add(read);
+            return read;
         }
 
         @Override
         public Optional<StoredWorkspaceSettings> read(String tenantId) {
             reads.incrementAndGet();
-            CountDownLatch held = gate;
-            if (held != null) {
-                entered.countDown();
+            // A read answers with what was there when it ran, however late it answers.
+            StoredWorkspaceSettings seen = value.get();
+            boolean down = failing;
+            HeldRead hold = held.poll();
+            if (hold != null) {
+                hold.entered.countDown();
                 try {
-                    held.await(10, TimeUnit.SECONDS);
+                    hold.gate.await(10, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             }
-            if (failing) {
+            if (down) {
                 throw new IllegalStateException("store down");
             }
-            return Optional.ofNullable(value.get());
+            return Optional.ofNullable(seen);
         }
 
         @Override
@@ -277,11 +287,11 @@ class RuntimeWorkspaceSettingsTest {
             assertFalse(s.admitsLegacy());
 
             store.write("default", stored("finance", "shared"));
-            store.holdNextRead();
+            HeldRead read = store.holdNextRead();
             expireCache();
             Thread refresher = refreshInBackground(s);
             try {
-                assertTrue(store.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
+                assertTrue(read.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
 
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
                     assertEquals(WorkspaceSettings.LEGACY_ADMIN_ONLY, s.effectiveLegacyVisibility());
@@ -289,7 +299,7 @@ class RuntimeWorkspaceSettingsTest {
                 }, "a reader must not wait for another caller's store read");
                 assertEquals(2, store.reads.get(), "only the one caller went to the store");
             } finally {
-                store.release();
+                read.release();
                 refresher.join(5_000);
             }
 
@@ -304,19 +314,99 @@ class RuntimeWorkspaceSettingsTest {
             var s = settings(null, null);
             s.admitsLegacy();
 
-            store.holdNextRead();
+            HeldRead read = store.holdNextRead();
             expireCache();
             Thread refresher = refreshInBackground(s);
             try {
-                assertTrue(store.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
+                assertTrue(read.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
                 // What this instance just wrote; the in-flight read began before it.
                 assertTimeoutPreemptively(Duration.ofSeconds(1), () -> s.adopt(stored("ops", "shared")));
             } finally {
-                store.release();
+                read.release();
                 refresher.join(5_000);
             }
 
             assertEquals(Optional.of("ops"), s.getDefaultSpaceTeam(), "the read that started first must not win");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
+        @DisplayName("a forced re-read is not undone by an older re-read that answers before it")
+        void olderRereadDoesNotUndoNewerOne() throws Exception {
+            // GET /workspaces/settings forces a re-read so that it shows another
+            // replica's write. An access check's re-read that began before that write
+            // must not be what is left in place, whichever of the two answers first.
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            HeldRead older = store.holdNextRead();
+            expireCache();
+            Thread accessCheck = refreshInBackground(s);
+            HeldRead newer = null;
+            Thread settingsPage = null;
+            try {
+                assertTrue(older.entered.await(5, TimeUnit.SECONDS), "the access check reached the store");
+                store.write("default", stored("finance", "shared")); // another replica's write
+                newer = store.holdNextRead();
+                settingsPage = new Thread(s::refresh, "settings-page");
+                settingsPage.setDaemon(true);
+                settingsPage.start();
+                assertTrue(newer.entered.await(5, TimeUnit.SECONDS), "the settings page reached the store");
+
+                older.release();
+                accessCheck.join(5_000);
+                newer.release();
+                settingsPage.join(5_000);
+            } finally {
+                older.release();
+                accessCheck.join(5_000);
+                if (newer != null) {
+                    newer.release();
+                    settingsPage.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "the read that started last holds the newest values");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
+        @DisplayName("a re-read that fails keeps what is served when it fails, not what was served when it began")
+        void failedRereadKeepsLatestValues() throws Exception {
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            store.write("default", stored("finance", "shared"));
+            HeldRead succeeding = store.holdNextRead();
+            expireCache();
+            Thread accessCheck = refreshInBackground(s);
+            HeldRead failing = null;
+            Thread settingsPage = null;
+            try {
+                assertTrue(succeeding.entered.await(5, TimeUnit.SECONDS), "the access check reached the store");
+                store.failing = true;
+                failing = store.holdNextRead();
+                settingsPage = new Thread(s::refresh, "settings-page");
+                settingsPage.setDaemon(true);
+                settingsPage.start();
+                assertTrue(failing.entered.await(5, TimeUnit.SECONDS), "the settings page reached the store");
+
+                succeeding.release();
+                accessCheck.join(5_000);
+                failing.release();
+                settingsPage.join(5_000);
+            } finally {
+                succeeding.release();
+                accessCheck.join(5_000);
+                if (failing != null) {
+                    failing.release();
+                    settingsPage.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "a failed read learns nothing and must not revert a good one");
             assertTrue(s.admitsLegacy());
         }
 

@@ -14,15 +14,18 @@
   use, edit and deploy pre-existing resources, so an upgrade hides nothing, but the
   `OWN` acts are admin-only until an owner is assigned with
   `PUT /descriptorstore/descriptors/{id}/shares/owner`. Explicit grants on a legacy
-  resource still count in full. This matches what a resource with no descriptor at all
-  already got (`ResourceAccessGuard.requireLegacyFallback`) and what
-  [Workspaces](../workspaces.md#resources-that-predate-ownership) promised.
+  resource still count in full. It is the rule a resource with no descriptor at all
+  already followed — an absent record must not grant authority — though that case,
+  in `ResourceAccessGuard.requireLegacyFallback`, stops lower still, at read and use. See
+  [Resources that predate ownership](../workspaces.md#resources-that-predate-ownership).
 - **The workspace settings cache no longer makes access checks wait for the store.**
   `WorkspaceSettings` re-read the stored settings under a lock when its 5-second cache
   expired, so every request whose access check asked `admitsLegacy()` queued behind a
   database read with no timeout — at every expiry, and for the whole of an outage. It is
   now stale-while-revalidate: one caller re-reads, everyone else is served the last
-  values, and a write adopted meanwhile is not overwritten by the older read. Only the
+  values. Each read is numbered when it starts and each adopted write when it lands, and
+  the higher number is what stays served, so neither a write adopted meanwhile nor the
+  settings page's forced re-read is undone by an older read that answers later. Only the
   very first read, with nothing to serve, is still waited for. No executor is involved.
 - **A corrupt stored `legacy-visibility` is validated once, at load.** It used to be
   re-validated, and logged at `WARN`, on every access check. It is now treated as unset

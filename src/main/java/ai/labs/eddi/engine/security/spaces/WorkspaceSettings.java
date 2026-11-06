@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 
@@ -101,7 +102,7 @@ public class WorkspaceSettings {
 
     private static final long TTL_NANOS = STORED_SETTINGS_TTL.toNanos();
 
-    private static final Snapshot NOTHING_STORED = new Snapshot(null, 0L, false);
+    private static final Snapshot NOTHING_STORED = new Snapshot(null, 0L, false, 0L);
 
     private final boolean enabled;
     private final boolean authEnabled;
@@ -124,6 +125,9 @@ public class WorkspaceSettings {
     /** Set while one caller re-reads an expired snapshot. */
     private final AtomicBoolean refreshing = new AtomicBoolean();
 
+    /** Numbers each store read as it starts, and each adopted write. */
+    private final AtomicLong sequence = new AtomicLong();
+
     /**
      * The invalid stored legacy-visibility last reported, so a bad row is logged
      * once rather than at every re-read.
@@ -137,8 +141,12 @@ public class WorkspaceSettings {
      * @param unreadable
      *            the store could not be read and nothing was ever read from it — so
      *            what an administrator stored is unknown, not absent
+     * @param sequence
+     *            when its read started (or its write was adopted), relative to the
+     *            others: the higher one holds the newer values, whichever answered
+     *            first
      */
-    private record Snapshot(StoredWorkspaceSettings stored, long loadedAtNanos, boolean unreadable) {
+    private record Snapshot(StoredWorkspaceSettings stored, long loadedAtNanos, boolean unreadable, long sequence) {
     }
 
     @Inject
@@ -293,16 +301,15 @@ public class WorkspaceSettings {
     }
 
     /**
-     * Re-reads the store now, keeping the previous values if it fails. A value that
-     * landed while the store was being read — an {@link #adopt}ed write — is newer
-     * than this read and is kept instead.
+     * Re-reads the store now, keeping the previous values if it fails. A write
+     * {@link #adopt}ed while the store was being read is newer than this read and
+     * is kept instead.
      */
     public void refresh() {
         if (store == null) {
             return;
         }
-        Snapshot current = snapshot.get();
-        snapshot.compareAndSet(current, load(current, nanoClock.getAsLong()));
+        install(load(nanoClock.getAsLong()));
     }
 
     /**
@@ -314,7 +321,7 @@ public class WorkspaceSettings {
         if (store == null) {
             return;
         }
-        snapshot.set(new Snapshot(validated(written), nanoClock.getAsLong(), false));
+        install(new Snapshot(validated(written), nanoClock.getAsLong(), false, sequence.incrementAndGet()));
     }
 
     public static boolean isValidLegacyVisibility(String value) {
@@ -360,12 +367,29 @@ public class WorkspaceSettings {
             if (isFresh(current)) {
                 return current; // re-read by a caller that finished just before this one
             }
-            Snapshot loaded = load(current, nanoClock.getAsLong());
-            // Losing the swap means an adopt() or refresh() landed while the store was
-            // being read; theirs is at least as new as this read, so it stays.
-            return snapshot.compareAndSet(current, loaded) ? loaded : snapshot.get();
+            return install(load(nanoClock.getAsLong()));
         } finally {
             refreshing.set(false);
+        }
+    }
+
+    /**
+     * Serves {@code candidate} unless what is served began later: a write adopted,
+     * or a read started, after {@code candidate}'s read did. Comparing by start
+     * rather than by arrival is what keeps a slow read from putting back the values
+     * a newer read or write replaced.
+     *
+     * @return what is served now
+     */
+    private Snapshot install(Snapshot candidate) {
+        while (true) {
+            Snapshot current = snapshot.get();
+            if (current != null && current.sequence() > candidate.sequence()) {
+                return current;
+            }
+            if (snapshot.compareAndSet(current, candidate)) {
+                return candidate;
+            }
         }
     }
 
@@ -379,8 +403,7 @@ public class WorkspaceSettings {
         if (current != null) {
             return current;
         }
-        Snapshot loaded = load(null, nanoClock.getAsLong());
-        return snapshot.compareAndSet(null, loaded) ? loaded : snapshot.get();
+        return install(load(nanoClock.getAsLong()));
     }
 
     private boolean isFresh(Snapshot candidate) {
@@ -415,17 +438,21 @@ public class WorkspaceSettings {
         return new StoredWorkspaceSettings(stored.defaultSpace(), null, stored.updatedAt(), stored.updatedBy());
     }
 
-    private Snapshot load(Snapshot previous, long now) {
+    private Snapshot load(long now) {
+        long started = sequence.incrementAndGet();
         try {
-            return new Snapshot(validated(store.read(TENANT).orElse(null)), now, false);
+            return new Snapshot(validated(store.read(TENANT).orElse(null)), now, false, started);
         } catch (RuntimeException e) {
+            // A failed read learns nothing, so it keeps what is served as it fails —
+            // which may be newer than what was served when it began.
+            Snapshot previous = snapshot.get();
             if (previous != null) {
                 LOGGER.warnf("Could not read the stored workspace settings (%s); keeping the values last read.", e.getClass().getSimpleName());
-                return new Snapshot(previous.stored(), now, previous.unreadable());
+                return new Snapshot(previous.stored(), now, previous.unreadable(), started);
             }
             LOGGER.warnf("Could not read the stored workspace settings (%s); pinned properties apply, and unowned resources stay "
                     + "admin-only, until they can be read.", e.getClass().getSimpleName());
-            return new Snapshot(null, now, true);
+            return new Snapshot(null, now, true, started);
         }
     }
 }
