@@ -827,7 +827,7 @@ class RestAgentManagementExtendedTest {
                     () -> mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse));
 
             verify(restAgentEngine).endConversation(OWN_CONV_ID);
-            verify(asyncResponse, never()).resume(any());
+            verifyNoInteractions(asyncResponse);
         }
 
         @Test
