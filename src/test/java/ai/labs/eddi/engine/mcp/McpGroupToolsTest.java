@@ -1260,7 +1260,7 @@ class McpGroupToolsTest {
         @Test
         void continueGroupDiscussion_overLongOrBlankQuestion_isRefusedBeforeTheConversationIsRead() throws Exception {
             assertBadRequest(tools.continue_group_discussion("gc1", overLong), "at most 50000");
-            assertBadRequest(tools.continue_group_discussion("gc1", "	"), "'question' is required");
+            assertBadRequest(tools.continue_group_discussion("gc1", "\t"), "'question' is required");
 
             verify(groupConversationService, never()).readGroupConversation(any());
             verify(groupConversationService, never()).continueDiscussion(any(), any(), any());

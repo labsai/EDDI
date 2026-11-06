@@ -11,9 +11,9 @@ Three places where one surface of the group API did less than its sibling.
   `RestGroupConversation`'s own virtual-thread executor. Nothing carried the caller
   across, and on that thread the request scope is gone, so the member turns'
   `captureOrCurrent()` found nobody: every `${caller:userId}` and `${caller:token}`
-  failed closed on this path alone. The caller is now captured on the request thread and bound around the
-  work with `CallerIdentityContext.withIdentity`, the way `startAndDiscussAsync`
-  already does for a streamed start. `CallerIdentityContext` is a new constructor
+  failed closed on this path alone. The caller is now captured on the request
+  thread and bound around the work with `CallerIdentityContext.withIdentity`, the
+  way `startAndDiscussAsync` already does for a streamed start. `CallerIdentityContext` is a new constructor
   parameter of `RestGroupConversation`.
 - **The MCP discussion tools skipped the question ceilings.** REST re-checks by
   hand that a question is present and at most 50,000 characters, and that `userId`
