@@ -846,7 +846,9 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * httpcalls and an mcpcalls step: its own tools ({@link #isAgentMode()}), or
          * the workflow's, which {@code enableHttpCallTools} /
          * {@code enableMcpCallTools} {@code false} switch off. The configuration-time
-         * answer, for checks that run without a conversation; it cannot see an
+         * approximation, for checks that run without a conversation, not the runtime
+         * assembly's answer ({@code IAgentOrchestrator.offersTools}): it may be true
+         * when discovery produces no usable tools, and it cannot see an
          * attachment-reading tool, which depends on the turn.
          */
         @JsonIgnore
