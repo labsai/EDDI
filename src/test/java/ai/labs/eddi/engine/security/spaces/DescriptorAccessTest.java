@@ -176,8 +176,34 @@ class DescriptorAccessTest {
         @DisplayName("legacy data follows the operator's policy")
         void legacyFollowsPolicy() {
             var d = descriptor(null, null, null);
-            assertEquals(AccessLevel.OWN, DescriptorAccess.effectiveLevel(d, BOB, true));
+            assertEquals(AccessLevel.EDIT, DescriptorAccess.effectiveLevel(d, BOB, true));
             assertNull(DescriptorAccess.effectiveLevel(d, BOB, false));
+        }
+
+        @Test
+        @DisplayName("an absent owner is not a grant of ownership: legacy data admits EDIT, never OWN")
+        void legacyNeverOwned() {
+            // OWN is delete, share, publish and move. Handing it to every caller for every
+            // pre-workspace resource let anyone publish one to anonymous callers, or move
+            // it
+            // into their own space and lock everyone else out.
+            var d = descriptor(null, null, null);
+            for (CallerSpaces caller : List.of(ALICE, BOB, CallerSpaces.ANONYMOUS)) {
+                assertFalse(DescriptorAccess.effectiveLevel(d, caller, true).includes(AccessLevel.OWN));
+            }
+        }
+
+        @Test
+        @DisplayName("an explicit grant on legacy data still counts in full")
+        void legacyGrantStillCounts() {
+            // The cap is on what an absent owner implies, not on what an administrator
+            // deliberately granted.
+            var d = descriptor(null, null, null);
+            grant(d, Subjects.user("bob"), AccessLevel.OWN);
+
+            assertEquals(AccessLevel.OWN, DescriptorAccess.effectiveLevel(d, BOB, true));
+            assertEquals(AccessLevel.OWN, DescriptorAccess.effectiveLevel(d, BOB, false));
+            assertEquals(AccessLevel.EDIT, DescriptorAccess.effectiveLevel(d, ALICE, true));
         }
     }
 
