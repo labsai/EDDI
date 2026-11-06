@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.IResourceStore.ResourceAlreadyExistsException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentManagement;
@@ -57,28 +56,26 @@ public class RestAgentManagement implements IRestAgentManagement {
     private final IUserConversationStore userConversationStore;
     private final IRestAgentTriggerStore restAgentManagementStore;
     private final boolean checkForUserAuthentication;
-
-    @Inject
-    SecurityIdentity identity;
-
+    private final SecurityIdentity identity;
     /**
-     * Binds the {@code {userId}} path segment to the caller. Field-injected, like
-     * {@link #identity}, so the constructor the tests build with stays as it is; a
-     * null validator (older test seams) means the check is skipped.
+     * Binds the {@code {userId}} path segment to the caller; see
+     * {@link #requireUserAccess}.
      */
-    @Inject
-    OwnershipValidator ownershipValidator;
+    private final OwnershipValidator ownershipValidator;
 
     private static final Logger log = Logger.getLogger(RestAgentManagement.class);
 
     @Inject
     public RestAgentManagement(IRestAgentEngine restAgentEngine, IUserConversationStore userConversationStore,
             IRestAgentTriggerStore restAgentManagementStore,
-            @ConfigProperty(name = "quarkus.oidc.tenant-enabled") boolean checkForUserAuthentication) {
+            @ConfigProperty(name = "quarkus.oidc.tenant-enabled") boolean checkForUserAuthentication, SecurityIdentity identity,
+            OwnershipValidator ownershipValidator) {
         this.restAgentEngine = restAgentEngine;
         this.userConversationStore = userConversationStore;
         this.restAgentManagementStore = restAgentManagementStore;
         this.checkForUserAuthentication = checkForUserAuthentication;
+        this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
     }
 
     @Override
@@ -198,22 +195,16 @@ public class RestAgentManagement implements IRestAgentManagement {
         if (userConversation == null) {
             AgentDeployment agentDeployment = selectAgentDeployment(intent);
             checkUserAuthIfApplicable(agentDeployment.getEnvironment());
-            try {
-                userConversation = createNewConversation(intent, userId, language, agentDeployment);
-            } catch (CannotCreateConversationException e) {
-                // A concurrent request stored its conversation first; act on that one.
-                userConversation = getUserConversation(intent, userId);
-                if (userConversation == null) {
-                    throw e;
-                }
-            }
+            userConversation = createNewConversation(intent, userId, language, agentDeployment);
             newlyCreatedConversation = true;
         }
 
         if (isConversationEnded(userConversation)) {
             AgentDeployment agentDeployment = selectAgentDeployment(intent);
             checkUserAuthIfApplicable(agentDeployment.getEnvironment());
-            deleteUserConversation(intent, userId);
+            // Conditioned on the ended id: a concurrent request that replaced it
+            // already must keep its fresh mapping, and this one then adopts it.
+            deleteUserConversationIfMatches(intent, userId, userConversation.getConversationId());
             userConversation = createNewConversation(intent, userId, language, agentDeployment);
             newlyCreatedConversation = true;
         }
@@ -307,9 +298,9 @@ public class RestAgentManagement implements IRestAgentManagement {
         return language;
     }
 
-    private void deleteUserConversation(String intent, String userId) {
+    private void deleteUserConversationIfMatches(String intent, String userId, String conversationId) {
         try {
-            userConversationStore.deleteUserConversation(intent, userId);
+            userConversationStore.deleteUserConversationIfMatches(intent, userId, conversationId);
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -344,6 +335,12 @@ public class RestAgentManagement implements IRestAgentManagement {
         return getRandom(agentTriggerConfig.getAgentDeployments());
     }
 
+    /**
+     * Starts a conversation with {@code agentDeployment} and claims the (intent,
+     * userId) mapping for it. When a concurrent request stored its mapping first,
+     * that one is returned and the conversation started here, which nothing points
+     * at, is ended.
+     */
     private UserConversation createNewConversation(String intent, String userId, String language, AgentDeployment agentDeployment)
             throws CannotCreateConversationException {
 
@@ -370,31 +367,36 @@ public class RestAgentManagement implements IRestAgentManagement {
         }
         if (responseHttpCode == 201) {
             var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
-            var resourceId = RestUtilities.extractResourceId(locationUri);
+            String conversationId = RestUtilities.extractResourceId(locationUri).getId();
+            var candidate = new UserConversation(intent, userId, agentDeployment.getEnvironment(), agentId, conversationId);
+            UserConversation claimed;
             try {
-                return createUserConversation(intent, userId, agentDeployment, resourceId.getId());
-            } catch (ResourceAlreadyExistsException e) {
-                throw new CannotCreateConversationException(
-                        String.format("Cannot create conversation for agentId=%s in environment=%s (httpCode=%s), " + "Conversation already exists",
-                                agentId, agentDeployment.getEnvironment(), responseHttpCode));
+                claimed = userConversationStore.createOrAdopt(candidate);
             } catch (IResourceStore.ResourceStoreException e) {
+                // Not claimed, so nothing reaches this conversation.
+                endOrphanedConversation(conversationId);
                 throw sneakyThrow(e);
             }
+            if (!conversationId.equals(claimed.getConversationId())) {
+                endOrphanedConversation(conversationId);
+            }
+            return claimed;
         } else {
             throw new CannotCreateConversationException(String.format("Cannot create conversation for agentId=%s in environment=%s (httpCode=%s)",
                     agentId, agentDeployment.getEnvironment(), responseHttpCode));
         }
     }
 
-    private UserConversation createUserConversation(String intent, String userId, AgentDeployment agentDeployment, String conversationId)
-            throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
-
-        UserConversation userConversation = new UserConversation(intent, userId, agentDeployment.getEnvironment(), agentDeployment.getAgentId(),
-                conversationId);
-
-        storeUserConversation(userConversation);
-
-        return userConversation;
+    /**
+     * Best effort: the request already has the conversation it will act on (or is
+     * failing for another reason), so a failure here is logged, never thrown.
+     */
+    private void endOrphanedConversation(String conversationId) {
+        try {
+            restAgentEngine.endConversation(conversationId);
+        } catch (RuntimeException e) {
+            log.warnf(e, "Could not end the unclaimed managed conversation %s", sanitize(conversationId));
+        }
     }
 
     private AgentDeployment getRandom(List<AgentDeployment> agentDeployments) {
@@ -416,13 +418,6 @@ public class RestAgentManagement implements IRestAgentManagement {
         }
     }
 
-    private void storeUserConversation(UserConversation userConversation)
-            throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException {
-
-        userConversationStore.createUserConversation(userConversation);
-
-    }
-
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
         checkUserAuthIfApplicable(userConversation.getEnvironment());
     }
@@ -440,9 +435,7 @@ public class RestAgentManagement implements IRestAgentManagement {
      * {@code authorization.enabled=false} and for an admin.
      */
     private void requireUserAccess(String userId) {
-        if (ownershipValidator != null) {
-            ownershipValidator.validateUserAccess(identity, userId);
-        }
+        ownershipValidator.validateUserAccess(identity, userId);
     }
 
     private void checkUserAuthIfApplicable(Deployment.Environment environment) throws UnauthorizedException {

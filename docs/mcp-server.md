@@ -562,6 +562,10 @@ The conversation is auto-created on first message and reused on subsequent calls
 
 - **First call** with a new intent+userId: creates a new conversation and sends the message
 - **Subsequent calls** with the same intent+userId: reuses the existing conversation (like continuing in the same chat window)
+- **Ended conversation**: the next call replaces it with a fresh one
+- **Several deployments** on the trigger: each new conversation goes to one picked at random, as with the REST managed endpoints
+- **Concurrent first calls** for the same intent+userId: both land in one conversation. The call whose mapping was stored second adopts the other one's conversation and ends the one it started
+- **Agent not ready** (startup, rolling deploy): returns an error with `"errorCode": "UNAVAILABLE"`; retry shortly. No conversation was created
 - Returns an error if no agent trigger is configured for the given intent
 
 ---

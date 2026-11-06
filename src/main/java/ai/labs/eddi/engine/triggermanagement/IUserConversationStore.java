@@ -29,6 +29,37 @@ public interface IUserConversationStore {
 
     void createUserConversation(UserConversation userConversation) throws ResourceAlreadyExistsException, IResourceStore.ResourceStoreException;
 
+    /**
+     * Claim the (intent, userId) mapping for {@code candidate}, or adopt the
+     * mapping a concurrent caller stored first.
+     * <p>
+     * Two requests that both find no mapping (or the same ended one) both start a
+     * conversation and both try to store it; only one insert can win. The loser
+     * gets the winner's mapping back, so both go on talking to one conversation.
+     * <p>
+     * <b>The caller owns the conversation it started.</b> When the returned mapping
+     * names a different conversation than {@code candidate}, nothing points at the
+     * caller's own conversation any more, and the caller must end it.
+     *
+     * @return {@code candidate} if it was stored, otherwise the mapping that won
+     * @throws IResourceStore.ResourceStoreException
+     *             if the store fails, or if the insert collided with a mapping that
+     *             was gone again by the time it was read
+     */
+    default UserConversation createOrAdopt(UserConversation candidate) throws IResourceStore.ResourceStoreException {
+        try {
+            createUserConversation(candidate);
+            return candidate;
+        } catch (ResourceAlreadyExistsException e) {
+            UserConversation winner = readUserConversation(candidate.getIntent(), candidate.getUserId());
+            if (winner == null) {
+                throw new IResourceStore.ResourceStoreException(
+                        "The managed conversation mapping was claimed concurrently and removed again before it could be read");
+            }
+            return winner;
+        }
+    }
+
     void deleteUserConversation(String intent, String userId) throws IResourceStore.ResourceStoreException;
 
     /**
