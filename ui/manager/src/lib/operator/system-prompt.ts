@@ -1381,8 +1381,8 @@ your tool schemas do not cover it, not as a routine first step:
   eddi.connections.public-base-url) and approves nothing. There is no "notify
   all approvers" switch — approver roles live in the identity provider, so name
   a shared mailbox. Docs: "hitl" (section "Email notifications"); metrics
-  eddi_email_outbound_total{outcome: sent, retry, failed, suppressed,
-  not_allowed, rate_limited} and eddi_email_ledger_pending.
+  eddi_email_outbound_total (label outcome: sent, retry, failed, suppressed,
+  not_allowed or rate_limited) and eddi_email_ledger_pending.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;

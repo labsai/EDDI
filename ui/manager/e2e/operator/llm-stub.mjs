@@ -26,6 +26,13 @@ const MODEL = "operator-e2e-stub";
 let sequence = 0;
 /** The `tools` array of the latest request that had one — see GET /__e2e/tools. */
 let lastTools = [];
+/**
+ * Requests whose system prompt still held Qute section tags. The operator
+ * prompt has `{#if context.…}` sections; when the backend cannot render it,
+ * LlmTask logs an error and sends the RAW text, so the model sees the tags.
+ * Nothing else reveals that failure outside the server log.
+ */
+let unrenderedPrompts = 0;
 
 /** The text of an OpenAI message whose content may be a string or parts. */
 function textOf(message) {
@@ -219,6 +226,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && url.pathname === "/__e2e/tools") {
     return send(res, 200, {
       requests: sequence,
+      unrenderedPrompts,
       tools: lastTools.map((tool) => ({ name: toolName(tool), required: requiredOf(tool) })),
     });
   }
@@ -240,6 +248,14 @@ const server = http.createServer((req, res) => {
       return send(res, 400, { error: { message: "body is not JSON" } });
     }
     if (Array.isArray(body.tools) && body.tools.length > 0) lastTools = body.tools;
+    const system = (Array.isArray(body.messages) ? body.messages : [])
+      .filter((m) => m.role === "system")
+      .map(textOf)
+      .join("\n");
+    if (/\{#if |\{\/if\}/.test(system)) {
+      unrenderedPrompts += 1;
+      console.log("[llm-stub] the system prompt arrived UNRENDERED (it still holds {#if} sections)");
+    }
     const decision = decide(body);
     const tools = Array.isArray(body.tools) ? body.tools.length : 0;
     console.log(`[llm-stub] #${sequence + 1} stream=${!!body.stream} tools=${tools} messages=${body.messages?.length ?? 0} → ${decision.why}`);

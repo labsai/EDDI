@@ -200,7 +200,17 @@ test.describe("Platform Operator activation against a real backend", () => {
     // ── What the model was offered ──
     const offeredRes = await request.get(`${STUB_URL}/__e2e/tools`);
     expect(offeredRes.ok(), `the model stub's inspection endpoint (${STUB_URL}) did not answer`).toBe(true);
-    const offered = (await offeredRes.json()) as { tools: { name: string; required: string[] }[] };
+    const offered = (await offeredRes.json()) as {
+      tools: { name: string; required: string[] }[];
+      unrenderedPrompts: number;
+    };
+    // The prompt is rendered as a Qute template on every turn. A render that
+    // fails (a parse error, or text Qute takes for a namespace, such as
+    // `{outcome: …}`) is only logged, and the RAW prompt goes to the model.
+    expect(
+      offered.unrenderedPrompts,
+      "the model received the operator prompt unrendered — its Qute render failed on the backend (see the eddi log)",
+    ).toBe(0);
     const offeredNames = new Set(offered.tools.map((tool) => tool.name));
     const specRes = await request.get(`${API_BASE}/openapi?format=json`);
     expect(specRes.ok()).toBe(true);

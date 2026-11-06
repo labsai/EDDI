@@ -57,8 +57,10 @@ The first green run surfaced three defects in what activation provisions. The ti
   `forEach {pathToTargetArray (…, required), iterationObjectName …}`. Qute read that as an expression and could not
   parse it. Every operator turn logged `ERROR … Template processing failed for LLM parameter 'systemMessage'` and
   sent the raw prompt, and every deploy reported `TEMPLATE_DOES_NOT_PARSE`. The line now lists the fields in prose.
-  The real parser accepts every other `{` in both scopes: checked by running the built prompt through it. The revision
-  bump is what tells existing deployments to upgrade.
+  With that fixed, the render still failed on the next one: `eddi_email_outbound_total{outcome: sent, …}` reads as
+  the namespace `outcome:` (`No namespace resolver found for [outcome]`), which a parse alone does not catch. It is now
+  written with the label in parentheses. Both scopes now parse and render. The revision bump is what tells existing
+  deployments to upgrade.
 - **The compatibility check reported a false `TEMPLATE_DOES_NOT_PARSE`.** `LlmTask` wraps `${vault:…}`-style mentions
   in raw sections before rendering an LLM parameter (`escapeConfigReferenceMentions`), but `AgentCompatibilityLint`
   parsed the raw text, so a prompt that only *mentions* the syntax (the operator's tells the model to store keys as
@@ -85,8 +87,10 @@ Unit tests: `AgentCompatibilityLintTest` (vault mention not reported, a real err
 `ApiCallExecutorTest` (an empty optional parameter is not sent, a supplied one and a non-optional empty one are).
 Mutation-checked: reverting each of the four fixes fails its test. The E2E checks the same things from outside: one
 distinct tool per allow-listed endpoint reached the model (read from the stub's `GET /__e2e/tools`, published on
-loopback port 8089), `readAgentDescriptors` has no required arguments, and the operator's deployment status carries
-no `TEMPLATE_DOES_NOT_PARSE`.
+loopback port 8089), `readAgentDescriptors` has no required arguments, the operator's deployment status carries
+no `TEMPLATE_DOES_NOT_PARSE`, and no request reached the model with the prompt unrendered. The stub counts system
+prompts that still hold `{#if}` section tags: when its render fails, `LlmTask` only logs the error and sends the raw
+text. Restoring the `{outcome: …}` line fails that check with 5 unrendered prompts.
 
 ### Next
 
