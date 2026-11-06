@@ -186,6 +186,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
             <DraftInput
+              disabled={disabled}
               type="text"
               value={agent.identity?.agentDid ?? ""}
               onCommit={(v) =>
@@ -323,11 +324,13 @@ function SkillAutocomplete({
   onChange,
   onSelect,
   placeholder,
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSelect: (skill: string) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const { data: allSkills } = useSkills();
   const [open, setOpen] = useState(false);
@@ -381,6 +384,7 @@ function SkillAutocomplete({
       <input
         type="text"
         value={value}
+        disabled={disabled}
         onChange={(e) => { onChange(e.target.value); setOpen(true); setHighlighted(-1); }}
         onFocus={() => { if (value.trim()) setOpen(true); }}
         onKeyDown={handleKeyDown}
@@ -608,6 +612,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                   <span className="flex-1 text-xs font-medium text-foreground">{cap.skill}</span>
                   {/* Confidence badge */}
                   <select
+                    disabled={disabled}
                     value={cap.confidence ?? "medium"}
                     onChange={(e) => updateConfidence(i, e.target.value)}
                     className={`h-7 rounded-full border px-2 text-[10px] font-semibold focus:outline-none focus:ring-1 focus:ring-ring ${confidenceColors[cap.confidence ?? "medium"] ?? ""}`}
@@ -663,6 +668,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
             value={newSkill}
             onChange={setNewSkill}
             onSelect={addCapability}
+            disabled={disabled}
             placeholder={t("agentDetail.capabilityPlaceholder", "Search or type a skill name...")}
           />
           <button
@@ -747,6 +753,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.defaultVisibility", "Default Visibility")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.defaultVisibility ?? "self"}
                   onChange={(e) => patchConfig({ defaultVisibility: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -760,6 +767,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.maxRecallEntries", "Max Recall")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={cfg.maxRecallEntries ?? 50}
                   onCommit={(v) => patchConfig({ maxRecallEntries: v })}
                   fallback={50}
@@ -771,6 +779,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.maxEntriesPerUser", "Max per User")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={cfg.maxEntriesPerUser ?? 500}
                   onCommit={(v) => patchConfig({ maxEntriesPerUser: v })}
                   fallback={500}
@@ -785,6 +794,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.onCapReached", "On Cap Reached")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.onCapReached ?? "evict_oldest"}
                   onChange={(e) => patchConfig({ onCapReached: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -798,6 +808,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   {t("agentDetail.recallOrder", "Recall Order")}
                 </label>
                 <select
+                  disabled={disabled}
                   value={cfg.recallOrder ?? "most_recent"}
                   onChange={(e) => patchConfig({ recallOrder: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -816,15 +827,15 @@ export const UserMemorySection = memo(function UserMemorySection({
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
-                  <DraftNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
-                  <DraftNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
-                  <DraftNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DraftNumberInput disabled={disabled} value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
             </div>
@@ -851,38 +862,38 @@ export const UserMemorySection = memo(function UserMemorySection({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
-                      <DraftInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
-                      <DraftInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <DraftInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftInput disabled={disabled} type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <DraftNumberInput value={dream.maxCostPerRun ?? 0.5} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={0.5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput disabled={disabled} value={dream.maxCostPerRun ?? 0.5} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={0.5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
-                      <DraftNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput disabled={disabled} value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
-                      <DraftNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput disabled={disabled} value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                      <input type="checkbox" checked={dream.detectContradictions ?? true} onChange={(e) => patchDream({ detectContradictions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                      <input disabled={disabled} type="checkbox" checked={dream.detectContradictions ?? true} onChange={(e) => patchDream({ detectContradictions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
                       {t("agentDetail.detectContradictions", "Detect contradictions")}
                     </label>
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-                      <input type="checkbox" checked={dream.summarizeInteractions ?? false} onChange={(e) => patchDream({ summarizeInteractions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
+                      <input disabled={disabled} type="checkbox" checked={dream.summarizeInteractions ?? false} onChange={(e) => patchDream({ summarizeInteractions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
                       {t("agentDetail.summarizeInteractions", "Summarize interactions")}
                     </label>
                   </div>
@@ -1395,6 +1406,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                 {t("agentDetail.hitlPauseReason", "Approval reason (shown to approvers)")}
               </label>
               <DraftInput
+                disabled={disabled}
                 type="text"
                 value={hitl.pauseReason ?? ""}
                 onCommit={(v) => patchHitl({ pauseReason: v.trim() ? v : null })}
@@ -1442,6 +1454,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   {t("agentDetail.hitlApprovalTimeout", "Approval timeout (ISO-8601)")}
                 </label>
                 <input
+                  disabled={disabled}
                   type="text"
                   value={timeoutDraft}
                   onChange={(e) => {
@@ -1708,6 +1721,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                   {t("agentDetail.maxCheckpoints", "Max Checkpoints")}
                 </label>
                 <DraftNumberInput
+                  disabled={disabled}
                   value={sm.maxCheckpointsPerConversation ?? 10}
                   onCommit={(v) => patchSm({ maxCheckpointsPerConversation: v })}
                   min={1}
