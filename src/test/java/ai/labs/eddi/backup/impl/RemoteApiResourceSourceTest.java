@@ -135,7 +135,8 @@ class RemoteApiResourceSourceTest {
             var sent = ArgumentCaptor.forClass(HttpRequest.class);
             Mockito.verify(mockHttpClient, Mockito.atLeastOnce()).send(sent.capture(), any(HttpResponse.BodyHandler.class));
             for (HttpRequest request : sent.getAllValues()) {
-                assertTrue(request.uri().getRawPath().startsWith("/agentstore/agents/"), "left the agent path: " + request.uri());
+                assertEquals("/agentstore/agents/..%2F..%2Fsecretstore%2Fx", request.uri().getRawPath(), "left the agent path: " + request.uri());
+                assertEquals("version=1", request.uri().getRawQuery());
             }
         }
     }
