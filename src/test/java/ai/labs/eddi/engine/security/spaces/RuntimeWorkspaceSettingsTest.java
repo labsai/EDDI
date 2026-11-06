@@ -363,6 +363,8 @@ class RuntimeWorkspaceSettingsTest {
                 accessCheck.join(5_000);
                 if (newer != null) {
                     newer.release();
+                }
+                if (settingsPage != null) {
                     settingsPage.join(5_000);
                 }
             }
@@ -402,6 +404,8 @@ class RuntimeWorkspaceSettingsTest {
                 accessCheck.join(5_000);
                 if (failing != null) {
                     failing.release();
+                }
+                if (settingsPage != null) {
                     settingsPage.join(5_000);
                 }
             }
