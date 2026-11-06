@@ -1113,6 +1113,15 @@ your tool schemas do not cover it, not as a routine first step:
   into the same jar: one sign-in (it uses the manager's Keycloak client), and
   moving between the two is a page load. You live only in the manager;
   Workforce shows an administrator a link to you, never your chat.
+  Users can install Workforce as an app (Chrome or Edge: "Install app";
+  iPhone Safari: Share, Add to Home Screen). The server renders its manifest at
+  /workforce/manifest.webmanifest from the branding: product name, primary
+  colour, and the brand's icon (a square PNG of at least 512 px or an SVG
+  makes a sharp home-screen icon). There is no service worker and no offline
+  mode, on purpose: nothing signed-in is cached on the device.
+  In a cluster, Stop in a chat may not reach a turn running on another pod
+  (/cancel stops a running turn only on its own pod); the chat re-reads the
+  conversation and tells the user when the turn ran on.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
