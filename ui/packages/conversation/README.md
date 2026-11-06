@@ -10,15 +10,18 @@ Phase 3b brought the **agent** kind (1:1 conversations); phase 6 the **team**
 kind (group discussions, below). The operator kind still runs its own loop in the
 Manager (`use-operator-chat.ts`); see the changelog of phase 6 for why.
 
-Three entries, so an app resolves only what it renders:
+The entries, so an app resolves only what it renders:
 
 | Entry | What | Who imports it |
 | --- | --- | --- |
 | `@eddi/conversation` | The agent kind: controller, components, the one markdown renderer, the `conversation.*` strings | All three apps |
 | `@eddi/conversation/team` | The team kind: the `GroupDiscussion` controller and the team components | The Manager and Workforce |
 | `@eddi/conversation/i18next` | `ConversationMarkdown`: the markdown renderer with a react-i18next app's translator | The Manager and Workforce |
+| `@eddi/conversation/tool-activity` | What a turn's tools did (T1.9) and the notice before Edit or Regenerate of such a turn (T1.6), below | The Manager and Workforce |
 
-The Chat UI never resolves the last two, so they cost its bundle nothing.
+The Chat UI never resolves the last three, so they cost its bundle nothing
+(`tool-activity/ToolActivity.test.tsx` fails if `ui/chat/src` imports the tool entry or
+`@eddi/core/tool-events`).
 
 | Module | What it holds |
 | --- | --- |
@@ -131,3 +134,18 @@ discussion.getSnapshot().transcript; // QUESTION, member turns, SYNTHESIS…
   `noUncheckedIndexedAccess` and ES2020 target).
 - Checks: `npm run typecheck`, `npm run lint`, `npm test` in this directory. CI runs
   them in the `UI Chat` job.
+
+## Tool activity (`@eddi/conversation/tool-activity`)
+
+The stream's `tool_result` events (B6, parsed by `@eddi/core/tool-events`) as the user sees
+them. Tailwind-styled and read through the app's react-i18next, like the team kind.
+
+| Module | What it holds |
+| --- | --- |
+| `tool-activity/tool-activity-log.ts` | `ToolActivityLog`: the calls of each turn by conversation and step, a plain store (`subscribe`, `getSnapshot`). A host calls `beginTurn(conversationId, step)` from `onTurnStarting` (the step and every later, undone one start empty), `record` from `onStreamEvent` through `toolResultListener`, `clearStep` after a turn ran again without a stream. At most 50 calls per turn (the rest are counted) and 20 conversations. `toolCardPositions` puts a turn's cards under its question; `toolNames` lists a turn's tools once each |
+| `tool-activity/ToolActivity.tsx` | `ToolActivityCards` (one disclosure per turn, collapsed: "Tools used: 2 · 1 failed"; open, a card per call with the tool, whether it worked and the summary **as a text child, never markdown or HTML**), `ToolTurnNotice` (which tools the turn ran, beside Edit or Regenerate: neither takes back what they did), `useToolTurns(log, conversationId)`, `formatToolList` (`Intl.ListFormat`, three names then "+N more") |
+| `tool-activity/i18n.ts`, `i18n/locales/*` | `toolActivity.*` in the eleven locales, `withToolActivityLocales` (`setupAppI18n` calls it) |
+
+**Live only.** The events are not stored in a form a client may read: the detailed snapshot
+holds the raw tool trace, which the server redacts only on the way out through the stream. A
+reload, or a conversation opened later, shows no cards for its earlier turns.

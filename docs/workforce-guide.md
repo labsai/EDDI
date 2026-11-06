@@ -69,6 +69,18 @@ conversation of its own; those are part of the team session and are not listed a
 Every change shows at once. If the server refuses it (you are offline, or the conversation was
 deleted elsewhere), the list goes back to how it was and a message says why.
 
+### Searching your conversations
+
+The box at the top of the list searches **the titles** of all your chats, not only the ones the
+list shows. It does not search what was said in them. Type a few letters (upper or lower case does
+not matter): the results replace the list until you clear the box (**Esc** or the **×**). **↑ ↓**
+pick a result and **Enter** opens it. When there are more results than fit, **More results** shows
+the next ones. The search finds your own chats only, an administrator's too. Team sessions are not
+searched; find them in the list or with **⌘K**.
+
+**⌘K** / **Ctrl+K** searches the same titles: below the matches from the list, it adds older chats
+whose title matches.
+
 ---
 
 ## A chat
@@ -102,6 +114,16 @@ missing, that is the agent's setting, not a fault.
   the reply is ready it replaces the part you saw. Only if the server cannot be reached does the
   reply end with "Connection lost".
 
+### What the agent's tools did
+
+When an agent uses tools to answer (a search, a lookup, sending an email), a line under your
+message says so: **Tools used: 2**, and how many failed. Click it to see a card per tool: its name,
+whether it worked, and the start of what it returned (at most 200 characters, with keys and
+passwords removed by the server). It is closed until you open it. The cards show what happened
+while you watched: they are not kept with the conversation, so after a reload, or for a
+conversation you open from the list, they are gone. A team member's conversation (from a team's
+board) shows them too.
+
 ### Changing what you asked
 
 - **Edit** (under your last message, or **↑** in an empty message box) takes your last message and
@@ -109,8 +131,11 @@ missing, that is the agent's setting, not a fault.
 - **Regenerate** (under the agent's last answer) asks the agent to answer the same message again.
 
 Both appear only on the last turn, and only if the agent's designer allows undo (and, for
-Regenerate, redo). Neither takes back what a tool already did. A secret message, or one that
-carried files, cannot be edited: send it again instead.
+Regenerate, redo). Neither takes back what a tool already did. When the last turn used tools, a
+warning beside both buttons names them (for example "Ran send_email. Editing takes back the reply,
+not what the tools did."): the email stays sent, and a new answer may send another. After an edit
+the same warning appears once more as a message. A secret message, or one that carried files,
+cannot be edited: send it again instead.
 
 ### What a reply can contain
 
@@ -138,7 +163,7 @@ Who sees your rating is said under the rating card.
 
 | Keys | What they do |
 | --- | --- |
-| **⌘K** / **Ctrl+K** | Go to a conversation or an agent: type a few letters, **↑ ↓** to pick, **Enter** to open |
+| **⌘K** / **Ctrl+K** | Go to a conversation or an agent: type a few letters, **↑ ↓** to pick, **Enter** to open. Also finds older chats by title |
 | **⌘⇧O** / **Ctrl+Shift+O** | New chat (Home, with the message box ready) |
 | **Enter** · **Shift+Enter** | Send · new line |
 | **↑** (in an empty message box) | Edit your last message |
@@ -198,3 +223,12 @@ the discussion styles work.
   running turn only on the node running it ([HITL](hitl.md)). Workforce reads the conversation again
   1.5 and 5 seconds later and tells the user when the turn ran on, so nobody believes a reply was
   stopped that was not.
+- **Search** uses `GET /conversationstore/conversations/search` ([REST API reference](rest-api-reference.md#searching-my-conversations)):
+  the caller's own conversations, by title only, administrators included. It keeps no index of its
+  own, so GDPR erasure removes what it can find with the conversations.
+- **Tool cards** come from the `tool_result` events of a streamed turn: the tool's name, whether it
+  worked, and a summary the server redacts like the `task_complete` tool trace and cuts to 200
+  characters. Workforce shows the summary as plain text, never as markup. The cards are not stored:
+  the stored trace is not redacted for clients, so a conversation read back from the server shows
+  none. A turn the agent answers without streaming (the agent's `conversationControls.streaming` is
+  off, or the user switched streaming off in the Manager) has no cards and no tool warning.

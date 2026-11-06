@@ -230,11 +230,19 @@ Phase 7 (Tier 1) added, in both apps: **Stop** in place of Send while a turn run
 ran on — `chat-notice`); a **Reconnecting** line while a dropped stream's turn is followed
 (`reconnecting` in the chat store); **Edit** on the last message (undo, then its text back in the
 composer; **↑** in an empty composer) and **Regenerate** on the last reply (rerun), only when
-`conversationControls` allow undo (and redo), with the **`renderTurnNotice`** prop as the seam
-for "this turn ran tools whose effects stay" (B6); the **`ReplyAnnouncer`** (the transcript `log`
+`conversationControls` allow undo (and redo); the **`ReplyAnnouncer`** (the transcript `log`
 is `aria-live="off"`; completed replies are announced once); attachment chips with per-file
 progress (files from 256 KB, XMLHttpRequest) and **Try again**; `ChatMessage` gained an
 `actions` slot and renders `kind: "notice"` as a system line.
+
+**Tool cards and the tool notice (T1.9, T1.6).** `chatConversation` feeds the stream's
+`tool_result` events (`@eddi/core/tool-events`) into **`chatToolActivity`**, a
+`ToolActivityLog` from `@eddi/conversation/tool-activity` keyed by conversation and step
+(`beginTurn` in `onTurnStarting`, `clearStep` after a rerun, which has no stream). `ChatPanel`
+draws `ToolActivityCards` under each turn's question (collapsed; the summary is a text child,
+never markdown) and, by default, a `ToolTurnNotice` beside Edit and Regenerate of a turn that ran
+tools, tied to the button with `aria-describedby`; **`renderTurnNotice`** overrides it. Live only:
+the stored trace is not redacted for clients, so nothing is restored from a snapshot.
 
 ### Key Patterns
 
