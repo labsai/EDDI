@@ -214,7 +214,7 @@ final class VertxOutboundEngine implements OutboundEngine {
             abandon(result, sent);
             throw e;
         } catch (ExecutionException e) {
-            throw unwrap(e);
+            throw unwrap(e, uri, deadlineBinds);
         }
     }
 
@@ -240,10 +240,25 @@ final class VertxOutboundEngine implements OutboundEngine {
      * peer check) as itself, anything else — Vert.x reports a closed connection as
      * a {@code VertxException} — as an {@link IOException}; with the caller's
      * frames attached.
+     * <p>
+     * A {@link TimeoutException} is the wait for a pooled connection running out
+     * ({@link RequestOptions#setConnectTimeout}, set to the time left): it is
+     * reported as the timeout it is — {@link OutboundTimeoutException} when the
+     * whole-exchange deadline was the binding limit, else the hop's
+     * {@link HttpTimeoutException} — never as a generic I/O failure.
+     *
+     * @param deadlineBinds
+     *            whether the exchange deadline, not the hop timeout, bounded this
+     *            hop
      */
-    static IOException unwrap(ExecutionException e) {
+    static IOException unwrap(ExecutionException e, URI uri, boolean deadlineBinds) {
         Throwable cause = e.getCause() != null ? e.getCause() : e;
         CallerFrames.attachTo(cause);
+        if (cause instanceof TimeoutException) {
+            HttpTimeoutException timeout = deadlineBinds ? deadlineExceeded(uri) : new HttpTimeoutException("request timed out");
+            timeout.initCause(cause);
+            return timeout;
+        }
         if (cause instanceof IOException io) {
             return io;
         }

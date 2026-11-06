@@ -10,14 +10,21 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -210,6 +217,49 @@ class OutboundEngineSelectionTest {
             assertEquals(ConnectedPeers.parse("fe80::1"), ConnectedPeers.parse("[fe80::1%eth0]"));
             assertNull(ConnectedPeers.parse("example.com"));
             assertNull(ConnectedPeers.parse(" "));
+        }
+    }
+
+    @Nested
+    @DisplayName("how the Vert.x engine reports an async failure")
+    class VertxFailures {
+
+        private final URI uri = URI.create("https://api.example.com/v1?key=s3cret");
+
+        @Test
+        @DisplayName("a pool-wait timeout under the exchange deadline is an OutboundTimeoutException, without the query")
+        void poolWaitAtDeadline() {
+            TimeoutException poolWait = new TimeoutException("The timeout of 5000 ms has been exceeded when getting a connection");
+
+            IOException reported = VertxOutboundEngine.unwrap(new ExecutionException(poolWait), uri, true);
+
+            assertInstanceOf(OutboundTimeoutException.class, reported);
+            assertSame(poolWait, reported.getCause());
+            assertFalse(reported.getMessage().contains("s3cret"), reported.getMessage());
+        }
+
+        @Test
+        @DisplayName("a pool-wait timeout under the hop timeout is the hop's HttpTimeoutException")
+        void poolWaitAtHopTimeout() {
+            IOException reported = VertxOutboundEngine.unwrap(new ExecutionException(new TimeoutException("pool")), uri, false);
+
+            assertInstanceOf(HttpTimeoutException.class, reported);
+            assertFalse(reported instanceof OutboundTimeoutException);
+        }
+
+        @Test
+        @DisplayName("an I/O failure keeps its type, a refused peer is rethrown, anything else becomes an IOException")
+        void otherFailures() {
+            ConnectException refused = new ConnectException("Connection refused");
+            assertSame(refused, VertxOutboundEngine.unwrap(new ExecutionException(refused), uri, true));
+
+            OutboundBlockedException blocked = new OutboundBlockedException("peer refused");
+            assertSame(blocked, assertThrows(OutboundBlockedException.class,
+                    () -> VertxOutboundEngine.unwrap(new ExecutionException(blocked), uri, true)));
+
+            IllegalStateException closed = new IllegalStateException("Connection was closed");
+            IOException wrapped = VertxOutboundEngine.unwrap(new ExecutionException(closed), uri, true);
+            assertSame(closed, wrapped.getCause());
         }
     }
 }
