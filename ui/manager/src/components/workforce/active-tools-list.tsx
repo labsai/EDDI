@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowUpRight, ChevronDown, ChevronUp, Globe, Plug, Wrench, Database, Boxes } from "lucide-react";
 import { getDescriptor } from "@/lib/api/descriptors";
-import { parseToolResourceRefs } from "@/lib/agent-tool-refs";
+import { collectWorkflowToolRefs, type ToolResourceRef } from "@/lib/agent-tool-refs";
+import type { WorkflowConfiguration } from "@/lib/api/workflows";
 import type { LlmTask } from "@/components/editors/llm/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -14,27 +15,43 @@ const COLLAPSED_ROWS = 4;
 
 interface ActiveToolsListProps {
   task: LlmTask | undefined;
+  /** Every workflow of the agent, in order; an entry is undefined while it loads. */
+  workflows: readonly (WorkflowConfiguration | undefined)[];
+  /** True while any of the agent's workflows is still loading. */
+  workflowsLoading?: boolean;
   enableMemoryTools?: boolean;
 }
 
-function ResourceIcon({ slug }: { slug: string | null }) {
-  const Icon = slug === "apicalls" ? Globe : slug === "mcpcalls" ? Plug : Wrench;
+function ResourceIcon({ kind }: { kind: ToolResourceRef["kind"] }) {
+  const Icon = kind === "mcp" ? Plug : Globe;
   return <Icon className="h-3.5 w-3.5 shrink-0 text-sky-400" aria-hidden />;
 }
 
 /**
- * The agent's tools, grouped by where they come from and readable at a glance:
- * tool resources by their descriptor name (linked to their editor), built-ins
- * as short chips, and the "whole category" switches as their own chips.
+ * The tools the agent's LLM actually receives, as the backend assembles them:
  *
- * Capabilities are not tools and have their own card in the details panel, so
- * they are not repeated here.
+ * - HTTP and MCP tool sets from the `eddi://ai.labs.httpcalls` and
+ *   `eddi://ai.labs.mcpcalls` steps of every workflow of the agent, unless the
+ *   task switches the category off (`enableHttpCallTools` /
+ *   `enableMcpCallTools` default to on). Each is shown by its descriptor name and
+ *   links to its editor. The task's own `tools` list is deliberately ignored —
+ *   the backend never resolves it.
+ * - Built-in tools, only when `enableBuiltInTools` is on: the whitelist, or
+ *   "all" without one.
+ * - Memory tools, from the agent.
+ *
+ * Capabilities are not tools and have their own card in the details panel.
  */
-export function ActiveToolsList({ task, enableMemoryTools }: ActiveToolsListProps) {
+export function ActiveToolsList({ task, workflows, workflowsLoading, enableMemoryTools }: ActiveToolsListProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
-  const refs = useMemo(() => parseToolResourceRefs(task?.tools), [task?.tools]);
+  const httpOn = task?.enableHttpCallTools !== false;
+  const mcpOn = task?.enableMcpCallTools !== false;
+  const refs = useMemo(
+    () => collectWorkflowToolRefs(workflows, { http: httpOn, mcp: mcpOn }),
+    [workflows, httpOn, mcpOn],
+  );
 
   // One descriptor read per tool resource; react-query caches them by id, and a
   // failed read falls back to the id — an unresolved name is not a broken tool.
@@ -48,14 +65,12 @@ export function ActiveToolsList({ task, enableMemoryTools }: ActiveToolsListProp
     })),
   });
 
-  const builtIns = task?.builtInToolsWhitelist?.filter(Boolean) ?? [];
-  const allBuiltIns = !!task?.enableBuiltInTools && builtIns.length === 0;
+  // The backend ignores the whitelist unless built-ins are switched on.
+  const builtInsOn = task?.enableBuiltInTools === true;
+  const builtIns = builtInsOn ? (task?.builtInToolsWhitelist?.filter(Boolean) ?? []) : [];
+  const allBuiltIns = builtInsOn && builtIns.length === 0;
 
   const switches: { key: string; label: string; icon: typeof Globe }[] = [];
-  if (task?.enableHttpCallTools)
-    switches.push({ key: "http", label: t("Workforce.agentEditor.toolsWorkflowHttp", "Workflow HTTP calls"), icon: Globe });
-  if (task?.enableMcpCallTools)
-    switches.push({ key: "mcp", label: t("Workforce.agentEditor.toolsWorkflowMcp", "Workflow MCP tools"), icon: Plug });
   if (enableMemoryTools)
     switches.push({ key: "memory", label: t("Workforce.agentEditor.toolsMemory", "Memory"), icon: Database });
 
@@ -80,7 +95,14 @@ export function ActiveToolsList({ task, enableMemoryTools }: ActiveToolsListProp
         )}
       </div>
 
-      {total === 0 && (
+      {total === 0 && workflowsLoading && (
+        <div className="space-y-1.5" data-testid="active-tools-loading">
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      )}
+
+      {total === 0 && !workflowsLoading && (
         <span className="text-[11px] text-muted-foreground italic" data-testid="active-tools-empty">
           {t("Workforce.agentEditor.noTools", "None configured")}
         </span>
@@ -98,7 +120,7 @@ export function ActiveToolsList({ task, enableMemoryTools }: ActiveToolsListProp
               const label = name ?? `${ref.id.slice(0, 10)}…`;
               const content = (
                 <>
-                  <ResourceIcon slug={ref.slug} />
+                  <ResourceIcon kind={ref.kind} />
                   {query?.isLoading ? (
                     <Skeleton className="h-3 flex-1" />
                   ) : (

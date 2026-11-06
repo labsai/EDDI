@@ -5175,8 +5175,6 @@
       "toolsResources": "Ensembles d'outils connectés",
       "toolsBuiltIn": "Intégrés",
       "toolsAllBuiltIn": "Tous les outils intégrés",
-      "toolsWorkflowHttp": "Appels HTTP du workflow",
-      "toolsWorkflowMcp": "Outils MCP du workflow",
       "toolsMemory": "Mémoire",
       "toolsShowMore": "Afficher {{hidden}} de plus",
       "toolsShowFewer": "Afficher moins",

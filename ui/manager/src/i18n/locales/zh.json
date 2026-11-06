@@ -5122,8 +5122,6 @@
       "toolsResources": "已连接的工具集",
       "toolsBuiltIn": "内置",
       "toolsAllBuiltIn": "所有内置工具",
-      "toolsWorkflowHttp": "工作流 HTTP 调用",
-      "toolsWorkflowMcp": "工作流 MCP 工具",
       "toolsMemory": "记忆",
       "toolsShowMore": "再显示 {{hidden}} 个",
       "toolsShowFewer": "收起",

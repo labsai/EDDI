@@ -5122,8 +5122,6 @@
       "toolsResources": "Verbundene Tool-Sets",
       "toolsBuiltIn": "Integriert",
       "toolsAllBuiltIn": "Alle integrierten Tools",
-      "toolsWorkflowHttp": "Workflow-HTTP-Aufrufe",
-      "toolsWorkflowMcp": "Workflow-MCP-Tools",
       "toolsMemory": "Gedächtnis",
       "toolsShowMore": "{{hidden}} weitere anzeigen",
       "toolsShowFewer": "Weniger anzeigen",

@@ -5122,8 +5122,6 @@
       "toolsResources": "ชุดเครื่องมือที่เชื่อมต่อ",
       "toolsBuiltIn": "ในตัว",
       "toolsAllBuiltIn": "เครื่องมือในตัวทั้งหมด",
-      "toolsWorkflowHttp": "การเรียก HTTP ของเวิร์กโฟลว์",
-      "toolsWorkflowMcp": "เครื่องมือ MCP ของเวิร์กโฟลว์",
       "toolsMemory": "หน่วยความจำ",
       "toolsShowMore": "แสดงเพิ่มอีก {{hidden}} รายการ",
       "toolsShowFewer": "แสดงน้อยลง",

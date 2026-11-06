@@ -5122,8 +5122,6 @@
       "toolsResources": "연결된 도구 세트",
       "toolsBuiltIn": "기본 제공",
       "toolsAllBuiltIn": "모든 기본 제공 도구",
-      "toolsWorkflowHttp": "워크플로 HTTP 호출",
-      "toolsWorkflowMcp": "워크플로 MCP 도구",
       "toolsMemory": "메모리",
       "toolsShowMore": "{{hidden}}개 더 보기",
       "toolsShowFewer": "간단히 보기",

@@ -5334,8 +5334,6 @@
       "toolsResources": "مجموعات الأدوات المتصلة",
       "toolsBuiltIn": "مدمجة",
       "toolsAllBuiltIn": "جميع الأدوات المدمجة",
-      "toolsWorkflowHttp": "استدعاءات HTTP لسير العمل",
-      "toolsWorkflowMcp": "أدوات MCP لسير العمل",
       "toolsMemory": "الذاكرة",
       "toolsShowMore": "عرض {{hidden}} إضافية",
       "toolsShowFewer": "عرض أقل",

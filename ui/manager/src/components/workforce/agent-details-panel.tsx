@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { agentKeys } from "@/lib/query-keys";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { getAgent, getAgentDescriptors, parseResourceUri } from "@/lib/api/agents";
 import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { getWorkflow } from "@/lib/api/workflows";
@@ -102,6 +102,23 @@ export function AgentDetailsPanel({
     staleTime: 30_000,
     retry: false,
   });
+
+  // Every workflow of the agent: the backend discovers HTTP and MCP tools from
+  // all of them, not just the first. Same query key as above, so the first one
+  // is shared from the cache.
+  const workflowQueries = useQueries({
+    queries: (agentData?.workflows ?? []).map((uri) => {
+      const parsed = parseResourceUri(uri);
+      return {
+        queryKey: ["workflow", parsed.id, parsed.version],
+        queryFn: () => getWorkflow(parsed.id, parsed.version),
+        staleTime: 30_000,
+        retry: false,
+      };
+    }),
+  });
+  const allWorkflows = workflowQueries.map((q) => q.data);
+  const workflowsLoading = workflowQueries.some((q) => q.isLoading);
 
   // 3) Find the LLM step in the pipeline and extract the LLM resource URI
   const llmStep = workflowData?.workflowSteps?.find(
@@ -357,7 +374,12 @@ export function AgentDetailsPanel({
                 </>
               )}
 
-              <ActiveToolsList task={firstTask} enableMemoryTools={agentData?.enableMemoryTools} />
+              <ActiveToolsList
+                task={firstTask}
+                workflows={allWorkflows}
+                workflowsLoading={workflowsLoading}
+                enableMemoryTools={agentData?.enableMemoryTools}
+              />
             </div>
           </div>
 

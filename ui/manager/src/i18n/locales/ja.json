@@ -5122,8 +5122,6 @@
       "toolsResources": "接続済みツールセット",
       "toolsBuiltIn": "組み込み",
       "toolsAllBuiltIn": "すべての組み込みツール",
-      "toolsWorkflowHttp": "ワークフロー HTTP 呼び出し",
-      "toolsWorkflowMcp": "ワークフロー MCP ツール",
       "toolsMemory": "メモリ",
       "toolsShowMore": "さらに {{hidden}} 件表示",
       "toolsShowFewer": "表示を減らす",

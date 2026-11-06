@@ -5175,8 +5175,6 @@
       "toolsResources": "Conjuntos de ferramentas conectados",
       "toolsBuiltIn": "Integradas",
       "toolsAllBuiltIn": "Todas as ferramentas integradas",
-      "toolsWorkflowHttp": "Chamadas HTTP do fluxo",
-      "toolsWorkflowMcp": "Ferramentas MCP do fluxo",
       "toolsMemory": "Memória",
       "toolsShowMore": "Mostrar mais {{hidden}}",
       "toolsShowFewer": "Mostrar menos",

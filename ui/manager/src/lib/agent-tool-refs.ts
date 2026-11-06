@@ -1,20 +1,25 @@
 import { parseResourceUri } from "@/lib/api/agents";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
+import type { WorkflowConfiguration } from "@/lib/api/workflows";
 
 /**
- * One configuration resource an LLM task names in `tools` — an `eddi://` URI
- * such as `eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1`.
- *
- * The URI is what the backend needs and nothing a person can read: an agent
- * with sixteen API-call tools rendered as sixteen copies of the same 60-char
- * prefix. The parts a UI needs are the id and version (to resolve the
- * descriptor's name), and the resource slug (for an icon and a link).
+ * The step types the backend turns into LLM tools. Matched EXACTLY, as the
+ * backend does (`WorkflowTraversal.discoverConfigs` compares the type string):
+ * `HttpCallToolsProvider` looks for `eddi://ai.labs.httpcalls` and
+ * `McpToolsProvider` for `eddi://ai.labs.mcpcalls`. A step typed with the
+ * `eddi://ai.labs.apicalls` alias still runs in the pipeline but is not offered
+ * to the LLM, so it is deliberately not listed here.
  */
+export const HTTP_TOOLS_STEP_TYPE = "eddi://ai.labs.httpcalls";
+export const MCP_TOOLS_STEP_TYPE = "eddi://ai.labs.mcpcalls";
+
+/** One tool set the LLM receives: an apicalls or mcpcalls resource a workflow step points at. */
 export interface ToolResourceRef {
   uri: string;
   id: string;
   version: number;
-  /** `RESOURCE_TYPES` slug (`apicalls`, `mcpcalls`, …), or null if the store is unknown. */
+  kind: "http" | "mcp";
+  /** `RESOURCE_TYPES` slug (`apicalls`, `mcpcalls`), or null if the store is unknown. */
   slug: string | null;
 }
 
@@ -31,21 +36,41 @@ function slugFor(uri: string): string | null {
 }
 
 /**
- * Parse an LLM task's `tools` list into resource references, dropping blanks
- * and duplicates (the same id and version listed twice is one tool source).
+ * The tool sets an LLM task actually receives, read from the agent's workflows
+ * the way the backend reads them.
+ *
+ * NOT from the task's `tools` list: the backend never resolves those entries
+ * (`LlmConfiguration.Task#tools` — "a non-empty list only switches the task into
+ * agent mode"). HTTP and MCP tools are discovered from every workflow of the
+ * agent, gated by `enableHttpCallTools` / `enableMcpCallTools`, both of which
+ * default to on — so only an explicit `false` turns a category off.
+ *
+ * Duplicates (the same resource id and version in two steps) count once.
  */
-export function parseToolResourceRefs(tools: readonly string[] | undefined): ToolResourceRef[] {
-  if (!tools?.length) return [];
+export function collectWorkflowToolRefs(
+  workflows: readonly (WorkflowConfiguration | undefined)[],
+  options: { http: boolean; mcp: boolean },
+): ToolResourceRef[] {
   const seen = new Set<string>();
   const refs: ToolResourceRef[] = [];
-  for (const raw of tools) {
-    const uri = raw?.trim();
-    if (!uri) continue;
-    const { id, version } = parseResourceUri(uri);
-    const key = `${id}@${version}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    refs.push({ uri, id, version, slug: slugFor(uri) });
+  for (const workflow of workflows) {
+    for (const step of workflow?.workflowSteps ?? []) {
+      const kind =
+        step.type === HTTP_TOOLS_STEP_TYPE && options.http
+          ? "http"
+          : step.type === MCP_TOOLS_STEP_TYPE && options.mcp
+            ? "mcp"
+            : null;
+      if (!kind) continue;
+      const rawUri = step.config?.uri;
+      const uri = typeof rawUri === "string" ? rawUri.trim() : "";
+      if (!uri) continue;
+      const { id, version } = parseResourceUri(uri);
+      const key = `${id}@${version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({ uri, id, version, kind, slug: slugFor(uri) });
+    }
   }
   return refs;
 }
