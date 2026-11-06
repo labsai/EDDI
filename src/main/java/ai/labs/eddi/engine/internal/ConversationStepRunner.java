@@ -46,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
@@ -350,8 +351,15 @@ class ConversationStepRunner {
 
     /**
      * Turns whose final write was refused by the cluster fence, keyed by
-     * conversation (a node runs at most one turn of a conversation at a time);
-     * drained by the task so the coordinator dead-letters them.
+     * conversation; drained by the task so the coordinator dead-letters them.
+     * <p>
+     * Keyed by conversation, not by turn, because only a turn whose dispatcher is
+     * still waiting for it writes here (this map, {@link #leaseLostTurns},
+     * {@link #conflictedTurns}), and the coordinator starts a conversation's next
+     * turn only once that wait has ended. A node does NOT run at most one turn of a
+     * conversation at a time: a body the watchdog abandoned can still be running
+     * when the next turn starts, which is why its late outcome is inert (see
+     * {@link #runGuardedConversationStep}).
      */
     private final Map<String, ConversationFencedException> fencedTurns = new ConcurrentHashMap<>();
 
@@ -359,14 +367,16 @@ class ConversationStepRunner {
      * Conversations whose running turn was cancelled because its lease was lost:
      * the conversation belongs to whoever holds the lease now, so the cancelled
      * turn must not stamp a state on it (see the cancel branch of the completion
-     * callback). Keyed by conversation — a node runs at most one turn of one at a
-     * time — and cleared when the next turn of it starts.
+     * callback). Keyed by conversation: written while the turn still holds its
+     * lease, so before the next turn of the conversation can start, and cleared
+     * when that turn starts.
      */
     private final Set<String> leaseLostConversations = ConcurrentHashMap.newKeySet();
 
     /**
-     * Lease-lost turns whose outcome was discarded, keyed by conversation; drained
-     * by the task, which dead-letters them (see {@code call()}).
+     * Lease-lost turns whose outcome was discarded, keyed by conversation (see
+     * {@link #fencedTurns} for why that is safe); drained by the task, which
+     * dead-letters them (see {@code call()}).
      */
     private final Map<String, TurnLeaseLostException> leaseLostTurns = new ConcurrentHashMap<>();
 
@@ -633,7 +643,8 @@ class ConversationStepRunner {
             conversationService.conversationHitlService.populateToolApprovalsConfig(conversationMemory);
             try {
                 abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                        registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn);
+                        registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn,
+                        registration::dispatcherGaveUp);
             } catch (RejectedExecutionException e) {
                 // The runtime refused the body (its pool is saturated or shutting down), so
                 // it never started and nothing of it ran. Answered busy rather than left to
@@ -816,6 +827,15 @@ class ConversationStepRunner {
             // Otherwise the body is still running and settles when it returns.
         }
 
+        /**
+         * Whether the dispatching thread gave up on this turn (see {@link #release}).
+         * Published before that thread returns, so before the coordinator can start the
+         * conversation's next turn.
+         */
+        private boolean dispatcherGaveUp() {
+            return dispatcherGaveUp;
+        }
+
         /** Once only, from whichever side sees the abandoned body finished last. */
         private void settle() {
             if (settled.compareAndSet(false, true)) {
@@ -848,14 +868,29 @@ class ConversationStepRunner {
      * the client's response / stream terminates exactly once on every path.
      * Non-pause turns are answered immediately from the callback and are not
      * affected.
+     * <p>
+     * <b>The late outcome of an abandoned turn is inert.</b> Once the watchdog
+     * gives up, this method returns, the task ends and the coordinator starts the
+     * conversation's next turn, while a body whose interrupt was swallowed keeps
+     * running. Its outcome, when it finally arrives, belongs to a turn whose state
+     * the watchdog already recorded and whose caller is gone; the conversation now
+     * belongs to the next turn. So it only refreshes the state cache: settled as a
+     * cancelled turn, it stamped {@code EXECUTION_INTERRUPTED} over the
+     * {@code READY} the next turn had committed, and in cluster mode its expired
+     * lease dead-lettered the next turn as lease-lost after that turn had answered.
+     * An outcome that arrives before the dispatcher gave up is settled as before:
+     * no newer turn can exist yet.
      *
+     * @param dispatcherGaveUp
+     *            whether the dispatching thread has stopped waiting for this turn
      * @return {@code true} when the watchdog gave up on the turn (see
      *         {@link #waitForExecutionFinishOrTimeout})
      */
     boolean runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
                                        Environment environment, IConversationMemory conversationMemory,
                                        Callable<Void> executeConversation, ConversationState memoryStateAtSubmit,
-                                       ConversationState preTurnPersistedState, ConversationService.ProcessingTurn processingTurn) {
+                                       ConversationState preTurnPersistedState, ConversationService.ProcessingTurn processingTurn,
+                                       BooleanSupplier dispatcherGaveUp) {
         return waitForExecutionFinishOrTimeout(loggingContext, conversationId, conversationMemory,
                 runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
                     @Override
@@ -878,6 +913,11 @@ class ConversationStepRunner {
                                 conversationService.contextLogger.setLoggingContext(loggingContext);
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
+                                if (dispatcherGaveUp.getAsBoolean()) {
+                                    // Abandoned by the watchdog: inert (see the method doc).
+                                    refreshCachedState(conversationId);
+                                    return;
+                                }
                                 if (discardLeaseLostTurn(conversationId, conversationMemory)) {
                                     return;
                                 }
@@ -1075,7 +1115,12 @@ class ConversationStepRunner {
                             errorMessage = String.format(errorMessage, conversationId);
                             conversationService.contextLogger.setLoggingContext(loggingContext);
                             LOGGER.warn(errorMessage, t);
-                            if (conversationMemory.isCancelled() && !discardLeaseLostTurn(conversationId, conversationMemory)) {
+                            if (dispatcherGaveUp.getAsBoolean()) {
+                                // The late outcome of a turn the watchdog abandoned: inert (see the
+                                // method doc). The watchdog recorded its state; the next turn of
+                                // the conversation may already have committed its own.
+                                refreshCachedState(conversationId);
+                            } else if (conversationMemory.isCancelled() && !discardLeaseLostTurn(conversationId, conversationMemory)) {
                                 // Same settlement as a cancelled turn that completed: the
                                 // pipeline's own failure handling may have cached ERROR on its
                                 // way out, and for a /cancel or GDPR stop of a say turn nothing
