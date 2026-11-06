@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -59,7 +60,7 @@ class ChannelConnectorMigrationBranchTest {
         @DisplayName("already applied — skips migration")
         void alreadyApplied() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString()))
-                    .thenReturn(new MigrationLog("channel-connector-migration-complete"));
+                    .thenReturn(new MigrationLog("channel-connector-migration-v2-complete"));
 
             migration.runIfNeeded();
 
@@ -267,9 +268,15 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
 
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
+
             migration.runIfNeeded();
 
             verify(channelStore).create(any(ChannelIntegrationConfiguration.class));
+            verify(descriptorStore).createDescriptor(eq("aabbccddeeff112233445566"), eq(1), any(DocumentDescriptor.class));
             verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
         }
 
