@@ -41,6 +41,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -475,12 +476,7 @@ class ConversationStepRunner {
         // lease is already gone, does not run: it is answered busy (409 + Retry-After)
         // and its input is not consumed.
         if (lease != null && lease.fence() != null && !fenceRaised(conversationId, lease)) {
-            conversationService.contextLogger.setLoggingContext(loggingContext);
-            submittedMemory.setConversationState(ConversationState.IN_PROGRESS);
-            if (skipNotifier != null) {
-                skipNotifier.accept(submittedMemory);
-            }
-            return null;
+            return skipAsBusy(submittedMemory, loggingContext, skipNotifier);
         }
 
         // Queued-say guard: this memory copy was loaded at REST-request time;
@@ -495,6 +491,14 @@ class ConversationStepRunner {
         // state, so the client gets a prompt, honest answer instead of a watchdog
         // timeout.
         //
+        // A conversation that no longer exists (deleted, or erased by a GDPR request,
+        // while this turn was queued) is skipped the same way and reported as ENDED:
+        // the say path only ever runs on a stored conversation, so a missing document
+        // means it is gone. Run on the request-time snapshot, the turn would spend its
+        // model and tool calls and write the user's long-term properties back after
+        // the erasure; only its final persist would fail. ENDED is what REST answers
+        // 410 for, and what the clients recover from by starting a new conversation.
+        //
         // EXECUTION_INTERRUPTED is deliberately NOT skipped: unlike ENDED it is a
         // RECOVERABLE marker meaning "the previous turn did not finish" (an
         // agentTimeout watchdog expiry, or HitlCrashRecoveryObserver parking a
@@ -506,14 +510,34 @@ class ConversationStepRunner {
         // to READY.
         // State and revision in one read (the stale-snapshot guard below needs the
         // revision); a store that cannot answer both at once is asked twice, as before.
-        IConversationMemoryStore.StateAndRevision persisted = conversationMemoryStore.getStateAndRevision(conversationId);
-        ConversationState persistedState = persisted != null ? persisted.state() : conversationMemoryStore.getConversationState(conversationId);
-        if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
-                || persistedState == ConversationState.ENDED) {
-            submittedMemory.setConversationState(persistedState);
+        // A store that cannot be read does not run the turn either: it is answered
+        // busy, like a fence that cannot be raised. Escaping from here, the failure
+        // reached the coordinator, which dead-lettered the turn, and its caller never
+        // heard back (REST waited for its 408; a stream got no terminal event at all).
+        IConversationMemoryStore.StateAndRevision persisted;
+        ConversationState persistedState;
+        try {
+            persisted = conversationMemoryStore.getStateAndRevision(conversationId);
+            persistedState = persisted != null ? persisted.state() : conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException e) {
             conversationService.contextLogger.setLoggingContext(loggingContext);
-            LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
-                    conversationId, persistedState);
+            LOGGER.warnf("Turn of conversation %s not run: could not read its state before it started (%s) — reporting it as "
+                    + "busy; the input was not consumed", sanitize(conversationId), e.getMessage());
+            return skipAsBusy(submittedMemory, loggingContext, skipNotifier);
+        }
+        boolean gone = persisted != null && persisted.state() == null && persisted.revision() == null;
+        ConversationState skipAs = gone ? ConversationState.ENDED : persistedState;
+        if (skipAs == ConversationState.AWAITING_HUMAN || skipAs == ConversationState.IN_PROGRESS
+                || skipAs == ConversationState.ENDED) {
+            submittedMemory.setConversationState(skipAs);
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            if (gone) {
+                LOGGER.infof("Skipping queued turn for conversation %s: the conversation no longer exists (deleted or erased "
+                        + "while the turn was queued) — reporting it as ended", sanitize(conversationId));
+            } else {
+                LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
+                        conversationId, persistedState);
+            }
             if (skipNotifier != null) {
                 skipNotifier.accept(submittedMemory);
             }
@@ -607,10 +631,37 @@ class ConversationStepRunner {
             // a stranded entry would keep a finished turn's memory reachable AND
             // make a later cancel signal the wrong (dead) pipeline.
             conversationService.conversationHitlService.populateToolApprovalsConfig(conversationMemory);
-            abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                    registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn);
+            try {
+                abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
+                        registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn);
+            } catch (RejectedExecutionException e) {
+                // The runtime refused the body (its pool is saturated or shutting down), so
+                // it never started and nothing of it ran. Answered busy rather than left to
+                // escape to the coordinator, which dead-lettered it with no answer for its
+                // caller.
+                abandoned = false;
+                conversationService.contextLogger.setLoggingContext(loggingContext);
+                LOGGER.warnf("Turn of conversation %s not run: the runtime refused it (%s) — reporting it as busy; the input "
+                        + "was not consumed", sanitize(conversationId), e.getMessage());
+                return skipAsBusy(conversationMemory, loggingContext, skipNotifier);
+            }
         } finally {
             registration.release(abandoned, processingTurn);
+        }
+        return null;
+    }
+
+    /**
+     * Answers a turn that was not run as busy: {@code 409} with {@code Retry-After}
+     * on REST, {@code done} with {@code IN_PROGRESS} on a stream. Its input was not
+     * consumed, so a retry runs it normally.
+     */
+    private Void skipAsBusy(IConversationMemory memory, Map<String, String> loggingContext,
+                            Consumer<IConversationMemory> skipNotifier) {
+        conversationService.contextLogger.setLoggingContext(loggingContext);
+        memory.setConversationState(ConversationState.IN_PROGRESS);
+        if (skipNotifier != null) {
+            skipNotifier.accept(memory);
         }
         return null;
     }
