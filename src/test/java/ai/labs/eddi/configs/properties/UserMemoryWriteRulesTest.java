@@ -84,4 +84,14 @@ class UserMemoryWriteRulesTest {
         assertEquals(UserMemoryEntry.Assessment.ACCEPTED, defaulted.assessment());
         assertNull(defaulted.supersededBy());
     }
+
+    @Test
+    @DisplayName("withDefaults clears sourceEntryIds, with or without a category: only Dream records provenance")
+    void withDefaultsClearsSourceEntryIds() {
+        var withCategory = entry("k", "v", "fact", Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withCategory).sourceEntryIds());
+
+        var withoutCategory = entry("k", "v", null, Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withoutCategory).sourceEntryIds());
+    }
 }

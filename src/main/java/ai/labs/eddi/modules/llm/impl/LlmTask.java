@@ -3191,6 +3191,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         effective.setMaxTurnsPerUpdate(configured.getMaxTurnsPerUpdate());
         effective.setMaxCharsPerUpdate(configured.getMaxCharsPerUpdate());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
+        effective.setCiteSources(configured.isCiteSources());
+        effective.setOnValidationFailure(configured.getOnValidationFailure());
         return effective;
     }
 

@@ -1094,7 +1094,18 @@ other side of the disagreement was rewritten, deleted or retired. See
 eddi_summarization_calls_total              # Rolling-summary generations attempted
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
+eddi_summary_citation_checks_total          # Summaries checked under citeSources, by source and outcome
 ```
+
+`eddi_summary_citation_checks_total` carries `source` (`conversation` for the rolling summary,
+`dream` for a Dream consolidation group) and `outcome`: `passed` (the first answer passed),
+`retried` (it failed and the one retry passed), `kept` (it failed and was stored anyway under
+`onValidationFailure: keep`) and `fallback` (it failed and was discarded — the previous summary,
+or for Dream the original entries, stay). It stays at zero unless `citeSources` is on. A steady
+`fallback` rate on `conversation` is worth a look: each one leaves the summary boundary where it
+was, so the next turn pays for another summarizer call. See
+[langchain.md](langchain.md#traceable-summaries-citesources) and
+[user-memory.md](user-memory.md#traceable-consolidation-citesources).
 
 ### RAG Ingestion Metrics
 

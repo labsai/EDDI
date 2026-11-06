@@ -1345,7 +1345,7 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer, and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer (a [`citeSources`](#traceable-summaries-citesources) retry re-sends that same screened content, and the citation check reads it too), and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks the spend gate and that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; a reached spend limit or an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.) A reprompted answer is screened by the output guardrails again from the first one, but it is **not** run through `responseValidation` a second time — a guardrail that must enforce the answer's shape belongs in `outputGuardrails` (`json-object`) itself.
 - **Tool-call arguments** are screened by a separate list, [`toolCallGuardrails`](tool-call-guardrails.md): the same types and actions, run on the arguments of each tool call the model asks for — before the approval gate, and again, block-only, on an approved or edited call.
 - An `onError` fallback is the author's own text and is not screened.
@@ -1951,6 +1951,8 @@ back into the full text through the `conversationRecall` built-in tool.
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 | `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
 | `summarizationPrompt`          | string  | Replaces the built-in summarizer instructions entirely. The built-in prompt asks for goals, decisions and their reasons, corrections and commitments, and tells the model to copy every opaque identifier (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names) exactly as written. A custom prompt gets none of that, so restate the identifier rule if your agent deals in order numbers, ticket ids or links | (built-in) |
+| `citeSources`                  | boolean | Ask for a citation on every point and check the answer before it is stored — see [Traceable summaries](#traceable-summaries-citesources). While false, nothing is checked and the prompt is unchanged | false   |
+| `onValidationFailure`          | string  | What happens to a summary that fails the `citeSources` check: `keep`, `retry_once` or `fallback_to_previous`. Ignored while `citeSources` is false | keep    |
 | `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
 Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
@@ -1961,6 +1963,71 @@ the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A r
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
 > not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
 > answers from the condensed view with no error and no log line.
+
+#### Traceable summaries (`citeSources`)
+
+A summary is prose a model wrote, and nothing in it says which turn a point came from — or whether
+a number in it was in the conversation at all. With `citeSources: true` the summary becomes
+extractive and checkable:
+
+```json
+{
+  "conversationSummary": {
+    "enabled": true,
+    "citeSources": true,
+    "onValidationFailure": "retry_once"
+  }
+}
+```
+
+**The prompt.** The summarizer is told to end every bullet point with the turns it is based on —
+`[turn 5]`, `[turns 4-7]`, `[turns 4-7, 9]` — to copy every number exactly as written, and to write
+"unclear in source" rather than guess. The rules are appended to the built-in prompt and to a
+custom `summarizationPrompt` alike. The turn numbers are the ones the summarizer input labels the
+turns with and `conversationRecall` reads: conversation step indices, 0-based, turn 0 being the
+opening step. `turn`/`turns` and `step`/`steps` are both accepted.
+
+**The check** runs after the call, without a model, on the summary split into units (a bullet with
+its continuation lines, or any other line on its own):
+
+- Every citation must lie in the summarized range: the new batch `[previous boundary, new boundary)`,
+  plus `[0, previous boundary)` when there is a previous summary. A citation of a turn still in the
+  recent window, or of an earlier turn when there is no previous summary, fails.
+- Every bullet point must carry at least one citation. Other lines (headings, prose) need one only
+  for the numbers they state.
+- Every number in a unit must appear **verbatim** in the turns the unit cites. A turn's text is its
+  user input and agent output **as the summarizer saw it** — after the input guardrails were
+  re-applied (below), and, for a turn cut to fit `maxCharsPerUpdate`, only its head — without the
+  `Turn N` labels. A number is a run of digits with optional `,`/`.` separators between digit groups,
+  an optional leading `-` (not after a letter or digit, so the `7` of `4-7` has none) and an optional
+  trailing `%`; `1,000` matches only `1,000` — not `1.000`, `1000` or `1,000.0` — and `10%` does not
+  match `10`. Not checked: the indices inside citations, unbracketed references such as `turn 5` or
+  `steps 3-4`, and a numbered-list marker (`1.`) at the start of a line.
+- **Points carried over from the previous summary.** An update sends the previous summary plus the
+  new turns; the old turns themselves are not sent again. A citation of a turn before the previous
+  boundary is therefore checked against the **previous summary's text** (its own citation indices
+  removed), the only source of those turns the summarizer saw. A previous summary written before
+  `citeSources` was switched on has no citations: the model is told to cite its whole range (the
+  heading names it), and its numbers are taken on trust from that summary.
+
+**On failure**, `onValidationFailure` decides; each checked summary is counted on
+`eddi.summary.citation.checks{source="conversation",outcome}` ([metrics](metrics.md#conversation-summarization-metrics)):
+
+| Value | What happens | `outcome` |
+| --- | --- | --- |
+| `keep` *(default)* | The summary is stored anyway, with a WARN listing the problems | `kept` |
+| `retry_once` | One more summarizer call, with the problems appended to the instructions. It sends the same, already screened content, is asked of the spend check (conversation ceiling and tenant budget) first like the first call, and its tokens are added to the first call's, so the step records and prices both. If it fails the check too, throws, comes back empty or is refused by the spend check, it falls back | `retried` on success, else `fallback` |
+| `fallback_to_previous` | The new summary is discarded. The previous summary and its boundary stay, so the turns past it keep reaching the model verbatim, and the next turn tries again | `fallback` |
+
+A passing summary counts as `passed`. Note what `fallback` costs: like a failed summarizer call, it
+retries on the next turn — a model that never cites correctly pays for a summarizer call on every
+turn while the verbatim window grows (up to `maxTurnsPerUpdate` turns per attempt). That is why the
+default is `keep`, and why a steady `fallback` rate is worth an alert.
+
+The summary stays a derived view: the check reads conversation memory and never changes it, and a
+failing summary only ever replaces the previous summary property or leaves it alone. To read what a
+citation points at, the model passes it to `conversationRecall` as it stands — `[turns 4-7, 9]`
+returns turns 4 to 7 and 9 (each once, clamped to the summarized turns, at most `maxRecallTurns`).
 
 ### In-Turn Tool Context Budget
 
