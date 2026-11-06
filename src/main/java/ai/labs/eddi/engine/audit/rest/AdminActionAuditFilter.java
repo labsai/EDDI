@@ -6,7 +6,10 @@ package ai.labs.eddi.engine.audit.rest;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import io.quarkus.security.Authenticated;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -19,8 +22,11 @@ import jakarta.ws.rs.ext.Provider;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,6 +34,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -46,8 +53,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * endpoint is covered without anyone remembering to add it: every mutating
  * request is recorded except those under {@link #DATA_PLANE_SEGMENTS} — the
  * chat and conversation APIs (already audited per turn), the OpenAI-compatible
- * and A2A surfaces, OAuth and channel callbacks, and the UI shells. Reads are
- * not recorded.
+ * and A2A surfaces, OAuth and channel callbacks, and the UI shells. An
+ * {@linkplain #adminOnly admin-only} endpoint under those roots — one whose
+ * {@code @RolesAllowed} does not admit {@code eddi-user}, such as the
+ * conversation state reset and the managed-conversation mappings — is recorded
+ * all the same: the path says where an endpoint lives, its roles say whether it
+ * is administrative. Reads are not recorded.
  * <p>
  * <b>What a record holds</b>: the caller's principal (or {@code anonymous}),
  * the HTTP method, the request path, the resource method that served it, and
@@ -88,10 +99,23 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
      * ({@code agents}, {@code userconversationstore}, {@code chat}), the
      * OpenAI-compatible {@code v1} and {@code a2a} surfaces, OAuth and channel
      * callbacks ({@code connections}, {@code integrations}), the MCP transport and
-     * the UI shells.
+     * the UI shells. An {@linkplain #adminOnly admin-only} endpoint under one of
+     * them is recorded regardless.
      */
     static final Set<String> DATA_PLANE_SEGMENTS = Set.of("agents", "userconversationstore", "chat", "v1", "a2a", "connections", "integrations",
             "mcp", "manage", "welcome", "workforce", "q");
+
+    /**
+     * The conversing role; an endpoint that does not admit it is administrative.
+     */
+    static final String USER_ROLE = "eddi-user";
+
+    /**
+     * {@link #adminOnly} per resource method, which never changes at runtime:
+     * bounded by the number of endpoints, and it keeps the reflection off the chat
+     * path, which passes through here on every turn.
+     */
+    private static final Map<Method, Boolean> ADMIN_ONLY = new ConcurrentHashMap<>();
 
     private final Instance<AuditLedgerService> ledger;
     private final Instance<SecurityIdentity> identity;
@@ -114,13 +138,13 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
             return;
         }
         try {
-            String path = request.getUriInfo().getPath();
-            if (!isAdministrative(path)) {
-                return;
-            }
             Method resourceMethod = resourceInfo != null ? resourceInfo.getResourceMethod() : null;
             if (resourceMethod == null) {
                 return; // no endpoint matched — a scanner's 404, not an action
+            }
+            String path = request.getUriInfo().getPath();
+            if (!isAdministrative(path) && !adminOnly(resourceMethod)) {
+                return;
             }
             if (!ledger.isResolvable()) {
                 return;
@@ -155,6 +179,58 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
         int slash = trimmed.indexOf('/');
         String first = (slash < 0 ? trimmed : trimmed.substring(0, slash)).toLowerCase(Locale.ROOT);
         return !DATA_PLANE_SEGMENTS.contains(first);
+    }
+
+    /**
+     * Whether an endpoint is admin-only: its effective {@code @RolesAllowed} does
+     * not admit {@value #USER_ROLE}. Such an endpoint is administrative wherever
+     * its path lives, and the role is declared on it already, so nothing new has to
+     * be remembered when one is added under a data-plane root.
+     * <p>
+     * The nearest declaration wins, as Quarkus applies it: a method's own
+     * {@code @RolesAllowed}, {@code @PermitAll} or {@code @Authenticated} before
+     * its class's. Each is looked for on the implementation first and then on the
+     * interface that declares the method — {@link ResourceInfo} hands over the
+     * implementation method, and Java does not inherit annotations from an
+     * interface, which is where this codebase declares its roles.
+     */
+    static boolean adminOnly(Method resourceMethod) {
+        return ADMIN_ONLY.computeIfAbsent(resourceMethod, AdminActionAuditFilter::resolveAdminOnly);
+    }
+
+    private static boolean resolveAdminOnly(Method resourceMethod) {
+        for (AnnotatedElement scope : securityScopes(resourceMethod)) {
+            RolesAllowed roles = scope.getAnnotation(RolesAllowed.class);
+            if (roles != null) {
+                return !Arrays.asList(roles.value()).contains(USER_ROLE);
+            }
+            if (scope.isAnnotationPresent(PermitAll.class) || scope.isAnnotationPresent(Authenticated.class)) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Where a security annotation for a resource method can sit, nearest first: the
+     * method, its same-signature declaration on each interface, the implementation
+     * class, then each of those interfaces.
+     */
+    private static List<AnnotatedElement> securityScopes(Method resourceMethod) {
+        List<Method> declarations = new ArrayList<>();
+        declarations.add(resourceMethod);
+        for (Class<?> contract : resourceMethod.getDeclaringClass().getInterfaces()) {
+            try {
+                declarations.add(contract.getMethod(resourceMethod.getName(), resourceMethod.getParameterTypes()));
+            } catch (NoSuchMethodException e) {
+                // This interface does not declare the method, so its roles do not apply to it.
+            }
+        }
+        List<AnnotatedElement> scopes = new ArrayList<>(declarations);
+        for (Method declaration : declarations) {
+            scopes.add(declaration.getDeclaringClass());
+        }
+        return scopes;
     }
 
     /**

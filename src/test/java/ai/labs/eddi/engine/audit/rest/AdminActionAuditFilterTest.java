@@ -12,6 +12,11 @@ import java.util.List;
 import java.util.ArrayList;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.internal.RestAgentEngine;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -23,11 +28,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.security.Principal;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -46,10 +54,34 @@ class AdminActionAuditFilterTest {
     private ContainerRequestContext request;
     private ContainerResponseContext response;
     private UriInfo uriInfo;
+    private ResourceInfo resourceInfo;
 
     /** Stand-in for a resource method. */
     @SuppressWarnings("unused")
     public void deleteUserData() {
+    }
+
+    /**
+     * Stand-in for a conversation endpoint, which every conversing role may call.
+     */
+    @SuppressWarnings("unused")
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
+    public void conversationTurn() {
+    }
+
+    /** Stand-in for an admin-only resource class whose methods override it. */
+    @RolesAllowed("eddi-admin")
+    public static class AdminOnlyResource {
+        public void inherited() {
+        }
+
+        @PermitAll
+        public void open() {
+        }
+
+        @RolesAllowed({"eddi-admin", "eddi-user"})
+        public void forUsers() {
+        }
     }
 
     @BeforeEach
@@ -71,7 +103,7 @@ class AdminActionAuditFilterTest {
         when(identityInstance.get()).thenReturn(identity);
 
         filter = new AdminActionAuditFilter(ledgerInstance, identityInstance, true);
-        ResourceInfo resourceInfo = mock(ResourceInfo.class);
+        resourceInfo = mock(ResourceInfo.class);
         Method method = AdminActionAuditFilterTest.class.getMethod("deleteUserData");
         when(resourceInfo.getResourceMethod()).thenReturn(method);
         filter.resourceInfo = resourceInfo;
@@ -168,16 +200,84 @@ class AdminActionAuditFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/agents/production/agent1", "/agents/conv-1", "/v1/chat/completions", "/userconversationstore/x/say",
-            "/integrations/slack/events", "/connections/abc/callback", "/a2a/agent1"})
+    @ValueSource(strings = {"/agents/production/agent1", "/agents/conv-1", "/agents/managed/support/alice", "/v1/chat/completions",
+            "/integrations/slack/events", "/connections/callback", "/a2a/agents/agent1"})
     @DisplayName("conversation and data-plane traffic is not recorded here — it is audited per turn")
-    void dataPlaneIsNotRecorded(String path) {
+    void dataPlaneIsNotRecorded(String path) throws Exception {
+        when(resourceInfo.getResourceMethod()).thenReturn(AdminActionAuditFilterTest.class.getMethod("conversationTurn"));
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn(path);
 
         filter.filter(request, response);
 
         verify(ledger, never()).submit(any());
+    }
+
+    /**
+     * The path rule alone let an admin-only endpoint under a data-plane root go
+     * unrecorded: resetting a conversation's state and creating or deleting a
+     * user's managed-conversation mapping are administrative by definition — their
+     * {@code @RolesAllowed} does not admit {@code eddi-user} — and were on no
+     * record. The rows are the real endpoints, so the roles come from where Quarkus
+     * reads them: the interface, which the implementation method does not inherit
+     * them from.
+     */
+    static Stream<Arguments> adminOnlyDataPlaneEndpoints() throws Exception {
+        return Stream.of(
+                Arguments.of("PATCH", "/agents/conv-1/state", RestAgentEngine.class.getMethod("resetState", String.class, String.class), false),
+                Arguments.of("POST", "/userconversationstore/userconversations/support/alice", RestUserConversationStore.class
+                        .getMethod("createUserConversation", String.class, String.class, UserConversation.class), true),
+                Arguments.of("DELETE", "/userconversationstore/userconversations/support/alice",
+                        RestUserConversationStore.class.getMethod("deleteUserConversation", String.class, String.class), true));
+    }
+
+    @ParameterizedTest
+    @MethodSource("adminOnlyDataPlaneEndpoints")
+    @DisplayName("an admin-only endpoint under a data-plane root is recorded — its roles make it administrative")
+    void adminOnlyEndpointUnderDataPlaneIsRecorded(String method, String path, Method resourceMethod, boolean namesAUser) {
+        when(resourceInfo.getResourceMethod()).thenReturn(resourceMethod);
+        when(request.getMethod()).thenReturn(method);
+        when(uriInfo.getPath()).thenReturn(path);
+        if (namesAUser) {
+            var parameters = new MultivaluedHashMap<String, String>();
+            parameters.add("intent", "support");
+            parameters.add("userId", "alice");
+            when(uriInfo.getPathParameters()).thenReturn(parameters);
+        }
+        when(response.getStatus()).thenReturn(200);
+
+        filter.filter(request, response);
+
+        AuditEntry entry = recorded();
+        assertEquals("admin-ann", entry.userId());
+        assertEquals(method, entry.input().get("method"));
+        assertEquals(resourceMethod.getDeclaringClass().getSimpleName() + "#" + resourceMethod.getName(), entry.input().get("resource"));
+        String recordedPath = (String) entry.input().get("path");
+        assertFalse(recordedPath.contains("alice"), recordedPath);
+        if (namesAUser) {
+            assertTrue(recordedPath.startsWith("/userconversationstore/userconversations/support/gdpr-erased:"), recordedPath);
+        }
+    }
+
+    @Test
+    @DisplayName("an endpoint under a data-plane root that admits eddi-user stays unrecorded")
+    void userEndpointUnderDataPlaneIsNotRecorded() throws Exception {
+        when(resourceInfo.getResourceMethod()).thenReturn(RestAgentEngine.class.getMethod("cancelConversation", String.class));
+        when(request.getMethod()).thenReturn("POST");
+        when(uriInfo.getPath()).thenReturn("/agents/conv-1/cancel");
+
+        filter.filter(request, response);
+
+        verify(ledger, never()).submit(any());
+    }
+
+    @Test
+    @DisplayName("a method's own security annotation decides before its class's")
+    void methodLevelSecurityDecidesBeforeClassLevel() throws Exception {
+        assertTrue(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("inherited")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("open")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("forUsers")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminActionAuditFilterTest.class.getMethod("deleteUserData")), "no roles declared");
     }
 
     @Test
