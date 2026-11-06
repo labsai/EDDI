@@ -360,7 +360,7 @@ class RestAgentManagementExtendedTest {
             assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
 
             assertNothingCreatedOrReplaced();
-            verify(asyncResponse, never()).resume(any());
+            verifyNoInteractions(asyncResponse);
         }
 
         @Test
@@ -392,7 +392,7 @@ class RestAgentManagementExtendedTest {
             assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
 
             assertNothingCreatedOrReplaced();
-            verify(asyncResponse, never()).resume(any());
+            verifyNoInteractions(asyncResponse);
         }
 
         @Test
