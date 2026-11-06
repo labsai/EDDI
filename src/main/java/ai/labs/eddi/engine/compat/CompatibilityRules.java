@@ -169,6 +169,39 @@ public final class CompatibilityRules {
         scan(location, node, validator, findings, 0);
     }
 
+    /**
+     * {@link #scanTemplates} for one LLM task, with its {@code parameters} checked
+     * the way {@code LlmTask.runTemplateEngineOnParams} renders them: after
+     * {@link LlmTask#escapeConfigReferenceMentions} has wrapped every
+     * {@code ${vault:…}}-style mention in a raw section.
+     * <p>
+     * Without that, a prompt that merely TALKS about a reference — the Platform
+     * Operator's tells the model to store keys as {@code ${vault:key-name}} — was
+     * reported as {@code TEMPLATE_DOES_NOT_PARSE} on every deploy although every
+     * turn renders it fine. Only the parameters: the rest of an LLM task (property
+     * instructions, guardrail texts) is rendered elsewhere, without that escape, so
+     * a mention there really does fail and is still reported.
+     */
+    public static void scanLlmTaskTemplates(String location, Object task, Function<String, String> validator, List<Finding> findings) {
+        if (!(task instanceof Map<?, ?> fields)) {
+            scanTemplates(location, task, validator, findings);
+            return;
+        }
+        Function<String, String> asRendered = text -> validator.apply(LlmTask.escapeConfigReferenceMentions(text));
+        for (var entry : fields.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            String path = location + "." + key;
+            if (LlmTask.TEMPLATE_SKIP_PARAMS.contains(key)) {
+                continue;
+            }
+            if ("parameters".equals(key)) {
+                scan(path, entry.getValue(), asRendered, findings, 1);
+            } else {
+                scan(path, entry.getValue(), validator, findings, 1);
+            }
+        }
+    }
+
     private static void scan(String path, Object node, Function<String, String> validator, List<Finding> findings, int depth) {
         if (node == null || depth > MAX_DEPTH) {
             return;

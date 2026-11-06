@@ -10,7 +10,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -83,11 +85,75 @@ class McpApiToolBuilderArgumentSchemaTest {
     }
 
     @Test
-    @DisplayName("every tool parameter is required, as the untyped tools made them")
+    @DisplayName("path parameters and the body are required; a query parameter only when the spec says so")
     void topLevelRequired() {
         JsonNode schema = schemaOf("invite");
         List<String> required = MAPPER.convertValue(schema.get("required"), List.class);
-        assertEquals(List.of("teamId", "notify", "mode", "tags", "locale", "requestBody"), required);
+        assertEquals(List.of("teamId", "requestBody"), required);
+    }
+
+    @Test
+    @DisplayName("an optional query parameter is recorded, so a value the model leaves out is not sent as ?name=")
+    void optionalQueryParamsRecorded() {
+        // By the spec's NAME (locale comes through a $ref), not the tool variable.
+        assertEquals(List.of("notify", "mode", "tags", "locale"), call("invite").getRequest().getOptionalQueryParams());
+    }
+
+    private static final String REQUIRED_QUERY_SPEC = """
+            {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+             "paths":{"/docs/{id}":{"patch":{"operationId":"patchDoc","tags":["d"],
+               "parameters":[
+                 {"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+                 {"name":"version","in":"query","required":true,"schema":{"type":"integer"}},
+                 {"name":"dryRun","in":"query","schema":{"type":"boolean"}}],
+               "responses":{"200":{"description":"ok"}}}}}}
+            """;
+
+    @Test
+    @DisplayName("a query parameter the spec marks required stays required and is always sent")
+    void requiredQueryParamStaysRequired() {
+        ApiCall call = McpApiToolBuilder.parseAndBuild(REQUIRED_QUERY_SPEC, null, null, null).configsByGroup().values().stream()
+                .flatMap(c -> c.getHttpCalls().stream()).findFirst().orElseThrow();
+        JsonNode schema = MAPPER.valueToTree(call.getArgumentSchema());
+        assertEquals("[\"id\",\"version\"]", schema.get("required").toString());
+        assertEquals(List.of("dryRun"), call.getRequest().getOptionalQueryParams());
+    }
+
+    private static final String REPEATED_IDS_SPEC = """
+            {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+             "paths":{
+              "/groups/{groupId}/lessons":{"get":{"operationId":"list","tags":["g"],
+                "parameters":[{"name":"groupId","in":"path","required":true,"schema":{"type":"string"}}],
+                "responses":{"200":{"description":"ok"}}}},
+              "/groups/{groupId}/outcomes":{"get":{"operationId":"list","tags":["g"],
+                "parameters":[{"name":"groupId","in":"path","required":true,"schema":{"type":"string"}}],
+                "responses":{"200":{"description":"ok"}}}},
+              "/things":{"get":{"operationId":"list","tags":["t"],"responses":{"200":{"description":"ok"}}}}}}
+            """;
+
+    @Test
+    @DisplayName("a repeated operationId gives every operation its own tool name, so none is dropped at assembly")
+    void repeatedOperationIdsStayDistinct() {
+        List<ApiCall> calls = McpApiToolBuilder.parseAndBuild(REPEATED_IDS_SPEC, null, null, null).configsByGroup().values().stream()
+                .flatMap(c -> c.getHttpCalls().stream()).toList();
+        List<String> names = calls.stream().map(ApiCall::getName).toList();
+        assertEquals(3, names.size(), names.toString());
+        assertEquals(3, names.stream().distinct().count(), "names must be unique: " + names);
+        // The first keeps its operationId; a repeat takes the method-and-path slug.
+        assertEquals("list", names.get(0));
+        assertTrue(names.contains("get_groups_groupid_outcomes"), names.toString());
+        for (ApiCall call : calls) {
+            assertEquals(call.getName() + "_response", call.getResponseObjectName());
+        }
+    }
+
+    @Test
+    @DisplayName("uniqueToolName falls back to a numeric suffix when the slug is taken too")
+    void uniqueToolNameSuffix() {
+        var taken = new HashSet<>(Set.of("list", "get_things"));
+        assertEquals("get_things_2", McpApiToolBuilder.uniqueToolName("list", "get", "/things", taken));
+        assertEquals("fresh", McpApiToolBuilder.uniqueToolName("fresh", "get", "/x", taken));
+        assertTrue(taken.containsAll(Set.of("get_things_2", "fresh")));
     }
 
     @Test

@@ -23,6 +23,10 @@ services:
     command: ["node", "/stub/llm-stub.mjs"]
     environment:
       PORT: "8089"
+    ports:
+      # Loopback only, for the spec's GET /__e2e/tools (the tools the model was
+      # offered). EDDI reaches the stub over the compose network, not this port.
+      - "127.0.0.1:8089:8089"
     volumes:
       - ./e2e/operator/llm-stub.mjs:/stub/llm-stub.mjs:ro
     healthcheck:

@@ -1,5 +1,6 @@
 import { test, expect, type Request } from "@playwright/test";
 import { navigateTo, API_BASE } from "../fullstack/fullstack-helpers";
+import { endpointsForScope } from "@/lib/operator/tool-scopes";
 
 /**
  * Operator activation E2E — the Platform Operator activated through the
@@ -23,8 +24,12 @@ import { navigateTo, API_BASE } from "../fullstack/fullstack-helpers";
  *   4. read the gate back (`verifyGateInstalled`) and run the gate dry-run;
  *   5. the background probes: the read canary (one real tool call) and the
  *      write canary (a real gated write that must pause);
- *   6. and finally a chat turn whose tool call must reach the platform and
- *      come back with data.
+ *   6. a chat turn whose tool call must reach the platform and come back
+ *      with data;
+ *   7. and what the model was actually offered: one distinct tool per
+ *      allow-listed endpoint (a repeated operationId once made assembly drop
+ *      one), with optional query parameters left optional — and no deploy-time
+ *      warning that the prompt does not parse as a template.
  *
  * The model is `llm-stub.mjs`, a deterministic OpenAI-compatible server, so no
  * paid provider is involved and the outcome does not depend on a model's mood.
@@ -40,6 +45,18 @@ import { navigateTo, API_BASE } from "../fullstack/fullstack-helpers";
 const LLM_BASE_URL = process.env.OPERATOR_E2E_LLM_BASE_URL ?? "http://llm-stub:8089/v1";
 const MODEL = "operator-e2e-stub";
 const PROBE_USER = "eddi-operator-probe";
+/** Where THIS process reaches the stub's inspection endpoint (a loopback port mapping). */
+const STUB_URL = process.env.OPERATOR_E2E_STUB_URL ?? "http://localhost:8089";
+
+/** The tool name McpApiToolBuilder.generateSlug gives an operation without a usable operationId. */
+function slugOf(method: string, path: string): string {
+  const cleaned = path
+    .replace(/[{}]/g, "")
+    .replace(/[^a-zA-Z0-9/]/g, "")
+    .replace(/\/+/g, "_")
+    .replace(/^_|_$/g, "");
+  return `${method.toLowerCase()}_${cleaned.toLowerCase()}`;
+}
 
 /** Activation plus two LLM probes plus a chat turn, on a cold JVM. */
 const ACTIVATION_TIMEOUT = 180_000;
@@ -179,5 +196,49 @@ test.describe("Platform Operator activation against a real backend", () => {
     expect(text, "the operator's tool call reached the platform but failed").not.toContain("OPERATOR_E2E_TOOL_FAILED");
     expect(text).toContain("OPERATOR_E2E_TOOL_OK");
     await expect(page.getByTestId("operator-chat-error")).toHaveCount(0);
+
+    // ── What the model was offered ──
+    const offeredRes = await request.get(`${STUB_URL}/__e2e/tools`);
+    expect(offeredRes.ok(), `the model stub's inspection endpoint (${STUB_URL}) did not answer`).toBe(true);
+    const offered = (await offeredRes.json()) as { tools: { name: string; required: string[] }[] };
+    const offeredNames = new Set(offered.tools.map((tool) => tool.name));
+    const specRes = await request.get(`${API_BASE}/openapi?format=json`);
+    expect(specRes.ok()).toBe(true);
+    const spec = (await specRes.json()) as { paths: Record<string, Record<string, { operationId?: string }>> };
+    // Every allow-listed endpoint the spec has must have reached the model as
+    // its OWN tool: named by its operationId, or by its method-and-path slug
+    // when an earlier operation already took that id. Each offered name is
+    // claimed once, so two endpoints sharing one tool count as one missing.
+    const claimed = new Set<string>();
+    const undelivered: string[] = [];
+    for (const endpoint of endpointsForScope("read_write")) {
+      const [method, path] = endpoint.split(" ") as [string, string];
+      const operation = spec.paths[path]?.[method.toLowerCase()];
+      if (!operation) continue; // findMissingEndpoints already refused this case
+      const candidates = [operation.operationId, slugOf(method, path)].filter(
+        (name): name is string => !!name && offeredNames.has(name) && !claimed.has(name),
+      );
+      if (candidates.length === 0) undelivered.push(`${endpoint} (${operation.operationId ?? "no operationId"})`);
+      else claimed.add(candidates[0]!);
+    }
+    expect(undelivered, "allow-listed endpoints that never reached the model as a tool of their own").toEqual([]);
+    // An optional query parameter is optional: the model is not made to invent
+    // a filter, a page index and a page size to list agents.
+    const listAgents = offered.tools.find((tool) => tool.name === "readAgentDescriptors");
+    expect(listAgents, "readAgentDescriptors was not offered").toBeTruthy();
+    expect(listAgents!.required, "readAgentDescriptors requires its optional query parameters").toEqual([]);
+
+    // ── What the deploy-time compatibility check said ──
+    // It parses every template with the runtime engine; a prompt Qute cannot
+    // parse fails its render on every turn and is reported here.
+    const statusRes = await request.get(`${API_BASE}/administration/production/deploymentstatus`);
+    expect(statusRes.ok()).toBe(true);
+    const statuses = (await statusRes.json()) as { agentId?: string; warnings?: string[] | null }[];
+    const operatorStatus = statuses.find((row) => row.agentId === config.agentId);
+    expect(operatorStatus, "the operator is not in the production deployment status").toBeTruthy();
+    expect(
+      (operatorStatus!.warnings ?? []).filter((warning) => warning.includes("TEMPLATE_DOES_NOT_PARSE")),
+      "the deploy-time compatibility check found a template that does not parse",
+    ).toEqual([]);
   });
 });

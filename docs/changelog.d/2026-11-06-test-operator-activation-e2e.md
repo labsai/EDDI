@@ -48,19 +48,50 @@ prompt to the real endpoint.
   the platform API at http://127.0.0.1:9"); and provisioning without `hitlConfig` (`The approval gate could not be
   verified … hitlConfig is absent`).
 
-### Found on the way, not fixed here
+### Fixed on the way
 
-- Every operator turn logs `ERROR … LlmTask … Template processing failed for LLM parameter 'systemMessage' … invalid
-  virtual method in {required),(iterationObjectName}`, and the deploy-time compatibility check reports
-  `TEMPLATE_DOES_NOT_PARSE … empty expression found {vault:...}`. The operator prompt contains literal `{…}` text
-  that Qute tries to parse. The turn still runs (the test passes), but the error fires on every call.
-- The generated `readAgentDescriptors` tool marks all five optional query parameters (`filter`, `index`, `limit`,
-  `ownership`, `space`) **required**, defaults included, so a model must invent values for each.
-- `setup-api` logs `Tool name collision: http tool 'list' clashes with …` for the operator's toolset: one generated
-  tool is dropped.
+The first green run surfaced three defects in what activation provisions. The tier now asserts each of them.
+
+- **The operator prompt failed its template render on every turn (revision 60 → 61).** The backend renders
+  `systemMessage` with Qute, and the forEach entry in the prompt's apicalls section was written
+  `forEach {pathToTargetArray (…, required), iterationObjectName …}`. Qute read that as an expression and could not
+  parse it. Every operator turn logged `ERROR … Template processing failed for LLM parameter 'systemMessage'` and
+  sent the raw prompt, and every deploy reported `TEMPLATE_DOES_NOT_PARSE`. The line now lists the fields in prose.
+  The real parser accepts every other `{` in both scopes: checked by running the built prompt through it. The revision
+  bump is what tells existing deployments to upgrade.
+- **The compatibility check reported a false `TEMPLATE_DOES_NOT_PARSE`.** `LlmTask` wraps `${vault:…}`-style mentions
+  in raw sections before rendering an LLM parameter (`escapeConfigReferenceMentions`), but `AgentCompatibilityLint`
+  parsed the raw text, so a prompt that only *mentions* the syntax (the operator's tells the model to store keys as
+  `${vault:key-name}`) was reported on every deploy. New `CompatibilityRules.scanLlmTaskTemplates` checks a task's
+  `parameters` as they render. The rest of the task is still checked raw, because it renders without that escape.
+  `escapeConfigReferenceMentions` is now public for it.
+- **Optional query parameters were required tool arguments.** `McpApiToolBuilder` marked every query parameter
+  required, defaults included, so `readAgentDescriptors` made the model invent `filter`, `index`, `limit`,
+  `ownership` and `space`. A query parameter is now required only when the spec says so. New
+  `Request.optionalQueryParams` (null by default, so stored configs are unchanged) lists the others, and
+  `ApiCallExecutor.buildRequest` leaves one off the request when its value renders empty instead of sending
+  `?limit=`. The approval preview, the request fingerprint and the execution all go through `buildRequest`, so
+  request pinning sees the same request that is sent. Side effect: an endpoint that needs a query value its spec does
+  not mark required (`duplicateRag`'s `version`) now answers the model with its own 400 instead of being forced.
+- **A repeated operationId dropped a tool.** `GET /groupstore/groups/{groupId}/lessons` and `…/outcomes` were both
+  `list`. Tools register by name, so assembly logged `Tool name collision: http tool 'list'` and the operator never
+  received one of two endpoints it had been granted. The two now have their own operationIds (`listGroupLessons`,
+  `listGroupOutcomes`). `McpApiToolBuilder.uniqueToolName` also keeps names unique for any spec: the first operation
+  keeps its operationId and a repeat takes its method-and-path slug, so a third-party spec can no longer lose a tool
+  this way.
+
+Unit tests: `AgentCompatibilityLintTest` (vault mention not reported, a real error beside one still reported),
+`McpApiToolBuilderArgumentSchemaTest` (requiredness, `optionalQueryParams`, repeated operationIds, suffix fallback),
+`ApiCallExecutorTest` (an empty optional parameter is not sent, a supplied one and a non-optional empty one are).
+Mutation-checked: reverting each of the four fixes fails its test. The E2E checks the same things from outside: one
+distinct tool per allow-listed endpoint reached the model (read from the stub's `GET /__e2e/tools`, published on
+loopback port 8089), `readAgentDescriptors` has no required arguments, and the operator's deployment status carries
+no `TEMPLATE_DOES_NOT_PARSE`.
 
 ### Next
 
 - Making `Operator Activation E2E` (or `E2E Gate`) a required status check is a repository-settings decision; only
   `Build & Test` and `CodeQL Analysis` are required today.
 - Until the cap fix merges, this job fails on `main`, by design: `main` still cannot activate the operator.
+- The revision bump (61) collides with any other open PR that bumps the operator revision; whichever merges
+  second re-bumps.

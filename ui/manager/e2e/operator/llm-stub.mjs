@@ -24,6 +24,8 @@ const PORT = Number(process.env.PORT) || 8089;
 const MODEL = "operator-e2e-stub";
 
 let sequence = 0;
+/** The `tools` array of the latest request that had one — see GET /__e2e/tools. */
+let lastTools = [];
 
 /** The text of an OpenAI message whose content may be a string or parts. */
 function textOf(message) {
@@ -211,6 +213,15 @@ function send(res, status, payload) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://stub");
   if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "UP" });
+  // For the spec, not for EDDI: the tools the model was offered on the latest
+  // request that carried any — what assembly actually delivered, after any tool
+  // was dropped for a name collision.
+  if (req.method === "GET" && url.pathname === "/__e2e/tools") {
+    return send(res, 200, {
+      requests: sequence,
+      tools: lastTools.map((tool) => ({ name: toolName(tool), required: requiredOf(tool) })),
+    });
+  }
   if (req.method === "GET" && /\/models$/.test(url.pathname)) {
     return send(res, 200, { object: "list", data: [{ id: MODEL, object: "model", owned_by: "e2e" }] });
   }
@@ -228,6 +239,7 @@ const server = http.createServer((req, res) => {
     } catch {
       return send(res, 400, { error: { message: "body is not JSON" } });
     }
+    if (Array.isArray(body.tools) && body.tools.length > 0) lastTools = body.tools;
     const decision = decide(body);
     const tools = Array.isArray(body.tools) ? body.tools.length : 0;
     console.log(`[llm-stub] #${sequence + 1} stream=${!!body.stream} tools=${tools} messages=${body.messages?.length ?? 0} → ${decision.why}`);
