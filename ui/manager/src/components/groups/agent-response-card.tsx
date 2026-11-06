@@ -11,6 +11,7 @@ import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
 import { truncateContent, safeFormatDate } from "./group-utils";
 import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import { StructuredEntryBody } from "./structured-entry-body";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -237,7 +238,7 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span role="status" aria-relevant="text" className="min-w-0 break-all text-xs text-muted-foreground ms-1">
               {toolName
-                ? t("groups.usingTool", "using {{tool}}…", { tool: toolName })
+                ? t("groups.usingTool", "using {{tool}}…", { tool: humanizeToolName(toolName) || toolName })
                 : t("groups.responding", "responding…")}
             </span>
           </div>

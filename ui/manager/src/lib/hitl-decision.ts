@@ -1,4 +1,5 @@
 import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@/lib/api/hitl";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /**
  * What a reviewer agreed to, captured the moment the decision was submitted, so
@@ -40,7 +41,7 @@ export function summariseDecision(args: SummariseArgs): SubmittedDecision {
   if (pauseDetails?.type === "TOOL_CALL") {
     items = pauseDetails.calls.map((call) => ({
       id: call.callId,
-      label: call.toolName,
+      label: humanizeToolName(call.toolName) || call.toolName,
       outcome: verdict === "REJECTED" ? "REJECTED" : (toolDecisions?.[call.callId]?.verdict ?? "APPROVED"),
       amended: verdict === "APPROVED" && !!toolDecisions?.[call.callId]?.amendedArguments,
     }));

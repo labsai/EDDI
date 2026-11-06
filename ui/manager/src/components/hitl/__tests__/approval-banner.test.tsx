@@ -213,8 +213,8 @@ describe("ApprovalBanner", () => {
       expect(onDecide).not.toHaveBeenCalled();
       const dialog = screen.getByRole("dialog");
       // The confirmation summarizes which tool(s) will execute.
-      expect(within(dialog).getByText(/sendEmail/)).toBeInTheDocument();
-      expect(within(dialog).getByText(/transfer_funds/)).toBeInTheDocument();
+      // In words, not identifiers: the card itself still shows the exact names.
+      expect(within(dialog).getByText(/Send email, Transfer funds/)).toBeInTheDocument();
       expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument();
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
@@ -228,10 +228,66 @@ describe("ApprovalBanner", () => {
         <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={vi.fn()} />,
       );
       expect(screen.getByTestId("approval-banner")).toHaveAttribute("data-pause-type", "TOOL_CALL");
-      expect(screen.getByText("sendEmail")).toBeInTheDocument();
-      expect(screen.getByText("transfer_funds")).toBeInTheDocument();
+      expect(screen.getByTestId("tool-label-c1")).toHaveTextContent("Send email");
+      expect(screen.getByTestId("tool-name-c1")).toHaveTextContent("sendEmail");
+      expect(screen.getByTestId("tool-label-c2")).toHaveTextContent("Transfer funds");
+      expect(screen.getByTestId("tool-name-c2")).toHaveTextContent("transfer_funds");
       expect(screen.getByText("mcp:*")).toBeInTheDocument();
+      // Readable label/value rows by default…
+      expect(screen.getByTestId("tool-args-fields-c1-to")).toHaveTextContent("To");
+      expect(screen.getByTestId("tool-args-fields-c1-to")).toHaveTextContent("[REDACTED]");
+      // …and the JSON one click away.
+      fireEvent.click(screen.getByTestId("tool-args-view-formatted-c1"));
       expect(screen.getByTestId("tool-args-c1")).toHaveTextContent('"to": "[REDACTED]"');
+    });
+
+    it("prefills the amendment with the call's arguments; an untouched copy is a plain approval", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("tool-amend-toggle-c2"));
+      expect((screen.getByTestId("tool-amend-c2") as HTMLTextAreaElement).value).toBe('{\n  "amount": 100\n}');
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      expect(onDecide).toHaveBeenLastCalledWith("APPROVED", undefined, undefined, undefined);
+    });
+
+    it("edit-on-approve: changing a prefilled value sends it as the amendment", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} />,
+      );
+      fireEvent.click(screen.getByTestId("tool-amend-toggle-c2"));
+      fireEvent.change(screen.getByTestId("tool-amend-c2"), { target: { value: '{\n  "amount": 50\n}' } });
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      expect(onDecide).toHaveBeenLastCalledWith("APPROVED", undefined, undefined, {
+        c2: { verdict: "APPROVED", amendedArguments: '{\n  "amount": 50\n}' },
+      });
+    });
+
+    it("refuses an amendment that still carries the redaction marker, which REST would run verbatim", () => {
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={toolPause({
+            calls: [
+              { callId: "c1", toolName: "sendEmail", source: "mcp", arguments: '{"to":"a@b.c","token":"<REDACTED>"}', argsTruncated: false, gateReason: "mcp:*", requestPinned: false },
+            ],
+          })}
+          onDecide={onDecide}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+      fireEvent.change(screen.getByTestId("tool-amend-c1"), {
+        target: { value: '{"to":"ops@acme.com","token":"<REDACTED>"}' },
+      });
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(screen.getByText(/still contain <REDACTED>/)).toBeInTheDocument();
     });
 
     it("approving with no per-call changes sends no toolDecisions (calls inherit APPROVED)", () => {
@@ -679,8 +735,22 @@ describe("ApprovalBanner — tool-call arguments display", () => {
       ],
     });
 
-  it("shows nested JSON-in-JSON arguments expanded, with a wrapping <pre>", () => {
+  it("shows a generated tool's nested requestBody as readable label/value rows by default", () => {
     renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={vi.fn()} />);
+    expect(screen.getByTestId("tool-label-c1")).toHaveTextContent("Setup agent");
+    expect(screen.getByTestId("tool-args-views-c1")).toHaveAttribute("data-view", "fields");
+    const body = screen.getByTestId("tool-args-fields-c1-requestBody");
+    expect(body).toHaveTextContent("Request body");
+    expect(body).toHaveTextContent("Agent name");
+    expect(body).toHaveTextContent("Support");
+    expect(body).toHaveTextContent("Api key");
+    expect(body).toHaveTextContent("<REDACTED>");
+    expect(body.textContent).not.toContain('\\"');
+  });
+
+  it("shows nested JSON-in-JSON arguments expanded in the JSON view, with a wrapping <pre>", () => {
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("tool-args-view-formatted-c1"));
     const pre = screen.getByTestId("tool-args-c1");
     expect(pre.textContent).toContain('"agentName": "Support"');
     expect(pre.textContent).toContain('"<REDACTED>"');
@@ -689,23 +759,23 @@ describe("ApprovalBanner — tool-call arguments display", () => {
     expect(pre.className).toContain("max-h-96");
   });
 
-  it("toggles to the exact raw text and back", () => {
+  it("switches to the exact raw text and back", () => {
     renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={vi.fn()} />);
-    const toggle = screen.getByTestId("tool-args-view-toggle-c1");
-    expect(toggle).toHaveAttribute("data-view", "formatted");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("data-view", "raw");
+    const views = screen.getByTestId("tool-args-views-c1");
+    fireEvent.click(screen.getByTestId("tool-args-view-raw-c1"));
+    expect(views).toHaveAttribute("data-view", "raw");
+    expect(screen.getByTestId("tool-args-view-raw-c1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("tool-args-c1").textContent).toBe(nested);
-    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId("tool-args-view-formatted-c1"));
     expect(screen.getByTestId("tool-args-c1").textContent).toContain('"agentName": "Support"');
   });
 
-  it("offers no toggle when formatting changes nothing", () => {
+  it("offers no view switch when the arguments are not JSON", () => {
     renderWithProviders(
       <ApprovalBanner surface="regular" pauseDetails={pause("not json")} onDecide={vi.fn()} />,
     );
     expect(screen.getByTestId("tool-args-c1").textContent).toBe("not json");
-    expect(screen.queryByTestId("tool-args-view-toggle-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tool-args-views-c1")).not.toBeInTheDocument();
   });
 
   it("shows truncated arguments verbatim", () => {
@@ -714,15 +784,15 @@ describe("ApprovalBanner — tool-call arguments display", () => {
       <ApprovalBanner surface="regular" pauseDetails={pause(truncated, true)} onDecide={vi.fn()} />,
     );
     expect(screen.getByTestId("tool-args-c1").textContent).toBe(truncated);
-    expect(screen.queryByTestId("tool-args-view-toggle-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tool-args-views-c1")).not.toBeInTheDocument();
   });
 
   it("submits the decision from the ORIGINAL arguments: an amendment goes out exactly as typed, and an untouched call carries none", () => {
     const onDecide = vi.fn();
     renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={onDecide} />);
-    // Viewing raw/formatted must not leak into the payload.
-    fireEvent.click(screen.getByTestId("tool-args-view-toggle-c1"));
-    fireEvent.click(screen.getByTestId("tool-args-view-toggle-c1"));
+    // Switching views must not leak into the payload.
+    fireEvent.click(screen.getByTestId("tool-args-view-raw-c1"));
+    fireEvent.click(screen.getByTestId("tool-args-view-formatted-c1"));
     fireEvent.click(screen.getByTestId("approve-button"));
     confirmInDialog("Approve");
     expect(onDecide).toHaveBeenLastCalledWith("APPROVED", undefined, undefined, undefined);

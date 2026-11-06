@@ -58,7 +58,7 @@ describe("PauseNotice (read-only pause surface)", () => {
     expect(screen.getByTestId("pause-notice-pending")).toBeInTheDocument();
     expect(screen.queryByTestId("pause-notice-tools")).not.toBeInTheDocument();
     await advance(600);
-    expect(screen.getByTestId("pause-notice-tools")).toHaveTextContent("setupAgent");
+    expect(screen.getByTestId("pause-notice-tools")).toHaveTextContent("Setup agent");
     expect(screen.queryByTestId("pause-notice-pending")).not.toBeInTheDocument();
     expect(screen.getByTestId("pause-notice-review").getAttribute("href")).toBe(
       "/manage/conversationview/c1?awaiting=1",

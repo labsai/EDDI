@@ -1000,7 +1000,11 @@
       "errDisabled": "Esta versão do agente não pede avaliações.",
       "errOwner": "Somente a pessoa que teve esta conversa pode avaliá-la.",
       "errGeneric": "Não foi possível salvar a avaliação."
-    }
+    },
+    "toolArgs": "Argumentos",
+    "toolResult": "Resultado",
+    "toolArgsShowFields": "Campos",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -4631,7 +4635,12 @@
     "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes.",
     "conversationColumn": "Conversa",
     "groupReviewLoadError": "Não foi possível carregar a discussão.",
-    "groupReviewNoEntries": "Ainda não foi dito nada."
+    "groupReviewNoEntries": "Ainda não foi dito nada.",
+    "argsViewLabel": "Mostrar argumentos como",
+    "argsViewFields": "Campos",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Bruto",
+    "amendRedactedMarker": "Os argumentos alterados ainda contêm <REDACTED>. Substitua pelo valor real ou aprove sem alterar: uma alteração é enviada exatamente como escrita."
   },
   "hitlReview": {
     "approveEdited": "Aprovar com alterações",

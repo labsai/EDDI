@@ -106,6 +106,39 @@ describe("use-chat handleSSEEvent — task_failed / error-JSON handling", () => 
   });
 });
 
+describe("use-chat handleSSEEvent — 6.7 tool_call display and tool_result", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    useChatStore.setState({
+      selectedAgentId: "agent1",
+      conversationId: "conv1",
+      streamingEnabled: true,
+    });
+  });
+
+  it("feeds the status line the toolDisplay label, else the name, and settles on tool_result", async () => {
+    const add = vi.spyOn(useDebugStore.getState(), "addToolCall");
+    const settle = vi.spyOn(useDebugStore.getState(), "markToolsSettled");
+    // RestAgentEngineStreaming.ToolCallEvent / ToolResultEvent, as serialised.
+    h.frames = [
+      {
+        type: "tool_call",
+        data: JSON.stringify({ tool: "createAction", callId: "call_1", displayName: "Creating an action", display: { title: "Renew the contract" } }),
+      },
+      { type: "tool_result", data: JSON.stringify({ tool: "createAction", callId: "call_1", status: "ok", durationMs: 12 }) },
+      { type: "tool_call", data: JSON.stringify({ tool: "getAgentDescriptors", callId: "call_2", displayName: null, display: null }) },
+    ];
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "hi" });
+    });
+    expect(add.mock.calls.map((c) => c[0])).toEqual(["Creating an action: Renew the contract", "getAgentDescriptors"]);
+    expect(settle).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("use-chat handleSSEEvent — canonical snapshot text on done", () => {
   beforeEach(() => {
     useChatStore.getState().reset();

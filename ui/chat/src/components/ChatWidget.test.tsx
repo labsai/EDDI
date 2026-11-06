@@ -973,7 +973,7 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     const indicator = await screen.findByTestId("tool-indicator");
-    expect(indicator).toHaveTextContent("Using calculator…");
+    expect(indicator).toHaveTextContent("Using Calculator…");
     expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
   });
@@ -986,9 +986,41 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     await waitFor(() =>
-      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
+      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using Calculator…"),
     );
-    expect(document.body.textContent).not.toMatch(/websearch/);
+    expect(document.body.textContent).not.toMatch(/websearch/i);
+  });
+
+  it("shows the designer's toolDisplay phrase as written (EDDI 6.7 tool_call)", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"createAction","callId":"call_1","displayName":"Creating an action","display":{"title":"Renew the contract"}}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Creating an action: Renew the contract…");
+    expect(indicator).not.toHaveTextContent("Using");
+    expect(document.body.textContent).not.toMatch(/createAction/);
+  });
+
+  it("puts a generated tool's identifier into words", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Get agent descriptors…");
+  });
+
+  it("clears the tool status when its tool_result arrives (EDDI 6.7)", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator","callId":"call_1"}\n\n',
+      'event: tool_result\ndata: {"tool":"calculator","callId":"call_1","status":"ok","durationMs":4}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() => expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument());
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
   });
 
   it("clears the tool status as soon as text resumes", async () => {
@@ -1001,7 +1033,7 @@ describe("ChatWidget — live tool calls", () => {
 
     await screen.findByText("The answer is 4");
     expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/Using calculator/);
+    expect(document.body.textContent).not.toMatch(/Using Calculator/);
   });
 
   it("clears the tool status when the turn completes", async () => {
@@ -1026,7 +1058,7 @@ describe("ChatWidget — live tool calls", () => {
     ]);
     await sendOnOpenStream();
 
-    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using weather…");
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Weather…");
     expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
     expect(screen.getByText("Let me check that.")).toBeInTheDocument();
   });
@@ -1051,7 +1083,7 @@ describe("ChatWidget — live tool calls", () => {
     await sendOnOpenStream();
 
     const status = await screen.findByTestId("chat-activity-status");
-    await waitFor(() => expect(status).toHaveTextContent("Using calculator…"));
+    await waitFor(() => expect(status).toHaveTextContent("Using Calculator…"));
     expect(status).toHaveAttribute("role", "status");
     expect(status.closest("[aria-busy='true']")).toBeNull();
     expect(screen.getByTestId("chat-transcript")).toHaveAttribute("aria-busy", "true");

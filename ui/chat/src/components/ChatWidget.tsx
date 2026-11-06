@@ -686,6 +686,15 @@ export function ChatWidget() {
           return false;
         }
 
+        // EDDI 6.7: `{tool, callId, status, durationMs}` once per call, right
+        // after it ran (never its arguments or result). Calls run one after
+        // another, so the call on screen is finished: back to "Thinking…"
+        // rather than naming a tool that is no longer running.
+        case "tool_result":
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
+          if (turn.tokenCount === 0) dispatch({ type: "SET_THINKING", value: true });
+          return false;
+
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come
         // back after text has begun. Raising it again here would undo that: a

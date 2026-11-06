@@ -988,7 +988,11 @@
       "errDisabled": "यह एजेंट संस्करण रेटिंग नहीं माँगता।",
       "errOwner": "केवल वही व्यक्ति इसे रेट कर सकता है जिसने यह बातचीत की।",
       "errGeneric": "रेटिंग सहेजी नहीं जा सकी।"
-    }
+    },
+    "toolArgs": "आर्ग्युमेंट",
+    "toolResult": "परिणाम",
+    "toolArgsShowFields": "फ़ील्ड",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Workflow पर वापस जाएं",
@@ -4583,7 +4587,12 @@
     "regularTruncated": "पहले {{limit}} वार्तालाप अनुमोदन दिखाए जा रहे हैं — और भी लंबित हैं। बाकी देखने के लिए कुछ पर निर्णय लें।",
     "conversationColumn": "बातचीत",
     "groupReviewLoadError": "चर्चा लोड नहीं हो सकी।",
-    "groupReviewNoEntries": "अभी तक कुछ नहीं कहा गया है।"
+    "groupReviewNoEntries": "अभी तक कुछ नहीं कहा गया है।",
+    "argsViewLabel": "आर्ग्युमेंट इस रूप में दिखाएँ",
+    "argsViewFields": "फ़ील्ड",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "मूल",
+    "amendRedactedMarker": "संशोधित आर्ग्युमेंट में अभी भी <REDACTED> है। इसे असली मान से बदलें, या बिना संशोधन के स्वीकृत करें: संशोधन ठीक वैसे ही भेजा जाता है जैसे लिखा गया है।"
   },
   "hitlReview": {
     "approveEdited": "बदलावों के साथ स्वीकृत करें",

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Hand } from "lucide-react";
 import { useApprovalStatus } from "@/hooks/use-hitl";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 export interface PauseNoticeProps {
   conversationId: string;
@@ -59,7 +60,10 @@ export function PauseNotice({
   }, [decidedBeforeSeen]);
 
   const details = status.data?.pauseDetails;
-  const tools = details?.type === "TOOL_CALL" ? details.calls.map((c) => c.toolName).filter(Boolean) : [];
+  const tools =
+    details?.type === "TOOL_CALL"
+      ? Array.from(new Set(details.calls.map((c) => humanizeToolName(c.toolName)).filter(Boolean)))
+      : [];
   const reason =
     headline ||
     status.data?.pauseReason ||
@@ -75,7 +79,7 @@ export function PauseNotice({
       <Hand className="h-4 w-4 shrink-0 text-warn-500" aria-hidden="true" />
       <span className="text-warn-600 dark:text-warn-400">{reason}</span>
       {tools.length > 0 && (
-        <span className="font-mono text-muted-foreground" data-testid={`${testIdBase}-tools`}>
+        <span className="text-muted-foreground" data-testid={`${testIdBase}-tools`}>
           {t("hitl.noticeWaitingFor", "Waiting for approval: {{tools}}", { tools: tools.join(", ") })}
         </span>
       )}
