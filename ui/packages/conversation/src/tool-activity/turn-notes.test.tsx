@@ -52,6 +52,9 @@ describe("parseTurnNote", () => {
     expect(parseTurnNote(ev("cascade_escalation", { fromStep: 0, toStep: 1 }))).toBeNull();
     expect(parseTurnNote(ev("llm_retry", { reason: "  " }))).toBeNull();
     expect(parseTurnNote(ev("llm_retry", "null"))).toBeNull();
+    // Another event that happens to carry a reason is still not a note.
+    expect(parseTurnNote(ev("task_failed", { reason: "low_confidence" }))).toBeNull();
+    expect(parseTurnNote(ev("error", { message: "x", reason: "timeout" }))).toBeNull();
   });
 
   it("a listener hands only notes on", () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
@@ -66,7 +67,10 @@ function LocationProbe() {
 }
 
 function renderBoard(entry: string | { pathname: string; search?: string; state?: unknown }, user: Partial<AuthUser> | null = null) {
+  // StrictMode runs effects twice on mount, as a dev build does: a question
+  // handed in must still start one session.
   return render(
+    <StrictMode>
     <AuthContext.Provider
       value={
         user
@@ -91,7 +95,8 @@ function renderBoard(entry: string | { pathname: string; search?: string; state?
           </ThemeProvider>
         </QueryClientProvider>
       </MemoryRouter>
-    </AuthContext.Provider>,
+    </AuthContext.Provider>
+    </StrictMode>,
   );
 }
 

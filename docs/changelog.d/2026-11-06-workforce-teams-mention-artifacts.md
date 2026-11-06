@@ -38,7 +38,7 @@ What the backend exposes per streamed turn, and nothing more: `cascade_escalatio
 
 ### Bundles, i18n, operator
 
-- First load, gzip: Workforce BEFORE → 256.7 KB (budget 280), Manager BEFORE → MANAGER_AFTER KB (620), the widget 169.4 → 169.4 KB (170): it imports none of this. No budget raised.
+- First load, gzip: Workforce 256.7 → 256.7 KB (budget 280), Manager 615.3 → 615.3 KB (620), both measured on the base commit and on this branch, the widget 169.4 → 169.4 KB (170): it imports none of this. No budget raised.
 - 70 new keys in the eleven locales (turn notes in the tool-activity bundle, team strings in the team bundle, `chat.mention.*` in app-kit's, `Workforce.handoff.*` / board / home in Workforce's).
 - **Platform Operator:** the prompt explains the turn notes and their gaps, the browser-only hand-off (not cross-team handoff), Home's teams, the plain decision, the human-turn wording, the artifacts panel, and that templates need an author role. No allow-list change. Revision **57**.
 - Docs: [`workforce-guide.md`](../workforce-guide.md) (Home, why an answer came the way it did, @ hand-off, keyboard, a team, administrator notes), [`group-conversations.md`](../group-conversations.md) (humans in Workforce, artifacts in Workforce), `ui/workforce/AGENTS.md`, `ui/manager/AGENTS.md`, the `@eddi/conversation` README.
