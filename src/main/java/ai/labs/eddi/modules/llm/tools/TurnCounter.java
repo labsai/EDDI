@@ -28,9 +28,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * The key is read by exact match ({@link IWritableConversationStep#getData}),
  * not by prefix: {@code getLatestData} would let {@code tools:delegations:a}
  * read the count of {@code tools:delegations:ab}. Callers use keys outside the
- * public step prefixes, so the count never reaches a client's conversation
- * snapshot. The tool calls of a turn are dispatched one at a time, so the
- * read-then-write of {@link #increment} is not raced by another tool call.
+ * public step prefixes, so the count is not part of the simple conversation
+ * snapshot a client gets. With {@code returnDetailed=true} it does appear, as a
+ * plain integer, like {@code hitl:tool_pause_count}: it holds no prompt text,
+ * trace or credential, so the detailed view's denylist leaves it alone. The
+ * tool calls of a turn are dispatched one at a time, so the read-then-write of
+ * {@link #increment} is not raced by another tool call.
  */
 public final class TurnCounter {
 
