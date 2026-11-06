@@ -489,8 +489,19 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
 | `conversationId` | One conversation |
 | `viewState` | `UNSEEN`, `SEEN`, … |
 | `filter` | Free-text filter |
+| `mine` | `true`: only the caller's own conversations (default `false`) |
 
-Results are newest first. A non-admin sees only their own conversations.
+Results are newest first. A non-admin sees only their own conversations, plus,
+with `agentId`, those of an agent they review; an admin sees everybody's.
+
+`mine=true` narrows any caller, an admin included, to the conversations they
+own. Ask it whenever the listing picks a conversation to **continue**, as the
+Manager's chat panel does when it reopens an agent: an admin's listing
+otherwise holds every user's conversations, and the newest of them may be
+someone else's. The owner is an exact match on the descriptor's `userId`, so a
+conversation from before v5.1.6 that records no owner there is left out. With
+authorization disabled there is no caller to match and every conversation is
+listed.
 
 | Call | Notes |
 | --- | --- |
