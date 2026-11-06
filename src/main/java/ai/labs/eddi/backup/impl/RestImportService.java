@@ -1552,15 +1552,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private static WebApplicationException refusedUpdate(Class<?> storeClass, String localId, Response response) {
-        String message = "Merge refused: " + storeClass.getSimpleName() + " '" + LogSanitizer.sanitize(localId) + "' answered "
-                + (response == null ? "nothing" : response.getStatus()) + " to its update, so the import fails and is rolled back";
+        // No consequence in the message: a refusal fails an agent import but costs a
+        // snippet only itself, and the caller decides which.
+        String message = "Merge update refused: " + storeClass.getSimpleName() + " '" + LogSanitizer.sanitize(localId) + "' answered "
+                + (response == null ? "nothing" : response.getStatus()) + " and was not updated";
         // Logged here because the client's answer is the store's own, which does not
         // say which resource it refused.
         LOGGER.warn(message);
-        // That answer reaches the client unchanged: its body says what is wrong with
-        // the
-        // document. A status that is not an error is a broken contract, and must not
-        // travel as a success.
+        // An error answer reaches the client unchanged: its body says what is wrong
+        // with the document. A status that is not an error is a broken contract, and
+        // must not travel as a success.
         boolean storeRefusal = response != null && response.getStatus() >= 400;
         return new WebApplicationException(message, storeRefusal ? response : Response.serverError().build());
     }
