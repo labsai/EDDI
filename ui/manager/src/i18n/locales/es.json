@@ -6176,13 +6176,15 @@
       "static": "Clave de API",
       "basic": "Usuario y contraseña",
       "clientCredentials": "Cuenta de servicio OAuth",
-      "authorizationCode": "Inicio de sesión OAuth"
+      "authorizationCode": "Inicio de sesión OAuth",
+      "jwtBearer": "Cuenta de servicio con clave de firma"
     },
     "choice": {
       "staticBody": "Una cabecera fija, la misma para todos — X-Api-Key, o Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se encarga de la codificación, así la contraseña sigue siendo una entrada aparte de la bóveda que puede rotar por su cuenta.",
       "clientCredentialsBody": "El agente se identifica como sí mismo. Un token de acceso compartido por todos, renovado automáticamente.",
-      "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda."
+      "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda.",
+      "jwtBearerBody": "El agente inicia sesión como sí mismo con una clave privada en lugar de un secreto — por ejemplo, una cuenta de servicio de Google. Un único token de acceso compartido por todos."
     },
     "binding": {
       "perUser": "Por persona",
@@ -6216,7 +6218,7 @@
     "clientId": "ID de cliente",
     "clientSecret": "Secreto de cliente",
     "clientAuthMethod": "Autenticación del cliente",
-    "clientAuthMethodHint": "Cómo llega el secreto de cliente al punto del token. Acertar por casualidad no es opción: fallar parece exactamente un secreto incorrecto, por eso es un ajuste y no una suposición.",
+    "clientAuthMethodHint": "Cómo se identifica el cliente ante el endpoint de tokens: con el secreto del cliente por Basic o en el cuerpo, o con private_key_jwt — una aserción firmada con una clave privada guardada en el vault, para una aplicación registrada con un certificado. Elegirlo mal parece exactamente un secreto incorrecto, por eso es un ajuste y no una alternativa automática.",
     "discoveryUrl": "URL de descubrimiento (opcional)",
     "pkceAlwaysOn": "PKCE (S256) se aplica siempre a un inicio de sesión de usuario y no puede desactivarse — el destino de la redirección es una ruta pública.",
     "scopes": "Ámbitos",
@@ -6302,7 +6304,9 @@
       "paramReserved": "Uno de estos parámetros lo establece el propio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Sobrescribirlo rompería el flujo.",
       "paramValueReference": "Los valores de los parámetros se envían tal cual: una referencia ${…} aquí no se resuelve y pondría un puntero de la bóveda en una URL. Use solo valores de protocolo simples.",
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
-      "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos."
+      "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos.",
+      "thumbprintFormat": "No es una huella de la longitud correcta: x5t#S256 necesita la huella SHA-256 y x5t la SHA-1 — en hexadecimal o base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación."
     },
     "backToList": "Volver a Conexiones",
     "headerSecret": "Secreto guardado",
@@ -6325,7 +6329,30 @@
     "confirmAuthChangeDesc": "Las cuentas vinculadas a través de esta conexión dejarán de resolverse: una concesión pertenece al flujo que la produjo. {{productName}} rechaza el cambio mientras quede alguna cuenta vinculada e indica cuántas; desvincúlelas primero, o cree una conexión nueva y deje que la gente vincule esa.",
     "confirmAuthChangeAccept": "Cambiar",
     "deleted": "Conexión \"{{name}}\" eliminada",
-    "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?"
+    "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?",
+    "privateKey": "Clave privada",
+    "privateKeyHint": "Una entrada del vault con una clave RSA PKCS#8 PEM sin cifrar (BEGIN PRIVATE KEY), o el archivo de clave JSON completo de una cuenta de servicio de Google. La clave nunca sale de {{productName}}; solo se envía una aserción firmada de corta duración.",
+    "certificateThumbprint": "Huella del certificado",
+    "certificateThumbprintHint": "La del certificado subido al proveedor de identidad — en hexadecimal tal como lo muestra el portal, o en base64url. Es pública, no un secreto.",
+    "certificateThumbprintHeader": "Cabecera de la huella",
+    "thumbprintS256": "x5t#S256 — SHA-256 (predeterminado en Entra)",
+    "thumbprintSha1": "x5t — huella SHA-1",
+    "serviceAccountEmail": "Cuenta de servicio (emisor)",
+    "serviceAccountEmailHint": "p. ej. agent@project.iam.gserviceaccount.com. Opcional si la clave privada es un archivo de clave JSON, que indica su propia cuenta.",
+    "audience": "Audiencia de la aserción (opcional)",
+    "audienceHint": "El claim aud de la aserción firmada. Déjelo vacío para usar la URL del token, que es lo que espera Google.",
+    "preset": "Empezar desde una plantilla",
+    "presetNone": "Ninguna — rellenar todos los campos",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Aplicación de Microsoft Entra con certificado",
+        "description": "Un registro de aplicación de Entra que se autentica con un certificado en lugar de un secreto de cliente (private_key_jwt). Sustituya <tenant-id> en la URL del token, indique el ID de aplicación (cliente) y la huella del certificado, y guarde la clave privada del certificado en el almacén como PEM PKCS#8 sin cifrar. Añada https://login.microsoftonline.com a la lista de permitidos de endpoints de credenciales."
+      },
+      "google-service-account": {
+        "label": "Cuenta de servicio de Google (clave JSON)",
+        "description": "Las API de Google como cuenta de servicio, firmadas con su clave privada (portador JWT, RFC 7523). Guarde el archivo de clave JSON descargado como UNA sola entrada del almacén y haga referencia a ella como clave privada; de ahí se leen el emisor y el ID de clave. Añada https://oauth2.googleapis.com a la lista de permitidos de endpoints de credenciales. Sin delegación en todo el dominio, la cuenta solo ve lo que se comparte con ella."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analizador de entrada",

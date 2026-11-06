@@ -36,7 +36,7 @@ async function toCredentials(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("CreateConnectionDialog — the auth type chooser", () => {
-  it("is a real radio group, not four unrelated radios", async () => {
+  it("is a real radio group, not five unrelated radios", async () => {
     // `role="radio"` with no owning radiogroup is invalid ARIA: the options are
     // announced with no group name and no "1 of 4", on the one decision the
     // wizard itself calls unchangeable afterwards.
@@ -44,7 +44,7 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
 
     const group = screen.getByRole("radiogroup");
     expect(group).toBeInTheDocument();
-    expect(within(group).getAllByRole("radio")).toHaveLength(4);
+    expect(within(group).getAllByRole("radio")).toHaveLength(5);
   });
 
   it("moves the selection with the arrow keys", async () => {
@@ -77,6 +77,31 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
     expect(screen.getByTestId("auth-type-choice-BASIC")).toHaveAttribute(
       "tabindex",
       "-1",
+    );
+  });
+});
+
+describe("CreateConnectionDialog — templates", () => {
+  it("offers the presets by their translated labels, and choosing one fills the draft", async () => {
+    const user = userEvent.setup();
+    await renderDialog();
+
+    const chooser = screen.getByTestId("create-connection-preset");
+    // The label comes from the locale file, keyed by the preset id.
+    const google = within(chooser).getByRole("option", { name: "Google service account (JSON key)" });
+    expect(within(chooser).getByRole("option", { name: "Microsoft Entra app with a certificate" })).toBeInTheDocument();
+
+    await user.selectOptions(chooser, google);
+
+    expect(screen.getByTestId("create-connection-preset-description")).toHaveTextContent(
+      /RFC 7523 JWT bearer/,
+    );
+    // The preset sets the auth type, which the chooser shows as selected.
+    await waitFor(() =>
+      expect(screen.getByTestId("auth-type-choice-OAUTH2_JWT_BEARER")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
     );
   });
 });

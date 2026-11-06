@@ -96,6 +96,116 @@ does not look like one.
 
 The first call mints the grant; there is no human step.
 
+### A service account that signs instead of sending a secret
+
+Some providers authenticate a service account by a **signed assertion** rather than a
+client secret — RFC 7523's JWT bearer grant. Google service accounts are the common
+case. EDDI signs a short-lived RS256 JWT with a vaulted private key and exchanges it
+at the token endpoint; the key itself never leaves the process.
+
+```json
+{
+  "name": "google-drive-sa",
+  "authType": "OAUTH2_JWT_BEARER",
+  "binding": "SERVICE",
+  "oauth": {
+    "tokenUrl": "https://oauth2.googleapis.com/token",
+    "privateKey": "${vault:google-sa-key}",
+    "scopes": ["https://www.googleapis.com/auth/drive.readonly"]
+  },
+  "baseUrlAllowlist": ["https://www.googleapis.com"]
+}
+```
+
+`privateKey` names **one** vault entry holding either an unencrypted PKCS#8 PEM
+(`-----BEGIN PRIVATE KEY-----`) RSA key of at least 2048 bits, or the **whole Google
+service-account JSON key file** exactly as the console downloads it. From a key file
+EDDI reads `private_key`, `client_email` (the issuer, when `clientId` is not set) and
+`private_key_id` (the `kid` header, when `privateKeyId` is not set). Its `token_uri`
+is deliberately **ignored**: where an assertion is sent is decided by `oauth.tokenUrl`
+and the [credential-endpoint allowlist](#two-allowlists-and-why-they-are-separate),
+never by the secret. Store the file with `PUT /secretstore/secrets/{tenantId}/{keyName}`
+and the JSON as the value.
+
+| Field | Meaning |
+| --- | --- |
+| `oauth.tokenUrl` | Required. The assertion's audience too, unless `audience` is set. Must be on the credential-endpoint allowlist, like any token endpoint |
+| `oauth.privateKey` | Required, a `${vault:…}` reference — never a pasted key |
+| `oauth.clientId` | The service account's email, used as `iss` and `sub`. Optional with a JSON key file; when both are present they must agree, or the call is refused before anything is signed |
+| `oauth.privateKeyId` | Optional `kid` header |
+| `oauth.audience` | Optional `aud` claim; defaults to `tokenUrl` |
+| `oauth.scopes` | Space-joined into the `scope` claim. Google requires at least one |
+
+The assertion carries `iss`, `sub = iss`, `aud`, `scope`, `iat`, `nbf`, a unique `jti`
+and an `exp` **five minutes** after `iat` (Google refuses more than an hour). It is
+sent as `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=…` with no
+client authentication: the signature is the proof. The resulting access token goes
+through the same grant cache and single-flight as `client_credentials` — minted on
+first use, sealed in the vault, served until shortly before it expires, then minted
+again — so httpcalls, MCP, A2A, ingestion and the mail transports gain it without
+change. A rejected assertion (`invalid_grant`, e.g. a revoked key or a skewed clock)
+marks the grant `REFRESH_FAILED`, and the next call simply mints again.
+
+`OAUTH2_JWT_BEARER` is `SERVICE`-bound only. Without domain-wide delegation the
+account sees only what has been shared with it; acting **as** a Workspace user is a
+separate capability. Fields of the other flows — `clientSecret`, `authorizationUrl`,
+`extraAuthParams`, `certificateThumbprint` — are refused at save time rather than
+ignored.
+
+### An app that authenticates with a certificate (`private_key_jwt`)
+
+`OAUTH2_CLIENT_CREDENTIALS` and `OAUTH2_AUTHORIZATION_CODE` can prove the client with a
+signed assertion instead of a client secret — RFC 7523 §2.2, OpenID Connect
+`private_key_jwt`. Microsoft Entra calls this an app registration with a certificate
+credential; the provider holds only the public half, so there is no shared secret to
+leak.
+
+```json
+{
+  "name": "graph",
+  "authType": "OAUTH2_CLIENT_CREDENTIALS",
+  "binding": "SERVICE",
+  "oauth": {
+    "tokenUrl": "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token",
+    "clientId": "11111111-2222-3333-4444-555555555555",
+    "clientAuthMethod": "private_key_jwt",
+    "privateKey": "${vault:graph-app-key}",
+    "certificateThumbprint": "AB:CD:…",
+    "certificateThumbprintHeader": "x5t#S256",
+    "scopes": ["https://graph.microsoft.com/.default"]
+  },
+  "baseUrlAllowlist": ["https://graph.microsoft.com"]
+}
+```
+
+Every token request — the client-credentials mint, the authorization-code exchange and
+each refresh — then carries `client_id`,
+`client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` and a
+`client_assertion` freshly signed for that request: `iss = sub = clientId`,
+`aud = tokenUrl`, a unique `jti`, `nbf`, and a five-minute `exp`. No `Authorization`
+header and no `client_secret` are sent.
+
+* **`clientAuthMethod`** is the existing field, now with a third value. The default stays
+  `client_secret_basic`, so every existing connection is unchanged.
+* **`privateKey`** replaces `clientSecret` — exactly one of the two may be set; a client
+  secret left beside a private key is refused, because it would read as the credential
+  in use and never be sent.
+* **`certificateThumbprint`** is the thumbprint of the certificate registered at the
+  provider, as hex (colons and spaces allowed, as portals and `openssl x509 -fingerprint`
+  show it) or base64url. It is public. Name the digest when you compute it, because
+  `openssl` defaults to SHA-1: `openssl x509 -in cert.pem -noout -fingerprint -sha256` for
+  `x5t#S256`, `-sha1` for `x5t`. **`certificateThumbprintHeader`** picks the JOSE
+  header: `x5t#S256` (SHA-256, the default and what Entra documents today) or `x5t`
+  (SHA-1, still accepted by Entra and AD FS). The digest length must match the header —
+  a SHA-1 thumbprint under `x5t#S256` is refused at save time with a message saying so.
+  Leave the thumbprint out for a provider that identifies the key by `privateKeyId`
+  (`kid`) instead.
+
+The Manager's **New connection** dialog offers both shapes as templates
+("Google service account (JSON key)", "Microsoft Entra app with a certificate"). They
+are JSON files under `ui/manager/src/lib/connection-presets/`, not code — a template
+only pre-fills the form, and the document it produces is validated like any other.
+
 ### Per-end-user OAuth
 
 ```json
@@ -196,7 +306,8 @@ grant under whoever completed the consent screen, so a `SERVICE`-bound one would
 look for a grant under a service principal that nothing can ever create. Since
 `binding` defaults to `SERVICE`, omitting it here used to produce a connection
 that saved, deployed, showed a working consent screen, and then failed every call
-as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
+as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` or `OAUTH2_JWT_BEARER` for a service
+account; `OAUTH2_JWT_BEARER` is likewise `SERVICE`-only.
 
 ---
 
@@ -205,11 +316,11 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | Field | Purpose |
 | --- | --- |
 | `name` | What `${connection:name}` refers to. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters, no surrounding whitespace. Refused otherwise, never trimmed: a space, `/`, `}` or `:` would make the name unreferenceable, and the `X-EDDI-Connection-Credential` header splits at the first space |
-| `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
+| `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_JWT_BEARER`, `OAUTH2_AUTHORIZATION_CODE` |
 | `binding` | `SERVICE` (one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
-| `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
+| `oauth` | Endpoints, client id, a **vaulted** client secret or private key, scopes |
 | `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`) with an `http`/`https` scheme, or a mail scheme (`smtps://`, `smtp://`, `imaps://`, `imap://`) for a credential that logs in to a mail server — the system mailer's XOAUTH2 or BASIC login (`eddi.mail.smtp.connection`). A mail origin folds the port its TLS mode implies (`smtps` 465, `smtp` 587, `imaps` 993, `imap` 143), and an `https` entry for the same host does not cover it. `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment allows it — `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections), or the `eddi.connections.allow-plaintext-remote-origins` property; see [Plaintext origins](#plaintext-origins) |
 | `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
@@ -220,14 +331,14 @@ better than pretending otherwise at runtime.
 
 ### Every secret is a reference
 
-`clientSecret`, `passwordRef` and every interpolated segment of a `valueTemplate`
-**must** be `${vault:…}` or `${vars:…}`. A literal is refused with a 400 that
+`clientSecret`, `privateKey`, `passwordRef` and every interpolated segment of a
+`valueTemplate` **must** be `${vault:…}` or `${vars:…}`. A literal is refused with a 400 that
 names `PUT /secretstore/secrets/{tenantId}/{keyName}`, the call that stores it in the vault.
 
 **A `${vars:…}` here may only point at the vault.** The global variable store is
 readable by every editor (`GET /variablestore/variables`), so a variable holding
 the client secret itself would be the plaintext field in a different document.
-For `clientSecret` and `passwordRef` the variable must expand to exactly one
+For `clientSecret`, `privateKey` and `passwordRef` the variable must expand to exactly one
 `${vault:…}` reference; in a `valueTemplate` it must expand to a vault reference
 or to scaffolding that passes the literal-text rules below (`Bearer `, never a
 key). This is checked twice: at save, where a variable that exists and holds
@@ -248,7 +359,7 @@ is punctuated, a key EDDI composes itself (`redirect_uri`, `state`,
 **value** must be a literal of at most 512 characters with no `${…}` reference
 and no credential-shaped prefix (`sk-`, `xoxb-`, `ghp_`, `AKIA`, `eyJ`, `Bearer `).
 
-For `clientSecret` and `passwordRef` the check is "the value **is** a reference",
+For `clientSecret`, `privateKey` and `passwordRef` the check is "the value **is** a reference",
 not "contains one". A `valueTemplate` may carry literal text around its references
 — that is how `Bearer ${vault:k}` gets its scheme — so its literal text is checked
 too, under three rules: every `${` must be a well-formed `${vault:…}` or
@@ -895,9 +1006,9 @@ definition, and every secret-bearing field is refused a literal at write time.
 
 A document saved **before** those rules existed can still hold a literal, so a
 caller who is not `eddi-admin` reads a copy. In it `oauth.clientSecret`,
-`staticAuth.passwordRef`, `staticAuth.valueTemplate` and each
+`oauth.privateKey`, `staticAuth.passwordRef`, `staticAuth.valueTemplate` and each
 `oauth.extraAuthParams` entry keep their value only if it passes the rule save-time
-validation applies to that field — reference-only for the first two, the template
+validation applies to that field — reference-only for the first three, the template
 rule, the key-and-value rule — and otherwise read
 `<redacted: a literal value where a vault reference is required - an eddi-admin must re-save this connection>`.
 Everything else, including `name`, `authType`, `binding` and
@@ -959,6 +1070,14 @@ treated as an administrator, exactly as `@RolesAllowed` is.
   and deletes that grant — redirecting with `exchange_failed` — if the connection is
   gone or no longer a `PER_USER` authorization-code connection. Whichever write
   lands first, one of the two re-checks sees it.
+* **A private key never leaves the process, and never reaches a log.** It is resolved
+  from the vault per token request, used to sign, and dropped. Only the signed
+  assertion is sent, and only to an allowlisted token endpoint. Every refusal about a
+  key — not PKCS#8, PKCS#1, encrypted, under 2048 bits, a malformed key file — is a
+  fixed sentence with no cause attached, because a JSON parser's exception quotes the
+  text it choked on, and that text is the key. A key file is parsed when it is used,
+  not when the connection is saved: saving checks only that `privateKey` is a vault
+  reference, and resolving a secret just to inspect it would be a use of it.
 * **`VaultGrantChecker` follows the hop.** A `${connection:name}` is an *indirect*
   vault reference: the connection document holds the `${vault:…}` client secret.
   Without following it an agent could use a credential it was never granted

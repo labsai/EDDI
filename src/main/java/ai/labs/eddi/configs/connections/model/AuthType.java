@@ -34,7 +34,17 @@ public enum AuthType {
      * OAuth 2.0 authorization code with PKCE — a grant per end user. The only type
      * that may carry {@link Binding#PER_USER}.
      */
-    OAUTH2_AUTHORIZATION_CODE;
+    OAUTH2_AUTHORIZATION_CODE,
+
+    /**
+     * OAuth 2.0 JWT bearer grant (RFC 7523 §2.1) — a service account that proves
+     * itself with a signed assertion rather than a client secret. EDDI signs a
+     * short-lived RS256 JWT with a vaulted private key and exchanges it for an
+     * access token; Google service accounts are the common case. Like
+     * {@link #OAUTH2_CLIENT_CREDENTIALS} it needs no human step, so it is
+     * {@link Binding#SERVICE} only and the first call mints the grant.
+     */
+    OAUTH2_JWT_BEARER;
 
     /**
      * Whether this type completes an OAuth 2.0 flow, and so needs a token endpoint,
@@ -46,6 +56,16 @@ public enum AuthType {
      * vault and then fails at the moment the token comes back.
      */
     public boolean isOAuth() {
-        return this == OAUTH2_AUTHORIZATION_CODE || this == OAUTH2_CLIENT_CREDENTIALS;
+        return this == OAUTH2_AUTHORIZATION_CODE || this == OAUTH2_CLIENT_CREDENTIALS || this == OAUTH2_JWT_BEARER;
+    }
+
+    /**
+     * Whether this type obtains its token without a human step, so the token
+     * service mints the grant on first use and simply re-mints when one is rejected
+     * — there is no refresh token to rotate and no user to send back to a consent
+     * screen.
+     */
+    public boolean isServiceAccount() {
+        return this == OAUTH2_CLIENT_CREDENTIALS || this == OAUTH2_JWT_BEARER;
     }
 }

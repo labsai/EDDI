@@ -6116,13 +6116,15 @@
       "static": "API-Schlüssel",
       "basic": "Benutzername & Passwort",
       "clientCredentials": "OAuth-Dienstkonto",
-      "authorizationCode": "OAuth-Benutzeranmeldung"
+      "authorizationCode": "OAuth-Benutzeranmeldung",
+      "jwtBearer": "Dienstkonto mit Signaturschlüssel"
     },
     "choice": {
       "staticBody": "Ein fester Header, für alle gleich — X-Api-Key oder Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} übernimmt die Kodierung, dadurch bleibt das Passwort ein eigener Vault-Eintrag, den Sie separat wechseln können.",
       "clientCredentialsBody": "Der Agent meldet sich als er selbst an. Ein Access-Token für alle, das automatisch erneuert wird.",
-      "authorizationCodeBody": "Jede Person verknüpft ihr eigenes Konto und der Agent handelt in ihrem Namen. Erfordert aktivierte Anmeldung und einen Vault."
+      "authorizationCodeBody": "Jede Person verknüpft ihr eigenes Konto und der Agent handelt in ihrem Namen. Erfordert aktivierte Anmeldung und einen Vault.",
+      "jwtBearerBody": "Der Agent meldet sich mit einem privaten Schlüssel statt eines Geheimnisses als er selbst an — zum Beispiel ein Google-Dienstkonto. Ein Access-Token für alle."
     },
     "binding": {
       "perUser": "Pro Person",
@@ -6156,7 +6158,7 @@
     "clientId": "Client-ID",
     "clientSecret": "Client-Secret",
     "clientAuthMethod": "Client-Authentifizierung",
-    "clientAuthMethodHint": "Wie das Client-Secret zum Token-Endpunkt gelangt. Ein falsch geratener Wert sieht genau wie ein falsches Secret aus, deshalb ist es eine Einstellung und kein Rateverfahren.",
+    "clientAuthMethodHint": "Wie sich der Client am Token-Endpunkt ausweist: mit dem Client-Secret per Basic oder im Body, oder mit private_key_jwt — einer mit einem im Vault gespeicherten privaten Schlüssel signierten Assertion, für eine mit Zertifikat registrierte App. Eine falsche Wahl sieht genauso aus wie ein falsches Secret, deshalb ist es eine Einstellung und kein Fallback.",
     "discoveryUrl": "Discovery-URL (optional)",
     "pkceAlwaysOn": "PKCE (S256) gilt bei einer Benutzeranmeldung immer und lässt sich nicht abschalten — das Redirect-Ziel ist öffentlich erreichbar.",
     "scopes": "Scopes",
@@ -6242,7 +6244,9 @@
       "paramReserved": "Einen dieser Parameter setzt {{productName}} selbst (client_id, redirect_uri, response_type, state, code_challenge …). Ihn zu überschreiben würde den Ablauf zerstören.",
       "paramValueReference": "Parameterwerte werden genau so gesendet, wie sie geschrieben sind – eine ${…}-Referenz wird hier nicht aufgelöst und würde einen Tresorverweis in eine URL setzen. Verwenden Sie nur einfache Protokollwerte.",
       "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
-      "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter."
+      "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter.",
+      "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -6265,7 +6269,30 @@
     "confirmAuthChangeDesc": "Über diese Verbindung verknüpfte Konten werden nicht mehr aufgelöst – eine Berechtigung gehört zu dem Ablauf, der sie erzeugt hat. {{productName}} lehnt die Änderung ab, solange noch ein Konto verknüpft ist, und nennt die Anzahl; heben Sie die Verknüpfungen zuerst auf, oder legen Sie eine neue Verbindung an und lassen Sie die Leute stattdessen diese verknüpfen.",
     "confirmAuthChangeAccept": "Ändern",
     "deleted": "Verbindung \"{{name}}\" gelöscht",
-    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?"
+    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?",
+    "privateKey": "Privater Schlüssel",
+    "privateKeyHint": "Ein Vault-Eintrag mit einem unverschlüsselten RSA-Schlüssel im PKCS#8-PEM-Format (BEGIN PRIVATE KEY) oder einer vollständigen JSON-Schlüsseldatei eines Google-Dienstkontos. Der Schlüssel verlässt {{productName}} nie; gesendet wird nur eine kurzlebige signierte Assertion.",
+    "certificateThumbprint": "Zertifikat-Fingerabdruck",
+    "certificateThumbprintHint": "Des beim Identitätsanbieter hochgeladenen Zertifikats — als Hex, wie das Portal ihn zeigt, oder base64url. Öffentlich, kein Geheimnis.",
+    "certificateThumbprintHeader": "Fingerabdruck-Header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra-Standard)",
+    "thumbprintSha1": "x5t — SHA-1-Fingerabdruck",
+    "serviceAccountEmail": "Dienstkonto (Aussteller)",
+    "serviceAccountEmailHint": "z. B. agent@project.iam.gserviceaccount.com. Optional, wenn der private Schlüssel eine JSON-Schlüsseldatei ist, die ihr eigenes Konto nennt.",
+    "audience": "Assertion-Zielgruppe (optional)",
+    "audienceHint": "Der aud-Claim der signierten Assertion. Leer lassen, um die Token-URL zu verwenden — das erwartet Google.",
+    "preset": "Mit einer Vorlage beginnen",
+    "presetNone": "Keine — alle Felder selbst ausfüllen",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Microsoft-Entra-App mit Zertifikat",
+        "description": "Eine Entra-App-Registrierung, die sich mit einem Zertifikat statt eines Client-Geheimnisses anmeldet (private_key_jwt). Ersetzen Sie <tenant-id> in der Token-URL, tragen Sie die Anwendungs-(Client-)ID und den Fingerabdruck des Zertifikats ein und legen Sie den privaten Schlüssel des Zertifikats als unverschlüsseltes PKCS#8-PEM im Vault ab. Fügen Sie https://login.microsoftonline.com zur Allowlist der Credential-Endpunkte hinzu."
+      },
+      "google-service-account": {
+        "label": "Google-Dienstkonto (JSON-Schlüssel)",
+        "description": "Google-APIs als Dienstkonto, signiert mit dessen privatem Schlüssel (RFC 7523 JWT Bearer). Legen Sie die heruntergeladene JSON-Schlüsseldatei als EINEN Vault-Eintrag ab und referenzieren Sie ihn als privaten Schlüssel; Aussteller und Schlüssel-ID werden daraus gelesen. Fügen Sie https://oauth2.googleapis.com zur Allowlist der Credential-Endpunkte hinzu. Ohne domainweite Delegierung sieht das Konto nur, was mit ihm geteilt wurde."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",

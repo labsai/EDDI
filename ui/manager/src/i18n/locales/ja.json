@@ -6116,13 +6116,15 @@
       "static": "API キー",
       "basic": "ユーザー名とパスワード",
       "clientCredentials": "OAuth サービスアカウント",
-      "authorizationCode": "OAuth ユーザーログイン"
+      "authorizationCode": "OAuth ユーザーログイン",
+      "jwtBearer": "署名鍵サービスアカウント"
     },
     "choice": {
       "staticBody": "全員に共通の固定ヘッダー — X-Api-Key、または Authorization: Bearer …",
       "basicBody": "HTTP Basic。エンコードは {{productName}} が行うため、パスワードは Vault の独立した項目として単独でローテーションできます。",
       "clientCredentialsBody": "エージェント自身としてログインします。全員で共有する 1 つのアクセストークンが自動更新されます。",
-      "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。"
+      "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。",
+      "jwtBearerBody": "エージェントはシークレットの代わりに秘密鍵を使って自身としてサインインします（例: Google のサービスアカウント）。全員で 1 つのアクセストークンを共有します。"
     },
     "binding": {
       "perUser": "ユーザーごと",
@@ -6156,7 +6158,7 @@
     "clientId": "クライアント ID",
     "clientSecret": "クライアントシークレット",
     "clientAuthMethod": "クライアント認証",
-    "clientAuthMethodHint": "クライアントシークレットをトークンエンドポイントへどう渡すか。取り違えるとシークレットが誤っている場合とまったく同じ症状になるため、推測ではなく設定にしています。",
+    "clientAuthMethodHint": "トークンエンドポイントでクライアントが自身を証明する方法です。クライアントシークレットを Basic または本文で送るか、private_key_jwt（証明書で登録したアプリ向けの、Vault に保存した秘密鍵で署名したアサーション）を使います。誤って選ぶと誤ったシークレットとまったく同じに見えるため、自動フォールバックではなく設定項目になっています。",
     "discoveryUrl": "ディスカバリー URL（任意）",
     "pkceAlwaysOn": "ユーザーログインでは PKCE（S256）が常に適用され、無効にはできません — リダイレクト先が公開パスだからです。",
     "scopes": "スコープ",
@@ -6242,7 +6244,9 @@
       "paramReserved": "これらのパラメーターのいずれかは {{productName}} 自身が設定します（client_id、redirect_uri、response_type、state、code_challenge…）。上書きするとフローが壊れます。",
       "paramValueReference": "パラメーター値は書かれたとおりに送信されます。ここでの ${…} 参照は解決されず、ボールトへのポインターが URL に載ってしまいます。プレーンなプロトコル値のみを使用してください。",
       "paramValueTooLong": "パラメーター値は 512 文字以内です。",
-      "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。"
+      "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。",
+      "thumbprintFormat": "正しい長さのサムプリントではありません。x5t#S256 には SHA-256、x5t には SHA-1 のサムプリントが必要です（16 進数または base64url）。",
+      "thumbprintRequiredEntra": "Microsoft Entra はキーを証明書のサムプリントでのみ識別します。アプリ登録にアップロードした証明書のサムプリントを貼り付けてください。"
     },
     "backToList": "接続一覧に戻る",
     "headerSecret": "保存済みシークレット",
@@ -6265,7 +6269,30 @@
     "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、{{productName}} は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
     "confirmAuthChangeAccept": "変更する",
     "deleted": "接続「{{name}}」を削除しました",
-    "confirmDeleteNamed": "接続「{{name}}」を削除しますか？"
+    "confirmDeleteNamed": "接続「{{name}}」を削除しますか？",
+    "privateKey": "秘密鍵",
+    "privateKeyHint": "暗号化されていない PKCS#8 PEM（BEGIN PRIVATE KEY）の RSA 鍵、または Google サービスアカウントの JSON 鍵ファイル全体を保持する Vault エントリ。鍵が {{productName}} の外に出ることはなく、送信されるのは短時間有効な署名付きアサーションだけです。",
+    "certificateThumbprint": "証明書のサムプリント",
+    "certificateThumbprintHint": "ID プロバイダーにアップロードした証明書のもの。ポータルに表示される 16 進数、または base64url で入力します。公開情報であり、シークレットではありません。",
+    "certificateThumbprintHeader": "サムプリントヘッダー",
+    "thumbprintS256": "x5t#S256 — SHA-256（Entra の既定）",
+    "thumbprintSha1": "x5t — SHA-1 サムプリント",
+    "serviceAccountEmail": "サービスアカウント（発行者）",
+    "serviceAccountEmailHint": "例: agent@project.iam.gserviceaccount.com。秘密鍵が JSON 鍵ファイルの場合は、ファイル自体がアカウントを示すため省略できます。",
+    "audience": "アサーションのオーディエンス（任意）",
+    "audienceHint": "署名付きアサーションの aud クレーム。空のままにするとトークン URL が使われ、これは Google が想定する値です。",
+    "preset": "テンプレートから始める",
+    "presetNone": "なし — すべての項目を入力",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "証明書を使う Microsoft Entra アプリ",
+        "description": "クライアント シークレットの代わりに証明書で認証する Entra アプリ登録です (private_key_jwt)。トークン URL の <tenant-id> を置き換え、アプリケーション (クライアント) ID と証明書のサムプリントを入力し、証明書の秘密鍵を暗号化されていない PKCS#8 PEM として Vault に保存してください。https://login.microsoftonline.com を認証情報エンドポイントの許可リストに追加してください。"
+      },
+      "google-service-account": {
+        "label": "Google サービス アカウント (JSON キー)",
+        "description": "サービス アカウントとして Google API を使い、その秘密鍵で署名します (RFC 7523 JWT ベアラー)。ダウンロードした JSON キー ファイルを Vault の 1 つのエントリとして保存し、秘密鍵として参照してください。発行者とキー ID はそこから読み取られます。https://oauth2.googleapis.com を認証情報エンドポイントの許可リストに追加してください。ドメイン全体の委任がない場合、アカウントは共有されたものしか参照できません。"
+      }
+    }
   },
   "extensionTypes": {
     "parser": "入力パーサー",

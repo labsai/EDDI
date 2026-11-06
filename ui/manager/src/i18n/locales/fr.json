@@ -6176,13 +6176,15 @@
       "static": "Clé d'API",
       "basic": "Identifiant & mot de passe",
       "clientCredentials": "Compte de service OAuth",
-      "authorizationCode": "Connexion utilisateur OAuth"
+      "authorizationCode": "Connexion utilisateur OAuth",
+      "jwtBearer": "Compte de service à clé de signature"
     },
     "choice": {
       "staticBody": "Un en-tête fixe, identique pour tout le monde — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se charge de l'encodage : le mot de passe reste une entrée distincte du coffre, que vous pouvez renouveler seule.",
       "clientCredentialsBody": "L'agent se connecte en son propre nom. Un jeton d'accès partagé par tous, renouvelé automatiquement.",
-      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre."
+      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre.",
+      "jwtBearerBody": "L'agent se connecte en son propre nom avec une clé privée au lieu d'un secret — un compte de service Google, par exemple. Un seul jeton d'accès partagé par tous."
     },
     "binding": {
       "perUser": "Par personne",
@@ -6216,7 +6218,7 @@
     "clientId": "Identifiant client",
     "clientSecret": "Secret client",
     "clientAuthMethod": "Authentification du client",
-    "clientAuthMethodHint": "Comment le secret client parvient au point de jeton. Une mauvaise supposition ressemble exactement à un mauvais secret : c'est donc un réglage, pas une devinette.",
+    "clientAuthMethodHint": "Comment le client s'authentifie auprès du point de terminaison de jeton : le secret client en Basic ou dans le corps, ou private_key_jwt — une assertion signée avec une clé privée stockée dans le coffre, pour une application enregistrée avec un certificat. Une erreur ici ressemble exactement à un mauvais secret ; c'est donc un réglage et non un repli automatique.",
     "discoveryUrl": "URL de découverte (facultatif)",
     "pkceAlwaysOn": "PKCE (S256) s'applique toujours à une connexion utilisateur et ne peut pas être désactivé — la cible de redirection est une adresse publique.",
     "scopes": "Portées",
@@ -6302,7 +6304,9 @@
       "paramReserved": "L'un de ces paramètres est défini par {{productName}} lui-même (client_id, redirect_uri, response_type, state, code_challenge…). Le remplacer casserait le flux.",
       "paramValueReference": "Les valeurs de paramètres sont envoyées telles quelles — une référence ${…} n'est pas résolue ici et placerait un pointeur de coffre dans une URL. N'utilisez que des valeurs de protocole simples.",
       "paramValueTooLong": "Une valeur de paramètre fait au plus 512 caractères.",
-      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici."
+      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici.",
+      "thumbprintFormat": "Ce n'est pas une empreinte de la bonne longueur : x5t#S256 exige l'empreinte SHA-256, x5t l'empreinte SHA-1 — en hexadécimal ou en base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra n'identifie la clé que par l'empreinte de son certificat. Collez l'empreinte du certificat que vous avez chargé dans l'inscription de l'application."
     },
     "backToList": "Retour aux connexions",
     "headerSecret": "Secret enregistré",
@@ -6325,7 +6329,30 @@
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. {{productName}} refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
     "confirmAuthChangeAccept": "Changer",
     "deleted": "Connexion \"{{name}}\" supprimée",
-    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?",
+    "privateKey": "Clé privée",
+    "privateKeyHint": "Une entrée du coffre contenant une clé RSA PKCS#8 PEM non chiffrée (BEGIN PRIVATE KEY), ou le fichier de clé JSON complet d'un compte de service Google. La clé ne quitte jamais {{productName}} ; seule une assertion signée de courte durée est envoyée.",
+    "certificateThumbprint": "Empreinte du certificat",
+    "certificateThumbprintHint": "Celle du certificat téléversé chez le fournisseur d'identité — en hexadécimal tel que le portail l'affiche, ou en base64url. Publique, ce n'est pas un secret.",
+    "certificateThumbprintHeader": "En-tête d'empreinte",
+    "thumbprintS256": "x5t#S256 — SHA-256 (par défaut pour Entra)",
+    "thumbprintSha1": "x5t — empreinte SHA-1",
+    "serviceAccountEmail": "Compte de service (émetteur)",
+    "serviceAccountEmailHint": "p. ex. agent@project.iam.gserviceaccount.com. Facultatif si la clé privée est un fichier de clé JSON, qui nomme son propre compte.",
+    "audience": "Audience de l'assertion (facultatif)",
+    "audienceHint": "La revendication aud de l'assertion signée. Laissez vide pour utiliser l'URL du jeton, ce qu'attend Google.",
+    "preset": "Partir d'un modèle",
+    "presetNone": "Aucun — remplir tous les champs",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Application Microsoft Entra avec certificat",
+        "description": "Une inscription d'application Entra qui s'authentifie avec un certificat au lieu d'un secret client (private_key_jwt). Remplacez <tenant-id> dans l'URL du jeton, renseignez l'ID d'application (client) et l'empreinte du certificat, et stockez la clé privée du certificat dans le coffre au format PEM PKCS#8 non chiffré. Ajoutez https://login.microsoftonline.com à la liste d'autorisation des points de terminaison d'identifiants."
+      },
+      "google-service-account": {
+        "label": "Compte de service Google (clé JSON)",
+        "description": "Les API Google en tant que compte de service, signées avec sa clé privée (jeton porteur JWT, RFC 7523). Stockez le fichier de clé JSON téléchargé comme UNE seule entrée du coffre et référencez-la comme clé privée ; l'émetteur et l'ID de clé y sont lus. Ajoutez https://oauth2.googleapis.com à la liste d'autorisation des points de terminaison d'identifiants. Sans délégation à l'échelle du domaine, le compte ne voit que ce qui est partagé avec lui."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",
