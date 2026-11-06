@@ -1857,44 +1857,6 @@ class ToolLoopRunner {
         // classifies it, and neither sends it anywhere.
         toolResult = SecretRedactionFilter.redact(toolResult);
 
-        // Apply response truncation (MCP governance).
-        //
-        // The provenance envelope is added AFTER this, so the budget handed to the
-        // truncator is reduced by the envelope's worst case. Otherwise a configured
-        // ceiling is exceeded by every single result — small individually, kilobytes
-        // across a long tool loop, and exactly the drift the ceiling exists to stop.
-        toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
-                toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
-
-        Map<String, Object> resultStep = new HashMap<>();
-        resultStep.put("type", "tool_result");
-        resultStep.put("tool", toolRequest.name());
-        withCallId(resultStep, toolRequest);
-        // Redacted for the same reason as the call step's arguments: an API
-        // response can echo a credential (its own, or one the request carried).
-        // toolResult was redacted above; it is scanned again because truncation
-        // (summarize strategy) can produce new text.
-        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
-        if (mockingExecutor != null) {
-            resultStep.put("mocked", true);
-        }
-        trace.add(resultStep);
-
-        // LAZY mode: after discover_tools returns, activate the matching built-in
-        // specs.
-        //
-        // Deliberately BEFORE the guardrail: discover_tools' output is an
-        // EDDI-authored control message this loop parses itself, and wrapping it in
-        // a provenance envelope first would make that parse fail. The envelope is
-        // for the model's benefit, and the model still gets one.
-        if (isLazy && "discover_tools".equals(toolRequest.name())) {
-            int before = activeSpecs.size();
-            activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
-            LazyToolCatalog.countActivation(activeSpecs.size() - before);
-            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
-        }
-
         // Govern what comes back. Until now the comment on the live loop's caller
         // read "append the raw result verbatim", which made every tool a
         // prompt-injection channel: third-party bulk text arrived in the same
@@ -1905,21 +1867,81 @@ class ToolLoopRunner {
         // the MCP resource bridge's executors return ordinary tool results —
         // resource content and listings for free.
         //
-        // Applied AFTER the trace entry above on purpose: the trace is a display
-        // record of what the TOOL returned, and showing an operator EDDI's own
-        // envelope back would obscure that.
+        // The WHOLE result is screened, before truncation. Screening the cut text
+        // left the rest ungoverned: the paginate strategy stores it as pages that
+        // come back through fetch_tool_response_page — a built-in tool, which a
+        // guardrail narrowed to ["mcp"] never screens — and the summarize strategy
+        // sent it to a second model. A directive in the part a cut drops now also
+        // triggers `block`.
         String source = toolSources == null ? null : toolSources.get(toolRequest.name());
-        var outcome = toolResultGuardrail.inspect(toolRequest.name(), source, toolResult,
-                task.getToolResultGuardrails());
-        if (!ToolResultGuardrail.ACTION_ALLOW.equals(outcome.action())) {
+        var guardrails = task.getToolResultGuardrails();
+        var screened = toolResultGuardrail.screen(toolRequest.name(), source, toolResult, guardrails);
+        String guardrailAction = screened.action();
+
+        // Apply response truncation (MCP governance).
+        //
+        // The provenance envelope is added AFTER this, so the budget handed to the
+        // truncator is reduced by the envelope's worst case. Otherwise a configured
+        // ceiling is exceeded by every single result — small individually, kilobytes
+        // across a long tool loop, and exactly the drift the ceiling exists to stop.
+        toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
+                toolRequest.name(), screened.result(), reserveEnvelopeBudget(task.getToolResponseLimits(), task),
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
+
+        // A summary is new text, written by a model from third-party content, and a
+        // summarizer that normalises an obfuscated instruction the pattern missed can
+        // produce one it matches — so it is screened in turn. The other strategies
+        // only remove text, and their output is not scanned twice.
+        if (summarizes(task.getToolResponseLimits()) && toolResult != null && !toolResult.equals(screened.result())) {
+            var summary = toolResultGuardrail.screen(toolRequest.name(), source, toolResult, guardrails);
+            toolResult = summary.result();
+            if (!ToolResultGuardrail.ACTION_ALLOW.equals(summary.action())) {
+                guardrailAction = summary.action();
+            }
+        }
+
+        Map<String, Object> resultStep = new HashMap<>();
+        resultStep.put("type", "tool_result");
+        resultStep.put("tool", toolRequest.name());
+        withCallId(resultStep, toolRequest);
+        // Redacted for the same reason as the call step's arguments: an API
+        // response can echo a credential (its own, or one the request carried).
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
+        //
+        // The screened text, before the envelope: the trace is a display record of
+        // what the tool returned as the model received it, and showing an operator
+        // EDDI's own envelope back would obscure that.
+        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
+        if (mockingExecutor != null) {
+            resultStep.put("mocked", true);
+        }
+        trace.add(resultStep);
+
+        // LAZY mode: after discover_tools returns, activate the matching built-in
+        // specs.
+        //
+        // From the raw result: discover_tools' output is an EDDI-authored control
+        // message this loop parses itself, and the envelope or a cut would make that
+        // parse fail. The envelope is for the model's benefit, and the model still
+        // gets one.
+        if (isLazy && "discover_tools".equals(toolRequest.name())) {
+            int before = activeSpecs.size();
+            activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
+            LazyToolCatalog.countActivation(activeSpecs.size() - before);
+            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
+        }
+
+        if (!ToolResultGuardrail.ACTION_ALLOW.equals(guardrailAction)) {
             Map<String, Object> guardrailStep = new HashMap<>();
             guardrailStep.put("type", "tool_result_guardrail");
             guardrailStep.put("tool", toolRequest.name());
-            guardrailStep.put("action", outcome.action());
+            guardrailStep.put("action", guardrailAction);
             trace.add(guardrailStep);
         }
 
-        return new ToolCallResult(outcome.result(), untruncatedResult, notExecuted);
+        return new ToolCallResult(toolResultGuardrail.mark(toolRequest.name(), source, toolResult, guardrails), untruncatedResult,
+                notExecuted);
     }
 
     /**
@@ -1931,6 +1953,11 @@ class ToolLoopRunner {
     static boolean indicatesUnfinishedCall(String rawResult) {
         ToolOutcomeClassifier.Outcome outcome = ToolOutcomeClassifier.classify(rawResult);
         return outcome.isFailure() || outcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED;
+    }
+
+    /** Whether the task truncates its tool results with the summarize strategy. */
+    private static boolean summarizes(LlmConfiguration.ToolResponseLimits limits) {
+        return limits != null && "summarize".equalsIgnoreCase(limits.getTruncationStrategy());
     }
 
     /**
