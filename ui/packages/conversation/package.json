@@ -13,6 +13,7 @@
     ".": "./src/index.ts",
     "./team": "./src/team/index.ts",
     "./team/locales/*": "./src/team/i18n/locales/*",
+    "./tool-activity": "./src/tool-activity/index.ts",
     "./i18next": "./src/i18next/index.ts",
     "./paused-card": "./src/components/PausedCard.tsx",
     "./rating-card": "./src/components/RatingCard.tsx",

@@ -1,6 +1,6 @@
 import { ReviewNotice } from "./review-notice";
 import { useAgentReviewProfile } from "../../hooks/use-agent-review-profile";
-import { useEffect, useId, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "../../lib/constants";
@@ -19,6 +19,7 @@ import {
   useUndoConversation,
   useRedoConversation,
   useRerunConversation,
+  chatToolActivity,
 } from "../../hooks/use-chat";
 import type { SentAttachment } from "../../hooks/use-chat";
 import {
@@ -34,6 +35,14 @@ import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "../../hooks/use-chat-ratings";
 import { lastStepIndex, ratableSteps } from "@eddi/core";
 import { ReplyAnnouncer, type AnnouncedMessage } from "@eddi/conversation";
+import {
+  ToolActivityCards,
+  ToolTurnNotice,
+  formatToolList,
+  toolCardPositions,
+  toolNames,
+  useToolTurns,
+} from "@eddi/conversation/tool-activity";
 import { ChatActivity } from "./chat-activity";
 import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
@@ -95,10 +104,11 @@ export interface ChatPanelProps {
   /** Called once the initial message has been taken, so the host can drop it. */
   onInitialMessageConsumed?: () => void;
   /**
-   * A notice beside "Edit" and "Regenerate" on the last turn — the seam for
-   * "this turn ran tools whose effects stay" once the stream reports which
-   * tools a turn ran (plan B6). Undo and rerun take back the reply, never what
-   * a tool did. Nothing is shown when it returns null or is not passed.
+   * A notice beside "Edit" and "Regenerate" on the last turn. Undo and rerun
+   * take back the reply, never what a tool did, so by default a turn that ran
+   * tools says which (T1.6, from the stream's `tool_result` events — the
+   * turns this page watched; see `chatToolActivity`). Pass this to say
+   * something else; returning null shows nothing.
    */
   renderTurnNotice?: (context: TurnNoticeContext) => ReactNode;
 }
@@ -125,7 +135,7 @@ export function ChatPanel({
   onInitialMessageConsumed,
   renderTurnNotice,
 }: ChatPanelProps = {}) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
@@ -622,17 +632,43 @@ export function ChatPanel({
     !lastUser.attachments?.length;
   const canRegenerate = controls.undo && controls.redo && turnIdle && lastTurn.reply >= 0;
 
+  // The tool calls of the turns this page watched (T1.9), and where their cards go.
+  const toolTurns = useToolTurns(chatToolActivity, conversationId);
+  const toolCardsAt = useMemo(() => toolCardPositions(messages, toolTurns), [messages, toolTurns]);
+  const turnNoticeId = useId();
+
   const handleEditLast = useCallback(() => {
     if (!canEditLast || !lastUser) return;
     const text = lastUser.content;
+    // Read before the undo takes the turn off the screen: once the question
+    // is back in the composer, the notice beside Edit is gone with it.
+    const ranTools = toolNames(toolTurns.get(lastStepIndex(messages) ?? -1));
     undoConversation.mutate(undefined, {
       onSuccess: (moved) => {
         if (moved === false) return;
         setDraft({ text, nonce: Date.now() });
+        if (ranTools.length > 0) {
+          const tools = formatToolList(ranTools, i18n.language, (n) =>
+            t("toolActivity.more", "+{{n}} more", { n }),
+          );
+          toast.warning(
+            t("toolActivity.notice.edited", "Your message is back in the composer. What {{tools}} did was not undone.", {
+              tools,
+            }),
+          );
+        }
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
-  }, [canEditLast, lastUser, undoConversation]);
+  }, [canEditLast, lastUser, undoConversation, toolTurns, messages, i18n.language, t]);
+
+  /** By default: which tools the turn ran, when it ran any (T1.6). */
+  const turnNotice = (context: TurnNoticeContext): ReactNode => {
+    if (renderTurnNotice) return renderTurnNotice(context);
+    const activity = context.stepIndex === null ? undefined : toolTurns.get(context.stepIndex);
+    if (toolNames(activity).length === 0) return null;
+    return <ToolTurnNotice activity={activity} action={context.action} id={`${turnNoticeId}-${context.action}`} />;
+  };
 
   const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
@@ -1021,10 +1057,12 @@ export function ChatPanel({
                 const editHere = i === lastTurn.user && canEditLast;
                 const regenerateHere = i === lastTurn.reply && canRegenerate;
                 const action: TurnNoticeContext["action"] | null = editHere ? "edit" : regenerateHere ? "regenerate" : null;
-                const notice = action ? renderTurnNotice?.({ action, stepIndex: lastStepIndex(messages) }) : null;
+                const notice = action ? turnNotice({ action, stepIndex: lastStepIndex(messages) }) : null;
+                const toolStep = toolCardsAt.get(i);
+                const toolActivity = toolStep === undefined ? undefined : toolTurns.get(toolStep);
                 return (
+                  <Fragment key={msg.id}>
                   <ChatMessage
-                    key={msg.id}
                     message={msg}
                     ratingStep={ratingStep}
                     rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
@@ -1036,6 +1074,8 @@ export function ChatPanel({
                           <button
                             type="button"
                             onClick={editHere ? handleEditLast : handleRerun}
+                            // The notice is what the click does not take back; read it with the button.
+                            aria-describedby={notice && !renderTurnNotice ? `${turnNoticeId}-${action}` : undefined}
                             className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                             title={editHere ? t("chat.editLastHint", "Edit and send again (↑)") : t("chat.regenerateHint", "Ask for a new reply")}
                             data-testid={editHere ? "edit-last" : "regenerate-last"}
@@ -1052,6 +1092,12 @@ export function ChatPanel({
                       ) : undefined
                     }
                   />
+                  {toolActivity && (
+                    <div className="ps-15 pe-4 pb-1">
+                      <ToolActivityCards activity={toolActivity} className="max-w-[min(75%,48rem)] text-xs" />
+                    </div>
+                  )}
+                  </Fragment>
                 );
               })}
 
