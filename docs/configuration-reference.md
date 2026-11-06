@@ -425,6 +425,7 @@ Full guide: [hitl.md](hitl.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
+| `eddi.hitl.plan-hash.strict` | `false` | Strict plan binding for every agent and group: a human HITL decision on a pause that has a `planHash` must carry it, or it is refused with `400` (the pause is not consumed). Off, a decision without it is accepted and logged; an agent or group can still require it with `hitlConfig.requirePlanHash`. Timeouts and other `system:*` decisions are exempt — see [Plan Binding](hitl.md#plan-binding-planhash) |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
 | `eddi.hitl.tool.journal-retention` | `30d` | How long completed tool-approval journal entries are kept. A claim left `EXECUTING` by a crash inside the tool is kept until its conversation is deleted, so a later approval of the same pause cannot run the call again |
 | `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |

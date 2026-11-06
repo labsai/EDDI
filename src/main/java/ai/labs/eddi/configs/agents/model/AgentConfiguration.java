@@ -1827,6 +1827,26 @@ public class AgentConfiguration {
         }
 
         /**
+         * Strict plan binding: a human decision on this agent's pauses must carry the
+         * pause's {@code planHash} (from approval-status), or it is refused with a 400
+         * and the pause stays. Absent or {@code false} = a decision without the hash is
+         * accepted and logged, as clients that predate plan hashing send it. The
+         * deployment property {@code eddi.hitl.plan-hash.strict} turns it on for every
+         * agent. Automated decisions (timeouts) are never refused for it.
+         *
+         * @since 6.8.0
+         */
+        private Boolean requirePlanHash;
+
+        public Boolean getRequirePlanHash() {
+            return requirePlanHash;
+        }
+
+        public void setRequirePlanHash(Boolean requirePlanHash) {
+            this.requirePlanHash = requirePlanHash;
+        }
+
+        /**
          * Who is told when this agent pauses a conversation for approval —
          * {@code notify.email.recipients} today. Absent = nobody is notified. The
          * notification links to the Manager's approvals page and carries no

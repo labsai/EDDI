@@ -1015,7 +1015,8 @@ public class SlackEventHandler {
 
         // The button value carries the owning integration name and this card's id,
         // so the decision is bound to THIS integration and THIS card.
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId);
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId,
+                bookmark != null ? bookmark.getHitlPlanHash() : null);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(

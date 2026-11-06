@@ -879,6 +879,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (IConversationService.PlanMismatchException e) {
+            // The decision named a plan (planHash) other than the pending one, or the
+            // stored plan no longer verifies. Nothing ran; the pause is untouched.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The pending approval's plan is not the one this decision was made for (planHash does not match) — "
+                            + "re-read approval-status and decide again.")
+                    .build();
         } catch (IConversationService.PauseMismatchException e) {
             // The decision named a pause (pauseId) that is no longer the current one.
             // Fixed text: the current pause is untouched and awaits a fresh decision.
@@ -965,6 +972,10 @@ public class RestAgentEngine implements IRestAgentEngine {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
+            // The plan hash a decision passes back as HitlDecision.planHash, so it
+            // applies only to exactly the plan shown here (HitlPlanHash). Empty for a
+            // pause committed before plan hashing.
+            summary.put("planHash", paused && snapshot.getHitlPlanHash() != null ? snapshot.getHitlPlanHash() : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
