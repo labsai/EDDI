@@ -10,6 +10,7 @@ import { Eye, EyeOff, Lock, SendHorizontal } from "lucide-react";
 import { isImeComposing } from "./ime";
 import { useConversationContext } from "../react/context";
 import { useConversationText } from "../react/hooks";
+import { inputFieldType, isSecretInputField } from "../controller/composer-mode";
 
 interface SecretInputProps {
   label?: string;
@@ -51,7 +52,7 @@ export function SecretInput({
   // Only a password field is a secret. Every subType used to be masked and
   // sent with `secretInput`, so an e-mail address was hidden from the user
   // typing it and vaulted by the backend as though it were a credential.
-  const isSecret = (subType || "password") === "password";
+  const isSecret = isSecretInputField(subType);
 
   const handleSubmit = useCallback(() => {
     // Don't trim — leading/trailing whitespace is valid in passwords and tokens
@@ -77,13 +78,7 @@ export function SecretInput({
     else dispatch({ type: "CLEAR_INPUT_FIELD" });
   }, [onCancel, dispatch]);
 
-  const inputType = isSecret
-    ? visible
-      ? "text"
-      : "password"
-    : subType === "email"
-      ? "email"
-      : "text";
+  const inputType = isSecret && visible ? "text" : inputFieldType(subType);
 
   return (
     <div className="secret-input" data-testid="secret-input">

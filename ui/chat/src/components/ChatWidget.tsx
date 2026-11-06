@@ -24,6 +24,8 @@ import {
   createManagedTransport,
   indicatorStatusText,
   guardrailActive,
+  offersQuickReplies,
+  resolveComposerMode,
 } from "@eddi/conversation";
 
 import {
@@ -590,6 +592,8 @@ export function ChatWidget() {
   // A guardrail fired on the reply being written: the wait is it at work.
   const guardrailOnReply = guardrailActive(state.messages, state.isProcessing);
   const isEnded = state.conversationState === "ENDED";
+  // One mode at a time (T2.5): the agent's requested field, the lock, or text.
+  const composerMode = resolveComposerMode(state);
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
   const showStartRetry = state.startFailed && !state.conversationId && !isEnded;
@@ -731,7 +735,7 @@ export function ChatWidget() {
         )}
       </MessageList>
 
-      {!isEnded && !isPaused &&
+      {!isEnded && !isPaused && offersQuickReplies(composerMode) &&
         state.config.enableQuickReplies !== false && controls.quickReplies && (
           <QuickReplies
             replies={state.quickReplies}
@@ -901,12 +905,12 @@ export function ChatWidget() {
               </div>
             )}
 
-            {state.activeInputField ? (
+            {composerMode.kind === "field" ? (
               <SecretInput
-                label={state.activeInputField.label}
-                placeholder={state.activeInputField.placeholder}
-                defaultValue={state.activeInputField.defaultValue}
-                subType={state.activeInputField.subType}
+                label={composerMode.field.label}
+                placeholder={composerMode.field.placeholder}
+                defaultValue={composerMode.field.defaultValue}
+                subType={composerMode.field.subType}
                 onSend={handleRequestedFieldSend}
                 onCancel={handleRequestedFieldCancel}
                 disabled={state.isProcessing}
