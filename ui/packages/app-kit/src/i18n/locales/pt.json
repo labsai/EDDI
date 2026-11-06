@@ -863,7 +863,10 @@
     "noProgressAbort": "Abortar",
     "confirmCancelGroupTitle": "Cancelar discussão?",
     "confirmCancelGroupDescription": "Cancelar esta discussão? Qualquer trabalho em andamento será abortado.",
-    "confirmCancelGroupButton": "Cancelar discussão"
+    "confirmCancelGroupButton": "Cancelar discussão",
+    "noticeAutoApprove": "Aprovado automaticamente às {{time}}, a menos que alguém decida antes",
+    "noticeAutoReject": "Rejeitado automaticamente às {{time}}, a menos que alguém decida antes",
+    "noticeAutoAbort": "Interrompido automaticamente às {{time}}, a menos que alguém decida antes"
   },
   "chatDrawer": {
     "timeout": "Tempo limite de implantação esgotado"

@@ -856,7 +856,10 @@
     "noProgressAbort": "Abbrechen",
     "confirmCancelGroupTitle": "Diskussion abbrechen?",
     "confirmCancelGroupDescription": "Diese Diskussion abbrechen? Alle laufenden Arbeiten werden abgebrochen.",
-    "confirmCancelGroupButton": "Diskussion abbrechen"
+    "confirmCancelGroupButton": "Diskussion abbrechen",
+    "noticeAutoApprove": "Wird um {{time}} automatisch genehmigt, sofern niemand vorher entscheidet",
+    "noticeAutoReject": "Wird um {{time}} automatisch abgelehnt, sofern niemand vorher entscheidet",
+    "noticeAutoAbort": "Wird um {{time}} automatisch beendet, sofern niemand vorher entscheidet"
   },
   "chatDrawer": {
     "timeout": "Zeitüberschreitung bei der Bereitstellung"

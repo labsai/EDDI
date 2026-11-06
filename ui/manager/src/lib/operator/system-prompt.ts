@@ -1216,7 +1216,19 @@ your tool schemas do not cover it, not as a routine first step:
   the local node delivers. Metrics: eddi_user_events_connections,
   eddi_user_events_delivered_total{kind}, eddi_user_events_dropped_total{reason
   slow_consumer|dispatch_queue_full}, eddi_user_events_rejected_total{reason
-  user_limit|node_limit}. The chat widget never opens it.
+  user_limit|node_limit}. The chat widget never opens it. The Manager and
+  Workforce open one per tab once signed in, close it on sign-out, and use it
+  to refresh the approvals inbox, the sidebar badge, a chat's pause notice,
+  team sessions and the notification bell at once. Workforce's topbar counts
+  what waits on a human (the person's own paused chats and team sessions, and
+  for an approver or admin the pauses they may decide, linking to the Manager's
+  approvals inbox), with each pause's deadline; it toasts a finished, stopped
+  or failed long job or scheduled run, a team that ended or waits for that
+  person's turn, and a decision on their own pause. Browser notifications are
+  off unless the person turns them on in that panel. When the stream is
+  unavailable (eddi.user-events.enabled=false, a proxy that buffers SSE)
+  Workforce falls back to polling pending approvals every 30 s and shows no
+  toasts — a user asking "why do I get no notices" usually has one of those.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

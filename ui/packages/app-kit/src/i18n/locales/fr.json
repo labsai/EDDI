@@ -863,7 +863,10 @@
     "noProgressAbort": "Interrompre",
     "confirmCancelGroupTitle": "Annuler la discussion ?",
     "confirmCancelGroupDescription": "Annuler cette discussion ? Tout travail en cours sera interrompu.",
-    "confirmCancelGroupButton": "Annuler la discussion"
+    "confirmCancelGroupButton": "Annuler la discussion",
+    "noticeAutoApprove": "Approuvé automatiquement à {{time}} si personne ne décide avant",
+    "noticeAutoReject": "Refusé automatiquement à {{time}} si personne ne décide avant",
+    "noticeAutoAbort": "Arrêté automatiquement à {{time}} si personne ne décide avant"
   },
   "chatDrawer": {
     "timeout": "Délai de déploiement dépassé"

@@ -11,6 +11,8 @@ import { WorkforceShortcuts } from "@/components/workforce/workforce-shortcuts";
 import { ShortcutsDialog } from "@/components/workforce/shortcuts-dialog";
 import { useVisualViewportHeight } from "@/hooks/use-visual-viewport-height";
 import { QuickSwitcher } from "@/components/workforce/quick-switcher";
+import { UserEventBridge } from "@eddi/app-kit/components/layout/user-event-bridge";
+import { WorkforceNotices } from "@/components/workforce/workforce-notices";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -129,6 +131,8 @@ export function WorkforceLayout() {
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <QuickSwitcher />
+        <UserEventBridge />
+        <WorkforceNotices />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -155,6 +159,8 @@ export function WorkforceLayout() {
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <QuickSwitcher />
+        <UserEventBridge />
+        <WorkforceNotices />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -213,6 +219,8 @@ export function WorkforceLayout() {
       <WorkforceShortcuts />
       <ShortcutsDialog />
       <QuickSwitcher />
+      <UserEventBridge />
+      <WorkforceNotices />
       <a
         href="#workforce-main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"

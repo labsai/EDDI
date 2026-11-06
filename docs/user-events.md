@@ -66,6 +66,18 @@ stream.start();
 
 It reads the stream with `fetch` (an `EventSource` cannot send a bearer token), reconnects with exponential backoff and jitter, stops on `401`/`403`/`404` (after one token refresh on `401`), and backs off on `429`. The embeddable Chat UI widget does not use it.
 
+### In the Manager and Workforce
+
+Both apps mount one `UserEventBridge` (`@eddi/app-kit/components/layout/user-event-bridge`) in their layout. It starts the tab's stream once someone is signed in, stops it on sign-out, and turns every event into refetches of what it concerns (`staleQueryKeys` in `@eddi/app-kit/lib/user-event-stream`): an approval event refreshes the approvals inbox, the sidebar badge and that conversation's paused card or pause notice; a team event refreshes the team's discussions and Workforce's team sessions; a job event refreshes the person's chats; `notification.created` refreshes the Manager's bell. A (re)connect refetches all of them. So a decision made in another tab, by another reviewer or by a timeout shows at once instead of at the next poll.
+
+Workforce adds what the end user sees:
+
+- **What waits on a human** (approvals in the flow): a count in the topbar, on every screen size, of the person's paused chats and team sessions — and, for an `eddi-approver` or `eddi-admin`, of the pauses they may decide. Its panel lists each with what its timeout policy does and when (`pausedAt + approvalTimeout`), and jumps to the paused turn in Workforce, or to the Manager's approvals inbox for a review. A paused chat or team session is also marked in the sidebar. The lists are the existing pending-approvals endpoints; they are polled (every 30 s) only while the stream is not open.
+- **Notices.** A toast, in the app's polite live region and never taking focus, when a long job finishes or stops (`job.finished`, with why: its turn limit, its cost ceiling), a scheduled run completes or fails, a team discussion ends, a team waits for *your* turn (`yourTurn: true` only), or *your own* paused conversation is decided. "Open" goes to the conversation or team session; nothing is shown for the one already on screen. The sentences are the app's own and generic — events carry no content.
+- **Browser notifications**, off by default. The person turns them on in the same panel; that click is the only place the browser's permission prompt is ever asked for. They are sent only while the tab is in the background.
+
+The read-only pause notice in a chat (Manager and Workforce) also says by when a pause decides itself, and how.
+
 **There is no replay.** Events are hints, not a log: the server keeps no per-user history and ignores `Last-Event-ID`. A client that (re)connects refetches what it shows — the `ready` frame is the signal — and from then on applies events as they come. An event missed while disconnected is therefore never lost in effect: the refetch shows its outcome.
 
 ## Limits

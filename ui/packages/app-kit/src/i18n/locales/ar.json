@@ -884,7 +884,10 @@
     "noProgressAbort": "إلغاء",
     "confirmCancelGroupTitle": "إلغاء المناقشة؟",
     "confirmCancelGroupDescription": "إلغاء هذه المناقشة؟ سيتم إيقاف أي عمل قيد التنفيذ.",
-    "confirmCancelGroupButton": "إلغاء المناقشة"
+    "confirmCancelGroupButton": "إلغاء المناقشة",
+    "noticeAutoApprove": "ستتم الموافقة تلقائيًا في {{time}} ما لم يقرر أحد قبل ذلك",
+    "noticeAutoReject": "سيتم الرفض تلقائيًا في {{time}} ما لم يقرر أحد قبل ذلك",
+    "noticeAutoAbort": "سيتم الإيقاف تلقائيًا في {{time}} ما لم يقرر أحد قبل ذلك"
   },
   "chatDrawer": {
     "timeout": "انتهت مهلة النشر"

@@ -153,6 +153,28 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
   `--wf-viewport-height` (`hooks/use-visual-viewport-height.ts`, set only while an iOS
   keyboard shrinks the visual viewport), else `100dvh`. Use those, not `h-screen`.
 
+### Tier 2: approvals in the flow and notices (phase 8, T2.3 / T2.8)
+
+- **One user event stream per tab** (`GET /me/events`, [docs/user-events.md](../../docs/user-events.md)).
+  `WorkforceLayout` mounts `UserEventBridge` (`@eddi/app-kit`), which opens it while someone
+  is signed in, closes it on sign-out and turns events into query invalidations
+  (`staleQueryKeys`). Components subscribe with `useUserEvent` / `useUserEventStatus`
+  (`@eddi/app-kit/hooks/use-user-events`) — never open a stream of their own, and never import
+  `@eddi/core/user-events` into `ui/chat`.
+- **What waits on a human** — `components/workforce/approvals-indicator.tsx` in the topbar
+  (every viewport), data in `hooks/use-workforce-approvals.ts`, shaping in
+  `lib/workforce-approvals.ts`. Both pending-approvals lists, on the same query keys as the
+  Manager's inbox, polled only while the stream is not `open`. "Mine" follows the sidebar's
+  owner rule; one's own items open in Workforce, an approver's reviews go to the Manager's
+  `/manage/approvals`. The sidebar's session list marks paused rows. Deciding in place is not
+  in Workforce yet.
+- **Notices** — `components/workforce/workforce-notices.tsx` (mounted by the layout) maps an
+  event to a sentence with `noticeFor` (`lib/workforce-notices.ts`) and toasts it through
+  sonner (the app's polite live region; never takes focus), skipping the conversation on
+  screen (`isShowing`). Browser notifications (`hooks/use-browser-notices.ts`) are opt-in
+  from the indicator's panel — the only place permission is requested — and sent only while
+  the tab is hidden.
+
 ### i18n
 
 Workforce's own strings (`Workforce.*`, `analyticsPage.*`, …) are in `src/i18n/locales/`,
