@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.templates.GroupTemplateService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -25,6 +26,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -1195,4 +1197,83 @@ class McpGroupToolsTest {
         assertEquals(0, workspace.getBacklog().size());
     }
 
+    /**
+     * The question ceilings REST re-checks by hand ({@code GroupQuestionLimits}).
+     * An MCP tool calls the service in-process, so no Bean Validation constraint
+     * ever sees its arguments: before this, a CONVERSE caller (eddi-viewer
+     * included) could fan a multi-megabyte question out to every member in every
+     * phase, or start a discussion about nothing. Each refusal comes before any
+     * read, access check or service call.
+     */
+    @Nested
+    class QuestionCeilings {
+
+        private final String overLong = "q".repeat(IRestGroupConversation.MAX_QUESTION_CHARS + 1);
+        private final String atCeiling = "q".repeat(IRestGroupConversation.MAX_QUESTION_CHARS);
+
+        private void assertBadRequest(String result, String fragment) {
+            assertTrue(result.contains("\"errorCode\":\"BAD_REQUEST\""), result);
+            assertTrue(result.contains(fragment), result);
+        }
+
+        @Test
+        void discussWithGroup_overLongOrBlankQuestion_isRefusedBeforeTheService() throws Exception {
+            assertBadRequest(tools.discuss_with_group("g1", overLong, null), "at most 50000");
+            assertBadRequest(tools.discuss_with_group("g1", "   ", null), "'question' is required");
+            assertBadRequest(tools.discuss_with_group("g1", null, null), "'question' is required");
+            assertBadRequest(tools.discuss_with_group("g1", "Q?", "u".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1)),
+                    "'userId' must be at most");
+
+            verify(groupConversationService, never()).discuss(any(), any(), any(), anyInt());
+            verify(resourceAccessGuard, never()).requireUseAccess(any(), any());
+        }
+
+        @Test
+        void discussWithGroup_questionAtTheCeiling_runs() throws Exception {
+            when(groupConversationService.discuss(any(), any(), any(), anyInt())).thenReturn(new GroupConversation());
+
+            tools.discuss_with_group("g1", atCeiling, null);
+
+            verify(groupConversationService).discuss("g1", atCeiling, "mcp-client", 0);
+        }
+
+        @Test
+        void startGroupDiscussion_overLongOrBlankQuestion_isRefusedBeforeTheService() throws Exception {
+            assertBadRequest(tools.start_group_discussion("g1", overLong, null), "at most 50000");
+            assertBadRequest(tools.start_group_discussion("g1", "", null), "'question' is required");
+
+            verify(groupConversationService, never()).startAndDiscussAsync(any(), any(), any(), any());
+        }
+
+        @Test
+        void followupWithMember_overLongOrIncompleteArguments_areRefusedBeforeTheConversationIsRead() throws Exception {
+            assertBadRequest(tools.followup_with_member("gc1", "Analyst", overLong), "at most 50000");
+            assertBadRequest(tools.followup_with_member("gc1", "Analyst", " "), "Both 'question' and 'targetAgentId' are required");
+            assertBadRequest(tools.followup_with_member("gc1", null, "why?"), "Both 'question' and 'targetAgentId' are required");
+            assertBadRequest(tools.followup_with_member("gc1", "a".repeat(IRestGroupConversation.MAX_IDENTIFIER_CHARS + 1), "why?"),
+                    "'targetAgentId' must be at most");
+
+            verify(groupConversationService, never()).readGroupConversation(any());
+            verify(groupConversationService, never()).followUpWithMember(any(), any(), any());
+        }
+
+        @Test
+        void continueGroupDiscussion_overLongOrBlankQuestion_isRefusedBeforeTheConversationIsRead() throws Exception {
+            assertBadRequest(tools.continue_group_discussion("gc1", overLong), "at most 50000");
+            assertBadRequest(tools.continue_group_discussion("gc1", "	"), "'question' is required");
+
+            verify(groupConversationService, never()).readGroupConversation(any());
+            verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+        }
+
+        @Test
+        void continueGroupDiscussion_questionAtTheCeiling_runs() throws Exception {
+            stubConversation("gc1");
+            when(groupConversationService.continueDiscussion(any(), any(), any())).thenReturn(new GroupConversation());
+
+            tools.continue_group_discussion("gc1", atCeiling);
+
+            verify(groupConversationService).continueDiscussion("gc1", atCeiling, null);
+        }
+    }
 }
