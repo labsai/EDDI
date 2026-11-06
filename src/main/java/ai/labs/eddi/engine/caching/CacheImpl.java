@@ -9,6 +9,7 @@ import com.github.benmanes.caffeine.cache.Policy.VarExpiration;
 import org.jboss.logging.Logger;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
@@ -40,10 +41,13 @@ public class CacheImpl<K, V> implements ICache<K, V> {
     private final String cacheName;
     private final Cache<K, V> cache;
     private final VarExpiration<K, V> variableExpiry;
+    /** What {@link #keySet()}, {@link #values()} and {@link #entrySet()} read. */
+    private final Map<K, V> readOnly;
 
     public CacheImpl(String cacheName, Cache<K, V> cache) {
         this.cacheName = cacheName != null ? cacheName : "default";
         this.cache = cache;
+        this.readOnly = Collections.unmodifiableMap(cache.asMap());
         this.variableExpiry = cache.policy().expireVariably().orElse(null);
 
         if (this.variableExpiry == null) {
@@ -231,17 +235,12 @@ public class CacheImpl<K, V> implements ICache<K, V> {
 
     @Override
     public V put(K key, V value) {
-        V prev = cache.getIfPresent(key);
-        cache.put(key, value);
-        return prev;
+        return asMap().put(key, value);
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public V remove(Object key) {
-        V prev = cache.getIfPresent((K) key);
-        cache.invalidate((K) key);
-        return prev;
+        return asMap().remove(key);
     }
 
     @Override
@@ -256,16 +255,16 @@ public class CacheImpl<K, V> implements ICache<K, V> {
 
     @Override
     public Set<K> keySet() {
-        return asMap().keySet();
+        return readOnly.keySet();
     }
 
     @Override
     public Collection<V> values() {
-        return asMap().values();
+        return readOnly.values();
     }
 
     @Override
     public Set<Map.Entry<K, V>> entrySet() {
-        return asMap().entrySet();
+        return readOnly.entrySet();
     }
 }
