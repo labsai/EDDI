@@ -66,7 +66,7 @@ describe("PausedCard", () => {
       />,
     );
 
-    expect(screen.getByTestId("paused-card")).toHaveTextContent("send_email");
+    expect(screen.getByTestId("paused-card")).toHaveTextContent("Send email");
   });
 
   it("shows when the pause will auto-decide", () => {

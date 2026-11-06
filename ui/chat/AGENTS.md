@@ -74,15 +74,20 @@ src/
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Eleven SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
-  `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
-  `guardrail_triggered`, `llm_retry`, `done`, `error`. The widget does not handle
-  `guardrail_triggered` or `llm_retry` (the Manager's `use-chat.ts` does). There is **no `thinking` event** — the backend never emits one.
-- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
-  the name only; arguments reach the client later, redacted, in
-  `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
-  widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
-  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
+- **SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
+  `task_failed`, `token`, `tool_call`, `tool_result`, `cascade_step_start`, `cascade_escalation`,
+  `guardrail_triggered`, `llm_retry`, `approval_required`, `done`, `error` (and `hitl_resume`
+  on `/resume/stream`, which this widget does not call). The widget does not handle
+  `guardrail_triggered`, `llm_retry` or `approval_required` (the paused `done` drives the
+  approval card). There is **no `thinking` event** — the backend never emits one.
+- **`tool_call` is `{"tool","callId","displayName"?,"display"?}`, sent right before each tool runs** —
+  never the arguments; they reach the client later, redacted, in
+  `task_complete`'s `toolTrace`. `displayName`/`display` are present only for a tool the
+  agent's `toolDisplay` names (a static label and up to three allow-listed, redacted
+  values); the widget then shows "label: values…", otherwise "Using {tool}…" with the
+  identifier in words (`tool-labels.ts`). **`tool_result`** (`{tool, callId, status,
+  durationMs}`, 6.7+) follows each call; it, the next `token`, a `task_failed`, an
+  escalation or the end of the turn clears the tool line. It is not token-gated — a
   model can write a sentence and then call a tool.
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
   refused BEFORE it ran — every condition the non-streaming endpoint answers with a

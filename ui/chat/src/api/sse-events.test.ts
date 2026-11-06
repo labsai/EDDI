@@ -12,6 +12,7 @@ import {
   isTurnPaused,
   parseToolCallName,
 } from "./sse-events";
+import { humanizeToolName } from "@/tool-labels";
 
 describe("parseErrorMessage", () => {
   it("extracts the message from the backend's JSON error payload", () => {
@@ -225,5 +226,43 @@ describe("parseToolCallName", () => {
     const name = parseToolCallName(JSON.stringify({ tool: "x".repeat(200) }));
     expect(name).toHaveLength(48);
     expect(name!.endsWith("…")).toBe(true);
+  });
+
+  // EDDI 6.7 RestAgentEngineStreaming.ToolCallEvent, as Jackson writes it.
+  it("shows the designer's toolDisplay label and allow-listed values", () => {
+    const data = JSON.stringify({
+      tool: "createAction",
+      callId: "call_1",
+      displayName: "Creating an action",
+      display: { title: "Renew the contract" },
+    });
+    expect(parseToolCallName(data)).toBe("Creating an action: Renew the contract");
+  });
+
+  it("keeps the identifier when no toolDisplay is configured (null fields)", () => {
+    expect(
+      parseToolCallName('{"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}'),
+    ).toBe("getAgentDescriptors");
+  });
+
+  it("names allow-listed values without a label by the tool in words", () => {
+    expect(parseToolCallName('{"tool":"send_mail","callId":"c","display":{"to":"ops@acme.com"}}')).toBe(
+      "Send mail: ops@acme.com",
+    );
+  });
+});
+
+describe("tool names in words", () => {
+  it.each([
+    ["getAgentDescriptors", "Get agent descriptors"],
+    ["add_issue_comment", "Add issue comment"],
+    ["fetchHTTPStatus", "Fetch HTTP status"],
+    ["calculator", "Calculator"],
+  ])("%s → %s", (name, expected) => {
+    expect(humanizeToolName(name)).toBe(expected);
+  });
+
+  it("leaves a designer phrase as written", () => {
+    expect(humanizeToolName("Creating an action: Renew")).toBe("Creating an action: Renew");
   });
 });

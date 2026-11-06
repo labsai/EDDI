@@ -988,7 +988,11 @@
       "errDisabled": "此智能体版本不收集评价。",
       "errOwner": "只有进行此对话的人才能评价。",
       "errGeneric": "无法保存评价。"
-    }
+    },
+    "toolArgs": "参数",
+    "toolResult": "结果",
+    "toolArgsShowFields": "字段",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -4583,7 +4587,12 @@
     "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。",
     "conversationColumn": "对话",
     "groupReviewLoadError": "无法加载该讨论。",
-    "groupReviewNoEntries": "目前还没有任何发言。"
+    "groupReviewNoEntries": "目前还没有任何发言。",
+    "argsViewLabel": "参数显示方式",
+    "argsViewFields": "字段",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "原始",
+    "amendRedactedMarker": "修改后的参数仍包含 <REDACTED>。请替换为真实值，或不修改直接批准：修改内容会按原样发送。"
   },
   "hitlReview": {
     "approveEdited": "修改后批准",

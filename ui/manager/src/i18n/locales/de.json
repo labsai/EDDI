@@ -988,7 +988,11 @@
       "errDisabled": "Diese Agentenversion fragt nicht nach Bewertungen.",
       "errOwner": "Nur die Person, die diese Unterhaltung geführt hat, kann sie bewerten.",
       "errGeneric": "Die Bewertung konnte nicht gespeichert werden."
-    }
+    },
+    "toolArgs": "Argumente",
+    "toolResult": "Ergebnis",
+    "toolArgsShowFields": "Felder",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -4583,7 +4587,12 @@
     "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen.",
     "conversationColumn": "Konversation",
     "groupReviewLoadError": "Die Diskussion konnte nicht geladen werden.",
-    "groupReviewNoEntries": "Es wurde noch nichts gesagt."
+    "groupReviewNoEntries": "Es wurde noch nichts gesagt.",
+    "argsViewLabel": "Argumente anzeigen als",
+    "argsViewFields": "Felder",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Roh",
+    "amendRedactedMarker": "Die geänderten Argumente enthalten noch <REDACTED>. Ersetzen Sie es durch den echten Wert oder genehmigen Sie ohne Änderung: eine Änderung wird genau so gesendet, wie sie dasteht."
   },
   "hitlReview": {
     "approveEdited": "Mit Änderungen genehmigen",
