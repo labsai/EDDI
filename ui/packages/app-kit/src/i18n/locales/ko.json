@@ -856,7 +856,10 @@
     "noProgressAbort": "중단",
     "confirmCancelGroupTitle": "토론을 취소하시겠습니까?",
     "confirmCancelGroupDescription": "이 토론을 취소하시겠습니까? 진행 중인 모든 작업이 중단됩니다.",
-    "confirmCancelGroupButton": "토론 취소"
+    "confirmCancelGroupButton": "토론 취소",
+    "noticeAutoApprove": "그 전에 아무도 결정하지 않으면 {{time}}에 자동으로 승인됩니다",
+    "noticeAutoReject": "그 전에 아무도 결정하지 않으면 {{time}}에 자동으로 거부됩니다",
+    "noticeAutoAbort": "그 전에 아무도 결정하지 않으면 {{time}}에 자동으로 중지됩니다"
   },
   "chatDrawer": {
     "timeout": "배포 시간 초과"

@@ -856,7 +856,10 @@
     "noProgressAbort": "Abort",
     "confirmCancelGroupTitle": "Cancel discussion?",
     "confirmCancelGroupDescription": "Cancel this discussion? Any in-progress work is aborted.",
-    "confirmCancelGroupButton": "Cancel discussion"
+    "confirmCancelGroupButton": "Cancel discussion",
+    "noticeAutoApprove": "Approved automatically at {{time}} unless someone decides first",
+    "noticeAutoReject": "Rejected automatically at {{time}} unless someone decides first",
+    "noticeAutoAbort": "Stopped automatically at {{time}} unless someone decides first"
   },
   "chatDrawer": {
     "timeout": "Deploy timed out"

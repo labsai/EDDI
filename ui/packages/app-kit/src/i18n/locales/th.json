@@ -856,7 +856,10 @@
     "noProgressAbort": "ยกเลิก",
     "confirmCancelGroupTitle": "ยกเลิกการสนทนากลุ่ม?",
     "confirmCancelGroupDescription": "ยกเลิกการสนทนากลุ่มนี้? งานที่กำลังดำเนินอยู่จะถูกยกเลิก",
-    "confirmCancelGroupButton": "ยกเลิกการสนทนากลุ่ม"
+    "confirmCancelGroupButton": "ยกเลิกการสนทนากลุ่ม",
+    "noticeAutoApprove": "จะอนุมัติโดยอัตโนมัติเวลา {{time}} หากไม่มีใครตัดสินใจก่อน",
+    "noticeAutoReject": "จะปฏิเสธโดยอัตโนมัติเวลา {{time}} หากไม่มีใครตัดสินใจก่อน",
+    "noticeAutoAbort": "จะหยุดโดยอัตโนมัติเวลา {{time}} หากไม่มีใครตัดสินใจก่อน"
   },
   "chatDrawer": {
     "timeout": "การปรับใช้หมดเวลา"
