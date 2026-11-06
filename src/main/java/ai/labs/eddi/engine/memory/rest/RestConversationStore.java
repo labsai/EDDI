@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationPurgeService;
+import ai.labs.eddi.engine.memory.ConversationTitles;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -47,6 +48,7 @@ import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import ai.labs.eddi.utils.PageBounds;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -805,6 +807,28 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     @Override
+    public ConversationDescriptor patchConversation(String conversationId, ConversationPatch patch)
+            throws ResourceStoreException, ResourceNotFoundException {
+        checkNotNull(conversationId, "conversationId");
+        // A write, so the strict owner check of the delete path: the owner or an admin,
+        // never a reviewer, and a legacy descriptor's owner resolved from its memory.
+        conversationAccessGuard.requireConversationOwnerStrict(conversationId, id -> {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
+            return snapshot != null ? snapshot.getUserId() : null;
+        });
+        if (patch == null || patch.title() == null && patch.pinned() == null) {
+            throw new BadRequestException("Give a title, a pinned flag, or both");
+        }
+        String title = patch.title() == null ? null : ConversationTitles.requireValidOwnerTitle(patch.title());
+        // Only the live descriptor: a soft-deleted conversation has none, and is not
+        // renamed through its archived copy.
+        if (!conversationDescriptorStore.writeOwnerEdit(conversationId, title, patch.pinned())) {
+            throw new NotFoundException(format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return conversationDescriptorStore.readDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION);
+    }
+
+    @Override
     public void deleteConversationLog(String conversationId, Boolean deletePermanently)
             throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
@@ -887,16 +911,10 @@ public class RestConversationStore implements IRestConversationStore {
      * descriptor was already retired (soft-deleted) or never written is ended on
      * its snapshot alone — that is not an error for a bulk end.
      */
-    private void markDescriptorEnded(String conversationId) throws ResourceStoreException {
-        try {
-            ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
-                    CONVERSATION_DESCRIPTOR_VERSION);
-            if (conversationDescriptor == null) {
-                return;
-            }
-            conversationDescriptor.setConversationState(ConversationState.ENDED);
-            conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
-        } catch (ResourceNotFoundException e) {
+    private void markDescriptorEnded(String conversationId) {
+        // A single field update: a whole-descriptor rewrite here could undo an owner's
+        // rename or pin made between its read and its write.
+        if (!conversationDescriptorStore.markEnded(conversationId)) {
             log.debug(format("No live descriptor to mark ENDED for conversation %s", sanitize(conversationId)));
         }
     }
@@ -1316,7 +1334,7 @@ public class RestConversationStore implements IRestConversationStore {
                 ended.add(conversationId);
                 try {
                     markDescriptorEnded(conversationId);
-                } catch (ResourceStoreException | RuntimeException e) {
+                } catch (RuntimeException e) {
                     log.warn(format("Conversation %s was ended but its descriptor could not be marked ENDED: %s",
                             sanitize(conversationId), sanitize(e.getMessage())));
                 }

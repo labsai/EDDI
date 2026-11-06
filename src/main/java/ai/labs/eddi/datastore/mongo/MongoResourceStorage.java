@@ -31,6 +31,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -429,6 +430,28 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         }
         // One updateOne $set on the live row: no read, and no other field is rewritten.
         return currentCollection.updateOne(Filters.eq(ID_FIELD, new ObjectId(id)), Updates.set(fieldName, value)).getMatchedCount() > 0;
+    }
+
+    @Override
+    public boolean setFieldsIf(String id, Map<String, Object> fields, String guardField, Collection<String> allowedGuardValues) {
+        checkNotNull(id, "id");
+        IResourceStorage.requireSettableFields(fields, guardField);
+        if (!ObjectId.isValid(id)) {
+            return false;
+        }
+        Bson filter = Filters.eq(ID_FIELD, new ObjectId(id));
+        if (guardField != null) {
+            // eq(field, null) matches an absent field as well as an explicit null.
+            Bson unset = Filters.eq(guardField, null);
+            filter = Filters.and(filter, allowedGuardValues == null || allowedGuardValues.isEmpty()
+                    ? unset
+                    : Filters.or(unset, Filters.in(guardField, allowedGuardValues)));
+        }
+        List<Bson> updates = new ArrayList<>(fields.size());
+        fields.forEach((name, value) -> updates.add(Updates.set(name, value)));
+        // One updateOne on the live row: the condition and the write are one atomic
+        // step.
+        return currentCollection.updateOne(filter, Updates.combine(updates)).getMatchedCount() > 0;
     }
 
     @Override

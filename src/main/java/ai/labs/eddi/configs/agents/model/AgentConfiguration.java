@@ -477,6 +477,56 @@ public class AgentConfiguration {
     }
 
     /**
+     * How the agent presents itself in a chat window — display name, avatar, accent
+     * colour, conversation starters. Absent: the client's defaults.
+     *
+     * @since 6.7.0
+     */
+    private AgentAppearance appearance;
+
+    public AgentAppearance getAppearance() {
+        return appearance;
+    }
+
+    public void setAppearance(AgentAppearance appearance) {
+        this.appearance = appearance;
+    }
+
+    /**
+     * Which controls a chat window offers — undo, redo, attachments, rating, quick
+     * replies, streaming, and whether HTML in replies is rendered. Absent keeps
+     * every control as before, except that HTML is shown as text unless
+     * {@code rawHtml} is {@code true}.
+     *
+     * @since 6.7.0
+     */
+    private ConversationControls conversationControls;
+
+    public ConversationControls getConversationControls() {
+        return conversationControls;
+    }
+
+    public void setConversationControls(ConversationControls conversationControls) {
+        this.conversationControls = conversationControls;
+    }
+
+    /**
+     * Model-written conversation titles; absent or disabled — the default — titles
+     * a conversation with its first non-secret user message, truncated.
+     *
+     * @since 6.7.0
+     */
+    private TitleGeneration titleGeneration;
+
+    public TitleGeneration getTitleGeneration() {
+        return titleGeneration;
+    }
+
+    public void setTitleGeneration(TitleGeneration titleGeneration) {
+        this.titleGeneration = titleGeneration;
+    }
+
+    /**
      * Conversation ratings: how (and whether) the people chatting with this agent
      * are asked for feedback.
      *

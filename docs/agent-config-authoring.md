@@ -268,6 +268,105 @@ The checks are applied against the agent **version the conversation runs on**:
 enabling ratings in v3 does not let people rate conversations that ran on v2. A
 save with out-of-range values answers 400 naming the field.
 
+## Agent Presentation (`appearance`, `conversationControls`)
+
+Two optional blocks on the **agent** configuration decide how chat windows show
+it. Both are served — together with the name, the review notice and the rating
+controls — by `GET /agents/{agentId}/profile`, which answers anyone who may
+*use* the agent, so a chat client reads them before the first message. They
+follow the deployed version, like the rest of the profile.
+
+```json
+"appearance": {
+  "displayName": "Ava",
+  "avatar": "https://cdn.example.com/ava.png",
+  "accentColor": "#4f46e5",
+  "starters": ["Track my order", "Talk to a human"]
+},
+"conversationControls": {
+  "undo": true,
+  "redo": true,
+  "attachments": false,
+  "rating": true,
+  "quickReplies": true,
+  "streaming": true,
+  "rawHtml": false
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `appearance.displayName` | the agent's name | Name the chat shows; ≤ 80 characters, not blank, no control characters |
+| `appearance.avatar` | none | An `https` URL (no credentials in it), or a `data:image/png`, `jpeg`, `gif` or `webp` base64 URI of ≤ 64 KB. SVG and plain `http` are refused. The viewer's browser loads it, never EDDI, so the Chat UI's `img-sources` policy applies ([chat-ui-embedding.md](chat-ui-embedding.md#3-images-in-agent-output)) |
+| `appearance.accentColor` | the theme's | `#rgb` or `#rrggbb` |
+| `appearance.starters` | `[]` | ≤ 6 one-click starters of ≤ 200 characters, sent as the user's message exactly as written |
+| `conversationControls.undo` · `redo` · `attachments` · `quickReplies` · `streaming` | shown | `false` hides the control; absent keeps it |
+| `conversationControls.rating` | shown | `false` hides the rating controls `ratingConfig` enables; it cannot switch ratings on |
+| `conversationControls.rawHtml` | **`false`** | `true` renders HTML in the agent's replies (through the client's sanitizer). Absent or `false` shows HTML as text |
+
+The profile returns `conversationControls` with every default applied
+(booleans, never absent), and `appearance` as stored or `null`. These are
+presentation switches: hiding undo does not disable the undo endpoint. A save
+with an invalid value answers 400 naming the field — on every write path,
+including ZIP import and agent sync, which carry both blocks unchanged.
+
+> **Upgrade note — `rawHtml` defaults to off.** Before 6.7.0 the Chat UI
+> rendered HTML in every agent's replies. An agent whose replies are meant to
+> contain HTML needs `"conversationControls": { "rawHtml": true }`; see
+> [chat-ui-embedding.md](chat-ui-embedding.md#upgrading-html-in-replies-is-off-by-default).
+
+## Conversation Titles (`titleGeneration`)
+
+Every conversation gets a title, shown in the owner's conversation list
+(`GET /conversationstore/conversations` returns `title`, `titleSource` and
+`pinned` on each descriptor). By default it is the **first user message that was
+not secret**, whitespace collapsed and cut at a word to
+`eddi.conversations.title-max-length` characters (default 80). A turn is never
+used when the client flagged its input `secretInput` (a secret `inputField` does
+that), when a `scope: "secret"` property vaulted the input, when the input
+carries a secret context value, or when an input guardrail withheld it; the next
+usable message titles the conversation instead, and with none it stays untitled.
+
+The owner renames or pins a conversation with
+`PATCH /conversationstore/conversations/{conversationId}` and a body
+`{"title": "…", "pinned": true}` (either field). Owner or `eddi-admin` only; a
+title is ≤ 200 characters. **A title the owner set is never replaced** by a
+generated one.
+
+`titleGeneration` on the agent opts into a model-written title instead:
+
+```json
+"titleGeneration": {
+  "enabled": true,
+  "llmProvider": "openai",
+  "llmModel": "gpt-4o-mini",
+  "parameters": { "apiKey": "${vault:openai-key}" },
+  "inputPricePer1M": 0.15,
+  "outputPricePer1M": 0.60,
+  "maxLength": 60
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Ask a model for the title after the first exchange |
+| `llmProvider`, `llmModel` | — | Required when enabled; a small model is plenty |
+| `parameters` | `{}` | Credentials and endpoint. A background call has no task to inherit them from (as for Dream), so set them here — as vault references |
+| `inputPricePer1M`, `outputPricePer1M` | catalog price | Prices for the cost charge; absent takes the Model Prices catalog's |
+| `maxLength` | `60` | 10–200 characters; a longer answer is cut |
+| `instructions` | standard wording | Replaces the instruction to the model, ≤ 2000 characters |
+
+The call runs once per conversation, in the background — it never delays the
+turn. It sees the first exchange as stored, secret input already replaced by its
+placeholder. It is refused when the tenant's cost budget is spent or the model is
+unpriced under a strict pricing policy, and its priced spend is charged to the
+tenant budget and reported to spend sinks as `CONVERSATION_TITLE`. If it fails,
+the default title stays. Outcomes are counted on `eddi.conversation.titles`.
+
+Titles are conversation content: GDPR export carries each conversation's
+`title` and `pinned`, and erasure removes them with the conversation's
+descriptor ([gdpr-compliance.md](gdpr-compliance.md)).
+
 ## ZIP Structure for Agent Import
 
 Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID unless the id is at least 18 characters long and is either all hex (an ObjectId-style id) or a canonical 8-4-4-4-12 UUID — dashes are accepted nowhere else — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.

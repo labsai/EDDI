@@ -538,6 +538,32 @@
       "noticePlaceholder": "이 에이전트와의 대화는 개선을 위해 에이전트를 관리하는 사람들이 읽을 수 있습니다.",
       "versionNote": "이 변경으로 생성되는 버전과 이후 버전의 대화에 적용됩니다 — 이전에 나눈 대화에는 적용되지 않습니다. Slack, Teams 및 API 클라이언트는 알림을 표시할 수 없으므로, 그곳에서 이 에이전트를 사용한다면 인사말에서 안내하세요."
     },
+    "presentation": {
+      "title": "표시 및 제목",
+      "description": "채팅 창에서 이 에이전트가 표시되는 방식입니다. 모두 선택 사항이며, 빈 항목은 기본값을 유지합니다.",
+      "displayName": "표시 이름",
+      "accentColor": "강조 색상 (#rrggbb)",
+      "avatar": "아바타 (https URL 또는 작은 data:image URI)",
+      "starters": "대화 시작 문구 (한 줄에 하나, 최대 {{count}}개)",
+      "controls": "채팅 컨트롤",
+      "control": {
+        "undo": "실행 취소",
+        "redo": "다시 실행",
+        "attachments": "첨부 파일",
+        "rating": "평가",
+        "quickReplies": "빠른 답장",
+        "streaming": "스트리밍",
+        "rawHtml": "답변의 HTML 렌더링"
+      },
+      "rawHtmlNote": "기본값은 꺼짐입니다. 채팅 위젯은 위젯이 대화 컨트롤을 읽는 릴리스부터만 이 설정을 적용하며, 그 전까지는 모든 에이전트의 HTML을 렌더링합니다. 답변에 HTML이 포함되도록 만든 에이전트라면 지금 켜 두세요.",
+      "titles": "대화 제목",
+      "titlesEnable": "모델이 대화 제목을 작성하도록 허용",
+      "titlesNote": "그렇지 않으면 대화의 첫 메시지가 제목이 됩니다. 모델은 대화마다 한 번 백그라운드에서 실행되며 비용 예산에 청구됩니다. 사용자가 정한 제목은 절대 바뀌지 않습니다.",
+      "titlesProvider": "제공자",
+      "titlesModel": "모델",
+      "titlesMaxLength": "최대 제목 길이",
+      "titlesCredentials": "자격 증명은 에이전트 문서의 titleGeneration.parameters에 넣습니다 (예: vault 비밀을 참조하는 apiKey). 에이전트 구성 문서를 참고하세요."
+    },
     "copyUrl": "URL 복사",
     "liveElsewhere": "운영 중: v{{live}} · 보는 중: v{{viewing}}(배포되지 않음)",
     "removeWorkflow": "에이전트에서 워크플로 제거",

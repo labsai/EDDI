@@ -16,8 +16,10 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -393,6 +395,49 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to set field " + fieldName, e);
+        }
+    }
+
+    @Override
+    public boolean setFieldsIf(String id, Map<String, Object> fields, String guardField, Collection<String> allowedGuardValues) {
+        checkNotNull(id, "id");
+        IResourceStorage.requireSettableFields(fields, guardField);
+        if (!PostgresIds.isStorableId(id)) {
+            return false;
+        }
+        String patch;
+        try {
+            patch = jsonSerialization.serialize(new LinkedHashMap<>(fields));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize fields " + fields.keySet(), e);
+        }
+        List<String> allowed = allowedGuardValues == null ? List.of() : List.copyOf(allowedGuardValues);
+        // One UPDATE on the live row: || merges only these keys at the top level, and
+        // the guard is part of the same statement, so the check and the write are
+        // atomic.
+        StringBuilder sql = new StringBuilder("UPDATE resources SET data = data || ?::jsonb WHERE id = ?::uuid AND collection_name = ?");
+        if (guardField != null) {
+            sql.append(" AND (data ->> ? IS NULL");
+            if (!allowed.isEmpty()) {
+                sql.append(" OR data ->> ? = ANY (?)");
+            }
+            sql.append(')');
+        }
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            int index = 1;
+            ps.setString(index++, patch);
+            ps.setString(index++, id);
+            ps.setString(index++, collectionName);
+            if (guardField != null) {
+                ps.setString(index++, guardField);
+                if (!allowed.isEmpty()) {
+                    ps.setString(index++, guardField);
+                    ps.setArray(index, conn.createArrayOf("text", allowed.toArray()));
+                }
+            }
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to set fields " + fields.keySet(), e);
         }
     }
 

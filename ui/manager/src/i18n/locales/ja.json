@@ -538,6 +538,32 @@
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
     },
+    "presentation": {
+      "title": "表示とタイトル",
+      "description": "チャットウィンドウでのこのエージェントの表示方法です。すべて任意で、空欄の項目は既定値のままです。",
+      "displayName": "表示名",
+      "accentColor": "アクセントカラー (#rrggbb)",
+      "avatar": "アバター (https URL または小さな data:image URI)",
+      "starters": "会話のきっかけ (1 行に 1 つ、最大 {{count}} 個)",
+      "controls": "チャットのコントロール",
+      "control": {
+        "undo": "元に戻す",
+        "redo": "やり直す",
+        "attachments": "添付ファイル",
+        "rating": "評価",
+        "quickReplies": "クイック返信",
+        "streaming": "ストリーミング",
+        "rawHtml": "返信内の HTML を表示する"
+      },
+      "rawHtmlNote": "既定ではオフです。チャットウィジェットがこの設定を適用するのは、ウィジェットが会話コントロールを読み込むリリース以降です。それまではすべてのエージェントで HTML を描画します。返信に HTML を含めることを想定したエージェントでは、今のうちにオンにしてください。",
+      "titles": "会話のタイトル",
+      "titlesEnable": "モデルに会話のタイトルを書かせる",
+      "titlesNote": "オフの場合、会話のタイトルは最初のメッセージになります。モデルは会話ごとに 1 回バックグラウンドで実行され、コスト予算に計上されます。ユーザーが設定したタイトルが置き換えられることはありません。",
+      "titlesProvider": "プロバイダー",
+      "titlesModel": "モデル",
+      "titlesMaxLength": "タイトルの最大長",
+      "titlesCredentials": "認証情報はエージェント文書の titleGeneration.parameters に入れます (例: vault のシークレットを参照する apiKey)。エージェント設定のドキュメントを参照してください。"
+    },
     "copyUrl": "URL をコピー",
     "liveElsewhere": "稼働中: v{{live}} · 表示中: v{{viewing}}（未デプロイ）",
     "removeWorkflow": "エージェントからワークフローを削除",
