@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, apiErrorFromResponse } from "../api-client";
 import { seg } from "./path-segment";
 
 // Types matching EDDI backend
@@ -425,17 +425,23 @@ export const MAX_CONVERSATION_SEARCH_LENGTH = 100;
  * only their own conversations too. Newest first, paged like the listing
  * (`index` is a page of results); a page can come back short, so page until
  * one is empty. A blank or overlong `q` is a 400 — check before calling.
+ *
+ * `signal` cancels the request: a search box aborts the previous query's
+ * request when the text changes, and the abort rejects as an `AbortError`.
  */
 export async function searchConversations(
   q: string,
   index = 0,
   limit = 20,
+  signal?: AbortSignal,
 ): Promise<ConversationDescriptor[]> {
   const params = new URLSearchParams({ q, index: String(index), limit: String(limit) });
-  const raw = await api.get<ConversationDescriptorRaw[]>(
-    `/conversationstore/conversations/search?${params.toString()}`,
-  );
-  return (Array.isArray(raw) ? raw : []).map(normalizeDescriptor);
+  // The authenticated fetch rather than `api.get`, which takes no signal.
+  const url = `${api.getBaseUrl()}/conversationstore/conversations/search?${params.toString()}`;
+  const response = await api.authorizedFetch(url, { headers: { Accept: "application/json" }, signal });
+  if (!response.ok) throw await apiErrorFromResponse(response, response.statusText, url);
+  const raw = (await response.json()) as unknown;
+  return (Array.isArray(raw) ? (raw as ConversationDescriptorRaw[]) : []).map(normalizeDescriptor);
 }
 
 /** Highest page size the backend will honour (it clamps `limit` to this). */

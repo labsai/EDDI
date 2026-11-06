@@ -20,6 +20,7 @@ import {
   usePatchChat,
   useWorkforceSessions,
 } from "@/hooks/use-workforce-sessions";
+import { ConversationSearch } from "@/components/workforce/conversation-search";
 
 /**
  * The sidebar's list of the signed-in person's chats and team sessions
@@ -100,6 +101,8 @@ export function SessionList() {
       <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {t("Workforce.sessions.title", "Your conversations")}
       </p>
+      {/* T1.3: while the box holds text, its results replace the list. */}
+      <ConversationSearch>
       {isLoading ? (
         <p className="ps-2 pe-2 py-2 text-xs text-muted-foreground" data-testid="workforce-sessions-loading">
           {t("Workforce.sessions.loading", "Loading…")}
@@ -140,6 +143,7 @@ export function SessionList() {
           </div>
         ))
       )}
+      </ConversationSearch>
 
       <AlertDialog
         open={deleting !== null}

@@ -575,7 +575,22 @@
       "title": "Zu einer Unterhaltung oder einem Agenten wechseln",
       "search": "Unterhaltungen und Agenten durchsuchen",
       "results": "Ergebnisse",
-      "noResults": "Keine Treffer"
+      "noResults": "Keine Treffer",
+      "searchFailed": "Die Suche in älteren Unterhaltungen ist fehlgeschlagen."
+    },
+    "search": {
+      "label": "Meine Unterhaltungen durchsuchen",
+      "placeholder": "Unterhaltungstitel durchsuchen",
+      "hint": "Durchsucht nur Titel, nicht das Gesagte.",
+      "loading": "Suche läuft…",
+      "error": "Suche fehlgeschlagen. Erneut versuchen",
+      "empty": "Keine Unterhaltungstitel gefunden.",
+      "found": "Gefundene Unterhaltungen: {{n}}",
+      "failed": "Die Suche ist fehlgeschlagen.",
+      "results": "Suchergebnisse",
+      "clear": "Suche löschen",
+      "more": "Weitere Ergebnisse",
+      "moreFailed": "Weitere konnten nicht geladen werden. Erneut versuchen"
     }
   },
   "analyticsPage": {
