@@ -191,7 +191,13 @@ class DreamServiceCitationTest {
 
         var instructions = ArgumentCaptor.forClass(String.class);
         verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
-        assertTrue(instructions.getAllValues().get(1).contains("number 1.000"), "the retry is told what failed");
+        String retryInstructions = instructions.getAllValues().get(1);
+        assertTrue(retryInstructions.contains("number 1.000"), "the retry is told what failed");
+        String feedback = retryInstructions.substring(instructions.getAllValues().get(0).length());
+        assertTrue(feedback.contains("only the JSON array") && feedback.contains("\"sources\"") && feedback.contains("refs"),
+                "the retry feedback restates the Dream answer contract: " + feedback);
+        assertFalse(feedback.contains("Write the summary again") || feedback.contains("cite its turns"),
+                "the retry feedback must not carry the rolling summary's wording: " + feedback);
         var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(store).insertIfAbsent(written.capture());
         assertEquals("2 seats, budget 1,000 EUR, near the station", written.getValue().value());

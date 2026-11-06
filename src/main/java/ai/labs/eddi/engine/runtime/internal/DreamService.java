@@ -742,7 +742,7 @@ public class DreamService {
                             && !(config.isMaxSummarizationCallsSet() && llmCallsMade >= config.getMaxSummarizationCalls())
                             && !tenantBudgetSpent(userId)) {
                         try {
-                            var second = summarizationService.summarizeWithUsage(content, instructions + SummaryCitations.retryFeedback(check),
+                            var second = summarizationService.summarizeWithUsage(content, instructions + citationRetryFeedback(check),
                                     config.getLlmProvider(), config.getLlmModel(), config.getParameters());
                             llmCallsMade++;
                             estimatedCostAccumulated += estimateCost(second, content.length(), config.getInputPricePer1M(),
@@ -1363,6 +1363,19 @@ public class DreamService {
             + "Copy every number exactly as it appears in its sources: the same digits, separators, sign and percent sign. "
             + "Do not round, convert, add up or otherwise compute numbers. "
             + "Where the sources are ambiguous or do not say, write \"unclear in source\" instead of guessing.";
+
+    /**
+     * Appended to the instructions of a {@code retry_once} consolidation call. It
+     * restates the Dream answer contract: the rolling summary's feedback asks for
+     * cited bullet points, which a model can follow with prose that this parser
+     * rejects, wasting the paid retry.
+     */
+    static String citationRetryFeedback(SummaryCitations.Result result) {
+        return "\n\nYour previous answer failed the citation check:\n" + result.describe()
+                + "Answer again with only the JSON array: [{\"key\": \"...\", \"value\": \"...\", \"sources\": [0, 2]}]. "
+                + "Every object must carry \"sources\" with the refs of the input entries it consolidates, and every number in "
+                + "\"value\" must appear exactly as written in the entries it cites. Do not add any text outside the JSON array.";
+    }
 
     /**
      * The {@code citeSources} check of a group's answer: each consolidated entry
