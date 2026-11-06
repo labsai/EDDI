@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
@@ -87,12 +88,13 @@ public class UnrestrictedSecretsCheck {
 
     @Inject
     public UnrestrictedSecretsCheck(ISecretProvider secretProvider, IDocumentDescriptorStore descriptorStore, ILlmStore llmStore,
-            IMcpCallsStore mcpCallsStore, IRagStore ragStore, IApiCallsStore apiCallsStore, IChannelIntegrationStore channelStore) {
+            IMcpCallsStore mcpCallsStore, IRagStore ragStore, IApiCallsStore apiCallsStore, IChannelIntegrationStore channelStore,
+            IParserStore parserStore) {
         this.secretProvider = secretProvider;
         this.descriptorStore = descriptorStore;
         this.scannedTypes = List.of(new ScannedType("ai.labs.llm", llmStore), new ScannedType("ai.labs.mcpcalls", mcpCallsStore),
                 new ScannedType("ai.labs.rag", ragStore), new ScannedType("ai.labs.apicalls", apiCallsStore),
-                new ScannedType("ai.labs.channel", channelStore));
+                new ScannedType("ai.labs.channel", channelStore), new ScannedType("ai.labs.parser", parserStore));
     }
 
     /**

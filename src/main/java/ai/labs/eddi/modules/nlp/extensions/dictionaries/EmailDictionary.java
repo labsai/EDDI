@@ -20,7 +20,11 @@ import java.util.regex.Pattern;
 public class EmailDictionary implements IDictionary {
     private static final String ID = "EmailDictionary";
     private final IExpressionProvider expressionProvider;
-    private static final Pattern emailPattern = Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}\\b",
+    /**
+     * Top-level domains run up to 63 letters. This allowed 2 to 4, so an address at
+     * .technology, .online or .museum was not an email.
+     */
+    private static final Pattern emailPattern = Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,63}\\b",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     public EmailDictionary(IExpressionProvider expressionProvider) {

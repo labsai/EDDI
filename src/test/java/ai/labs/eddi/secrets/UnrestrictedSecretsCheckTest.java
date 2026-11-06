@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -65,7 +66,7 @@ class UnrestrictedSecretsCheckTest {
         llmStore = mock(ILlmStore.class);
         channelStore = mock(IChannelIntegrationStore.class);
         check = new UnrestrictedSecretsCheck(secretProvider, descriptorStore, llmStore, mock(IMcpCallsStore.class), mock(IRagStore.class),
-                mock(IApiCallsStore.class), channelStore);
+                mock(IApiCallsStore.class), channelStore, mock(IParserStore.class));
 
         when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), any(), anyBoolean())).thenReturn(List.of());
         when(descriptorStore.readDescriptors("ai.labs.llm", "", 0, IDescriptorStore.NO_LIMIT, false)).thenReturn(List.of(descriptor(LLM_URI)));

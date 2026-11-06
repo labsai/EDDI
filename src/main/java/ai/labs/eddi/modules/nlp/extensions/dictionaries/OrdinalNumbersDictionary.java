@@ -13,6 +13,7 @@ import ai.labs.eddi.utils.LanguageUtilities;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * @author ginccc
@@ -27,7 +28,7 @@ public class OrdinalNumbersDictionary implements IDictionary {
 
     @Override
     public List<IFoundWord> lookupTerm(String value) {
-        final var ordinalValue = LanguageUtilities.extractOrdinalValue(value.toLowerCase());
+        final var ordinalValue = LanguageUtilities.extractOrdinalValue(value.toLowerCase(Locale.ROOT));
         if (ordinalValue.isPresent()) {
             final String ordinalNumber = String.valueOf(ordinalValue.get());
             Expression ordinalNumberExp = expressionProvider.createExpression("ordinal_number", ordinalNumber);
