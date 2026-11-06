@@ -642,9 +642,9 @@ const BODY_KNOWLEDGE_BASES_INGESTION = `- An ingestion id (from a direct ingest 
  * write later cannot leave the prompt claiming the opposite.
  */
 const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge base, and you cannot ingest a document
-  into one or start a source's run — you have no tool for any of it. Point the
-  user at the knowledge base under Resources in the manager, and offer to read
-  the current configuration for them first.`;
+  into one, delete a document from one or start a source's run — you have no
+  tool for any of it. Point the user at the knowledge base under Resources in
+  the manager, and offer to read the current configuration for them first.`;
 
 /**
  * Shown INSTEAD of the section above when the reads are not granted.

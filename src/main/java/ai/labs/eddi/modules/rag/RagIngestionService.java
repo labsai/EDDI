@@ -28,6 +28,7 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -59,9 +60,10 @@ public class RagIngestionService {
      * delete each other. Each stores its chunks and then removes every other
      * ingestion's under that name — run concurrently, both can store before either
      * deletes, each deletion then matches the other's new chunks, and the document
-     * is left with none. Weak values: an entry lives only while a replacement holds
-     * or waits for its lock. Per instance: replacements of one name arriving at two
-     * instances at once are not serialized.
+     * is left with none. {@link #delete} takes the same lock. Weak values: an entry
+     * lives only while a replacement or delete holds or waits for its lock. Per
+     * instance: replacements or deletes of one name arriving at two instances at
+     * once are not serialized.
      */
     private final Cache<ReplaceKey, ReentrantLock> replaceLocks = Caffeine.newBuilder().weakValues().build();
 
@@ -160,7 +162,7 @@ public class RagIngestionService {
                     .build();
 
             if (replace) {
-                ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(ragConfigId + "|" + kbId, documentName), key -> new ReentrantLock());
+                ReentrantLock replaceLock = documentLock(ragConfigId, kbId, documentName);
                 replaceLock.lock();
                 try {
                     storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, true);
@@ -209,6 +211,102 @@ public class RagIngestionService {
                         + "version failed, so both may be retrievable until the replacement is retried.");
                 throw e;
             }
+        }
+    }
+
+    /**
+     * The lock that serializes everything that removes a document's chunks by name:
+     * a replacing ingestion and {@link #delete}. Shared, so the two are ordered: a
+     * delete never lands between a replacement's store and its cleanup, where it
+     * would take the new chunks along with the old and leave a replacement that
+     * reports "completed" over a document with no text, and a delete answered while
+     * a replacement is still embedding cannot be undone by that replacement's
+     * chunks arriving a moment later — the delete waits, and then removes them too.
+     */
+    ReentrantLock documentLock(String ragConfigId, String kbId, String documentName) {
+        return replaceLocks.get(new ReplaceKey(ragConfigId + "|" + kbId, documentName), key -> new ReentrantLock());
+    }
+
+    /** What {@link #delete} did. */
+    public enum DeleteOutcome {
+        /** Every chunk ingested under the name was removed (zero is not an error). */
+        DELETED,
+        /**
+         * The vector store cannot delete by metadata, so nothing was removed and the
+         * text is still retrievable.
+         */
+        UNSUPPORTED,
+        /**
+         * A replacement of this name held the document for longer than
+         * {@link #deleteLockTimeout}; nothing was removed.
+         */
+        BUSY
+    }
+
+    /**
+     * How long {@link #delete} waits for a replacement of the same name to finish.
+     * A replacement holds the lock while it embeds, which for a large document can
+     * take a while; a request thread should not wait indefinitely. Not final only
+     * so a test can shorten it.
+     */
+    Duration deleteLockTimeout = Duration.ofSeconds(30);
+
+    /**
+     * Removes what {@link #ingest} stored under {@code documentName} in this
+     * knowledge base — the same chunks {@code replace=true} supersedes: those
+     * tagged with the name as {@code source} and with this knowledge base's
+     * {@code kbId}, whichever ingestion wrote them. Synchronous; runs under the
+     * per-document lock a replacement takes (see {@link #documentLock}).
+     * <p>
+     * Chunks written by an ingestion source are never matched: they carry the
+     * source's name as {@code sourceName} and are owned by a {@code sourceKey}, and
+     * no {@code source} key — the filter below cannot select them. They are removed
+     * through the source.
+     *
+     * @param ragConfigId
+     *            the RAG configuration's id
+     * @param documentName
+     *            the name the document was ingested under; required — and never the
+     *            {@code unnamed} default, which every unnamed document shares
+     * @param ragConfig
+     *            the RAG configuration, which decides the store and the chunk tag
+     * @return what was done
+     * @throws IllegalArgumentException
+     *             when the name is missing, or the configuration cannot be
+     *             addressed
+     * @throws RuntimeException
+     *             when the store fails to delete; the client should retry
+     */
+    public DeleteOutcome delete(String ragConfigId, String documentName, RagConfiguration ragConfig) {
+        if (documentName == null || documentName.isBlank()) {
+            throw new IllegalArgumentException("A document name is required to delete a document");
+        }
+        String kbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, ragConfig);
+
+        ReentrantLock lock = documentLock(ragConfigId, kbId, documentName);
+        try {
+            if (!lock.tryLock(deleteLockTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                return DeleteOutcome.BUSY;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return DeleteOutcome.BUSY;
+        }
+        try {
+            // Not getOrCreateForIngestion: for an in-memory knowledge base that would
+            // replace a store built under another embedding configuration, and a
+            // delete has no say in which vectors are current.
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
+            store.removeAll(metadataKey(METADATA_SOURCE).isEqualTo(documentName)
+                    .and(metadataKey(METADATA_KB_ID).isEqualTo(kbId)));
+            LOGGER.infof("Deleted document '%s' from KB '%s'", sanitize(documentName), sanitize(kbId));
+            return DeleteOutcome.DELETED;
+        } catch (UnsupportedOperationException e) {
+            LOGGER.warnf("KB '%s' cannot delete by metadata, so document '%s' was not deleted: %s", sanitize(kbId),
+                    sanitize(documentName), e.getMessage());
+            return DeleteOutcome.UNSUPPORTED;
+        } finally {
+            lock.unlock();
         }
     }
 

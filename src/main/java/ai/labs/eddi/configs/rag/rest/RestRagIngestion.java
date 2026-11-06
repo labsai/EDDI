@@ -168,6 +168,79 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     @Override
+    public Response deleteDocument(String ragConfigId, Integer version, String documentName) {
+        if (documentName == null || documentName.isBlank() || UNNAMED_DOCUMENT.equals(documentName)) {
+            // Deletion is keyed on the name, like replace=true: every document ingested
+            // without one shares "unnamed", and deleting that would delete all of them.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "documentName is required: the document is deleted by the name it was ingested under"))
+                    .build();
+        }
+
+        // EDIT, as for ingesting: removing text changes what every agent using this
+        // knowledge base answers from. Checked first so a refusal is a 403.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        var resolved = resolveKnowledgeBase(ragConfigId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        RagConfiguration knowledgeBase = resolved.knowledgeBase();
+
+        IngestionSource owner;
+        try {
+            owner = sourceIngestionService.sourceHoldingDocument(ragConfigId, knowledgeBase, documentName).orElse(null);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not check whether a source of KB %s holds document %s", sanitize(ragConfigId),
+                    sanitize(documentName));
+            return storeUnavailable(documentName, "Could not check this knowledge base's ingestion sources");
+        }
+        if (owner != null) {
+            String sourceId = owner.effectiveId();
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "Ingestion source '" + sourceId + "' holds a document named '" + documentName
+                            + "'. Its text is removed through the source: delete the file from an upload source "
+                            + "(DELETE /ragstore/rags/{id}/sources/{sourceId}/files/{fileId}), or exclude the page "
+                            + "from a crawling source and run it.",
+                            "documentName", documentName, "sourceId", String.valueOf(sourceId)))
+                    .build();
+        }
+
+        RagIngestionService.DeleteOutcome outcome;
+        try {
+            outcome = ragIngestionService.delete(ragConfigId, documentName, knowledgeBase);
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        } catch (RuntimeException e) {
+            // pgvector wraps its SQLException in a RuntimeException; a store that is
+            // down is the client's cue to retry, not a client error.
+            LOGGER.errorf(e, "Deleting document %s from KB %s failed", sanitize(documentName), sanitize(ragConfigId));
+            return storeUnavailable(documentName, "The vector store could not remove this document");
+        }
+
+        return switch (outcome) {
+            case DELETED -> Response.ok(Map.of("status", "deleted", "kbId", ragConfigId, "documentName", documentName)).build();
+            case UNSUPPORTED -> Response.ok(Map.of(
+                    "status", "not_deleted",
+                    "kbId", ragConfigId,
+                    "documentName", documentName,
+                    "warning", "This knowledge base's vector store cannot delete by metadata, so the text of '"
+                            + documentName + "' is still retrievable."))
+                    .build();
+            case BUSY -> Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", "A replacement of '" + documentName + "' is still in flight. Retry once it "
+                            + "has finished.", "documentName", documentName))
+                    .build();
+        };
+    }
+
+    private static Response storeUnavailable(String documentName, String reason) {
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .entity(Map.of("error", reason + ". Nothing may have been removed; retry.", "documentName", documentName))
+                .build();
+    }
+
+    @Override
     public Response getIngestionStatus(String ragConfigId, String ingestionId) {
         // The status of an ingestion is only meaningful to whoever could have started
         // it, and the caller names the RAG config in the path — so check it.

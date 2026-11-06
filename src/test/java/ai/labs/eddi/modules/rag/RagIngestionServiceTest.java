@@ -21,7 +21,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.util.List;
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -275,6 +277,121 @@ class RagIngestionServiceTest {
         awaitCompleted(service.ingest(ALPHA_ID, "text", "doc", config, false));
 
         verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config));
+    }
+
+    // --- delete ---
+
+    /**
+     * Against the real in-memory store: the named document goes — every version of
+     * it, including chunks written before chunks carried an ingestion id — and
+     * nothing else does, not another document, not another knowledge base's
+     * document of the same name, and not an ingestion source's chunks.
+     */
+    @Test
+    void delete_removesOnlyTheNamedDocumentOfThisKnowledgeBase() {
+        var shared = new InMemoryEmbeddingStore<TextSegment>();
+        wireRealStore(shared);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(shared);
+        var alpha = createConfig();
+        alpha.setStoreNamespace("id");
+        var beta = createConfig();
+        beta.setStoreNamespace("id");
+
+        awaitCompleted(service.ingest(ALPHA_ID, "Refunds within 30 days.", "policy.txt", alpha, false));
+        awaitCompleted(service.ingest(ALPHA_ID, "Refunds within 47 days.", "policy.txt", alpha, false));
+        awaitCompleted(service.ingest(ALPHA_ID, "Shipping takes 5 days.", "shipping.txt", alpha, false));
+        awaitCompleted(service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, false));
+        shared.add(Embedding.from(new float[]{1f, 0f}),
+                TextSegment.from("Legacy policy.", Metadata.from("source", "policy.txt").put("kbId", ALPHA_ID)));
+        // What an ingestion source writes: its name as sourceName, never "source".
+        shared.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Crawled policy page.",
+                Metadata.from("documentId", "policy.txt").put("sourceName", "policy.txt").put("sourceKey", ALPHA_ID + ":web")
+                        .put("kbId", ALPHA_ID)));
+        clearInvocations(embeddingStoreFactory);
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete(ALPHA_ID, "policy.txt", alpha));
+
+        assertEquals(List.of("BETA policy text.", "Crawled policy page.", "Shipping takes 5 days."), storedTexts(shared));
+        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(alpha));
+        verify(embeddingStoreFactory, never()).getOrCreateForIngestion(eq(ALPHA_ID), any());
+    }
+
+    @Test
+    void delete_ofANameNothingWasIngestedUnder_isNotAnError() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(new InMemoryEmbeddingStore<>());
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete("test-kb", "nothing.txt", createConfig()));
+    }
+
+    @Test
+    void delete_withoutAName_isRefused() {
+        assertThrows(IllegalArgumentException.class, () -> service.delete("test-kb", " ", createConfig()));
+        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any());
+    }
+
+    @Test
+    void delete_onAStoreThatCannotDeleteByMetadata_saysSo() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
+
+        assertEquals(RagIngestionService.DeleteOutcome.UNSUPPORTED, service.delete("test-kb", "policy.txt", createConfig()));
+    }
+
+    @Test
+    void delete_whoseStoreFails_throwsAndReleasesTheLock() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        doThrow(new RuntimeException("connection reset")).when(embeddingStore).removeAll(any(Filter.class));
+        var config = createConfig();
+
+        assertThrows(RuntimeException.class, () -> service.delete("test-kb", "policy.txt", config));
+
+        var lock = service.documentLock("test-kb", "test-kb", "policy.txt");
+        assertFalse(lock.isLocked(), "a failed delete must not keep the document locked");
+    }
+
+    /**
+     * A delete waits for a replacement of the same name: run between the
+     * replacement's store and its cleanup, it would take the new chunks too. The
+     * replacement below is held inside its write; the delete must not get through
+     * until it finishes, and then removes the replacement's chunks as well.
+     */
+    @Test
+    void delete_waitsForAReplacementOfTheSameName() throws Exception {
+        var writing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var store = new InMemoryEmbeddingStore<TextSegment>() {
+            @Override
+            public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
+                writing.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                super.addAll(ids, embeddings, embedded);
+            }
+        };
+        wireRealStore(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        var config = createConfig();
+
+        String replacing = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config, true);
+        assertTrue(writing.await(5, TimeUnit.SECONDS), "the replacement did not start writing");
+
+        service.deleteLockTimeout = Duration.ofMillis(100);
+        assertEquals(RagIngestionService.DeleteOutcome.BUSY, service.delete("test-kb", "policy.txt", config),
+                "a delete must not run while a replacement of the same name holds the document");
+        // Another name is not held up.
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete("test-kb", "other.txt", config));
+
+        service.deleteLockTimeout = Duration.ofSeconds(5);
+        var deleted = new CompletableFuture<RagIngestionService.DeleteOutcome>();
+        Thread.startVirtualThread(() -> deleted.complete(service.delete("test-kb", "policy.txt", config)));
+        release.countDown();
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, deleted.get(5, TimeUnit.SECONDS));
+        awaitCompleted(replacing);
+        assertEquals(List.of(), storedTexts(store), "the delete ran after the replacement and removed its chunks");
     }
 
     private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
