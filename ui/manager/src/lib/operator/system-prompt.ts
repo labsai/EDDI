@@ -1627,6 +1627,27 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
+- Readable tool calls in chats: an LLM task's toolDisplay (absent = the
+  streaming tool_call event carries only the tool name and call id) maps a tool
+  name to {label, fields}: label is static text (at most 120 characters, sent as
+  displayName), fields allow-lists at most 3 top-level argument names whose
+  string/number/boolean values are shown redacted and cut to 80 characters
+  (sent as display). A field named like a credential (password, apiKey, token,
+  secret) is a 400 at save and never shown. It changes the tool_call event only;
+  the Manager and the Chat UI show "label: values" while the tool runs and
+  otherwise turn the name into words (getAgentDescriptors becomes "Get agent
+  descriptors"). Docs "langchain".
+- Argument schemas for httpcall tools: an ApiCall's argumentSchema (JSON
+  Schema of the tool arguments; generated per operation for OpenAPI tools) and
+  unknownFields (reject default, drop, allow). A call that violates it is
+  refused before the approval gate with NOT_EXECUTED and one line per
+  violation (tool trace error argument_schema), so no approver ever sees it.
+  Docs "httpcalls".
+- Structured answers through a reply tool: an LLM task's answerMode "tool"
+  (needs convertToObject "true" and an object-root responseSchema) adds a
+  synthetic reply tool (answerToolName, default reply; answerToolChoice,
+  default required) the model answers through; it is never gated, counted or
+  shown as a tool call. Docs "langchain".
 - Edit-on-approve: an agent's hitlConfig.review (allowAnswerEdits, default
   false), screenEdits (OUTPUT_GUARDRAILS default, or NONE), maxEditChars
   (default 16000), approvalCategory (default rule:<agentId>), reasonCodes (code
