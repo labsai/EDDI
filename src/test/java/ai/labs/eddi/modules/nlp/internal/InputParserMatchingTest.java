@@ -35,6 +35,9 @@ class InputParserMatchingTest {
     }
 
     private static RegularDictionary phrases(String... phrasesAndExpressions) {
+        if (phrasesAndExpressions.length % 2 != 0) {
+            throw new IllegalArgumentException("phrases() takes (phrase, expression) pairs");
+        }
         var dictionary = new RegularDictionary();
         for (int i = 0; i < phrasesAndExpressions.length; i += 2) {
             dictionary.addPhrase(phrasesAndExpressions[i], exp(phrasesAndExpressions[i + 1]));
@@ -181,6 +184,16 @@ class InputParserMatchingTest {
         var raw = parser(new IInputParser.Config(), List.of(german, english), List.of()).parse("die bank", "en", List.of());
 
         assertEquals("bank_en", first(raw).getExpressions().toString());
+    }
+
+    @Test
+    @DisplayName("a quick-reply phrase with the same text as a configured phrase yields the quick reply's expressions")
+    void quickReplyPhraseWinsOverAnEqualConfiguredPhrase() throws Exception {
+        var configured = parser(new IInputParser.Config(), List.of(phrases("yes please", "configured")), List.of());
+
+        var raw = configured.parse("yes please", "en", List.of(phrases("yes please", "clicked")));
+
+        assertEquals("clicked", first(raw).getExpressions().toString());
     }
 
     @Test

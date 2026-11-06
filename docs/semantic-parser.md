@@ -464,8 +464,6 @@ To use the pattern matcher in your agent orchestration, add it as the first step
 
 **Configuration Options** (all live under the step's `config` object):
 
-| Option              | Default | Description                                                                       |
-| ------------------- | ------- | --------------------------------------------------------------------------------- |
 | Option                     | Default | Description |
 | -------------------------- | ------- | ----------- |
 | `includeUnknown`           | `true`  | Include `unknown(...)` expressions for words no dictionary or correction recognized |
@@ -498,7 +496,7 @@ Every match carries an accuracy between 0 and 1: `1.0` for the word as typed, `0
 | `expressions:alternatives` | With `maxAlternatives` above 0: the other readings, best first, as expression strings |
 | `expressions:inputTruncated` | `true` when the input had more than `maxInputTokens` tokens |
 
-`minMatchingAccuracy` is the switch for "don't act on a guess": with `0.9`, `"delte my account"` no longer becomes `delete(account)` through a typo correction — the word contributes nothing, and an `unknown` catch-all rule answers instead.
+`minMatchingAccuracy` is the switch for "don't act on a guess": with `0.9`, `"delte my account"` no longer becomes `delete(account)` through a typo correction. The rejected match contributes no expression at all — it does not turn into `unknown(...)` either — so write the fallback rule for "nothing matched" (for example on the absence of the expressions you expect), not for `unknown(*)`.
 
 ### Partial phrases
 

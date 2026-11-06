@@ -114,6 +114,27 @@ class UnrestrictedSecretsCheckTest {
                 new UnrestrictedSecret(new SecretReference("acme", "slack-bot"), List.of(CHANNEL_URI.toString()))), found);
     }
 
+    /**
+     * The scan used to run one regex over the whole serialized document, so an
+     * unterminated {@code ${vault:} in one field ran on into the next field's
+     * reference and hid it. Each string value is scanned on its own now.
+     */
+    @Test
+    @DisplayName("an unterminated reference in one field does not hide the reference in the next")
+    void unterminatedReferenceDoesNotHideTheNext() throws Exception {
+        var task = new LlmConfiguration.Task();
+        task.setType("openai");
+        var parameters = new LinkedHashMap<String, String>();
+        parameters.put("note", "see ${vault:unfinished");
+        parameters.put("apiKey", "${vault:setup.victim.apiKey}");
+        task.setParameters(parameters);
+        when(llmStore.read(LLM_ID, 2)).thenReturn(new LlmConfiguration(List.of(task)));
+        when(descriptorStore.readDescriptors("ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false)).thenReturn(List.of());
+
+        assertEquals(List.of(new UnrestrictedSecret(new SecretReference("default", "setup.victim.apiKey"), List.of(LLM_URI.toString()))),
+                check.scan());
+    }
+
     @Test
     @DisplayName("the listing learns which configurations reference each secret, narrowed ones included")
     void recordsReferencesForTheListing() {

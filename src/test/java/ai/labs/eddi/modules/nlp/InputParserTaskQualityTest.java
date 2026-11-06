@@ -13,7 +13,6 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.nlp.expressions.ExpressionFactory;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionProvider;
-import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.IDictionaryProvider;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.INormalizerProvider;
@@ -75,19 +74,18 @@ class InputParserTaskQualityTest {
      * extension entry that selects it.
      */
     private Map<String, Object> dictionaryWith(String id, String word, String expressions) {
-        dictionaries.put(id, () -> new IDictionaryProvider() {
-            @Override
-            public String getId() {
-                return id;
-            }
-
-            @Override
-            public IDictionary provide(Map<String, Object> config) {
+        IDictionaryProvider provider = mock(IDictionaryProvider.class);
+        when(provider.getId()).thenReturn(id);
+        try {
+            when(provider.provide(any())).thenAnswer(invocation -> {
                 var dictionary = new RegularDictionary();
                 dictionary.addWord(word, expressionProvider.parseExpressions(expressions), 0);
                 return dictionary;
-            }
-        });
+            });
+        } catch (IllegalExtensionConfigurationException e) {
+            throw new IllegalStateException(e);
+        }
+        dictionaries.put(id, () -> provider);
         return Map.of("type", "eddi://" + id);
     }
 

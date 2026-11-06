@@ -60,6 +60,11 @@ applies its length bound before lower-casing each dictionary word.
 - **Vault grant enforcement now covers parser configurations**: `VaultGrantChecker` reads parser documents
   and scans every step's inline `config`/`extensions`, so a `${vault:…}` key in a parser's
   `semanticFallback` — stored or inline — is checked against the agent's grant like an LLM's.
+- From review: a quick-reply phrase with the same text as a configured phrase now yields the quick
+  reply's expressions (single quick-reply words already won); `UnrestrictedSecretsCheck` scans each
+  string value with the linear reference scanner instead of one regex over the serialized document,
+  where an unterminated `${vault:` in one field hid the reference in the next; the new counter is
+  documented in [`metrics.md`](../metrics.md) and charted on the full-metrics dashboard ("Input Parser" row).
 
 **Files:** [`InputParser.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/InputParser.java),
 [`IterationCounter.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/matches/IterationCounter.java),

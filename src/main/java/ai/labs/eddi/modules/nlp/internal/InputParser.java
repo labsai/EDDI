@@ -32,6 +32,8 @@ public class InputParser implements IInputParser {
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final String BLANK_CHAR = " ";
     private static final String DEFAULT_USER_LANGUAGE = "en";
+    /** Position of the temporary (quick-reply) phrases in the phrase-map list. */
+    private static final int TEMPORARY_PHRASES = 1;
 
     private static final Logger log = Logger.getLogger(InputParser.class);
 
@@ -261,6 +263,7 @@ public class InputParser implements IInputParser {
 
         List<RawSolution> possibleSolutions = new ArrayList<>();
         Iterator<Suggestion> suggestionIterator = holder.createSolutionIterator();
+        // index TEMPORARY_PHRASES must be the temporary map
         List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phraseMaps = Arrays.asList(phrasesMap, tmpPhrasesMap);
 
         // Without any phrase, every combination is just another reading of the words;
@@ -530,22 +533,34 @@ public class InputParser implements IInputParser {
     private Collection<IDictionary.IPhrase> getPhrasesContainingFoundWords(List<IDictionary.IFoundWord> foundWords,
                                                                            List<Map<IDictionary.IWord, List<IDictionary.IPhrase>>> phrasesMaps) {
 
-        // insertion-ordered set: the order decides which phrase is tried first, the
-        // set keeps the de-duplication linear (it was a list scanned per phrase)
-        Set<IDictionary.IPhrase> ret = new LinkedHashSet<>();
+        // Insertion-ordered: the order decides which phrase is tried first, and the map
+        // keeps the de-duplication linear (it was a list scanned per phrase). Phrases
+        // are equal by their text. When a temporary (quick-reply) phrase has the same
+        // text as a configured one, the quick reply's phrase — and so its expressions —
+        // takes the configured one's place: the user clicked the quick reply, as single
+        // quick-reply words already win by being looked up first.
+        Map<IDictionary.IPhrase, IDictionary.IPhrase> ret = new LinkedHashMap<>();
         for (IDictionary.IFoundWord foundWord : foundWords) {
             if (foundWord.isPhrase()) {
                 continue;
             }
-            for (var phrasesMap : phrasesMaps) {
-                List<IDictionary.IPhrase> phrases = phrasesMap.get(foundWord.getFoundWord());
-                if (phrases != null) {
-                    ret.addAll(phrases);
+            for (int i = 0; i < phrasesMaps.size(); i++) {
+                List<IDictionary.IPhrase> phrases = phrasesMaps.get(i).get(foundWord.getFoundWord());
+                if (phrases == null) {
+                    continue;
+                }
+                boolean temporary = i == TEMPORARY_PHRASES;
+                for (IDictionary.IPhrase phrase : phrases) {
+                    if (temporary) {
+                        ret.put(phrase, phrase);
+                    } else {
+                        ret.putIfAbsent(phrase, phrase);
+                    }
                 }
             }
         }
 
-        return ret;
+        return ret.values();
     }
 
     private static String getLanguageOrDefault(String languageCode) {

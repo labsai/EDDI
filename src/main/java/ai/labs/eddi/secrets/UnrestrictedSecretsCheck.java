@@ -14,9 +14,11 @@ import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -31,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -216,17 +217,33 @@ public class UnrestrictedSecretsCheck {
             if (config == null) {
                 return true;
             }
-            Matcher matcher = SecretReference.compiledPattern().matcher(MAPPER.writeValueAsString(config));
-            while (matcher.find()) {
-                SecretReference reference = SecretReference.parse(matcher.group());
-                if (reference != null) {
-                    sink.computeIfAbsent(reference, r -> new LinkedHashSet<>()).add(resource);
+            // Each string value on its own, with the linear scanner: one regex over the
+            // serialized document let an unterminated "${vault:" in one field run on into
+            // the next field and swallow the reference there, hiding that secret.
+            List<String> values = new ArrayList<>();
+            collectStrings(MAPPER.valueToTree(config), values);
+            for (String value : values) {
+                for (ReferenceScanner.Match match : SecretReference.scanner().findAll(value)) {
+                    sink.computeIfAbsent(SecretReference.of(match), r -> new LinkedHashSet<>()).add(resource);
                 }
             }
             return true;
         } catch (Exception e) {
             LOGGER.debugf("Could not read %s while checking vault destinations: %s", sanitize(resource), sanitize(e.getMessage()));
             return false;
+        }
+    }
+
+    private static void collectStrings(JsonNode node, List<String> sink) {
+        if (node == null) {
+            return;
+        }
+        if (node.isTextual()) {
+            sink.add(node.textValue());
+        } else if (node.isContainerNode()) {
+            // object field names are configuration keys too, e.g. a headers map
+            node.fieldNames().forEachRemaining(sink::add);
+            node.forEach(child -> collectStrings(child, sink));
         }
     }
 
