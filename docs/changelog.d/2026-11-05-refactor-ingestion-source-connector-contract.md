@@ -35,6 +35,14 @@ modification.
   Text extraction stays in the framework, selected by content kind, which keeps the
   page-skipped-when-blank and file-failed-when-blank semantics. The old 8-argument constructor
   remains and builds the two connectors. CDI uses a new constructor that takes `SourceConnectors`.
+- **Traversal evidence is counted, not inferred.** The blank-site guard (`learnedSomething`) used to
+  treat `failed - unreachable` as definitive answers. A source-level failure (no document id) counts
+  as failed but was never unreachable, so a `FULL_TRAVERSAL` run that learned nothing about any
+  document passed for one that saw the corpus gone, and its absence-based deletion ran. `Collector`
+  now counts `definitive` where it is learned: a document-level `NotFound`/`Permanent`, or a file
+  with no text. Embed and budget failures no longer stand in for evidence either. That is the safe
+  direction, since the only effect is that reconciliation runs less often. The now write-only
+  `unreachable` counter is gone.
 - **Config models only, not wired:** `SourceFilters` (`formats`, `excludeNamePatterns`,
   `includePaths`, `maxFileBytes`) and `SourcePartitions` (`LISTED` | `ALL_ACCESSIBLE`, `ids`).
 - **Docs:** a "Source connectors" section in [`rag.md`](../rag.md#source-connectors-for-contributors).

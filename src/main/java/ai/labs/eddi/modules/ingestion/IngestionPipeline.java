@@ -826,8 +826,13 @@ public class IngestionPipeline {
      * <p>
      * Not simply "no usable document": a site whose pages have genuinely been
      * deleted also yields none, and that is exactly when reconciliation should run.
-     * The distinction is whether anything definitive was learned — a 404 or a 410 —
-     * rather than only failures that hide the content.
+     * The distinction is whether anything definitive was learned about a document —
+     * a 404 or a 410, a file with no text — rather than only failures that hide the
+     * content. That is counted where it is learned, in
+     * {@link Collector#definitive}, not inferred from the failure totals: a failure
+     * of the source as a whole concerns no document, and a run made only of those,
+     * or of a page that would not embed, must not pass for one that saw the corpus
+     * gone.
      *
      * <p>
      * This is a statement about traversal, which is why it applies to
@@ -838,8 +843,7 @@ public class IngestionPipeline {
      */
     private static boolean learnedSomething(Collector collector) {
         boolean nothingUsable = collector.ingested + collector.unchanged == 0;
-        boolean nothingDefinitive = collector.failed == collector.unreachable;
-        return !(nothingUsable && nothingDefinitive);
+        return !(nothingUsable && collector.definitive == 0);
     }
 
     /**
@@ -995,9 +999,13 @@ public class IngestionPipeline {
         private int skipped;
         private int failed;
         /**
-         * Of those failures, the ones that said nothing about whether the page exists.
+         * Failures that are themselves an answer about one document: the source said it
+         * is gone or refused it for good, or a file yielded no text. The only failures
+         * {@link #learnedSomething} accepts as evidence that a traversal saw the
+         * source, so a source-level failure or a document that would not embed never
+         * stands in for one.
          */
-        private int unreachable;
+        private int definitive;
         /**
          * Failures after which a document's old chunks may still be its only copy: the
          * content could not be looked at, did not embed, or its superseded chunks could
@@ -1244,6 +1252,8 @@ public class IngestionPipeline {
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             if (contentUnknown) {
                 inconclusive++;
+            } else {
+                definitive++;
             }
 
             if (mode != Mode.INGEST || documentId == null || !contentUnknown) {
@@ -1254,7 +1264,6 @@ public class IngestionPipeline {
             // against the document stops it counting as a miss: otherwise the same
             // tail pages of a rate-limited site are deleted after
             // tombstoneAfterMissedRuns runs, with every run reporting success.
-            unreachable++;
             stateStore.recordUnreachable(sourceKey, documentId, runId);
         }
 
@@ -1395,6 +1404,7 @@ public class IngestionPipeline {
             String documentId = document.documentId();
             seen++;
             failed++;
+            definitive++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             LOGGER.warnf("File '%s' of source '%s' was not ingested: %s",
                     LogSanitizer.sanitize(document.displayName()),
@@ -1420,7 +1430,6 @@ public class IngestionPipeline {
                 // missing — so the next run tries again.
                 LOGGER.warnf(e, "Could not remove the superseded chunks of file '%s' of source '%s'",
                         LogSanitizer.sanitize(document.displayName()), LogSanitizer.sanitize(source.getName()));
-                unreachable++;
                 inconclusive++;
                 stateStore.recordUnreachable(sourceKey, documentId, runId);
                 return;

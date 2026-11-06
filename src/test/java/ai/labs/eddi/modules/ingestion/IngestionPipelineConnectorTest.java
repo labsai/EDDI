@@ -299,6 +299,47 @@ class IngestionPipelineConnectorTest {
     }
 
     @Test
+    @DisplayName("a FULL_TRAVERSAL that met only a source-level failure concludes nothing")
+    void sourceLevelFailureIsNoTraversalEvidence() {
+        // The guard against a blank site used to read "failed minus unreachable" as
+        // definitive answers. A failure with no document id was counted as failed but
+        // never as unreachable, so a traversal that learned nothing about any document
+        // passed for one that saw the corpus gone, and reconciled it away.
+        var connector = new Scripted();
+        connector.coverage = Coverage.FULL_TRAVERSAL;
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha"), context.partition()));
+        run(connector);
+
+        // Permanent is definitive about a document, but this one names none.
+        connector.discovery = context -> context.reportFailure(null, "robots.txt",
+                new SourceError.Permanent("the whole site refused"));
+        IngestionReport report = run(connector);
+
+        assertEquals(1, report.documentsFailed());
+        assertEquals(0, report.documentsTombstoned());
+        assertTrue(report.tombstoningSkipped(), "the run must say it concluded nothing");
+        assertFalse(embeddingStore.segmentsOf("a").isEmpty());
+    }
+
+    @Test
+    @DisplayName("a FULL_TRAVERSAL whose only answer is a document-level 404 still reconciles")
+    void documentLevelGoneIsTraversalEvidence() {
+        // The other side of the guard: a site whose pages are genuinely gone yields
+        // nothing usable either, and that is exactly when absence must count.
+        var connector = new Scripted();
+        connector.coverage = Coverage.FULL_TRAVERSAL;
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha"), context.partition()));
+        run(connector);
+
+        connector.discovery = context -> context.reportFailure("b", "doc:b", new SourceError.NotFound("404"));
+        IngestionReport report = run(connector);
+
+        assertFalse(report.tombstoningSkipped());
+        assertEquals(1, report.documentsTombstoned());
+        assertTrue(embeddingStore.segmentsOf("a").isEmpty());
+    }
+
+    @Test
     @DisplayName("a source-level failure fails the run with its reason and releases the claim")
     void discoveryFailure() {
         var connector = new Scripted();
