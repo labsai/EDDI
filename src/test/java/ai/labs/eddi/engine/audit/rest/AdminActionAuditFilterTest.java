@@ -4,15 +4,14 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
-import java.util.List;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.internal.RestAgentEngine;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
-import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
@@ -30,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.security.Principal;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
