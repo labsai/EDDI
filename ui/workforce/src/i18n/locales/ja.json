@@ -464,7 +464,14 @@
       "fromDashboard": "ダッシュボードから",
       "newBoard": "タスクフォースを編成",
       "showHelp": "キーボードショートカットを表示",
-      "title": "キーボードショートカット"
+      "title": "キーボードショートカット",
+      "quickSwitcher": "会話またはエージェントへ移動",
+      "newChat": "新しいチャット",
+      "send": "メッセージを送信",
+      "shiftEnter": "Shift+Enter で改行",
+      "editLast": "最後のメッセージを編集",
+      "inEmptyComposer": "空のメッセージ欄で",
+      "stop": "作成中の返信を停止"
     },
     "sidebar": {
       "boards": "ボードナビゲーション"
@@ -561,6 +568,14 @@
       "send": "送信",
       "starters": "おすすめ",
       "recent": "最近"
+    },
+    "switcher": {
+      "newChat": "新しいチャット",
+      "chatWith": "このエージェントとチャット",
+      "title": "会話またはエージェントへ移動",
+      "search": "会話とエージェントを検索",
+      "results": "結果",
+      "noResults": "一致するものはありません"
     }
   },
   "analyticsPage": {

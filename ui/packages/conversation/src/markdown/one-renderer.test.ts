@@ -20,13 +20,13 @@ import { describe, expect, it } from "vitest";
 
 // Vitest runs from ui/packages/conversation.
 const UI_ROOT = resolve(process.cwd(), "..", "..");
-const ROOTS = ["manager/src", "manager/e2e", "chat/src", "packages"];
+const ROOTS = ["manager/src", "manager/e2e", "workforce/src", "workforce/e2e", "chat/src", "packages"];
 /** The renderer itself, which is the one place allowed to import it. */
 const RENDERER_DIR = ["packages", "conversation", "src", "markdown"].join(sep);
 const SKIP_DIRS = new Set(["node_modules", "dist", ".worktrees", "coverage", "reports"]);
 
 /** The modules that render markdown. Importing them is rendering it. */
-const RENDERER_MODULES = ["react-markdown", "remark-gfm", "rehype-raw", "rehype-sanitize", "rehype-katex"];
+const RENDERER_MODULES = ["react-markdown", "remark-gfm", "rehype-raw", "rehype-sanitize", "rehype-katex", "mermaid"];
 
 function sourceFiles(dir: string): string[] {
   let names: string[];

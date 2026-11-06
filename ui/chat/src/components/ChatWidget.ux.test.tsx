@@ -117,7 +117,7 @@ describe("failed sends give the draft back", () => {
     );
   });
 
-  it("keeps partial text, says the connection dropped, and re-reads the conversation", async () => {
+  it("keeps partial text, says it is reconnecting, and shows the reply the turn settled with", async () => {
     const backend = install({
       send: () => {
         const enc = new TextEncoder();
@@ -137,17 +137,23 @@ describe("failed sends give the draft back", () => {
     await screen.findByText("Hello there");
     const readsBefore = backend.calls.filter((c) => c.method === "GET").length;
 
+    // The turn runs on: the server settles it while the client is offline.
+    backend.snapshot = {
+      conversationState: "READY",
+      conversationOutputs: [{ output: [{ type: "text", text: "half an answer, settled on the server" }] }],
+    };
     await typeAndSend("tell me more");
 
-    await screen.findByText(/Connection lost/);
+    expect(await screen.findByTestId("reconnecting-indicator")).toHaveTextContent(/Reconnecting/);
     expect(screen.getByText(/half an answ/)).toBeInTheDocument();
     // The user's message stays (it was consumed), and no draft is pushed back.
     expect(screen.getByText("tell me more", { selector: "p" })).toBeInTheDocument();
-    await waitFor(() =>
-      expect(backend.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(
-        readsBefore,
-      ),
-    );
+    // The re-read finds the turn settled; its reply replaces the partial one.
+    expect(
+      await screen.findByText("half an answer, settled on the server", {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("reconnecting-indicator")).toBeNull();
+    expect(backend.calls.filter((c) => c.method === "GET").length).toBeGreaterThan(readsBefore);
     expect((screen.getByTestId("chat-input") as HTMLTextAreaElement).value).toBe("");
   });
 

@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/branding/icon" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: the layout pads itself by the safe-area insets (notch,
+         home indicator); interactive-widget: the on-screen keyboard shrinks the
+         layout instead of covering the composer (T1.11). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- Installable (T1.11): EDDI renders the manifest in the deployment's brand. -->
+    <link rel="manifest" href="/workforce/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/branding/icon" />
+    <meta name="theme-color" content="%BRAND_THEME_COLOR%" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="description" content="%BRAND_PRODUCT_NAME% Workforce — AI teams that solve complex challenges together" />
     <title>%BRAND_PRODUCT_NAME% Workforce</title>
     <script src="/manage/__auth_config__.js"></script>

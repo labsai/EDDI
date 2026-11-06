@@ -159,7 +159,7 @@ describe("ChatMessage", () => {
     expect(timeSpan?.textContent?.length).toBeGreaterThan(0);
   });
 
-  it("applies animate-pulse class for streaming messages", () => {
+  it("marks a streaming reply busy without pulsing the text being read", () => {
     const streamingWithContent: ChatMessageType = {
       id: "msg-5", role: "agent",
       content: "Typing...",
@@ -169,8 +169,18 @@ describe("ChatMessage", () => {
     const { container } = renderWithProviders(
       <ChatMessage message={streamingWithContent} />
     );
-    const pulseEl = container.querySelector(".animate-pulse");
-    expect(pulseEl).not.toBeNull();
+    const bubble = container.querySelector('[data-streaming="true"]');
+    expect(bubble).not.toBeNull();
+    expect(bubble).toHaveAttribute("aria-busy", "true");
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("renders a client notice as a system line, not as the agent speaking", () => {
+    renderWithProviders(
+      <ChatMessage message={{ id: "n1", role: "agent", kind: "notice", content: "Stop came too late.", timestamp: Date.now() }} />
+    );
+    expect(screen.getByTestId("chat-notice")).toHaveTextContent("Stop came too late.");
+    expect(screen.queryByTestId("copy-message")).not.toBeInTheDocument();
   });
 
   it("user message uses primary background", () => {

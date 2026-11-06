@@ -9,6 +9,8 @@ import { SuspendedOutlet } from "@eddi/app-kit/components/layout/suspended-outle
 import { WorkforceBottomTabs } from "@/components/workforce/workforce-bottom-tabs";
 import { WorkforceShortcuts } from "@/components/workforce/workforce-shortcuts";
 import { ShortcutsDialog } from "@/components/workforce/shortcuts-dialog";
+import { useVisualViewportHeight } from "@/hooks/use-visual-viewport-height";
+import { QuickSwitcher } from "@/components/workforce/quick-switcher";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -28,6 +30,9 @@ function getViewport(width: number): Viewport {
 
 export function WorkforceLayout() {
   const { t } = useTranslation();
+  // Keeps the layout to the visible viewport, so an on-screen keyboard never
+  // covers the composer (T1.11): `--wf-viewport-height` below.
+  useVisualViewportHeight();
 
   // Viewport detection
   // Initialised from the real width, as AppLayout does: starting at
@@ -120,9 +125,10 @@ export function WorkforceLayout() {
   // ─── Mobile ──────────────────────────────────────────────────
   if (viewport === "mobile") {
     return (
-      <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
+      <div data-testid="workforce-layout" className="Workforce relative flex h-[var(--wf-viewport-height,100dvh)] flex-col overflow-hidden ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
         <WorkforceShortcuts />
         <ShortcutsDialog />
+        <QuickSwitcher />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -132,7 +138,7 @@ export function WorkforceLayout() {
         <WorkforceTopbar />
         <main
           id="workforce-main"
-          className="flex flex-1 flex-col min-h-0 overflow-hidden pb-20"
+          className="flex flex-1 flex-col min-h-0 overflow-hidden pb-[calc(5rem+env(safe-area-inset-bottom))]"
           style={{ backgroundColor: "var(--br-bg)" }}
         >
           <SuspendedOutlet />
@@ -145,9 +151,10 @@ export function WorkforceLayout() {
   // ─── Tablet ──────────────────────────────────────────────────
   if (viewport === "tablet") {
     return (
-      <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
+      <div data-testid="workforce-layout" className="Workforce relative flex h-[var(--wf-viewport-height,100dvh)] flex-col overflow-hidden ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
         <WorkforceShortcuts />
         <ShortcutsDialog />
+        <QuickSwitcher />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -202,9 +209,10 @@ export function WorkforceLayout() {
 
   // ─── Desktop ─────────────────────────────────────────────────
   return (
-    <div data-testid="workforce-layout" className="Workforce relative flex h-dvh overflow-hidden">
+    <div data-testid="workforce-layout" className="Workforce relative flex h-[var(--wf-viewport-height,100dvh)] overflow-hidden ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
       <WorkforceShortcuts />
       <ShortcutsDialog />
+      <QuickSwitcher />
       <a
         href="#workforce-main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"

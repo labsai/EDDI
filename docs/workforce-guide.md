@@ -86,6 +86,79 @@ The agent's designer can switch off some controls for their agent: undo and redo
 ratings, quick-reply buttons and streaming (the reply appearing word by word). When a control is
 missing, that is the agent's setting, not a fault.
 
+### While the agent answers
+
+- The reply appears as it is written, and the page follows it. **Scroll up** to re-read something
+  and the page stops following; the **↓** button takes you back to the latest message and following
+  starts again. Sending a message always brings you back down.
+- **Stop** (the square in place of the send button, or **Esc**) ends the reply. Stopping takes back
+  the rest of the reply, never what the agent already did: a booking an agent's tool made stays
+  made. A moment later Workforce checks that the stop took. On a server that runs on several
+  machines the answer may already have been running elsewhere; then a line in the conversation says
+  so: the reply "finished anyway" (and is shown in full), or it is "still running" and appears when
+  you open the conversation again.
+- If the connection drops while a reply comes in, the conversation says **Reconnecting…** and
+  checks with the server for about half a minute. The agent usually keeps working meanwhile; when
+  the reply is ready it replaces the part you saw. Only if the server cannot be reached does the
+  reply end with "Connection lost".
+
+### Changing what you asked
+
+- **Edit** (under your last message, or **↑** in an empty message box) takes your last message and
+  the agent's answer back and puts your words into the message box to change and send again.
+- **Regenerate** (under the agent's last answer) asks the agent to answer the same message again.
+
+Both appear only on the last turn, and only if the agent's designer allows undo (and, for
+Regenerate, redo). Neither takes back what a tool already did. A secret message, or one that
+carried files, cannot be edited: send it again instead.
+
+### What a reply can contain
+
+Tables, code (with its language named, and a copy button), formulas written between `$$` signs,
+and diagrams: a code block marked `mermaid` is drawn as a diagram. Every reply has a **Copy**
+button. A picture an agent's designer configured is shown; a link to a picture in the agent's own
+words stays a link, so a reply cannot make your browser fetch anything you did not click.
+
+### Files
+
+Attach files with the paper clip, by pasting (a screenshot, for example) or by dropping them on the
+chat; up to five per message. Each file shows its own progress while it uploads. If one fails, it
+stays in the message box with the reason and a **Try again** button; only the files that uploaded
+are sent with your message.
+
+### Rating a reply
+
+When the agent asks for ratings, each answer has a thumbs up and a thumbs down. After a thumbs
+down you can pick a reason and add a comment; both are optional, and the thumb counts on its own.
+Who sees your rating is said under the rating card.
+
+---
+
+## Keyboard
+
+| Keys | What they do |
+| --- | --- |
+| **⌘K** / **Ctrl+K** | Go to a conversation or an agent: type a few letters, **↑ ↓** to pick, **Enter** to open |
+| **⌘⇧O** / **Ctrl+Shift+O** | New chat (Home, with the message box ready) |
+| **Enter** · **Shift+Enter** | Send · new line |
+| **↑** (in an empty message box) | Edit your last message |
+| **Esc** | Stop the reply being written; close a dialog |
+| **?** | The list of shortcuts |
+
+With a screen reader, each finished reply is read once, with who said it, rather than word by word
+while it is written. After you send a message, start a new chat or close a dialog, the cursor goes
+back to the message box.
+
+---
+
+## On your phone, or as an app
+
+Workforce works on a phone: the bottom bar replaces the sidebar, and the message box stays above
+the on-screen keyboard. You can also **install** it: in Chrome or Edge, *Install app* in the address
+bar or the menu; in Safari on iPhone, *Share → Add to Home Screen*. It then opens in its own window
+with your deployment's name and icon. Installing changes nothing about signing in, and nothing is
+kept on the device beyond what a browser tab keeps: Workforce does not work offline.
+
 ---
 
 ## A team
@@ -114,3 +187,14 @@ the discussion styles work.
   out, with the other UIs.
 - The Platform Operator stays in the Manager. Workforce shows an administrator a link to it,
   never the operator itself.
+- **Installing Workforce.** EDDI serves its web app manifest at `/workforce/manifest.webmanifest`,
+  rendered from the current [branding](white-labeling.md): the product name, the primary colour and
+  the brand's icon (`/branding/icon`, the EDDI icon when the brand has none). Upload a square PNG of
+  at least 512 pixels, or an SVG, as the icon for a sharp home-screen icon. There is deliberately no
+  service worker: browsers do not need one to install an app, and a cache in front of signed-in
+  conversations is a risk with nothing to gain, since Workforce needs the server anyway. Behind a
+  reverse proxy the manifest travels with the rest of `/workforce/`.
+- **Stopping a reply in a cluster.** Stop calls `POST /agents/{conversationId}/cancel`, which stops a
+  running turn only on the node running it ([HITL](hitl.md)). Workforce reads the conversation again
+  1.5 and 5 seconds later and tells the user when the turn ran on, so nobody believes a reply was
+  stopped that was not.

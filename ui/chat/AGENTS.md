@@ -82,7 +82,14 @@ conversation, shared with every other agent surface (phase 3b):
   `QuickReplies`, `ThinkingIndicator` (thinking, tool, cascade, and "Checking the
   reply…" while a guardrail that fired is at work — `guardrailActive`) /
   `TypingIndicator`, `PausedCard`, `RatingCard`, `StepRating`, `ScrollToBottom`. They
-  keep their BEM class names, styled by `chat.css` here. The controller's host hooks
+  keep their BEM class names, styled by `chat.css` here. **Phase 7:** `PausedCard` and
+  `RatingCard` are loaded on demand (`lazy`, from `@eddi/conversation/paused-card` and
+  `/rating-card`), and `Message` loads `StepRating` the same way: the first load sits
+  on its 170 KB budget, so a component only some conversations show is a chunk, not
+  first-load code. Esc stops a running turn (as the Stop button); the controller is
+  created with `STOP_VERIFY_DELAYS_MS` and `RECONNECT_DELAYS_MS`, so a Stop that did
+  not take and a dropped stream are said in the transcript (`ThinkingIndicator
+  reconnecting`); Mermaid diagrams render through the shared renderer, lazily. The controller's host hooks
   (README → Host hooks) are the Manager's; the widget uses none of them.
 - **The `conversation.*` strings** — every string those render, in the eleven locales,
   merged into the widget's bundles by `withConversationLocales` (`src/i18n`).

@@ -184,7 +184,17 @@
       "errDisabled": "เอเจนต์เวอร์ชันนี้ไม่ได้ขอคะแนน",
       "errOwner": "เฉพาะผู้ที่สนทนานี้เท่านั้นที่ให้คะแนนได้",
       "errGeneric": "ไม่สามารถบันทึกคะแนนได้"
-    }
+    },
+    "stop": "หยุด",
+    "stopWithKey": "หยุด (Esc)",
+    "editLast": "แก้ไข",
+    "editLastHint": "แก้ไขแล้วส่งอีกครั้ง (↑)",
+    "regenerate": "สร้างใหม่",
+    "regenerateHint": "ขอคำตอบใหม่",
+    "attachUploadingPercent": "กำลังอัปโหลด… {{percent}}%",
+    "attachProgress": "การอัปโหลด {{name}}",
+    "attachRetry": "ลองอีกครั้ง",
+    "attachHint": "แนบไฟล์ — หรือวางหรือลากมาวางที่นี่"
   },
   "editor": {
     "deployFailed": "การปรับใช้ล้มเหลว",

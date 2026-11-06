@@ -46,6 +46,8 @@ import {
 import { cancelConversation } from "@eddi/app-kit/lib/api/hitl";
 import {
   AgentConversation,
+  RECONNECT_DELAYS_MS,
+  STOP_VERIFY_DELAYS_MS,
   useAgentConversation,
   type ConversationMessage,
 } from "@eddi/conversation";
@@ -692,6 +694,8 @@ function createThreadConversation(
   turnRef: MutableRefObject<ThreadTurn | null>,
 ): AgentConversation {
   const controller: AgentConversation = new AgentConversation({
+    stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
+    reconnectDelaysMs: RECONNECT_DELAYS_MS,
     transport: {
       mode: "conversation",
       // A turn of files only names the first file as its input; the backend

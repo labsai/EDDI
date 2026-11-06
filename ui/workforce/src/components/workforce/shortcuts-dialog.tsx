@@ -67,7 +67,30 @@ export function ShortcutsDialog() {
 
   if (!open) return null;
 
+  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   const shortcuts = [
+    {
+      key: `${mod}K`,
+      label: t("Workforce.shortcuts.quickSwitcher", "Go to a conversation or agent"),
+    },
+    {
+      key: `${mod}${mod === "⌘" ? "⇧" : "Shift+"}O`,
+      label: t("Workforce.shortcuts.newChat", "New chat"),
+    },
+    {
+      key: "Enter",
+      label: t("Workforce.shortcuts.send", "Send the message"),
+      context: t("Workforce.shortcuts.shiftEnter", "Shift+Enter for a new line"),
+    },
+    {
+      key: "↑",
+      label: t("Workforce.shortcuts.editLast", "Edit your last message"),
+      context: t("Workforce.shortcuts.inEmptyComposer", "In an empty message box"),
+    },
+    {
+      key: "Esc",
+      label: t("Workforce.shortcuts.stop", "Stop the reply being written"),
+    },
     {
       key: "N",
       label: t("Workforce.shortcuts.newBoard", "Assemble Task Force"),
@@ -118,7 +141,7 @@ export function ShortcutsDialog() {
           </div>
           <div className="ps-5 pe-5 pt-3 pb-5 space-y-3">
             {shortcuts.map((s) => (
-              <div key={s.key} className="flex items-center justify-between">
+              <div key={`${s.key}-${s.label}`} className="flex items-center justify-between">
                 <div className="flex flex-col">
                   <span className="text-sm font-medium">{s.label}</span>
                   {s.context && (

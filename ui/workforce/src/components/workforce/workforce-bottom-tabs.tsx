@@ -84,7 +84,7 @@ export function WorkforceBottomTabs() {
     <nav
       aria-label={t("Workforce.bottomNav", "Bottom navigation")}
       className={cn(
-        "fixed inset-x-0 bottom-0 z-40 flex h-16 border-t",
+        "fixed inset-x-0 bottom-0 z-40 flex h-[calc(4rem+env(safe-area-inset-bottom))] border-t",
         "border-border bg-card/90 backdrop-blur-md",
         "pb-[env(safe-area-inset-bottom)]",
       )}

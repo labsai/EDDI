@@ -184,7 +184,17 @@
       "errDisabled": "このエージェントのバージョンは評価を求めていません。",
       "errOwner": "この会話を行った本人だけが評価できます。",
       "errGeneric": "評価を保存できませんでした。"
-    }
+    },
+    "stop": "停止",
+    "stopWithKey": "停止 (Esc)",
+    "editLast": "編集",
+    "editLastHint": "編集して再送信 (↑)",
+    "regenerate": "再生成",
+    "regenerateHint": "新しい返信を求める",
+    "attachUploadingPercent": "アップロード中… {{percent}}%",
+    "attachProgress": "{{name}} のアップロード",
+    "attachRetry": "再試行",
+    "attachHint": "ファイルを添付（ここに貼り付けやドロップも可）"
   },
   "editor": {
     "deployFailed": "デプロイに失敗しました",

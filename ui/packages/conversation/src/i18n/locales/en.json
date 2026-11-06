@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "Taking a closer look…",
   "conversation.indicator.thinking": "Thinking…",
   "conversation.indicator.guardrail": "Checking the reply…",
+  "conversation.indicator.reconnecting": "Connection lost. Reconnecting…",
   "conversation.message.noResponse": "No response",
   "conversation.speaker.you": "You said:",
   "conversation.speaker.agent": "{{name}} said:",
@@ -114,5 +115,9 @@
   "conversation.guardrail.actionBlock": "blocked",
   "conversation.guardrail.actionRedact": "redacted",
   "conversation.guardrail.actionReprompt": "re-asked the model",
-  "conversation.guardrail.actionWarn": "flagged"
+  "conversation.guardrail.actionWarn": "flagged",
+  "conversation.stop.finished": "Stop came too late: the reply had already finished on the server, and it counts. Here it is in full.",
+  "conversation.stop.stillRunning": "Stop did not reach this turn: it is still running on another server, and what it does still counts. Its reply appears when you reopen the conversation.",
+  "conversation.stop.unreachable": "Stop could not reach the server. The turn may still be running there; reopen the conversation to see how it ended.",
+  "conversation.diagram.label": "Diagram"
 }

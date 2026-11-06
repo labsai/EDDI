@@ -1594,6 +1594,23 @@ a:hover { opacity: 0.85; }
   right: 6px;
 }
 
+/* The language a fenced block names, above it; and a Mermaid diagram. */
+.code-block__lang {
+  display: block;
+  padding: 0 4px 2px;
+  font-size: 0.7rem;
+  color: var(--chat-text-muted);
+}
+
+.mermaid-diagram {
+  overflow-x: auto;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
 /* ─── Header text title ─── */
 
 .chat-header__title {

@@ -5,7 +5,7 @@
    the shared conversation components with the widget's own chrome.
    ────────────────────────────────────────────── */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 
 import { useChatState, useChatDispatch, useChatController, DEFAULT_PLACEHOLDER } from "@/store/chat-store";
@@ -16,9 +16,7 @@ import {
   Composer,
   Message,
   MessageList,
-  PausedCard,
   QuickReplies,
-  RatingCard,
   SecretInput,
   ThinkingIndicator,
   TypingIndicator,
@@ -47,6 +45,11 @@ import { useRatings } from "@/hooks/useRatings";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import type { ChatConfig } from "@/types";
 import { END_REASON_AGENT_VERSION_RETIRED } from "@/types";
+
+// Each card is rendered only when it is needed — a paused turn, a rating asked
+// for — so neither is part of the widget's first load (ui/bundle-budget.json).
+const PausedCard = lazy(() => import("@eddi/conversation/paused-card").then((m) => ({ default: m.PausedCard })));
+const RatingCard = lazy(() => import("@eddi/conversation/rating-card").then((m) => ({ default: m.RatingCard })));
 
 /** How long to wait for a postMessage token before starting without one. */
 const TOKEN_WAIT_MS = 5000;
@@ -544,6 +547,20 @@ export function ChatWidget() {
     void controller.stop();
   }, [controller]);
 
+  // Esc stops a running turn, as the Stop button does (T1.10). The restart
+  // confirmation keeps its own Esc.
+  const canStop = state.isProcessing && !state.historyBusy && !isPaused;
+  useEffect(() => {
+    if (!canStop) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector('[role="alertdialog"]')) return;
+      e.preventDefault();
+      handleStop();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canStop, handleStop]);
+
   /* ─── Composer focus handoff ────────────────── */
   // The agent-requested field replaces the composer, and leaving it (sending or
   // cancelling) unmounts whatever had focus. Moving it to the composer keeps a
@@ -581,14 +598,16 @@ export function ChatWidget() {
   // and the header's "Rate this conversation" has to open the card for it.
   const ratingCard =
     ratings.cardOpen && ratings.profile && !isPaused ? (
-      <RatingCard
-        key={state.conversationId ?? "none"}
-        profile={ratings.profile}
-        current={ratings.conversationRating}
-        onSubmit={ratings.rateConversation}
-        onWithdraw={ratings.withdrawConversation}
-        onClose={ratings.closeCard}
-      />
+      <Suspense fallback={null}>
+        <RatingCard
+          key={state.conversationId ?? "none"}
+          profile={ratings.profile}
+          current={ratings.conversationRating}
+          onSubmit={ratings.rateConversation}
+          onWithdraw={ratings.withdrawConversation}
+          onClose={ratings.closeCard}
+        />
+      </Suspense>
     ) : null;
 
   return (
@@ -625,8 +644,8 @@ export function ChatWidget() {
               aria-live="polite"
               data-testid="chat-activity-status"
             >
-              {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
-                ? indicatorStatusText(state.isEscalating, state.activeTool, t, guardrailOnReply)
+              {!isPaused && (state.isThinking || state.isEscalating || state.activeTool || state.reconnecting)
+                ? indicatorStatusText(state.isEscalating, state.activeTool, t, guardrailOnReply, state.reconnecting)
                 : ""}
             </div>
 
@@ -682,19 +701,22 @@ export function ChatWidget() {
             {isPaused ? (
               // From the stream's own news, at once: approval-status may not have
               // the pause stored yet, and the composer is locked meanwhile.
-              <PausedCard
-                status={state.approvalStatus}
-                onCancel={() => void controller.cancel()}
-                cancelDisabled={state.isProcessing}
-                locale={getLocale()}
-              />
+              <Suspense fallback={null}>
+                <PausedCard
+                  status={state.approvalStatus}
+                  onCancel={() => void controller.cancel()}
+                  cancelDisabled={state.isProcessing}
+                  locale={getLocale()}
+                />
+              </Suspense>
             ) : (
               <>
-                {(state.isThinking || state.isEscalating || state.activeTool) && (
+                {(state.isThinking || state.isEscalating || state.activeTool || state.reconnecting) && (
                   <ThinkingIndicator
                     escalating={state.isEscalating}
                     tool={state.activeTool}
                     guardrail={guardrailOnReply}
+                    reconnecting={state.reconnecting}
                   />
                 )}
                 {state.isProcessing &&

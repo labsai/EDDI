@@ -464,7 +464,14 @@
       "fromDashboard": "From dashboard",
       "newBoard": "Assemble Task Force",
       "showHelp": "Show keyboard shortcuts",
-      "title": "Keyboard Shortcuts"
+      "title": "Keyboard Shortcuts",
+      "quickSwitcher": "Go to a conversation or agent",
+      "newChat": "New chat",
+      "send": "Send the message",
+      "shiftEnter": "Shift+Enter for a new line",
+      "editLast": "Edit your last message",
+      "inEmptyComposer": "In an empty message box",
+      "stop": "Stop the reply being written"
     },
     "sidebar": {
       "boards": "Board navigation"
@@ -561,6 +568,14 @@
       "send": "Send",
       "starters": "Suggestions",
       "recent": "Recent"
+    },
+    "switcher": {
+      "newChat": "New chat",
+      "chatWith": "Chat with this agent",
+      "title": "Go to a conversation or agent",
+      "search": "Search conversations and agents",
+      "results": "Results",
+      "noResults": "Nothing matches"
     }
   },
   "analyticsPage": {

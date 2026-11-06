@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "Revisando con más detalle…",
   "conversation.indicator.thinking": "Pensando…",
   "conversation.indicator.guardrail": "Revisando la respuesta…",
+  "conversation.indicator.reconnecting": "Se perdió la conexión. Reconectando…",
   "conversation.message.noResponse": "Sin respuesta",
   "conversation.speaker.you": "Dijiste:",
   "conversation.speaker.agent": "{{name}} dijo:",
@@ -114,5 +115,9 @@
   "conversation.guardrail.actionBlock": "bloqueó",
   "conversation.guardrail.actionRedact": "ocultó texto",
   "conversation.guardrail.actionReprompt": "repreguntó al modelo",
-  "conversation.guardrail.actionWarn": "advirtió"
+  "conversation.guardrail.actionWarn": "advirtió",
+  "conversation.stop.finished": "La detención llegó tarde: la respuesta ya había terminado en el servidor y cuenta. Aquí está completa.",
+  "conversation.stop.stillRunning": "La detención no alcanzó este turno: sigue ejecutándose en otro servidor y lo que haga cuenta. Su respuesta aparecerá cuando vuelvas a abrir la conversación.",
+  "conversation.stop.unreachable": "La detención no pudo llegar al servidor. Puede que el turno siga ejecutándose allí; vuelve a abrir la conversación para ver cómo terminó.",
+  "conversation.diagram.label": "Diagrama"
 }

@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useMemo } from "react";
+import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
 import { ConversationMarkdown } from "@eddi/conversation/i18next";
@@ -65,6 +65,11 @@ interface ChatMessageProps {
   ratingProfile?: RatingProfile | null;
   /** Stable across renders, or every memoised bubble re-renders. */
   onRateStep?: (stepIndex: number, input: RatingInput | null) => Promise<boolean>;
+  /**
+   * The host's controls for this message (the `messageActions` slot): Edit on
+   * the last message the person sent, Regenerate on the last reply.
+   */
+  actions?: ReactNode;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -73,6 +78,7 @@ export const ChatMessage = memo(function ChatMessage({
   rating,
   ratingProfile,
   onRateStep,
+  actions,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -116,6 +122,18 @@ export const ChatMessage = memo(function ChatMessage({
       .join("\n\n");
   }, [structured, verdict, message.content, t]);
 
+  // Text the client wrote (Stop came too late, a step that could not be
+  // undone): a system line, not the agent speaking.
+  if (message.kind === "notice") {
+    return (
+      <div className="flex justify-center px-4 py-2" data-testid="chat-notice">
+        <p className="max-w-[min(85%,40rem)] rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-center text-xs text-muted-foreground">
+          {message.content}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -149,9 +167,12 @@ export const ChatMessage = memo(function ChatMessage({
             "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
             isUser
               ? "bg-primary text-primary-foreground rounded-ee-md"
-              : "bg-card border border-border text-card-foreground rounded-es-md",
-            message.isStreaming && "animate-pulse"
+              : "bg-card border border-border text-card-foreground rounded-es-md"
           )}
+          // Streamed text stays steady while it grows (a pulsing bubble is hard
+          // to read); assistive tech is told it is still being written.
+          aria-busy={message.isStreaming || undefined}
+          data-streaming={message.isStreaming ? "true" : undefined}
         >
           {isUser ? (
             <div className="flex flex-col gap-2">
@@ -220,7 +241,7 @@ export const ChatMessage = memo(function ChatMessage({
         )}>
           {/* Timestamp */}
           <span
-            className="text-[10px] text-muted-foreground/60 select-none"
+            className="text-[10px] text-muted-foreground select-none"
             title={formatFullTime(message.timestamp)}
           >
             {formatShortTime(message.timestamp)}
@@ -232,6 +253,9 @@ export const ChatMessage = memo(function ChatMessage({
               <CopyMessageButton content={copyContent} />
             </div>
           )}
+          {/* The host's own (Edit, Regenerate): always visible — the last turn
+              is where they are reached for, on touch screens too. */}
+          {actions}
         </div>
 
         {/* Reply thumbs: shown on hover/focus, always once rated, always on touch */}
@@ -363,7 +387,7 @@ function CopyMessageButton({ content }: { content: string }) {
         "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
         copied
           ? "text-emerald-500"
-          : "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
       )}
       title={t("chat.copyMessage", "Copy message")}
       aria-label={t("chat.copyMessage", "Copy message")}

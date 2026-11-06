@@ -8,6 +8,7 @@ import { createTestQueryClient } from "@eddi/app-kit/test/test-utils";
 import { MOCK_CATALOG_AGENTS } from "@eddi/app-kit/test/mocks/catalog-fixtures";
 import { EndUserCatalog } from "@/components/workforce/catalog-view";
 import { readInitialChatMessage } from "@eddi/app-kit/lib/workforce-chat-start";
+import { NEW_CHAT_STATE } from "@/lib/workforce-keyboard";
 
 /**
  * Workforce Home for an end user (T1.4): a composer first with an agent
@@ -29,10 +30,10 @@ function ChatProbe() {
   );
 }
 
-function renderHome() {
+function renderHome(state?: unknown) {
   return render(
     <AuthContext.Provider value={{ ...GUEST_CONTEXT, method: "keycloak", roles: ["eddi-user"] }}>
-      <MemoryRouter initialEntries={["/workforce"]}>
+      <MemoryRouter initialEntries={[{ pathname: "/workforce", state }]}>
         <QueryClientProvider client={createTestQueryClient()}>
           <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
             <Routes>
@@ -47,6 +48,18 @@ function renderHome() {
 }
 
 describe("Workforce Home", () => {
+  it("takes the caret into its composer when it is opened for a new chat (⌘⇧O)", async () => {
+    renderHome(NEW_CHAT_STATE);
+    const input = await screen.findByTestId("home-composer-input");
+    await waitFor(() => expect(input).toHaveFocus());
+  });
+
+  it("leaves focus alone on an ordinary visit", async () => {
+    renderHome();
+    const input = await screen.findByTestId("home-composer-input");
+    expect(input).not.toHaveFocus();
+  });
+
   it("puts the composer first, picks a listed agent and offers its starters", async () => {
     renderHome();
     const composer = await screen.findByTestId("home-composer");

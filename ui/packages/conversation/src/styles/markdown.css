@@ -36,6 +36,27 @@
   background: color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
 
+/* The language a fenced block names, above it; and a Mermaid diagram. */
+.eddi-markdown .code-block__lang {
+  display: block;
+  padding-inline: 4px;
+  padding-bottom: 2px;
+  font-size: 0.7rem;
+  color: var(--color-muted-foreground);
+}
+
+.eddi-markdown .mermaid-diagram {
+  overflow-x: auto;
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--color-background);
+}
+
+.eddi-markdown .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .eddi-markdown .table-scroll {
   overflow-x: auto;
 }
