@@ -436,7 +436,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
-| `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
+| `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution, and cancel group discussions a restart interrupted (single-node startup pass; set `false` for several pods without NATS — see [hitl.md](hitl.md#crash-recovery)) |
 | `eddi.hitl.analytics.retention` | `P400D` | How long approval-decision facts (the analytics projection of `hitl.approval` ledger entries) are kept. The ledger itself keeps the evidence. See [hitl-oversight.md](hitl-oversight.md) |
 | `eddi.hitl.analytics.initial-backfill` | `P90D` | How far back the one-time first-start rebuild reads the ledger into approval analytics. `P0D` disables it; `POST /hitl/analytics/rebuild` runs one by hand |
 | `eddi.hitl.samples.enabled` | `true` | Cluster-wide switch for the sampled audit of ungated tool calls (`hitlConfig.oversight.sampledAudit`) |

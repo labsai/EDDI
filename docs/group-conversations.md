@@ -1380,6 +1380,20 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
 
+## Restarts
+
+A discussion's leg runs in the JVM that started or resumed it, and nothing
+picks it up after that process dies. On a single node (`eddi.messaging.type=in-memory`)
+the startup HITL crash recovery therefore **cancels** every discussion still
+`IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
+started, so it does not sit in a running state that `continue` and `followup`
+refuse. Paused discussions are not affected: their timeout schedules are
+re-armed instead. Details and the multi-pod caveat
+(`eddi.hitl.crash-recovery.recover-in-progress`) are in
+[HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
+interrupted discussion still needs a manual cancel — or, for a standing team,
+the claim TTL (see [Standing Teams](#standing-teams-i13)).
+
 ## Not yet supported
 
 Known bounds, so they are not discovered at runtime:
