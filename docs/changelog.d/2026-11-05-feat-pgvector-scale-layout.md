@@ -71,7 +71,13 @@ million chunks retrieval took seconds and each document replacement scanned the 
   or a running ingestion: the next borrow reopens the pool, and each borrow counts as use of it. An
   evicted pool with connections still borrowed (Agroal metrics, `activeCount()`) is retired rather than
   closed under them, and closed on a later lookup once they are returned; `clearCache()` and
-  `@PreDestroy` still close every pool. Tested in `PgVectorConnectionPoolsTest` with fake pools.
+  `@PreDestroy` still close every pool. A borrow and a close of the same pool exclude each other through
+  a per-pool read/write lock (borrow under the read lock, from the `closed` check through
+  `getConnection()`; every close under the write lock, from the `activeCount()` check through
+  `close()`), so a borrow that had looked the pool up before its eviction can no longer finish between
+  the "nothing borrowed" check and the close; eviction and the retired sweep use `tryLock` and retire or
+  skip a pool a borrow is in, rather than stall a lookup. Tested in `PgVectorConnectionPoolsTest` with
+  fake pools, including a gated borrow that is inside `getConnection()` while its pool is evicted.
 - **An unqualified table is inspected in `current_schema()`**, where langchain4j's
   `CREATE TABLE IF NOT EXISTS` creates it, not wherever the `search_path` first finds the name — with
   `search_path = myschema, public`, `public.docs` would otherwise decide the layout of the new

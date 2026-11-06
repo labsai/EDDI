@@ -16,6 +16,11 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -46,6 +51,14 @@ class PgVectorConnectionPoolsTest {
         final AtomicBoolean closed = new AtomicBoolean();
         final AtomicLong active = new AtomicLong();
         final Login login;
+        /** Signalled when a gated borrow is inside {@code getConnection()}. */
+        final CountDownLatch entered = new CountDownLatch(1);
+        /**
+         * When set, {@code getConnection()} waits for it, then counts the connection as
+         * borrowed — the way Agroal's {@code activeCount()} only includes a connection
+         * once the borrow has completed.
+         */
+        volatile CountDownLatch gate;
 
         FakePool(Login login) throws SQLException {
             this.login = login;
@@ -57,8 +70,18 @@ class PgVectorConnectionPoolsTest {
                 return null;
             }).when(pool).close();
             when(pool.getConnection()).thenAnswer(inv -> {
+                CountDownLatch g = gate;
+                if (g != null) {
+                    entered.countDown();
+                    if (!g.await(5, TimeUnit.SECONDS)) {
+                        throw new SQLException("test gate was never opened");
+                    }
+                }
                 if (closed.get()) {
                     throw new SQLException("This pool is closed and does not handle any more connections!");
+                }
+                if (g != null) {
+                    active.incrementAndGet();
                 }
                 return mock(Connection.class);
             });
@@ -153,5 +176,47 @@ class PgVectorConnectionPoolsTest {
         assertTrue(second.closed.get());
         assertEquals(0, pools.retiredCount());
         assertTrue(byPool.values().stream().allMatch(p -> p.closed.get()), "closeAll closes every pool");
+    }
+
+    @Test
+    @DisplayName("a pool evicted while a borrow is inside getConnection() is retired, not closed under the borrower")
+    void evictionDuringBorrowDoesNotCloseThePool() throws Exception {
+        PgVectorConnectionPools pools = pools();
+        DataSource store = handle(pools, 0);
+        store.getConnection();
+        FakePool busy = poolOf("db0.example.com");
+        CountDownLatch gate = new CountDownLatch(1);
+        busy.gate = gate;
+
+        ExecutorService borrower = Executors.newSingleThreadExecutor();
+        try {
+            // Thread A has looked the pool up and is inside getConnection(); activeCount()
+            // is still 0
+            Future<Connection> borrowed = borrower.submit(() -> store.getConnection());
+            assertTrue(busy.entered.await(5, TimeUnit.SECONDS), "the borrow must reach getConnection()");
+            assertEquals(0, busy.active.get());
+
+            // Evict the pool while the borrow is in progress
+            flood(pools, 1);
+            assertFalse(busy.closed.get(), "a pool must not be closed while a borrow is inside getConnection()");
+            assertEquals(1, pools.retiredCount(), "the pool is evicted from the cache and retired");
+
+            gate.countDown();
+            assertNotNull(borrowed.get(5, TimeUnit.SECONDS), "the borrower gets its connection");
+            assertEquals(1, busy.active.get());
+            assertFalse(busy.closed.get(), "still borrowed: still open");
+            pools.size();
+            assertFalse(busy.closed.get(), "a lookup while the connection is borrowed keeps the pool");
+            assertEquals(1, pools.retiredCount());
+
+            busy.active.set(0); // the connection is returned
+            handle(pools, 1).getConnection();
+            assertTrue(busy.closed.get(), "returned: the next lookup closes the retired pool");
+            assertEquals(0, pools.retiredCount());
+        } finally {
+            gate.countDown();
+            borrower.shutdownNow();
+            assertTrue(borrower.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 }

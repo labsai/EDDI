@@ -21,6 +21,7 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 
 import javax.sql.DataSource;
@@ -47,8 +48,12 @@ import javax.sql.DataSource;
  * the pool, so a pool that stores are working with is the last the cache
  * evicts. An evicted pool with connections still borrowed is not closed under
  * them: it is retired, keeps serving the borrowers it has, and is closed on a
- * later lookup once all of them are returned. {@link #closeAll} closes every
- * pool, retired ones included.
+ * later lookup once all of them are returned. A borrow and a close of the same
+ * pool exclude each other (a read/write lock per pool), so a borrow that had
+ * already looked a pool up when it was evicted either completes before the
+ * "nothing borrowed" check — and so is counted by it — or sees the pool closed
+ * and borrows from its replacement. {@link #closeAll} closes every pool,
+ * retired ones included.
  */
 final class PgVectorConnectionPools {
 
@@ -77,12 +82,32 @@ final class PgVectorConnectionPools {
         }
     }
 
+    /**
+     * A pool and the lock that keeps a borrow and a close apart. A borrow holds the
+     * read lock from the {@link #closed} check through {@code getConnection()}, so
+     * once it returns, the pool's {@code activeCount()} includes the new
+     * connection; a close holds the write lock from the {@code activeCount()} check
+     * through {@code close()}. Without it, a borrower that had already looked the
+     * pool up could finish {@code getConnection()} between an evictor's "nothing
+     * borrowed" check and its close.
+     */
+    private static final class Pooled {
+        final AgroalDataSource dataSource;
+        final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+        /** Guarded by {@link #lock}. */
+        boolean closed;
+
+        Pooled(AgroalDataSource dataSource) {
+            this.dataSource = dataSource;
+        }
+    }
+
     private final Function<Login, AgroalDataSource> factory;
 
     /** Evicted pools that still had connections borrowed. */
-    private final Set<AgroalDataSource> retired = ConcurrentHashMap.newKeySet();
+    private final Set<Pooled> retired = ConcurrentHashMap.newKeySet();
 
-    private final Cache<String, AgroalDataSource> pools;
+    private final Cache<String, Pooled> pools;
 
     PgVectorConnectionPools() {
         this(PgVectorConnectionPools::create);
@@ -94,14 +119,18 @@ final class PgVectorConnectionPools {
         this.pools = Caffeine.newBuilder()
                 .maximumSize(MAX_POOLS)
                 .executor(Runnable::run)
-                .removalListener((String key, AgroalDataSource pool, RemovalCause cause) -> {
+                // The listener runs on the thread whose pools.get() caused the eviction, inside
+                // pool(), which connection() calls before it takes any pool's read lock — so
+                // no thread ever waits for a pool's write lock while holding that pool's read
+                // lock.
+                .removalListener((String key, Pooled pool, RemovalCause cause) -> {
                     if (cause == RemovalCause.SIZE) {
                         LOGGER.warnf("Evicting a pgvector connection pool because more than %d distinct PostgreSQL logins are in use by "
                                 + "knowledge bases; its stores reopen it on their next use. Reduce the number of distinct "
                                 + "host/database/user combinations across knowledge bases.", MAX_POOLS);
                         retire(pool);
                     } else {
-                        closeQuietly(pool);
+                        close(pool);
                     }
                 })
                 .build();
@@ -122,25 +151,33 @@ final class PgVectorConnectionPools {
     }
 
     /**
-     * Borrows a connection from the login's pool. If the pool was evicted between
-     * the lookup and the borrow and has been closed, the borrow is retried once on
-     * the pool that replaced it.
+     * Borrows a connection from the login's pool. The borrow runs under the pool's
+     * read lock, so the pool cannot be closed while it is in progress. If the pool
+     * was closed between the lookup and the borrow — evicted while idle, or by
+     * {@link #closeAll} — the borrow is retried once on the pool that replaced it.
+     * An {@code SQLException} from {@code getConnection()} is therefore never a
+     * closed pool of ours and is passed on.
      */
     Connection connection(String key, Login login) throws SQLException {
         closeIdleRetired();
-        AgroalDataSource pool = pool(key, login);
-        try {
-            return pool.getConnection();
-        } catch (SQLException e) {
-            if (pools.getIfPresent(key) == pool) {
-                throw e;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            // pool() may evict, and so run the removal listener, which takes a write lock:
+            // it must stay outside the read lock below
+            Pooled pool = pool(key, login);
+            pool.lock.readLock().lock();
+            try {
+                if (!pool.closed) {
+                    return pool.dataSource.getConnection();
+                }
+            } finally {
+                pool.lock.readLock().unlock();
             }
-            return pool(key, login).getConnection();
         }
+        throw new SQLException("The pgvector connection pool for " + login + " was closed concurrently with the borrow; try again.");
     }
 
-    private AgroalDataSource pool(String key, Login login) {
-        return pools.get(key, k -> factory.apply(login));
+    private Pooled pool(String key, Login login) {
+        return pools.get(key, k -> new Pooled(factory.apply(login)));
     }
 
     /** Number of open pools, retired ones included — for tests. */
@@ -159,32 +196,83 @@ final class PgVectorConnectionPools {
     void closeAll() {
         pools.invalidateAll();
         pools.cleanUp();
-        for (AgroalDataSource pool : retired) {
+        for (Pooled pool : retired) {
             if (retired.remove(pool)) {
-                closeQuietly(pool);
+                close(pool);
             }
         }
     }
 
-    private void retire(AgroalDataSource pool) {
+    /**
+     * An evicted pool: closed now if nothing is borrowed from it, otherwise kept
+     * for {@link #closeIdleRetired}. If a borrow is in progress — the read lock is
+     * held — it is retired without waiting: the evicting thread is a lookup, and
+     * must not stall for up to {@link #ACQUISITION_TIMEOUT} behind a borrower.
+     */
+    private void retire(Pooled pool) {
         if (pool == null) {
             return;
         }
-        if (borrowed(pool) == 0) {
-            closeQuietly(pool);
-        } else {
+        if (!pool.lock.writeLock().tryLock()) {
             retired.add(pool);
+            return;
+        }
+        try {
+            if (pool.closed) {
+                return;
+            }
+            if (borrowed(pool.dataSource) == 0) {
+                pool.closed = true;
+                closeQuietly(pool.dataSource);
+            } else {
+                retired.add(pool);
+            }
+        } finally {
+            pool.lock.writeLock().unlock();
         }
     }
 
+    /**
+     * Closes the retired pools nothing is borrowed from any more. A pool a borrow
+     * is in progress on is skipped, not waited for; a later lookup takes it.
+     */
     private void closeIdleRetired() {
         if (retired.isEmpty()) {
             return;
         }
-        for (AgroalDataSource pool : retired) {
-            if (borrowed(pool) == 0 && retired.remove(pool)) {
-                closeQuietly(pool);
+        for (Pooled pool : retired) {
+            if (!pool.lock.writeLock().tryLock()) {
+                continue;
             }
+            try {
+                if (pool.closed) {
+                    retired.remove(pool);
+                } else if (borrowed(pool.dataSource) == 0 && retired.remove(pool)) {
+                    pool.closed = true;
+                    closeQuietly(pool.dataSource);
+                }
+            } finally {
+                pool.lock.writeLock().unlock();
+            }
+        }
+    }
+
+    /**
+     * Closes a pool whether or not connections are borrowed from it; waits for a
+     * borrow in progress to finish.
+     */
+    private static void close(Pooled pool) {
+        if (pool == null) {
+            return;
+        }
+        pool.lock.writeLock().lock();
+        try {
+            if (!pool.closed) {
+                pool.closed = true;
+                closeQuietly(pool.dataSource);
+            }
+        } finally {
+            pool.lock.writeLock().unlock();
         }
     }
 
