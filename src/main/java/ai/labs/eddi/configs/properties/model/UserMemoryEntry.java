@@ -141,6 +141,12 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      * {@code conflicted} can never disagree with {@code assessment}. The only way
      * to store any other assessment is
      * {@code IUserMemoryStore#setAssessmentIfUnchanged}, which Dream uses.
+     * <p>
+     * {@link #sourceEntryIds()} is kept. Provenance is not a verdict, and Dream's
+     * consolidation write — the one write that sets it — goes through these same
+     * store methods. Writers that must not set it clear it themselves at their
+     * boundary: the REST write ({@code UserMemoryWriteRules.withDefaults}); every
+     * other writer builds its entry without sources.
      */
     public UserMemoryEntry asStatement() {
         if (assessment == Assessment.ACCEPTED && supersededBy == null && !conflicted) {

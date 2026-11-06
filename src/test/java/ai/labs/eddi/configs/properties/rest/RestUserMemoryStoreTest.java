@@ -181,6 +181,21 @@ class RestUserMemoryStoreTest {
                 && "edited".equals(e.value())));
     }
 
+    /**
+     * A client echoes a consolidated entry's sourceEntryIds back with an edited
+     * value. The new value is the client's statement, not derived from those
+     * entries, so the provenance is dropped.
+     */
+    @Test
+    void upsertMemory_echoedSourceEntryIdsAreNotStored() throws Exception {
+        var echoed = entry("1", "key", "edited").withSourceEntryIds(List.of("e1", "e2"));
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        assertEquals(200, rest.upsertMemory(echoed).getStatus());
+
+        verify(store).upsert(argThat(e -> e.sourceEntryIds().isEmpty() && "edited".equals(e.value())));
+    }
+
     @Test
     void upsertMemory_shouldRejectNullEntry() {
         Response response = rest.upsertMemory(null);

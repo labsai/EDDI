@@ -90,9 +90,14 @@ public final class UserMemoryWriteRules {
      * contested entry and writes it back edited must not keep the old verdict. The
      * stores apply the same rule; doing it here too keeps the contract visible at
      * the external boundary.
+     * <p>
+     * {@code sourceEntryIds} is cleared as well. Only a Dream consolidation records
+     * provenance, and a value a client writes is not derived from the entries it
+     * names. The stores keep sources ({@code asStatement} is a verdict rule only),
+     * so this boundary is the one place that rule can live.
      */
     public static UserMemoryEntry withDefaults(UserMemoryEntry entry) {
-        UserMemoryEntry statement = entry.asStatement();
+        UserMemoryEntry statement = entry.asStatement().withSourceEntryIds(List.of());
         if (statement.category() != null) {
             return statement;
         }

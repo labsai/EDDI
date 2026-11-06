@@ -76,3 +76,8 @@ the rolling summary's check to every consolidation group. See
   backups and exports.
 - A retry that throws skips the group but does not abort the phase: the group's first call succeeded, so it is no
   configuration fault.
+- After merging #1295's `asStatement()` (every store value write is stored `ACCEPTED`): `asStatement()` keeps
+  `sourceEntryIds`, because provenance is not a verdict and Dream's consolidation write goes through those same store
+  methods. The REST boundary (`UserMemoryWriteRules.withDefaults`) clears it, so a client echoing a consolidated
+  entry's ids onto an edited value does not keep them. MCP and every other writer build their entries without sources.
+  `DatastoreParityTest` pins both halves on MongoDB and PostgreSQL.

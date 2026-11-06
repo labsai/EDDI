@@ -342,4 +342,13 @@ class UserMemoryEntryTest {
         var flaggedOnly = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, true, 0, null, null);
         assertFalse(flaggedOnly.asStatement().conflicted(), "conflicted without CONTESTED is not kept either");
     }
+
+    @Test
+    void asStatement_keepsSourceEntryIds() {
+        var consolidated = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null)
+                .withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.CONTESTED, null).asStatement().sourceEntryIds(),
+                "provenance is not a verdict: Dream's consolidation write goes through asStatement");
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.SUPERSEDED, "x").asStatement().sourceEntryIds());
+    }
 }
