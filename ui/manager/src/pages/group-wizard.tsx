@@ -92,6 +92,13 @@ const MEMBER_SETUP_CONCURRENCY = 3;
    ================================================================ */
 
 interface MemberSlot extends GroupMember {
+  /**
+   * Stable for the slot's lifetime, unlike its position, which shifts when a
+   * card above it is removed. A per-slot "Create Agent" finishes long after
+   * the click, so it writes back by this id. Never sent: `handleCreate` maps
+   * slots to `GroupMember` field by field.
+   */
+  id: string;
   /** Whether this slot should create a new agent vs use existing */
   mode: "existing" | "new";
   /** New agent creation fields */
@@ -142,8 +149,24 @@ function isHitlConfigValid(state: WizardState): boolean {
   return true;
 }
 
+/**
+ * A state update: a patch, or a function of the CURRENT state returning one.
+ * Anything written after an `await` must use the function form - a patch built
+ * from the render that started the work reverts whatever changed meanwhile.
+ */
+type WizardUpdate = Partial<WizardState> | ((s: WizardState) => Partial<WizardState>);
+
+// A counter, not crypto.randomUUID(): that exists only in a secure context,
+// and the Manager is often served over plain http from a non-localhost host.
+let slotSeq = 0;
+function nextSlotId(): string {
+  slotSeq += 1;
+  return `slot-${slotSeq}`;
+}
+
 function createEmptySlot(index: number, displayName?: string, role?: string | null): MemberSlot {
   return {
+    id: nextSlotId(),
     agentId: "",
     displayName: displayName || "",
     speakingOrder: index + 1,
@@ -161,6 +184,7 @@ function createEmptySlot(index: number, displayName?: string, role?: string | nu
 
 function createModeratorSlot(): MemberSlot {
   return {
+    id: nextSlotId(),
     agentId: "",
     displayName: "Moderator",
     speakingOrder: 0,
@@ -463,9 +487,13 @@ export function GroupWizardPage() {
   const { requestLeave, dialog: leaveDialog } = useLeaveConfirm(isDirty);
 
   const update = useCallback(
-    (patch: Partial<WizardState>) => setState((s) => ({ ...s, ...patch })),
+    (patch: WizardUpdate) => setState((s) => ({ ...s, ...(typeof patch === "function" ? patch(s) : patch) })),
     [],
   );
+
+  // A card's own "Create Agent" is still running: the final Create would
+  // provision that slot a second time, since it has no agent id yet.
+  const slotProvisioning = state.members.some((m) => m.creating) || !!state.moderator?.creating;
 
   function selectTemplate(tmpl: GroupTemplate) {
     update({
@@ -493,7 +521,11 @@ export function GroupWizardPage() {
   }
 
   async function handleCreate() {
-    if (wizardSaveProblems(state).length > 0) return;
+    if (isCreating || slotProvisioning || wizardSaveProblems(state).length > 0) return;
+    // The write-backs below use this click-time copy of the members. That is
+    // safe only because nothing else can change them meanwhile: no card is
+    // provisioning (checked above) and navigation is locked while isCreating,
+    // and the review step renders no editors.
     setIsBatchCreating(true);
     const updatedMembers = [...state.members];
     let updatedModerator = state.moderator ? { ...state.moderator } : null;
@@ -759,7 +791,8 @@ export function GroupWizardPage() {
                 <button
                   type="button"
                   onClick={() => i < currentStep && setCurrentStep(i)}
-                  disabled={i > currentStep}
+                  // Locked while creating: see handleCreate.
+                  disabled={i > currentStep || isCreating}
                   aria-label={t("groupWizard.stepAria", "Step {{n}}: {{title}}", { n: i + 1, title })}
                   aria-current={isActive ? "step" : undefined}
                   data-testid={`group-wizard-step-${s.id}`}
@@ -772,6 +805,7 @@ export function GroupWizardPage() {
                     !isActive &&
                       !isComplete &&
                       "border-border bg-card text-muted-foreground",
+                    isCreating && isComplete && "cursor-not-allowed opacity-50",
                   )}
                 >
                   {isComplete ? (
@@ -836,9 +870,10 @@ export function GroupWizardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
-          disabled={currentStep === 0}
+          // Locked while creating: see handleCreate.
+          disabled={currentStep === 0 || isCreating}
           className={cn(
-            "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors",
+            "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             currentStep === 0
               ? "invisible"
               : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -863,7 +898,7 @@ export function GroupWizardPage() {
         ) : (
           <button
             onClick={() => handleCreate()}
-            disabled={isCreating || wizardSaveProblems(state).length > 0}
+            disabled={isCreating || slotProvisioning || wizardSaveProblems(state).length > 0}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
             data-testid="group-wizard-create"
           >
@@ -1441,7 +1476,7 @@ function MembersStep({
   styleColors,
 }: {
   state: WizardState;
-  onChange: (patch: Partial<WizardState>) => void;
+  onChange: (update: WizardUpdate) => void;
   styleColors: typeof STYLE_COLORS[DiscussionStyle];
 }) {
   const { t } = useTranslation();
@@ -1449,30 +1484,30 @@ function MembersStep({
   const agents = agentDescriptors ? groupAgentsByName(agentDescriptors) : [];
   const { deploy } = useDeployWithGrants();
 
+  // Every member and moderator write goes through the current state, keyed by
+  // slot id: the agent creations below write back after awaiting the server,
+  // by when other cards may have been created, edited or removed.
   function addMember() {
-    onChange({
-      members: [
-        ...state.members,
-        createEmptySlot(state.members.length),
-      ],
-    });
+    onChange((s) => ({ members: [...s.members, createEmptySlot(s.members.length)] }));
   }
 
-  function removeMember(idx: number) {
-    onChange({ members: state.members.filter((_, i) => i !== idx) });
+  function removeMember(id: string) {
+    onChange((s) => ({ members: s.members.filter((m) => m.id !== id) }));
   }
 
-  function updateMember(idx: number, updates: Partial<MemberSlot>) {
-    onChange({
-      members: state.members.map((m, i) => (i === idx ? { ...m, ...updates } : m)),
-    });
+  function updateMember(id: string, updates: Partial<MemberSlot>) {
+    onChange((s) => ({ members: s.members.map((m) => (m.id === id ? { ...m, ...updates } : m)) }));
   }
 
-  async function createAgentForSlot(idx: number) {
-    const slot = state.members[idx];
-    if (!slot || !slot.displayName.trim() || missingApiKey(slot)) return;
+  function updateModerator(updates: Partial<MemberSlot>) {
+    onChange((s) => ({ moderator: s.moderator && { ...s.moderator, ...updates } }));
+  }
 
-    updateMember(idx, { creating: true });
+  async function createAgentForSlot(id: string) {
+    const slot = state.members.find((m) => m.id === id);
+    if (!slot || slot.creating || !slot.displayName.trim() || missingApiKey(slot)) return;
+
+    updateMember(id, { creating: true });
 
     const req = buildSetupRequest(
       slot,
@@ -1488,7 +1523,7 @@ function MembersStep({
       // Through the grant flow: a new agent is on no vault key's grant yet.
       const options = { agentId: created.agentId, agentName: slot.displayName, version: created.version };
       const outcome = await deploy(options);
-      updateMember(idx, {
+      updateMember(id, {
         agentId: created.agentId,
         created: true,
         creating: false,
@@ -1502,7 +1537,7 @@ function MembersStep({
       }
     } catch (err) {
       updateMember(
-        idx,
+        id,
         created
           ? { agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
           : { creating: false },
@@ -1513,9 +1548,9 @@ function MembersStep({
 
   async function createModeratorAgent() {
     const mod = state.moderator;
-    if (!mod || missingApiKey(mod)) return;
+    if (!mod || mod.creating || missingApiKey(mod)) return;
 
-    onChange({ moderator: { ...mod, creating: true } });
+    updateModerator({ creating: true });
 
     const req = buildSetupRequest(
       mod,
@@ -1529,14 +1564,11 @@ function MembersStep({
       created = { agentId: result.agentId, version: await resolveSetupVersion(result) };
       const options = { agentId: created.agentId, agentName: mod.displayName, version: created.version };
       const outcome = await deploy(options);
-      onChange({
-        moderator: {
-          ...mod,
-          agentId: created.agentId,
-          created: true,
-          creating: false,
-          pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
-        },
+      updateModerator({
+        agentId: created.agentId,
+        created: true,
+        creating: false,
+        pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
       });
       if (outcome.kind === "deployed") {
         toast.success(t("groupWizard.moderatorCreated"));
@@ -1544,24 +1576,21 @@ function MembersStep({
         reportDeployOutcome(outcome, options, t);
       }
     } catch (err) {
-      onChange({
-        moderator: created
-          ? { ...mod, agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
-          : { ...mod, creating: false },
-      });
+      updateModerator(
+        created
+          ? { agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
+          : { creating: false },
+      );
       toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
     }
   }
 
   /** Copy one provider/model/key onto every advisor that is still to be created. */
   function applyToAllNew(llm: Pick<MemberSlot, "provider" | "model" | "apiKey">) {
-    onChange({
-      members: state.members.map((m) => (needsAgentCreation(m) ? { ...m, ...llm } : m)),
-      moderator:
-        state.moderator && needsAgentCreation(state.moderator)
-          ? { ...state.moderator, ...llm }
-          : state.moderator,
-    });
+    onChange((s) => ({
+      members: s.members.map((m) => (needsAgentCreation(m) ? { ...m, ...llm } : m)),
+      moderator: s.moderator && needsAgentCreation(s.moderator) ? { ...s.moderator, ...llm } : s.moderator,
+    }));
   }
 
   return (
@@ -1598,7 +1627,7 @@ function MembersStep({
       <div className="space-y-3 max-h-[500px] overflow-y-auto pe-1">
         {state.members.map((member, idx) => (
           <MemberCard
-            key={idx}
+            key={member.id}
             member={member}
             index={idx}
             // An agent seated in another slot is not offered again: both seats
@@ -1606,9 +1635,9 @@ function MembersStep({
             agents={optionsOfferedTo(agents, state.members, idx)}
             takenIds={idsTakenByOtherMembers(state.members, idx)}
             styleColors={styleColors}
-            onUpdate={(updates) => updateMember(idx, updates)}
-            onRemove={() => removeMember(idx)}
-            onCreateAgent={() => createAgentForSlot(idx)}
+            onUpdate={(updates) => updateMember(member.id, updates)}
+            onRemove={() => removeMember(member.id)}
+            onCreateAgent={() => createAgentForSlot(member.id)}
             t={t}
           />
         ))}
@@ -1647,7 +1676,9 @@ function MembersStep({
           ) : (
             <button
               onClick={() => onChange({ moderator: null })}
-              className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              // Removed mid-create, its agent would be left deployed with nothing pointing at it.
+              disabled={state.moderator.creating}
+              className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               title={t("groupWizard.removeModerator")}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -1659,7 +1690,7 @@ function MembersStep({
           <ModeratorCard
             moderator={state.moderator}
             agents={agents}
-            onChange={(updates) => onChange({ moderator: { ...state.moderator!, ...updates } })}
+            onChange={updateModerator}
             onCreateAgent={createModeratorAgent}
             t={t}
           />
@@ -1940,8 +1971,9 @@ function MemberCard({
           <button
             aria-pressed={member.memberType === "AGENT"}
             onClick={() => selectMemberType("AGENT")}
+            disabled={member.creating}
             className={cn(
-              "px-2.5 py-1 text-[10px] font-medium transition-colors",
+              "px-2.5 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               member.memberType === "AGENT"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -1952,8 +1984,9 @@ function MemberCard({
           <button
             aria-pressed={member.memberType === "GROUP"}
             onClick={() => selectMemberType("GROUP")}
+            disabled={member.creating}
             className={cn(
-              "px-2.5 py-1 text-[10px] font-medium transition-colors",
+              "px-2.5 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               member.memberType === "GROUP"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -1965,8 +1998,9 @@ function MemberCard({
           <button
             aria-pressed={member.memberType === "HUMAN"}
             onClick={() => selectMemberType("HUMAN")}
+            disabled={member.creating}
             className={cn(
-              "px-2.5 py-1 text-[10px] font-medium transition-colors",
+              "px-2.5 py-1 text-[10px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               member.memberType === "HUMAN"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -1980,7 +2014,10 @@ function MemberCard({
 
         <button
           onClick={onRemove}
-          className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          // Removing or retyping the card while its agent is being created would
+          // leave that agent deployed with nothing pointing at it.
+          disabled={member.creating}
+          className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           title={t("common.delete")}
           data-testid={`remove-member-${index}`}
         >
@@ -2160,6 +2197,7 @@ function MemberCard({
                     onClick={onCreateAgent}
                     disabled={member.creating || !member.displayName.trim() || keyMissing}
                     className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid={`gw-create-agent-${index}`}
                   >
                     {member.creating ? (
                       <RefreshCw className="h-3 w-3 animate-spin" />
@@ -2363,6 +2401,7 @@ function ModeratorCard({
             onClick={onCreateAgent}
             disabled={moderator.creating || keyMissing}
             className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            data-testid="gw-create-moderator"
           >
             {moderator.creating ? (
               <RefreshCw className="h-3 w-3 animate-spin" />
