@@ -324,7 +324,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
             return "Invalid approval request: " + e.getMessage();
         }
-        // Fixed text of its own, naming the field only.
+        // Strict plan binding's refusal: its message is fixed text that names the
+        // planHash field and no value, so it is appended like a review refusal's.
         if (e instanceof HitlPlanBinding.PlanHashRequired) {
             return "Invalid approval request: " + e.getMessage();
         }

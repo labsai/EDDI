@@ -130,8 +130,8 @@ decides.
    `approve_group_phase`) with `verdict` `APPROVED` or `REJECTED`, and **always pass the
    `pauseId` and the `planHash` you read**, so the decision cannot land on a different
    request that paused since, nor on a plan other than the one you showed the user. A
-   `PAUSE_CHANGED` or `PLAN_CHANGED` error means exactly that — read the status again and
-   ask again. `PLAN_HASH_REQUIRED` means the agent requires the `planHash` and you did not
+   `PAUSE_CHANGED` or `PLAN_CHANGED` error means exactly that — re-read the status, then
+   ask the user for a fresh decision. `PLAN_HASH_REQUIRED` means the agent requires the `planHash` and you did not
    send it (an empty `planHash` in the status is a pause from before plan hashing: omit it).
    When the user wants to approve **with changes**: `resume_conversation` takes
    `editedAnswer` (the final answer of a rule pause, when `pauseDetails.editableAnswer` is

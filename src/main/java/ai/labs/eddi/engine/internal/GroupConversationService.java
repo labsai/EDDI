@@ -292,9 +292,6 @@ public class GroupConversationService implements IGroupConversationService, User
     Instance<GroupApprovalContextRenderer> approvalContextRenderer;
 
     /**
-     * The group approval-context renderer, or {@code null} when none is available.
-     */
-    /**
      * Strict plan binding for the whole deployment (see {@code HitlPlanBinding}).
      * Field-injected with its default, like the other optional knobs here.
      */
@@ -306,6 +303,9 @@ public class GroupConversationService implements IGroupConversationService, User
         return planHashStrict;
     }
 
+    /**
+     * The group approval-context renderer, or {@code null} when none is available.
+     */
     public GroupApprovalContextRenderer approvalContextRenderer() {
         return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
     }
