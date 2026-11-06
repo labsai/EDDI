@@ -494,6 +494,11 @@ export function GroupWizardPage() {
   // A card's own "Create Agent" is still running: the final Create would
   // provision that slot a second time, since it has no agent id yet.
   const slotProvisioning = state.members.some((m) => m.creating) || !!state.moderator?.creating;
+  // No going back while agents are being created. During the final Create its
+  // click-time copy of the members would overwrite any edit (see handleCreate);
+  // during a card's own create, picking a preset would replace the card its
+  // agent is written back to, leaving that agent deployed with no card.
+  const navigationLocked = isCreating || slotProvisioning;
 
   function selectTemplate(tmpl: GroupTemplate) {
     update({
@@ -791,8 +796,7 @@ export function GroupWizardPage() {
                 <button
                   type="button"
                   onClick={() => i < currentStep && setCurrentStep(i)}
-                  // Locked while creating: see handleCreate.
-                  disabled={i > currentStep || isCreating}
+                  disabled={i > currentStep || navigationLocked}
                   aria-label={t("groupWizard.stepAria", "Step {{n}}: {{title}}", { n: i + 1, title })}
                   aria-current={isActive ? "step" : undefined}
                   data-testid={`group-wizard-step-${s.id}`}
@@ -805,7 +809,7 @@ export function GroupWizardPage() {
                     !isActive &&
                       !isComplete &&
                       "border-border bg-card text-muted-foreground",
-                    isCreating && isComplete && "cursor-not-allowed opacity-50",
+                    navigationLocked && isComplete && "cursor-not-allowed opacity-50",
                   )}
                 >
                   {isComplete ? (
@@ -870,8 +874,7 @@ export function GroupWizardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
-          // Locked while creating: see handleCreate.
-          disabled={currentStep === 0 || isCreating}
+          disabled={currentStep === 0 || navigationLocked}
           className={cn(
             "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             currentStep === 0

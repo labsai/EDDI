@@ -185,6 +185,26 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
     expect(setupCount).toBe(1);
   });
 
+  it("while a card provisions, the wizard cannot go back to the preset step and replace the cards", async () => {
+    const user = userEvent.setup();
+    await reachMembers(user);
+
+    await user.click(screen.getByTestId("gw-create-agent-0"));
+    await heldSetups(1);
+    // Picking a preset replaces every card, so the agent would find no card to
+    // write back to and be left deployed with nothing pointing at it.
+    expect(screen.getByTestId("group-wizard-back")).toBeDisabled();
+    expect(screen.getByTestId("group-wizard-step-template")).toBeDisabled();
+    expect(screen.getByTestId("group-wizard-step-config")).toBeDisabled();
+    await user.click(screen.getByTestId("group-wizard-step-template"));
+    expect(screen.queryByTestId("template-grid")).not.toBeInTheDocument();
+
+    pending[0]!(true);
+    await screen.findByText("Agent created & deployed");
+    expect(screen.getByTestId("group-wizard-back")).toBeEnabled();
+    expect(screen.getByTestId("group-wizard-step-template")).toBeEnabled();
+  });
+
   it("a moderator edit made while it provisions survives a failed create, and a retry saves it", async () => {
     const user = userEvent.setup();
     await reachMembers(user, { moderator: true });

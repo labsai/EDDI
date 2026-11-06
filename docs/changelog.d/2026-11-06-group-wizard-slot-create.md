@@ -19,7 +19,9 @@ Three more ways in: the final Create stayed enabled while a card was still
 provisioning (provisioning that card a second time); a card's Remove and type
 toggle stayed enabled while its own agent was being created; and during the
 final Create, Back and the step indicator still worked, so the person could edit
-members that the Create then overwrote with its own click-time copy.
+members that the Create then overwrote with its own click-time copy. While a
+card was provisioning they worked too, and picking a preset on the first step
+replaced every card, so the new agent had no card left to be written back to.
 
 ### What changed
 
@@ -32,14 +34,16 @@ members that the Create then overwrote with its own click-time copy.
   keyed by id. The final Create is disabled (and `handleCreate` returns) while
   any card is provisioning; a card's Remove and type toggle, and the moderator's
   Remove, are disabled while that agent is being created; Back and the step
-  buttons are disabled during the final Create. The per-slot buttons get
+  buttons are disabled during the final Create and while any card or the
+  moderator is provisioning. The per-slot buttons get
   `gw-create-agent-<n>` and `gw-create-moderator` test ids.
 - [`create-group-dialog.tsx`](../../ui/manager/src/components/groups/create-group-dialog.tsx):
   removed the `selectedTemplate` state, whose value was never read.
 - New [`group-wizard-slot-create.test.tsx`](../../ui/manager/src/pages/__tests__/group-wizard-slot-create.test.tsx):
-  six cases (two cards at once, an edit and a removal during provisioning, the
-  locked controls, a moderator edit across a failed create, navigation locked
-  during the final Create). Each fails on the previous code.
+  seven cases (two cards at once, an edit and a removal during provisioning, the
+  locked controls, navigation locked while a card provisions, a moderator edit
+  across a failed create, navigation locked during the final Create). Each fails
+  on the previous code.
 
 ### Design decisions
 
@@ -50,3 +54,7 @@ members that the Create then overwrote with its own click-time copy.
   id-keyed too.** The review step renders no editors, so once Back and the steps
   are locked nothing can change the members under it, and its retry-safety logic
   stays as it is.
+- **Lock navigation while a card provisions rather than only the preset step.**
+  Only the preset step can replace the cards, but it is two Back clicks away;
+  one lock on Back and the steps, held for the few seconds a create takes, is
+  simpler than guarding each preset button.
