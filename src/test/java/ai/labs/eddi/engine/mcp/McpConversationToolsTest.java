@@ -968,4 +968,24 @@ class McpConversationToolsTest {
         verify(conversationService, never()).say(any(), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
                 any(ConversationResponseHandler.class));
     }
+
+    @Test
+    void chatManaged_claimFailsUnchecked_endsOwnConversation() throws Exception {
+        // The MongoDB store lets driver failures through unchecked (PostgreSQL wraps
+        // them as ResourceStoreException). The conversation just started is just as
+        // unreachable, so it is ended on both stores.
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(null);
+        givenSupportTrigger();
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("own-conv-id", URI.create("eddi://conv/own-conv-id")));
+        doThrow(new IllegalStateException("Timed out while waiting for a server"))
+                .when(userConversationStore).createUserConversation(any());
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertTrue(result.contains("error"), result);
+        verify(conversationService).endConversation("own-conv-id", "system:lost-create-race");
+        verify(conversationService, never()).say(any(), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
+    }
 }

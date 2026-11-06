@@ -40,6 +40,9 @@ the tests pass both through the constructor.
 instead of failing with `500`; `chat_managed` answers the same race with the winner's reply, a not-ready
 agent with `UNAVAILABLE`, and spreads new conversations across a trigger's deployments. A conversation a
 request started but could not claim is ended (MCP records `system:lost-create-race` as who ended it).
+This holds on both stores, whether the claim fails with a checked `ResourceStoreException` (how PostgreSQL
+reports a failed read or write) or with an unchecked driver exception (how MongoDB, the default backend,
+reports a timeout or a write error other than a duplicate key).
 
 **Files:** [`IUserConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/triggermanagement/IUserConversationStore.java),
 [`RestAgentManagement.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java),

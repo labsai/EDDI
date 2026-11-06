@@ -731,14 +731,19 @@ class RestAgentManagementExtendedTest {
         private final UserConversation winner = new UserConversation("intent-1", "user-1", Deployment.Environment.production, "agent-1",
                 WINNER_CONV_ID);
 
-        /**
-         * This request's start succeeds, but another request stored its mapping first.
-         */
-        private SimpleConversationMemorySnapshot givenOwnStartLosesTheInsert() throws Exception {
+        /** This request starts its own conversation, {@link #OWN_CONV_ID}. */
+        private void givenOwnStartSucceeds() {
             when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(triggerWithDeployment("agent-1"));
             var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + OWN_CONV_ID + "?version=1");
             when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
                     .thenReturn(Response.status(201).header("location", location.toString()).build());
+        }
+
+        /**
+         * This request's start succeeds, but another request stored its mapping first.
+         */
+        private SimpleConversationMemorySnapshot givenOwnStartLosesTheInsert() throws Exception {
+            givenOwnStartSucceeds();
             doThrow(new IResourceStore.ResourceAlreadyExistsException("duplicate key"))
                     .when(userConversationStore).createUserConversation(any());
             when(restAgentEngine.getConversationState(WINNER_CONV_ID)).thenReturn(ConversationState.READY);
@@ -823,6 +828,28 @@ class RestAgentManagementExtendedTest {
 
             verify(restAgentEngine).endConversation(OWN_CONV_ID);
             verify(asyncResponse, never()).resume(any());
+        }
+
+        @Test
+        @DisplayName("the claim fails unchecked: own conversation ended, the driver error surfaces")
+        void uncheckedClaimFailureEndsOwnConversation() throws Exception {
+            // The MongoDB store lets driver failures through unchecked (a MongoException
+            // from its read, a non-duplicate MongoWriteException from its insert), where
+            // PostgreSQL wraps them as ResourceStoreException. The conversation started
+            // here is unreachable either way.
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenOwnStartSucceeds();
+            var driverFailure = new IllegalStateException("Timed out while waiting for a server");
+            doThrow(driverFailure).when(userConversationStore).createUserConversation(any());
+
+            var thrown = assertThrows(IllegalStateException.class,
+                    () -> mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse));
+
+            assertSame(driverFailure, thrown);
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            // Neither overload of resume: the error reaches the JAX-RS mappers as thrown.
+            verifyNoInteractions(asyncResponse);
         }
     }
 

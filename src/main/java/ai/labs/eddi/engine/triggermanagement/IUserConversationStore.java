@@ -39,7 +39,9 @@ public interface IUserConversationStore {
      * <p>
      * <b>The caller owns the conversation it started.</b> When the returned mapping
      * names a different conversation than {@code candidate}, nothing points at the
-     * caller's own conversation any more, and the caller must end it.
+     * caller's own conversation any more, and the caller must end it. The same goes
+     * when this method throws, and not only the checked exception: the MongoDB
+     * store lets driver failures through unchecked.
      *
      * @return {@code candidate} if it was stored, otherwise the mapping that won
      * @throws IResourceStore.ResourceStoreException

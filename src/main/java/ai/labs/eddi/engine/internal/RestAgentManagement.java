@@ -372,8 +372,9 @@ public class RestAgentManagement implements IRestAgentManagement {
             UserConversation claimed;
             try {
                 claimed = userConversationStore.createOrAdopt(candidate);
-            } catch (IResourceStore.ResourceStoreException e) {
-                // Not claimed, so nothing reaches this conversation.
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                // Not claimed, so nothing reaches this conversation. Unchecked too: the
+                // MongoDB store lets driver failures through as they are.
                 endOrphanedConversation(conversationId);
                 throw sneakyThrow(e);
             }

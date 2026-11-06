@@ -1030,8 +1030,9 @@ public class McpConversationTools {
         UserConversation claimed;
         try {
             claimed = userConversationStore.createOrAdopt(new UserConversation(intent, userId, usedEnv, agentId, conversationId));
-        } catch (IResourceStore.ResourceStoreException e) {
-            // Not claimed, so nothing reaches this conversation.
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // Not claimed, so nothing reaches this conversation. Unchecked too: the
+            // MongoDB store lets driver failures through as they are.
             endUnclaimedConversation(conversationId);
             throw e;
         }
