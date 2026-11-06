@@ -82,6 +82,9 @@ The first green run surfaced three defects in what activation provisions. The ti
   keeps its operationId and a repeat takes its method-and-path slug, so a third-party spec can no longer lose a tool
   this way.
 
+[HTTP Calls → Argument schema](../httpcalls.md#argument-schema-for-llm-tools) and its field table now describe the
+requiredness rule, `request.optionalQueryParams` and the renaming of a repeated operationId.
+
 Unit tests: `AgentCompatibilityLintTest` (vault mention not reported, a real error beside one still reported),
 `McpApiToolBuilderArgumentSchemaTest` (requiredness, `optionalQueryParams`, repeated operationIds, suffix fallback),
 `ApiCallExecutorTest` (an empty optional parameter is not sent, a supplied one and a non-optional empty one are).

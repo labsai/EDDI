@@ -28,8 +28,9 @@ import { endpointsForScope } from "@/lib/operator/tool-scopes";
  *      with data;
  *   7. and what the model was actually offered: one distinct tool per
  *      allow-listed endpoint (a repeated operationId once made assembly drop
- *      one), with optional query parameters left optional — and no deploy-time
- *      warning that the prompt does not parse as a template.
+ *      one), with optional query parameters left optional; the prompt must
+ *      have rendered as a template on every request (a failed render sends it
+ *      raw), and the deploy-time compatibility check must not report it.
  *
  * The model is `llm-stub.mjs`, a deterministic OpenAI-compatible server, so no
  * paid provider is involved and the outcome does not depend on a model's mood.
