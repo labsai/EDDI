@@ -24,13 +24,13 @@ export interface ToolResourceRef {
 }
 
 /**
- * The store segment is authoritative (`/apicallstore/`); the `ai.labs.*` host is
- * the fallback for a URI written without one.
+ * The store segment is authoritative (`/apicallstore/`): a URI naming a store
+ * this UI does not know gets no slug, so it is never linked to the wrong editor.
+ * The `ai.labs.*` host is the fallback only for a URI with no store segment.
  */
 function slugFor(uri: string): string | null {
   const store = /\/([a-z]+store)\//i.exec(uri)?.[1]?.toLowerCase();
-  const byStore = store ? RESOURCE_TYPES.find((rt) => rt.store === store) : undefined;
-  if (byStore) return byStore.slug;
+  if (store) return RESOURCE_TYPES.find((rt) => rt.store === store)?.slug ?? null;
   const extension = /^eddi:\/\/(ai\.labs\.[a-z]+)/i.exec(uri)?.[1]?.toLowerCase();
   return extension ? (RESOURCE_TYPES.find((rt) => rt.extension === extension)?.slug ?? null) : null;
 }

@@ -37,6 +37,20 @@ describe("collectWorkflowToolRefs", () => {
     ]);
   });
 
+  it("gives no slug to a URI naming an unknown store, falling back to the host only without a store", () => {
+    const [unknownStore, noStore] = collectWorkflowToolRefs(
+      [
+        workflow(
+          step("eddi://ai.labs.httpcalls", `eddi://ai.labs.apicalls/unknownstore/apicalls/${ID0}?version=1`),
+          step("eddi://ai.labs.httpcalls", `eddi://ai.labs.apicalls/${ID1}?version=1`),
+        ),
+      ],
+      ON,
+    );
+    expect(unknownStore?.slug).toBeNull();
+    expect(noStore?.slug).toBe("apicalls");
+  });
+
   it("ignores the apicalls alias step type, as the backend's tool discovery does", () => {
     expect(collectWorkflowToolRefs([workflow(step("eddi://ai.labs.apicalls", apiUri(ID0)))], ON)).toEqual([]);
   });
@@ -59,7 +73,7 @@ describe("ActiveToolsList", () => {
 
     expect(await screen.findByText("Tool 0")).toBeInTheDocument();
     const row = screen.getByTestId(`active-tool-${ID0}`);
-    expect(within(row).getByRole("link")).toHaveAttribute("href", `/manage/resources/apicalls/${ID0}`);
+    expect(within(row).getByRole("link")).toHaveAttribute("href", `/manage/resources/apicalls/${ID0}?version=1`);
     expect(row).not.toHaveTextContent("eddi://");
     expect(screen.queryByTestId(`active-tool-${ID5}`)).not.toBeInTheDocument();
     expect(screen.getByTestId("active-tools-count")).toHaveTextContent("6");

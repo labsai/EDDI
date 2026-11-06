@@ -138,7 +138,7 @@ export function ActiveToolsList({ task, workflows, workflowsLoading, enableMemor
               return (
                 <li key={`${ref.id}@${ref.version}`} title={name ? `${name}\n${ref.uri}` : ref.uri} data-testid={`active-tool-${ref.id}`}>
                   {ref.slug ? (
-                    <Link to={`/manage/resources/${ref.slug}/${ref.id}`} className={cn(rowClass, "hover:bg-muted/50 transition-colors")}>
+                    <Link to={`/manage/resources/${ref.slug}/${ref.id}?version=${ref.version}`} className={cn(rowClass, "hover:bg-muted/50 transition-colors")}>
                       {content}
                     </Link>
                   ) : (
