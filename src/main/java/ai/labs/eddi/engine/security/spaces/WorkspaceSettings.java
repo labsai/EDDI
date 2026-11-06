@@ -16,7 +16,11 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Operator-facing settings for per-user workspaces.
@@ -39,10 +43,19 @@ import java.util.function.LongSupplier;
  * <h3>Freshness</h3> Stored values are cached for {@link #STORED_SETTINGS_TTL}.
  * A write on this instance is adopted at once; other instances see it when
  * their cache expires. Access checks read these on every request, so a store
- * read per call is not an option. When the store cannot be read, the values
- * last read are kept, and before any successful read the defaults apply — which
- * for {@code legacy-visibility} is the permissive {@code shared}, matching what
- * an unconfigured deployment has always done.
+ * read per call is not an option — and neither is making them wait for one.
+ * Once the cache has expired, the first caller re-reads the store and every
+ * other caller is served the values last read until it has answered
+ * (stale-while-revalidate); only the very first read, with nothing to serve
+ * yet, is waited for. When the store cannot be read, the values last read are
+ * kept; when it has never been read, unowned resources stay admin-only until it
+ * can be.
+ * <p>
+ * A stored value is validated once, when it is read: a
+ * {@code legacy-visibility} that is neither {@code shared} nor
+ * {@code admin-only} — only a direct database write can store one — is logged
+ * and treated as unset, so the default applies and the settings resource
+ * reports it as {@code DEFAULT}.
  *
  * <h3>Why enforcement is a separate switch from ownership</h3>
  * {@code eddi.workspaces.enabled} gates <em>enforcement</em> only. Ownership is
@@ -105,9 +118,22 @@ public class WorkspaceSettings {
 
     private final LongSupplier nanoClock;
 
-    private volatile Snapshot snapshot;
+    /** What was last read from the store; null until the first read. */
+    private final AtomicReference<Snapshot> snapshot = new AtomicReference<>();
+
+    /** Set while one caller re-reads an expired snapshot. */
+    private final AtomicBoolean refreshing = new AtomicBoolean();
 
     /**
+     * The invalid stored legacy-visibility last reported, so a bad row is logged
+     * once rather than at every re-read.
+     */
+    private volatile String lastIgnoredLegacyVisibility;
+
+    /**
+     * @param stored
+     *            as read, with {@code legacyVisibility} already validated: trimmed
+     *            and lower-case, or null
      * @param unreadable
      *            the store could not be read and nothing was ever read from it — so
      *            what an administrator stored is unknown, not absent
@@ -221,17 +247,10 @@ public class WorkspaceSettings {
             // stored value can be read.
             return LEGACY_ADMIN_ONLY;
         }
+        // Already validated when it was read, so this stays a plain read: it runs on
+        // every access check.
         StoredWorkspaceSettings stored = current.stored();
-        if (stored != null && stored.legacyVisibility() != null) {
-            if (isValidLegacyVisibility(stored.legacyVisibility())) {
-                return stored.legacyVisibility().trim().toLowerCase(Locale.ROOT);
-            }
-            // The write boundary refuses this, so it can only come from a direct database
-            // write. Falling back to the default is what an unconfigured deployment does.
-            LOGGER.warnf("Ignoring the stored legacy-visibility '%s': it is neither '%s' nor '%s'.", stored.legacyVisibility(), LEGACY_SHARED,
-                    LEGACY_ADMIN_ONLY);
-        }
-        return LEGACY_SHARED;
+        return stored != null && stored.legacyVisibility() != null ? stored.legacyVisibility() : LEGACY_SHARED;
     }
 
     /**
@@ -273,14 +292,17 @@ public class WorkspaceSettings {
         return store != null;
     }
 
-    /** Re-reads the store now, keeping the previous values if it fails. */
+    /**
+     * Re-reads the store now, keeping the previous values if it fails. A value that
+     * landed while the store was being read — an {@link #adopt}ed write — is newer
+     * than this read and is kept instead.
+     */
     public void refresh() {
         if (store == null) {
             return;
         }
-        synchronized (this) {
-            snapshot = load(snapshot, nanoClock.getAsLong());
-        }
+        Snapshot current = snapshot.get();
+        snapshot.compareAndSet(current, load(current, nanoClock.getAsLong()));
     }
 
     /**
@@ -292,9 +314,7 @@ public class WorkspaceSettings {
         if (store == null) {
             return;
         }
-        synchronized (this) {
-            snapshot = new Snapshot(written, nanoClock.getAsLong(), false);
-        }
+        snapshot.set(new Snapshot(validated(written), nanoClock.getAsLong(), false));
     }
 
     public static boolean isValidLegacyVisibility(String value) {
@@ -322,25 +342,82 @@ public class WorkspaceSettings {
         if (store == null) {
             return NOTHING_STORED;
         }
-        Snapshot current = snapshot;
-        if (current != null && nanoClock.getAsLong() - current.loadedAtNanos() < TTL_NANOS) {
+        Snapshot current = snapshot.get();
+        if (current == null) {
+            return firstLoad();
+        }
+        if (isFresh(current)) {
             return current;
         }
-        synchronized (this) {
-            current = snapshot;
-            long now = nanoClock.getAsLong();
-            if (current != null && now - current.loadedAtNanos() < TTL_NANOS) {
-                return current;
-            }
-            Snapshot loaded = load(current, now);
-            snapshot = loaded;
-            return loaded;
+        if (!refreshing.compareAndSet(false, true)) {
+            // Another caller is already reading the store. Serve what was last read
+            // rather than queue every access check behind a database call that has no
+            // timeout of its own.
+            return current;
         }
+        try {
+            current = snapshot.get();
+            if (isFresh(current)) {
+                return current; // re-read by a caller that finished just before this one
+            }
+            Snapshot loaded = load(current, nanoClock.getAsLong());
+            // Losing the swap means an adopt() or refresh() landed while the store was
+            // being read; theirs is at least as new as this read, so it stays.
+            return snapshot.compareAndSet(current, loaded) ? loaded : snapshot.get();
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
+    /**
+     * The first read, which callers do wait for: there is nothing to serve them
+     * yet, and answering the defaults instead would open unowned resources on a
+     * deployment whose administrator had closed them.
+     */
+    private synchronized Snapshot firstLoad() {
+        Snapshot current = snapshot.get();
+        if (current != null) {
+            return current;
+        }
+        Snapshot loaded = load(null, nanoClock.getAsLong());
+        return snapshot.compareAndSet(null, loaded) ? loaded : snapshot.get();
+    }
+
+    private boolean isFresh(Snapshot candidate) {
+        return nanoClock.getAsLong() - candidate.loadedAtNanos() < TTL_NANOS;
+    }
+
+    /**
+     * {@code stored} with its legacy-visibility checked once, here, instead of on
+     * every access check: trimmed and lower-cased when valid, dropped when not.
+     */
+    private StoredWorkspaceSettings validated(StoredWorkspaceSettings stored) {
+        if (stored == null || stored.legacyVisibility() == null) {
+            lastIgnoredLegacyVisibility = null;
+            return stored;
+        }
+        String raw = stored.legacyVisibility();
+        if (isValidLegacyVisibility(raw)) {
+            lastIgnoredLegacyVisibility = null;
+            String normalized = raw.trim().toLowerCase(Locale.ROOT);
+            return normalized.equals(raw)
+                    ? stored
+                    : new StoredWorkspaceSettings(stored.defaultSpace(), normalized, stored.updatedAt(), stored.updatedBy());
+        }
+        // The write boundary refuses this, so it can only come from a direct database
+        // write. Falling back to the default is what an unconfigured deployment does.
+        if (!raw.equals(lastIgnoredLegacyVisibility)) {
+            lastIgnoredLegacyVisibility = raw;
+            LOGGER.warnf("Ignoring the stored legacy-visibility '%s': it is neither '%s' nor '%s', so the default '%s' applies and "
+                    + "GET /workspaces/settings reports it as DEFAULT. Set it again with PUT /workspaces/settings.", sanitize(raw),
+                    LEGACY_SHARED, LEGACY_ADMIN_ONLY, LEGACY_SHARED);
+        }
+        return new StoredWorkspaceSettings(stored.defaultSpace(), null, stored.updatedAt(), stored.updatedBy());
     }
 
     private Snapshot load(Snapshot previous, long now) {
         try {
-            return new Snapshot(store.read(TENANT).orElse(null), now, false);
+            return new Snapshot(validated(store.read(TENANT).orElse(null)), now, false);
         } catch (RuntimeException e) {
             if (previous != null) {
                 LOGGER.warnf("Could not read the stored workspace settings (%s); keeping the values last read.", e.getClass().getSimpleName());
