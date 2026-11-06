@@ -466,7 +466,14 @@
       "fromDashboard": "Depuis le tableau de bord",
       "newBoard": "Constituer une task force",
       "showHelp": "Afficher les raccourcis clavier",
-      "title": "Raccourcis clavier"
+      "title": "Raccourcis clavier",
+      "quickSwitcher": "Aller à une conversation ou un agent",
+      "newChat": "Nouvelle discussion",
+      "send": "Envoyer le message",
+      "shiftEnter": "Maj+Entrée pour aller à la ligne",
+      "editLast": "Modifier votre dernier message",
+      "inEmptyComposer": "Dans une zone de saisie vide",
+      "stop": "Arrêter la réponse en cours"
     },
     "sidebar": {
       "boards": "Navigation des tableaux"
@@ -563,6 +570,14 @@
       "send": "Envoyer",
       "starters": "Suggestions",
       "recent": "Récent"
+    },
+    "switcher": {
+      "newChat": "Nouvelle discussion",
+      "chatWith": "Discuter avec cet agent",
+      "title": "Aller à une conversation ou un agent",
+      "search": "Rechercher des conversations et des agents",
+      "results": "Résultats",
+      "noResults": "Aucun résultat"
     }
   },
   "analyticsPage": {

@@ -9,6 +9,7 @@ import { SuspendedOutlet } from "@eddi/app-kit/components/layout/suspended-outle
 import { WorkforceBottomTabs } from "@/components/workforce/workforce-bottom-tabs";
 import { WorkforceShortcuts } from "@/components/workforce/workforce-shortcuts";
 import { ShortcutsDialog } from "@/components/workforce/shortcuts-dialog";
+import { QuickSwitcher } from "@/components/workforce/quick-switcher";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -123,6 +124,7 @@ export function WorkforceLayout() {
       <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
+        <QuickSwitcher />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -148,6 +150,7 @@ export function WorkforceLayout() {
       <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
+        <QuickSwitcher />
         <a
           href="#workforce-main"
           className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"
@@ -205,6 +208,7 @@ export function WorkforceLayout() {
     <div data-testid="workforce-layout" className="Workforce relative flex h-dvh overflow-hidden">
       <WorkforceShortcuts />
       <ShortcutsDialog />
+      <QuickSwitcher />
       <a
         href="#workforce-main"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:start-2 focus:z-50 focus:bg-primary focus:text-primary-foreground focus:ps-4 focus:pe-4 focus:py-2 focus:rounded-lg"

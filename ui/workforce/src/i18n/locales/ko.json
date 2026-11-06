@@ -464,7 +464,14 @@
       "fromDashboard": "대시보드에서",
       "newBoard": "태스크포스 구성",
       "showHelp": "키보드 단축키 보기",
-      "title": "키보드 단축키"
+      "title": "키보드 단축키",
+      "quickSwitcher": "대화 또는 에이전트로 이동",
+      "newChat": "새 채팅",
+      "send": "메시지 보내기",
+      "shiftEnter": "Shift+Enter로 줄 바꿈",
+      "editLast": "마지막 메시지 편집",
+      "inEmptyComposer": "빈 메시지 입력란에서",
+      "stop": "작성 중인 답변 중지"
     },
     "sidebar": {
       "boards": "보드 내비게이션"
@@ -561,6 +568,14 @@
       "send": "보내기",
       "starters": "추천",
       "recent": "최근"
+    },
+    "switcher": {
+      "newChat": "새 채팅",
+      "chatWith": "이 에이전트와 채팅",
+      "title": "대화 또는 에이전트로 이동",
+      "search": "대화 및 에이전트 검색",
+      "results": "결과",
+      "noResults": "일치하는 항목이 없습니다"
     }
   },
   "analyticsPage": {

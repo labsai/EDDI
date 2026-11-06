@@ -466,7 +466,14 @@
       "fromDashboard": "Do painel",
       "newBoard": "Montar força-tarefa",
       "showHelp": "Mostrar atalhos de teclado",
-      "title": "Atalhos de teclado"
+      "title": "Atalhos de teclado",
+      "quickSwitcher": "Ir para uma conversa ou agente",
+      "newChat": "Nova conversa",
+      "send": "Enviar a mensagem",
+      "shiftEnter": "Shift+Enter para uma nova linha",
+      "editLast": "Editar sua última mensagem",
+      "inEmptyComposer": "Em uma caixa de mensagem vazia",
+      "stop": "Parar a resposta em andamento"
     },
     "sidebar": {
       "boards": "Navegação de quadros"
@@ -563,6 +570,14 @@
       "send": "Enviar",
       "starters": "Sugestões",
       "recent": "Recentes"
+    },
+    "switcher": {
+      "newChat": "Nova conversa",
+      "chatWith": "Conversar com este agente",
+      "title": "Ir para uma conversa ou agente",
+      "search": "Pesquisar conversas e agentes",
+      "results": "Resultados",
+      "noResults": "Nada corresponde"
     }
   },
   "analyticsPage": {
