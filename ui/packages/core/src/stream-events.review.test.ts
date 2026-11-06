@@ -13,6 +13,7 @@ import {
   extractOutputTexts,
   isSafeUri,
 } from "./stream-events";
+import type { SSEEventType } from "./types";
 
 // Vitest runs from ui/packages/core (where its config lives); the Java is three levels up.
 const JAVA_ROOT = resolve(process.cwd(), "../../../src/main/java/ai/labs/eddi/engine");
@@ -38,6 +39,31 @@ describe("UNCONSUMED_STREAM_ERROR_CODES", () => {
     expect([...UNCONSUMED_STREAM_ERROR_CODES].sort()).toEqual(
       [...literal, mapperCode!].sort(),
     );
+  });
+});
+
+describe("SSEEventType", () => {
+  it("names exactly the events RestAgentEngineStreaming sends", () => {
+    // A Record over the union: the compiler refuses a missing member and an
+    // extra key, so this list IS the type. The Java is the other side.
+    const declared: Record<SSEEventType, true> = {
+      token: true,
+      task_start: true,
+      task_complete: true,
+      task_failed: true,
+      tool_call: true,
+      tool_result: true,
+      cascade_step_start: true,
+      cascade_escalation: true,
+      guardrail_triggered: true,
+      llm_retry: true,
+      done: true,
+      error: true,
+    };
+    const java = readFileSync(STREAMING_JAVA, "utf8");
+    const sent = new Set([...java.matchAll(/stream\.send(?:Json)?\("([a-z_]+)"/g)].map((m) => m[1]));
+
+    expect([...sent].sort()).toEqual(Object.keys(declared).sort());
   });
 });
 

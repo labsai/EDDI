@@ -278,6 +278,10 @@ public interface IConversationService {
         default void onToolCall(String toolName) {
         }
 
+        /** One tool call has finished — see ConversationEventSink#onToolResult. */
+        default void onToolResult(String toolName, boolean ok, String summary) {
+        }
+
         /**
          * The turn was dropped without consuming the input (see
          * {@link ConversationResponseHandler#onSkipped}). Defaults to

@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -697,7 +698,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // user-controlled, so they can carry secrets (API keys, bearer
                 // tokens). The audit-ledger path already scrubs the same content via
                 // AuditLedgerService; this brings the live-display path to parity.
-                summary.put("toolTrace", redactToolTrace(toolTrace));
+                summary.put("toolTrace", ToolTraceRedaction.redactTrace(toolTrace));
             }
             // Cascade confidence (when model cascade is active) — written as a Double by
             // LlmTask's cascade branch. It used to write a String under a different key
@@ -760,39 +761,6 @@ public class LifecycleManager implements ILifecycleManager {
             }
         }
         return records;
-    }
-
-    /**
-     * Deep-redacts a collected tool trace before it is placed on the SSE
-     * {@code task_complete} summary. Each entry is a {@code Map} whose
-     * {@code arguments}/{@code result} strings are LLM- or user-controlled and may
-     * contain secrets. Mirrors {@code AuditLedgerService}'s scrub so the two
-     * outward-facing channels redact the same way. Returns a fresh structure — the
-     * trace stored in conversation memory is left intact for the owner-scoped
-     * {@code RestToolHistory} endpoint.
-     */
-    private static List<Object> redactToolTrace(List<Object> trace) {
-        List<Object> redacted = new ArrayList<>(trace.size());
-        for (Object entry : trace) {
-            redacted.add(redactTraceValue(entry));
-        }
-        return redacted;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Object redactTraceValue(Object value) {
-        if (value instanceof String s) {
-            return SecretRedactionFilter.redact(s);
-        } else if (value instanceof Map<?, ?> map) {
-            Map<String, Object> scrubbed = new LinkedHashMap<>(map.size());
-            for (Map.Entry<String, Object> e : ((Map<String, Object>) map).entrySet()) {
-                scrubbed.put(e.getKey(), redactTraceValue(e.getValue()));
-            }
-            return scrubbed;
-        } else if (value instanceof List<?> list) {
-            return list.stream().map(LifecycleManager::redactTraceValue).toList();
-        }
-        return value;
     }
 
     /**

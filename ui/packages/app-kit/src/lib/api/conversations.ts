@@ -415,6 +415,29 @@ export async function getConversationDescriptors(
   return items.map(normalizeDescriptor);
 }
 
+/** The longest search text the backend accepts, after collapsing whitespace. */
+export const MAX_CONVERSATION_SEARCH_LENGTH = 100;
+
+/**
+ * Search the caller's OWN conversations by title —
+ * `GET /conversationstore/conversations/search?q=…` (B3). The text is literal
+ * (no wildcards), case-insensitive, 1–100 characters; an administrator gets
+ * only their own conversations too. Newest first, paged like the listing
+ * (`index` is a page of results); a page can come back short, so page until
+ * one is empty. A blank or overlong `q` is a 400 — check before calling.
+ */
+export async function searchConversations(
+  q: string,
+  index = 0,
+  limit = 20,
+): Promise<ConversationDescriptor[]> {
+  const params = new URLSearchParams({ q, index: String(index), limit: String(limit) });
+  const raw = await api.get<ConversationDescriptorRaw[]>(
+    `/conversationstore/conversations/search?${params.toString()}`,
+  );
+  return (Array.isArray(raw) ? raw : []).map(normalizeDescriptor);
+}
+
 /** Highest page size the backend will honour (it clamps `limit` to this). */
 export const MAX_CONVERSATION_LIMIT = 100;
 

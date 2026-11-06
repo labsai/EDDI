@@ -301,6 +301,14 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         }
 
                         @Override
+                        public void onToolResult(String toolName, boolean ok, String summary) {
+                            // Additive (B6): a client that does not know the event ignores
+                            // it. The summary arrives redacted and bounded from the tool loop
+                            // (ToolTraceRedaction.summary), the same redaction as toolTrace.
+                            stream.sendJson("tool_result", new ToolResultEvent(toolName, ok, summary == null ? "" : summary));
+                        }
+
+                        @Override
                         public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                             var sb = new StringBuilder();
                             sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId.getIdentifier(), taskType,
@@ -761,6 +769,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /** Typed payload for the {@code cascade_step_start} SSE event. */
     private record CascadeStepStartEvent(int stepIndex, String modelType, String modelName, int totalSteps) {
+    }
+
+    /**
+     * Typed payload for the {@code tool_result} SSE event: the tool's name, whether
+     * it succeeded, and the start of its redacted result.
+     */
+    private record ToolResultEvent(String tool, boolean ok, String summary) {
     }
 
     /** Typed payload for the {@code llm_retry} SSE event. */
