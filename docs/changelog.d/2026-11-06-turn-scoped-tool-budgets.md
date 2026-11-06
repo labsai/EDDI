@@ -16,8 +16,11 @@ The new `TurnCounter` keeps the count on the conversation's current step instead
 tool `tools:memory_writes`, and `DynamicAgentToolsProvider` hands the delegation tool
 `tools:delegations:<taskId>` (`default` for a task without an id), so the delegation cap stays per LLM
 task as documented, now across every assembly of that task in the turn. The next turn's step starts at
-zero again. Neither key has a public prefix, so the counts stay out of the client snapshot. The key is
-read by exact match: the step's `getLatestData` is a prefix lookup and would let `tools:delegations:a`
+zero again. Two consequences follow from counting on the step: the LLM tasks of one turn share
+`maxWritesPerTurn` (it was per task execution), and a rerun of the turn, which re-executes the same step,
+starts from what its first run spent — the writes and delegations that run made are not undone either.
+Neither key has a public prefix, so the counts stay out of the client snapshot. The key is read by exact
+match: the step's `getLatestData` is a prefix lookup and would let `tools:delegations:a`
 read the count of `tools:delegations:ab`. A tool built without a conversation (direct construction)
 still counts on its own instance.
 
