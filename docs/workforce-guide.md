@@ -144,6 +144,21 @@ and diagrams: a code block marked `mermaid` is drawn as a diagram. Every reply h
 button. A picture an agent's designer configured is shown; a link to a picture in the agent's own
 words stays a link, so a reply cannot make your browser fetch anything you did not click.
 
+### When the agent asks for something specific, or you type a secret
+
+The message box has three modes, and shows one at a time:
+
+- **The field an agent asked for.** An agent can ask for one value, such as an API key or an email
+  address, and the message box becomes that field, with the agent's label. A password or key is
+  hidden as you type (the eye shows it), sent exactly as typed, and kept out of the conversation's
+  title and its stored history. An email or text field is an ordinary message. **Type a message
+  instead** goes back to the normal message box.
+- **Secret mode.** The lock button hides what you type and sends it as a secret: the conversation
+  shows dots, and the server masks it in stored history. Turning the lock off throws the hidden text
+  away instead of showing it. Whatever you had typed in the normal box before is still there. A
+  secret is never kept as a draft. Quick-reply buttons are hidden while the lock is on.
+- **The normal message box**, with the agent's quick-reply buttons above it when it offers some.
+
 ### Files
 
 Attach files with the paper clip, by pasting (a screenshot, for example) or by dropping them on the
@@ -156,6 +171,32 @@ are sent with your message.
 When the agent asks for ratings, each answer has a thumbs up and a thumbs down. After a thumbs
 down you can pick a reason and add a comment; both are optional, and the thumb counts on its own.
 Who sees your rating is said under the rating card.
+
+---
+
+## What your agents remember about you
+
+Some agents remember things about you between conversations: your preferred language, your time
+zone, a project you mentioned. **My memory**, at the bottom of the sidebar (or **⌘K** / **Ctrl+K**
+and "remember"), lists everything they have saved about you, newest first. For each entry it shows:
+
+- **which agent saved it.** If an older entry does not record its agent, the page says so.
+- **who may use it.** *Private* means only the agent that saved it uses it. *Team* means the agents
+  of a team use it, and the page names the team. *All agents* means any agent you talk to uses it.
+- when it last changed.
+
+Search filters the list by any of these, including the agent's and the team's names.
+
+**Forget** deletes one entry. **Forget everything** deletes them all, for every agent and team,
+after asking you to confirm. Either way your agents no longer know it in new conversations, and it
+cannot be undone. Your conversations themselves are not deleted. You can forget any entry, including
+a shared one; forgetting a shared entry removes it for every agent that uses it.
+
+Records your administrator keeps for data-protection requests (for example a restriction of
+processing) are not listed here and cannot be deleted from this page. Ask your administrator for a
+full erasure of your data. With sign-in switched off on a deployment, there is no person to remember,
+and the page says so. Nobody else can open your memory from this page: the server only shows it to
+you, or to an administrator.
 
 ---
 
