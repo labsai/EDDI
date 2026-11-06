@@ -1388,8 +1388,8 @@ the startup HITL crash recovery therefore **cancels** every discussion still
 `IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
 started, so it does not sit in a running state that `continue` and `followup`
 refuse. Paused discussions are not affected: their timeout schedules are
-re-armed instead. Details and the multi-pod caveat
-(`eddi.hitl.crash-recovery.recover-in-progress`) are in
+re-armed instead. Details, and when to turn it off
+(`eddi.hitl.crash-recovery.recover-in-progress`), are in
 [HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
 interrupted discussion still needs a manual cancel — or, for a standing team,
 the claim TTL (see [Standing Teams](#standing-teams-i13)).
