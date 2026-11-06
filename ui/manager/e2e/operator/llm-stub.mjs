@@ -45,10 +45,12 @@ function textOf(message) {
   return "";
 }
 
+/** A tool's name, in either the nested (`function.name`) or the flat OpenAI shape. */
 function toolName(tool) {
   return tool?.function?.name ?? tool?.name ?? "";
 }
 
+/** A tool's JSON-schema parameters; an empty object schema when it declares none. */
 function toolParams(tool) {
   return tool?.function?.parameters ?? { type: "object", properties: {} };
 }
@@ -77,6 +79,7 @@ function findListAgentsTool(tools) {
   return null;
 }
 
+/** The names a tool's schema lists as required, or none. */
 function requiredOf(tool) {
   const params = toolParams(tool);
   return Array.isArray(params.required) ? params.required : [];
@@ -150,6 +153,7 @@ function decide(body) {
   return { text: "Hello from the operator E2E stub model.", why: "plain" };
 }
 
+/** A non-streaming `chat.completion` carrying the decided text or tool call. */
 function completion(decision) {
   const id = `chatcmpl-stub-${++sequence}`;
   const created = Math.floor(Date.now() / 1000);
@@ -176,6 +180,10 @@ function completion(decision) {
   };
 }
 
+/**
+ * The same decision as `chat.completion.chunk` frames: the content (or the whole
+ * tool call in one delta), the finish reason, then a usage-only frame.
+ */
 function streamChunks(decision) {
   const id = `chatcmpl-stub-${++sequence}`;
   const created = Math.floor(Date.now() / 1000);
@@ -212,6 +220,7 @@ function streamChunks(decision) {
   ];
 }
 
+/** Answer with a JSON body. */
 function send(res, status, payload) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
