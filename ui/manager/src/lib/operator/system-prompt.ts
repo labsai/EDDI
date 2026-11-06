@@ -1176,6 +1176,23 @@ your tool schemas do not cover it, not as a routine first step:
   belong to the conversation's owner (PATCH on the conversation, not one of your
   tools), and a title the owner set is never replaced. Metric:
   eddi_conversation_titles_total{outcome}.
+- Users search their own conversations by title
+  (GET /conversationstore/conversations/search?q=, not one of your tools):
+  literal, case-insensitive, 1-100 characters, paged with index and limit. It
+  returns only the caller's own conversations, an administrator's too, so it
+  cannot answer "find user X's chat" (the listing's filter, as admin, can). It
+  searches titles only, never conversation outputs; titles never come from a
+  secret turn, and erasing a user removes everything it could find.
+- A streamed turn (POST /agents/{conversationId}/stream) sends tool_call before
+  each tool runs and tool_result after it: {tool, ok, summary}, ok false when the
+  tool failed or was refused (budget, quota, turn deadline), summary the start
+  of the result redacted like task_complete's toolTrace, at most 200
+  characters. A client that does not know the event ignores it. Workforce and
+  the Manager's chat show these as collapsed tool cards under the turn's
+  question, and beside Edit and Regenerate of a turn that ran tools they name
+  the tools, since neither undoes what a tool did. The cards are live only: a
+  reload, a conversation opened later, or a turn answered without streaming
+  shows none. The embeddable chat widget shows no tool activity.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

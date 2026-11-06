@@ -56,6 +56,7 @@ for anything this page does not cover.
 | `GET /agents/pending-approvals` | Conversations awaiting a human decision | `200` list |
 | `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` (a compare-and-set from the state it read: `409` when the state changed meanwhile or cannot be reset) | `200` |
 | `GET /conversationstore/conversations` | List conversations (paged, filterable) | `200` list |
+| `GET /conversationstore/conversations/search?q=` | Search **my** conversations by title (paged; see [Searching my conversations](#searching-my-conversations)) | `200` list |
 | `GET /conversationstore/conversations/simple/{conversationId}` | Read a conversation (same shape as `GET /agents/{id}`) | `200` |
 | `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory. The `audit:*` step data (the compiled system prompt above all; `audit:token_usage` stays) is withheld unless the caller has `VIEW` on the agent — the same rule `approval-status?detail=full` and MCP `read_audit_trail` apply | `200` |
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
@@ -237,7 +238,8 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_complete` | `{"taskId","taskType","durationMs"}` plus, when present, `actions` (the actions in memory after the task), `toolTrace` (the LLM task's tool calls, arguments redacted) and `confidence` | A task finished |
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
-| `tool_call` | `{"tool":"<name>"}` | Sent right before a tool runs — the name only. There is no "tool finished" event |
+| `tool_call` | `{"tool":"<name>"}` | Sent right before a tool runs — the name only |
+| `tool_result` | `{"tool":"<name>","ok":true,"summary":"…"}` | Sent after each call announced by `tool_call`, in the same order, once it finished: it ran, failed, or was refused (budget, quota, turn deadline). `ok` is `true` when the tool ran and its result does not report a failure (an HTTP error status, an `error` field, a `NOT_EXECUTED` status). `summary` is the start of the result, or the refusal, redacted exactly like `task_complete`'s `toolTrace`, whitespace collapsed, at most 200 characters (may be empty). Not sent for a call cut off by a cancellation or an approval pause. Additive: a client that does not know it ignores it |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
 | `cascade_escalation` | `{"fromStep","toStep","confidence","threshold","reason","durationMs"}` | The cascade escalates to the next model |
 | `llm_retry` | `{"reason","attempt"}` | The LLM task asks the same model again after an unusable reply ([recovery policies](langchain.md#recovery-policies-retry-where-it-helps)) |
@@ -470,6 +472,40 @@ Results are newest first. A non-admin sees only their own conversations.
 
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
+
+### Searching my conversations
+
+```bash
+curl -s "$EDDI/conversationstore/conversations/search?q=rome&index=0&limit=20"
+```
+
+Answers the same descriptors as the listing, newest first, for the conversations
+whose **title** contains `q`.
+
+- **Only the caller's own conversations**, for every caller, an administrator
+  included: this is "my conversations". (An administrator who needs everybody's
+  uses the listing's `filter`.) The owner is part of the database query, as an
+  exact match on the descriptor's `userId`, so another user's conversation is
+  never read. With authorization disabled every conversation is searched, as the
+  listing then shows every conversation. A conversation from before v5.1.6 that
+  records no owner on its descriptor is not searched.
+- `q` is literal text, not a pattern: `%`, `_`, `*` or `(` match themselves. It is
+  case-insensitive, whitespace is collapsed the way titles are stored, and it must
+  be 1 to 100 characters (`400` otherwise).
+- `index`, `limit` page as in the listing (`index × limit` at most 10,000). A page
+  can come back short, because a match whose conversation memory is gone is left
+  out, so page until a page comes back empty.
+- **Titles only.** A title never comes from a secret turn, and it lives on the
+  conversation descriptor, which [GDPR erasure](gdpr-compliance.md) deletes, so
+  nothing the search can find outlives an erasure. Conversation *outputs* are not
+  searched yet. Doing that safely needs more than a query: the outputs live in
+  the conversation memory documents, not the descriptors, so they need their own
+  index on both backends. They hold model and tool text that the turn-end scrub
+  does not cover (it removes secret input and secret context, not what a tool
+  echoed), so they would also need a decision on redaction. Both are open.
+- MongoDB matches with an escaped, case-insensitive regex and PostgreSQL with an
+  escaped `ILIKE`, both after the exact owner match narrows the rows to the
+  caller's.
 
 ## Calling an API as the user: secret context
 

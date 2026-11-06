@@ -1,0 +1,16 @@
+{
+  "toolActivity": {
+    "region": "Activité des outils",
+    "summary": "Outils utilisés : {{n}}",
+    "failedCount": "{{n}} en échec",
+    "ok": "Réussi",
+    "failed": "Échec",
+    "noSummary": "Aucun détail",
+    "more": "+{{n}} de plus",
+    "notice": {
+      "edit": "A exécuté {{tools}}. Modifier annule la réponse, pas ce que les outils ont fait.",
+      "regenerate": "A exécuté {{tools}}. Ce qu’ils ont fait reste acquis, et une nouvelle réponse peut les relancer.",
+      "edited": "Votre message est de retour dans la zone de saisie. Ce que {{tools}} a fait n’a pas été annulé."
+    }
+  }
+}

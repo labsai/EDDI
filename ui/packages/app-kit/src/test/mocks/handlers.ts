@@ -1624,6 +1624,27 @@ export const handlers = [
     return HttpResponse.json(result.slice(index * limit, index * limit + limit));
   }),
 
+  // Search my conversations (B3) — mirrors RestConversationStore.searchConversations:
+  // titles only, literal and case-insensitive, whitespace collapsed; 400 for a
+  // blank or over-100-character q. The mock data has a single user, so the owner
+  // scope has nothing to filter here.
+  http.get("*/conversationstore/conversations/search", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").replace(/\s+/g, " ").trim();
+    if (!q || q.length > 100) return HttpResponse.json({ error: "Invalid q" }, { status: 400 });
+    const needle = q.toLowerCase();
+    const result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      const entry = { ...c, ...patch } as typeof c & { title?: string };
+      return typeof entry.title === "string" && entry.title.toLowerCase().includes(needle) ? [entry] : [];
+    });
+    const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+    const limit = rawLimit < 1 ? 20 : rawLimit;
+    const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));
+    return HttpResponse.json(result.slice(index * limit, index * limit + limit));
+  }),
+
   // Simple conversation log. Detailed (non-public) keys included: every step
   // records `agent:version`, and step 4 is where the conversation moved from
   // v2 to a compatible v3 (`agent:switch`).

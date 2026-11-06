@@ -149,6 +149,39 @@ class RestAgentEngineStreamingExtendedTest {
         }
 
         @Test
+        @DisplayName("onToolResult sends a tool_result event {tool, ok, summary}, JSON-escaped")
+        void onToolResultSendsEvent() throws Exception {
+            invokeSayStreaming();
+            var handler = captureHandler();
+
+            handler.onToolResult("weather", false, "upstream said \"no\"\n");
+
+            verify(eventBuilder).name("tool_result");
+            var dataCaptor = ArgumentCaptor.forClass(String.class);
+            verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertEquals("weather", node.get("tool").asText());
+            assertFalse(node.get("ok").asBoolean());
+            assertEquals("upstream said \"no\"\n", node.get("summary").asText());
+            assertEquals(3, node.size(), "nothing but tool, ok and summary: " + node);
+        }
+
+        @Test
+        @DisplayName("onToolResult with no summary sends an empty one, never null")
+        void onToolResultNullSummary() throws Exception {
+            invokeSayStreaming();
+            var handler = captureHandler();
+
+            handler.onToolResult("calc", true, null);
+
+            var dataCaptor = ArgumentCaptor.forClass(String.class);
+            verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertTrue(node.get("ok").asBoolean());
+            assertEquals("", node.get("summary").asText());
+        }
+
+        @Test
         @DisplayName("onTaskComplete includes confidence in event")
         void onTaskCompleteIncludesConfidence() throws Exception {
             invokeSayStreaming();

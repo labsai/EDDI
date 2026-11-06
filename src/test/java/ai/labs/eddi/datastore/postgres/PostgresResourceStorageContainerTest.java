@@ -398,6 +398,18 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
             assertEquals(Set.of(hit), find("name", new IResourceFilter.Contains("% off 'today' \\o/ a_b")));
         }
 
+        @Test
+        @DisplayName("ContainsIgnoreCase: literal, anywhere, any case; wildcards and regex characters are text")
+        void containsIgnoreCaseIsALiteralSubstringOfAnyCase() throws Exception {
+            String lower = store(Map.of("title", "trip to rome (a+b) 50% a_b"));
+            String upper = store(Map.of("title", "TRIP TO ROME (A+B) 50% A_B!"));
+            store(Map.of("title", "trip to rome (aab) 50X axb")); // "+", "%" and "_" are not special
+            store(Map.of("title", "trip to rome (a+b) 50XYZ aXb")); // "%" and "_" as LIKE wildcards would match this
+            store(Map.of("name", "trip to rome (a+b) 50% a_b")); // the field is absent
+
+            assertEquals(Set.of(lower, upper), find("title", new IResourceFilter.ContainsIgnoreCase("Rome (A+b) 50% a_B")));
+        }
+
         private Set<String> find(String field, Object value) {
             Set<String> ids = new HashSet<>();
             storage.findResources(new IResourceFilter.QueryFilters[]{

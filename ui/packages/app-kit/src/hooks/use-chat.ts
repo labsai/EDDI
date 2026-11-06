@@ -49,6 +49,7 @@ import {
   UNCONSUMED_STREAM_ERROR_CODES,
   extractOutputImages,
   extractOutputTexts,
+  lastStepIndex,
   type ApprovalStatus,
   type AttachmentResult,
   type ConversationSnapshot,
@@ -67,6 +68,8 @@ import {
   type TurnFailure,
   type TurnFailureContext,
 } from "@eddi/conversation";
+import { ToolActivityLog } from "@eddi/conversation/tool-activity";
+import { toolResultListener } from "@eddi/core/tool-events";
 import { useDebugStore, type ToolTraceEntry } from "./use-debug-events";
 import { getErrorMessage } from "../lib/api-client";
 import { toast } from "sonner";
@@ -868,6 +871,20 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
 /** A translator for code that runs before any component rendered (tests). */
 const fallbackT = ((key: string, fallback?: unknown) => (typeof fallback === "string" ? fallback : key)) as unknown as TFunction;
 
+/**
+ * The tool calls of the chat's turns, from the stream's `tool_result` events
+ * (B6): the tool cards under a turn (T1.9) and the notice before Edit or
+ * Regenerate of a turn that ran tools (T1.6). Live only — see
+ * `ToolActivityLog`. Each call is filed under the conversation and step on
+ * screen when it arrives; the turn's question is already in the transcript.
+ */
+export const chatToolActivity = new ToolActivityLog();
+
+const recordChatToolResult = toolResultListener((result) => {
+  const { conversationId, messages } = useChatStore.getState();
+  chatToolActivity.record(conversationId, lastStepIndex(messages), result);
+});
+
 /** The Manager's conversation controller: one for the chat store. */
 export const chatConversation = new AgentConversation({
   transport: chatTransport,
@@ -889,7 +906,10 @@ export const chatConversation = new AgentConversation({
     const texts = extractOutputTexts(output.output);
     return texts.length > 0 ? texts : extractOutputParts(output as ConversationOutput);
   },
-  onStreamEvent: (event) => recordDebugEvent(event),
+  onStreamEvent: (event) => {
+    recordDebugEvent(event);
+    recordChatToolResult(event);
+  },
   // Turn boundary at turn START, not only on the happy endings: a previous
   // turn that ended without a done/error frame leaves its events in the debug
   // store, and the live status line renders straight off that array.
@@ -899,6 +919,10 @@ export const chatConversation = new AgentConversation({
   onTurnStarting: () => {
     useDebugStore.getState().finalizeTurn();
     useChatStore.getState().setPaused(false, null);
+    // The question is on screen: its step starts with no tool calls, and the
+    // steps after it (an undone timeline) are gone for good.
+    const { conversationId, messages } = useChatStore.getState();
+    chatToolActivity.beginTurn(conversationId, lastStepIndex(messages));
   },
   onTurnEnd: () => useDebugStore.getState().finalizeTurn(),
   onTurnSnapshot: (snapshot) => {
@@ -1623,6 +1647,9 @@ export function useRerunConversation() {
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+      // The rerun ran without a stream: the tools it called were never
+      // reported, so what the first run's calls said no longer applies.
+      chatToolActivity.clearStep(conversationId, lastStepIndex(messages));
       return snapshot;
     },
   });

@@ -575,7 +575,22 @@
       "title": "前往对话或智能体",
       "search": "搜索对话和智能体",
       "results": "结果",
-      "noResults": "没有匹配项"
+      "noResults": "没有匹配项",
+      "searchFailed": "搜索较早的对话失败。"
+    },
+    "search": {
+      "label": "搜索我的对话",
+      "placeholder": "搜索对话标题",
+      "hint": "仅搜索标题，不搜索对话内容。",
+      "loading": "正在搜索…",
+      "error": "无法搜索您的对话。重试",
+      "empty": "没有匹配的对话标题。",
+      "found": "找到的对话：{{n}}",
+      "failed": "搜索失败。",
+      "results": "搜索结果",
+      "clear": "清除搜索",
+      "more": "更多结果",
+      "moreFailed": "无法加载更多。重试"
     }
   },
   "analyticsPage": {

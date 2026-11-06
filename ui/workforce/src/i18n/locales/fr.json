@@ -577,7 +577,22 @@
       "title": "Aller à une conversation ou un agent",
       "search": "Rechercher des conversations et des agents",
       "results": "Résultats",
-      "noResults": "Aucun résultat"
+      "noResults": "Aucun résultat",
+      "searchFailed": "La recherche dans vos anciennes conversations a échoué."
+    },
+    "search": {
+      "label": "Rechercher dans mes conversations",
+      "placeholder": "Rechercher dans les titres",
+      "hint": "Recherche uniquement dans les titres, pas dans les messages.",
+      "loading": "Recherche…",
+      "error": "Impossible de rechercher vos conversations. Réessayer",
+      "empty": "Aucun titre de conversation ne correspond.",
+      "found": "Conversations trouvées : {{n}}",
+      "failed": "La recherche a échoué.",
+      "results": "Résultats de recherche",
+      "clear": "Effacer la recherche",
+      "more": "Plus de résultats",
+      "moreFailed": "Impossible d’en charger plus. Réessayer"
     }
   },
   "analyticsPage": {

@@ -1,11 +1,13 @@
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, MessageSquare, MessageSquarePlus, Search, Users } from "lucide-react";
+import { Bot, Loader2, MessageSquare, MessageSquarePlus, Search, Users } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useDeployedAgents } from "@eddi/app-kit/hooks/use-chat";
 import { useWorkforceSessions } from "@/hooks/use-workforce-sessions";
+import { useConversationSearch, useSearchedSessions } from "@/hooks/use-conversation-search";
+import { MAX_CONVERSATION_SEARCH_LENGTH } from "@eddi/app-kit/lib/api/conversations";
 import { sessionLabel } from "@/lib/workforce-sessions";
 import { NEW_CHAT_STATE } from "@/lib/workforce-keyboard";
 
@@ -20,11 +22,17 @@ interface SwitcherItem {
 
 /** Rows shown without a query, and at most with one. */
 const MAX_ITEMS = 30;
+/** Rows the title search (T1.3) adds below the local matches. */
+const MAX_FOUND_ITEMS = 10;
 
 /**
  * The ⌘K quick switcher (T1.10): one search box over the sidebar's
  * conversations and the agents the person may use, plus "New chat". Arrows
  * move, Enter opens, Esc closes and puts focus back where it was.
+ *
+ * With text in it, it also searches the titles of all the person's
+ * conversations on the server (T1.3) — the sidebar holds only the latest — and
+ * lists the ones it has not shown already, below the rest.
  */
 export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boolean) => void }) {
   const { t, i18n } = useTranslation();
@@ -34,6 +42,8 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
   const [active, setActive] = useState(0);
   const { sessions } = useWorkforceSessions();
   const { data: agents } = useDeployedAgents();
+  const search = useConversationSearch(query);
+  const found = useSearchedSessions(search);
 
   const items = useMemo<SwitcherItem[]>(() => {
     const formatDate = (ms: number) => new Date(ms).toLocaleDateString(i18n.language);
@@ -62,8 +72,21 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
     const matches = q
       ? all.filter((item) => `${item.label} ${item.detail ?? ""}`.toLocaleLowerCase().includes(q))
       : all;
-    return matches.slice(0, MAX_ITEMS);
-  }, [sessions, agents, query, t, i18n.language, navigate, onClose]);
+    const shown = matches.slice(0, MAX_ITEMS);
+    if (!q) return shown;
+    const ids = new Set(shown.map((item) => item.id));
+    const byTitle = found
+      .filter((s) => !ids.has(`chat:${s.id}`))
+      .slice(0, MAX_FOUND_ITEMS)
+      .map<SwitcherItem>((s) => ({
+        id: `chat:${s.id}`,
+        kind: "chat",
+        label: sessionLabel(s, formatDate),
+        detail: s.ownerName || s.ownerId,
+        go: open(s.href),
+      }));
+    return [...shown, ...byTitle];
+  }, [sessions, agents, found, query, t, i18n.language, navigate, onClose]);
 
   const current = Math.min(active, Math.max(items.length - 1, 0));
 
@@ -115,6 +138,7 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
               aria-label={t("Workforce.switcher.search", "Search conversations and agents")}
               placeholder={t("Workforce.switcher.search", "Search conversations and agents")}
               value={query}
+              maxLength={MAX_CONVERSATION_SEARCH_LENGTH}
               onChange={(e) => {
                 setQuery(e.target.value);
                 setActive(0);
@@ -129,7 +153,9 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
           <ul id={listId} role="listbox" aria-label={t("Workforce.switcher.results", "Results")} className="max-h-[50vh] overflow-y-auto p-1">
             {items.length === 0 ? (
               <li className="px-3 py-6 text-center text-sm text-muted-foreground" data-testid="quick-switcher-empty">
-                {t("Workforce.switcher.noResults", "Nothing matches")}
+                {search.status === "loading"
+                  ? t("Workforce.search.loading", "Searching…")
+                  : t("Workforce.switcher.noResults", "Nothing matches")}
               </li>
             ) : (
               items.map((item, i) => {
@@ -162,6 +188,20 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
               })
             )}
           </ul>
+          {query.trim() && (
+            <div className="flex items-center gap-1.5 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+              {search.status === "loading" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />}
+              <span className="min-w-0 flex-1" data-testid="quick-switcher-search-hint">
+                {t("Workforce.search.hint", "Searches titles only, not what was said.")}
+              </span>
+              {/* Polite: how the server search went, not every keystroke. */}
+              <span role="status" aria-live="polite" data-testid="quick-switcher-search-status">
+                {search.status === "error"
+                  ? t("Workforce.switcher.searchFailed", "Searching your older conversations failed.")
+                  : ""}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </>
