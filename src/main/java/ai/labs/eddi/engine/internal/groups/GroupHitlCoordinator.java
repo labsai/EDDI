@@ -815,6 +815,9 @@ public class GroupHitlCoordinator {
         gc.setHitlApprovalTimeout(null);
         gc.setHitlApprovalContext(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
+        // A new leg starts here: startup crash recovery treats a running discussion
+        // last written before the process started as a dead leg.
+        gc.setLastModified(Instant.now());
 
         // Zero-match outcomes are distinguished by the store: a concurrent DELETE
         // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
