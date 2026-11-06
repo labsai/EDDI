@@ -4,12 +4,7 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
-import java.util.logging.Logger;
-import java.util.logging.LogRecord;
-import java.util.logging.Level;
-import java.util.logging.Handler;
 import java.util.List;
-import java.util.ArrayList;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.internal.RestAgentEngine;
@@ -102,7 +97,10 @@ class AdminActionAuditFilterTest {
         when(identityInstance.isResolvable()).thenReturn(true);
         when(identityInstance.get()).thenReturn(identity);
 
-        filter = new AdminActionAuditFilter(ledgerInstance, identityInstance, true);
+        // A real recorder over a mocked ledger: what the filter decides to record is
+        // read off the entries the ledger receives. The entry itself is
+        // AdminActionRecorderTest's subject.
+        filter = new AdminActionAuditFilter(new AdminActionRecorder(ledgerInstance, identityInstance, true));
         resourceInfo = mock(ResourceInfo.class);
         Method method = AdminActionAuditFilterTest.class.getMethod("deleteUserData");
         when(resourceInfo.getResourceMethod()).thenReturn(method);
@@ -154,7 +152,7 @@ class AdminActionAuditFilterTest {
     }
 
     @Test
-    @DisplayName("the id of the person an action is about is pseudonymised — no raw id enters the immutable ledger")
+    @DisplayName("the request's path parameters reach the recorder, so the person an action is about is pseudonymised")
     void pseudonymisesTheSubjectOfTheAction() {
         when(request.getMethod()).thenReturn("DELETE");
         when(uriInfo.getPath()).thenReturn("/admin/gdpr/alice@example.com");
@@ -168,23 +166,6 @@ class AdminActionAuditFilterTest {
         String path = (String) recorded().input().get("path");
         assertFalse(path.contains("alice"), path);
         assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
-    }
-
-    @Test
-    @DisplayName("a user id that is also a path word replaces that segment only, not the rest of the path")
-    void pseudonymisesWholeSegmentsOnly() {
-        when(request.getMethod()).thenReturn("DELETE");
-        when(uriInfo.getPath()).thenReturn("/admin/gdpr/admin");
-        var parameters = new MultivaluedHashMap<String, String>();
-        parameters.add("userId", "admin");
-        when(uriInfo.getPathParameters()).thenReturn(parameters);
-        when(response.getStatus()).thenReturn(200);
-
-        filter.filter(request, response);
-
-        String path = (String) recorded().input().get("path");
-        assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
-        assertEquals(3, path.split("/").length - 1, path);
     }
 
     @ParameterizedTest
@@ -281,29 +262,18 @@ class AdminActionAuditFilterTest {
     }
 
     @Test
-    @DisplayName("an unauthenticated caller is recorded as anonymous")
-    void anonymousCaller() {
-        when(identity.isAnonymous()).thenReturn(true);
-        when(request.getMethod()).thenReturn("POST");
-        when(uriInfo.getPath()).thenReturn("/administration/production/deploy/agent1");
-        when(response.getStatus()).thenReturn(202);
-
-        filter.filter(request, response);
-
-        assertEquals("anonymous", recorded().userId());
-    }
-
-    @Test
-    @DisplayName("switched off by eddi.audit.admin-actions.enabled=false")
+    @DisplayName("switched off by eddi.audit.admin-actions.enabled=false, before any per-request work")
     @SuppressWarnings("unchecked")
     void canBeSwitchedOff() {
-        var off = new AdminActionAuditFilter(mock(Instance.class), mock(Instance.class), false);
+        var off = new AdminActionAuditFilter(new AdminActionRecorder(mock(Instance.class), mock(Instance.class), false));
+        off.resourceInfo = resourceInfo;
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn("/agentstore/agents");
 
         off.filter(request, response);
 
         verify(ledger, never()).submit(any());
+        verify(resourceInfo, never()).getResourceMethod();
     }
 
     @Test
@@ -327,51 +297,18 @@ class AdminActionAuditFilterTest {
         assertFalse(AdminActionAuditFilter.isAdministrative("/Agents/x"));
         assertFalse(AdminActionAuditFilter.isAdministrative("/"));
         assertFalse(AdminActionAuditFilter.isAdministrative(null));
-        assertTrue(AdminActionAuditFilter.namesAPerson("userId"));
-        assertTrue(AdminActionAuditFilter.namesAPerson("principalId"));
-        assertFalse(AdminActionAuditFilter.namesAPerson("agentId"));
     }
 
     @Test
     @DisplayName("the failure WARN cannot be used to forge log records (CWE-117)")
     void failureLogLineIsSanitized() {
-        doThrow(new IllegalStateException("ledger down\r\nFORGED")).when(ledger).submit(any());
+        // A failure on the filter's side of the hand-over: the recorder never throws.
+        when(uriInfo.getPathParameters()).thenThrow(new IllegalStateException("lookup failed\r\nFORGED"));
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn("/agentstore/agents\r\n2026-01-01 INFO forged admin login");
         when(response.getStatus()).thenReturn(201);
 
-        List<String> captured = new ArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                captured.add(String.valueOf(record.getMessage()));
-                if (record.getParameters() != null) {
-                    for (Object parameter : record.getParameters()) {
-                        captured.add(String.valueOf(parameter));
-                    }
-                }
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        // logging.properties turns ai.labs.eddi OFF for unit tests; open it, or this
-        // passes vacuously.
-        Logger julLogger = Logger.getLogger(AdminActionAuditFilter.class.getName());
-        Level previous = julLogger.getLevel();
-        julLogger.setLevel(Level.ALL);
-        julLogger.addHandler(handler);
-        try {
-            filter.filter(request, response);
-        } finally {
-            julLogger.removeHandler(handler);
-            julLogger.setLevel(previous);
-        }
+        List<String> captured = AdminActionRecorderTest.logged(AdminActionAuditFilter.class, () -> filter.filter(request, response));
 
         assertTrue(captured.stream().anyMatch(value -> value.contains("Could not record administrative action")),
                 "the line under test did not fire; captured: " + captured);

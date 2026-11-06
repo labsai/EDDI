@@ -5,15 +5,18 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.audit.rest.AdminActionRecorder;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.GdprDeletionResult;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.List;
@@ -35,18 +38,121 @@ class McpGdprToolsTest {
 
     private GdprComplianceService gdprService;
     private IJsonSerialization jsonSerialization;
+    private SecurityIdentity identity;
+    private AdminActionRecorder recorder;
     private McpGdprTools tools;
 
     @BeforeEach
     void setUp() throws Exception {
         gdprService = mock(GdprComplianceService.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        var identity = mock(SecurityIdentity.class);
+        identity = mock(SecurityIdentity.class);
+        recorder = mock(AdminActionRecorder.class);
         lenient().when(identity.isAnonymous()).thenReturn(true);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
 
         tools = new McpGdprTools(gdprService, jsonSerialization, identity,
-                false);
+                recorder, false);
+    }
+
+    // ==================== administrative-action record ====================
+    // These two tools reach the GDPR service directly, so the REST filter that
+    // records who acted never sees them: without the recorder the ledger said that
+    // a user was erased or exported, but not who asked. AdminActionRecorderTest
+    // pins the entry itself (actor, pseudonymised subject).
+
+    @Test
+    void deleteUserData_isRecordedWithItsOutcome() {
+        when(gdprService.deleteUserData("user-1")).thenReturn(new GdprDeletionResult("user-1", 5, 3, 2, 10,
+                15, Instant.now()));
+
+        tools.deleteUserData("user-1", "CONFIRM");
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 200);
+    }
+
+    @Test
+    void deleteUserData_incompleteErasureIsRecordedAs207() {
+        when(gdprService.deleteUserData("user-1")).thenReturn(new GdprDeletionResult("user-1", 5, 0, 2, 10, 15,
+                0, 0, 0, 0, 0, 0, List.of("conversations"), Instant.EPOCH));
+
+        tools.deleteUserData("user-1", "CONFIRM");
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 207);
+    }
+
+    @Test
+    void deleteUserData_failedErasureIsRecordedAs500() {
+        when(gdprService.deleteUserData("user-1")).thenThrow(new RuntimeException("DB down"));
+
+        tools.deleteUserData("user-1", "CONFIRM");
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 500);
+    }
+
+    /** The record carries what the caller was told, as the REST record does. */
+    @Test
+    void deleteUserData_unanswerableCallIsRecordedAs500() throws Exception {
+        when(gdprService.deleteUserData("user-1")).thenReturn(new GdprDeletionResult("user-1", 5, 3, 2, 10,
+                15, Instant.now()));
+        when(jsonSerialization.serialize(any())).thenThrow(new IOException("cannot serialize"));
+
+        tools.deleteUserData("user-1", "CONFIRM");
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 500);
+    }
+
+    @Test
+    void deleteUserData_unconfirmedCallIsRecordedAs400() {
+        tools.deleteUserData("user-1", "yes");
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 400);
+        verifyNoInteractions(gdprService);
+    }
+
+    /**
+     * The attempt that matters most: someone without the role tried to erase a
+     * user.
+     */
+    @Test
+    void deleteUserData_refusedCallerIsRecordedAs403AndStillRefused() {
+        var guarded = new McpGdprTools(gdprService, jsonSerialization, identity, recorder, true);
+
+        assertThrows(ForbiddenException.class, () -> guarded.deleteUserData("user-1", "CONFIRM"));
+
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 403);
+        verifyNoInteractions(gdprService);
+    }
+
+    @Test
+    void exportUserData_isRecordedWithItsOutcome() {
+        var export = new UserDataExport("user-1", Instant.now(), List.of(), List.of(), List.of(), List.of());
+        when(gdprService.exportUserData("user-1")).thenReturn(export);
+
+        tools.exportUserData("user-1");
+
+        // 207 while the bundle is short, as REST answers; the exporter always omits
+        // some categories today, which complete() reports.
+        assertFalse(export.complete());
+        verify(recorder).recordToolCall("export_user_data", "user-1", "McpGdprTools#exportUserData", 207);
+    }
+
+    @Test
+    void exportUserData_failedExportIsRecordedAs500() {
+        when(gdprService.exportUserData("user-1")).thenThrow(new RuntimeException("Timeout"));
+
+        tools.exportUserData("user-1");
+
+        verify(recorder).recordToolCall("export_user_data", "user-1", "McpGdprTools#exportUserData", 500);
+    }
+
+    @Test
+    void exportUserData_refusedCallerIsRecordedAs403AndStillRefused() {
+        var guarded = new McpGdprTools(gdprService, jsonSerialization, identity, recorder, true);
+
+        assertThrows(ForbiddenException.class, () -> guarded.exportUserData("user-1"));
+
+        verify(recorder).recordToolCall("export_user_data", "user-1", "McpGdprTools#exportUserData", 403);
     }
 
     // ==================== delete_user_data ====================
