@@ -5,6 +5,7 @@ import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { userEventHandlers } from "./user-event-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
 
@@ -13,6 +14,7 @@ export { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS };
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
 // discovers every handler array this module exports, checks it too.
 export { brandingHandlers, resetBrandingMockState } from "./branding-handlers";
+export { pushMockUserEvent, closeMockUserEventStreams } from "./user-event-handlers";
 
 const AGENTS_MOCK = [
   {
@@ -964,6 +966,8 @@ export const handlers = [
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // The per-user event stream: GET /me/events (ready, then whatever pushMockUserEvent sends).
+  ...userEventHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
