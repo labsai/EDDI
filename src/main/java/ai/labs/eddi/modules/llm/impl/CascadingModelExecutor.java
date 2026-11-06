@@ -283,7 +283,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     /**
@@ -330,7 +330,7 @@ class CascadingModelExecutor {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
                 turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
-                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, null);
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     /**
@@ -364,25 +364,34 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
-                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, stepMessages);
+                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(),
+                stepMessages);
     }
 
     /**
      * As above, with both the spend check and a per-step prompt: the spend check is
      * asked before every escalation and re-ask, and each step's attachments are
-     * decided for that step's own endpoint.
+     * decided for that step's own endpoint. This is the overload {@code LlmTask}
+     * calls, and the only one told whether the task has tools.
+     *
+     * @param taskHasTools
+     *            whether the task has tools of its own this turn, as
+     *            {@link IAgentOrchestrator#offersTools} answers it — including the
+     *            tools of the workflow's httpcalls and mcpcalls, which
+     *            {@link LlmConfiguration.Task#isAgentMode()} cannot see. The other
+     *            overloads pass {@code isAgentMode()}
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                           LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                           Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                           ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                           FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
-                          FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
+                          FormatRetryRunner.ReaskSpend spend, boolean taskHasTools, StepMessages stepMessages)
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
                 turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
-                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, stepMessages);
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, taskHasTools, stepMessages);
     }
 
     /**
@@ -396,7 +405,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, task.isAgentMode(), null);
     }
 
     private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
@@ -404,7 +413,7 @@ class CascadingModelExecutor {
                                     Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                                     ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                                     FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
-                                    FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
+                                    FormatRetryRunner.ReaskSpend spend, boolean taskHasTools, StepMessages stepMessages)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -421,11 +430,10 @@ class CascadingModelExecutor {
         }
 
         // answerMode "tool" answers through the reply tool, so every step needs the
-        // tool
-        // loop even when the task has no other tool (isAgentMode() is false then).
+        // tool loop even when the task has no other tool (taskHasTools is false then).
         // enableInAgentMode does not gate it: a task with other tools and
         // enableInAgentMode=false never reaches the cascade (LlmTask skips it).
-        boolean useAgentMode = (cascade.isEnableInAgentMode() && task.isAgentMode()) || AnswerTool.enabled(task);
+        boolean useAgentMode = (cascade.isEnableInAgentMode() && taskHasTools) || AnswerTool.enabled(task);
         String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
         HeuristicConfig heuristicConfig = cascade.getHeuristic();
 

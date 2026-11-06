@@ -20,10 +20,13 @@ import java.util.List;
  * The tool-calling agent loop, as a contract (R2 step 6): run a turn's tools,
  * or resume one that paused for human approval.
  * <p>
- * Two methods, because there are exactly two ways into the loop. Everything
- * else {@code AgentOrchestrator} exposes — {@code buildToolSetup}, the assorted
- * gate/budget/reflection helpers — is either internal or reached by tests, and
- * putting it here would turn a seam into a second copy of the class's surface.
+ * Two abstract methods, because there are exactly two ways into the loop; the
+ * defaults around them are what a caller asks of the loop without entering it
+ * (whether this turn has tools, a format re-ask, the tool cost so far).
+ * Everything else {@code AgentOrchestrator} exposes — {@code buildToolSetup},
+ * the assorted gate/budget/reflection helpers — is either internal or reached
+ * by tests, and putting it here would turn a seam into a second copy of the
+ * class's surface.
  * <p>
  * Lives in {@code ai.labs.eddi.modules.llm.impl} rather than an {@code api}
  * package on purpose: {@link AgentOrchestrator.ExecutionResult} is
@@ -80,6 +83,25 @@ interface IAgentOrchestrator {
             throws LifecycleException {
         return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex,
                 transcriptMaxBytes, jsonPolicy);
+    }
+
+    /**
+     * Whether {@link #executeIfToolsEnabled} would run the tool loop for this task
+     * this turn on a tool of its own — anything other than the reply tool of
+     * {@code answerMode: "tool"}. It is answered from the same tool assembly the
+     * loop runs on, so the tools a workflow's {@code httpcalls} and
+     * {@code mcpcalls} contribute, attachments and lazy placeholders count exactly
+     * as they do there; {@link LlmConfiguration.Task#isAgentMode()} sees only the
+     * task's own {@code tools}, {@code enableBuiltInTools} and {@code a2aAgents}.
+     * <p>
+     * A caller that has to know before the model phase starts — the model cascade's
+     * tool decision, {@code enableInAgentMode}, the cost reservation's round count
+     * — asks this once per turn. The default answers {@code false}: an
+     * implementation that cannot tell offers no tools beyond what the task's own
+     * configuration says.
+     */
+    default boolean offersTools(LlmConfiguration.Task task, IConversationMemory memory) {
+        return false;
     }
 
     /**
