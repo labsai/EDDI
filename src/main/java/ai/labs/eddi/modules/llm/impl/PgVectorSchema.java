@@ -23,6 +23,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * The table layout of a pgvector knowledge base, and the DDL EDDI runs for it.
@@ -248,19 +249,73 @@ final class PgVectorSchema {
      * full, qualified name, so two tables never share an index name.
      */
     static String indexName(String table, String suffix) {
-        String base = unqualified(table).toLowerCase(Locale.ROOT);
+        String trimmed = table.trim();
+        String base = unqualified(trimmed).toLowerCase(Locale.ROOT);
         if (base.length() + suffix.length() <= MAX_IDENTIFIER_LENGTH) {
             return base + suffix;
         }
-        String digest = shortDigest(table.toLowerCase(Locale.ROOT));
+        String digest = shortDigest(trimmed.toLowerCase(Locale.ROOT));
         int keep = MAX_IDENTIFIER_LENGTH - suffix.length() - digest.length() - 1;
         return base.substring(0, keep) + "_" + digest + suffix;
+    }
+
+    /**
+     * One part of a table name: a letter or underscore, then letters, digits,
+     * underscores or {@code $} — at most 63 characters. The same rule
+     * {@code KnowledgeBaseStorage.isPlainPgIdentifier} applies when the name is
+     * resolved; it is checked again here because this is where the name meets SQL.
+     */
+    private static final Pattern IDENTIFIER_PART = Pattern.compile("[A-Za-z_][A-Za-z0-9_$]{0,62}");
+
+    /**
+     * {@code table} — a plain or schema-qualified name — as a quoted SQL
+     * identifier. Each part is checked against {@link #IDENTIFIER_PART}, so it
+     * holds no quote, whitespace, comment or separator, and is folded to lower case
+     * before it is quoted: {@code "kb"} is the table the unquoted {@code KB} in
+     * langchain4j's own SQL names, so the indexes land on the table langchain4j
+     * created.
+     *
+     * @throws IllegalArgumentException
+     *             for any other name; the message does not echo it
+     */
+    static String quotedTable(String table) {
+        if (table == null) {
+            throw new IllegalArgumentException("pgvector table name is missing");
+        }
+        String[] parts = table.trim().split("\\.", -1);
+        if (parts.length > 2) {
+            throw new IllegalArgumentException("pgvector table name must be a plain table name, optionally qualified with a schema");
+        }
+        StringBuilder quoted = new StringBuilder();
+        for (String part : parts) {
+            if (!quoted.isEmpty()) {
+                quoted.append('.');
+            }
+            quoted.append(quotedIdentifier(part));
+        }
+        return quoted.toString();
+    }
+
+    /** One identifier part, checked and quoted — see {@link #quotedTable}. */
+    private static String quotedIdentifier(String part) {
+        if (!IDENTIFIER_PART.matcher(part).matches()) {
+            throw new IllegalArgumentException("pgvector table name must be a plain table name, optionally qualified with a schema");
+        }
+        return '"' + part.toLowerCase(Locale.ROOT) + '"';
+    }
+
+    private static int requireRange(int value, int min, int max, String name) {
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(name + " must be between " + min + " and " + max);
+        }
+        return value;
     }
 
     /** The HNSW index — cosine, because langchain4j orders by {@code <=>}. */
     static String hnswIndexSql(String table, int m, int efConstruction) {
         return String.format("CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (embedding vector_cosine_ops) WITH (m = %d, ef_construction = %d)",
-                indexName(table, SUFFIX_HNSW), table, m, efConstruction);
+                quotedIdentifier(indexName(table, SUFFIX_HNSW)), quotedTable(table), requireRange(m, 2, 100, PARAM_HNSW_M),
+                requireRange(efConstruction, 4, 1000, PARAM_HNSW_EF_CONSTRUCTION));
     }
 
     /**
@@ -270,11 +325,12 @@ final class PgVectorSchema {
      * {@code sourceKey} alone uses the second one's leading column.
      */
     static List<String> metadataIndexSql(String table) {
+        String quoted = quotedTable(table);
         return List.of(
                 String.format("CREATE INDEX IF NOT EXISTS %s ON %s ((metadata->>'%s'), (metadata->>'%s'))",
-                        indexName(table, SUFFIX_DOC_SOURCE), table, METADATA_DOCUMENT_ID, METADATA_SOURCE_KEY),
+                        quotedIdentifier(indexName(table, SUFFIX_DOC_SOURCE)), quoted, METADATA_DOCUMENT_ID, METADATA_SOURCE_KEY),
                 String.format("CREATE INDEX IF NOT EXISTS %s ON %s ((metadata->>'%s'), (metadata->>'%s'))",
-                        indexName(table, SUFFIX_SOURCE_RUN), table, METADATA_SOURCE_KEY, METADATA_RUN_ID));
+                        quotedIdentifier(indexName(table, SUFFIX_SOURCE_RUN)), quoted, METADATA_SOURCE_KEY, METADATA_RUN_ID));
     }
 
     /**
@@ -284,7 +340,7 @@ final class PgVectorSchema {
      * so nothing a user wrote reaches the SQL.
      */
     static String efSearchSql(int efSearch) {
-        return "SET hnsw.ef_search = " + efSearch;
+        return "SET hnsw.ef_search = " + requireRange(efSearch, 1, 1000, PARAM_HNSW_EF_SEARCH);
     }
 
     /**

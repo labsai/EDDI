@@ -16,6 +16,8 @@ import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.postgresql.PGConnection;
 
 import java.sql.Connection;
@@ -151,7 +153,7 @@ class PgVectorSchemaTest {
         @Test
         @DisplayName("HNSW on the embedding with cosine ops and the configured build parameters")
         void hnsw() {
-            assertEquals("CREATE INDEX IF NOT EXISTS eddi_kbid_abc_hnsw_idx ON eddi_kbid_abc USING hnsw (embedding vector_cosine_ops) "
+            assertEquals("CREATE INDEX IF NOT EXISTS \"eddi_kbid_abc_hnsw_idx\" ON \"eddi_kbid_abc\" USING hnsw (embedding vector_cosine_ops) "
                     + "WITH (m = 24, ef_construction = 200)", PgVectorSchema.hnswIndexSql("eddi_kbid_abc", 24, 200));
         }
 
@@ -159,9 +161,51 @@ class PgVectorSchemaTest {
         @DisplayName("expression indexes on exactly what langchain4j's filter mapper emits")
         void metadataIndexes() {
             assertEquals(List.of(
-                    "CREATE INDEX IF NOT EXISTS t_doc_src_idx ON t ((metadata->>'documentId'), (metadata->>'sourceKey'))",
-                    "CREATE INDEX IF NOT EXISTS t_src_run_idx ON t ((metadata->>'sourceKey'), (metadata->>'runId'))"),
+                    "CREATE INDEX IF NOT EXISTS \"t_doc_src_idx\" ON \"t\" ((metadata->>'documentId'), (metadata->>'sourceKey'))",
+                    "CREATE INDEX IF NOT EXISTS \"t_src_run_idx\" ON \"t\" ((metadata->>'sourceKey'), (metadata->>'runId'))"),
                     PgVectorSchema.metadataIndexSql("t"));
+        }
+
+        @Test
+        @DisplayName("table names are quoted lower-case, the way PostgreSQL folds the unquoted name langchain4j uses")
+        void quotedTable() {
+            assertEquals("\"kb\"", PgVectorSchema.quotedTable("KB"));
+            assertEquals("\"rag\".\"kb_1$x\"", PgVectorSchema.quotedTable(" Rag.KB_1$x "));
+            assertEquals("\"" + "a".repeat(63) + "\"", PgVectorSchema.quotedTable("a".repeat(63)));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.quotedTable("a".repeat(64)),
+                    "PostgreSQL would truncate a 64-character name");
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.quotedTable(null));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "t;drop table x", "t\"x", "t x", "t--", "a.b.c", ".t", "t.", "1t", "t/*", "t'x"})
+        @DisplayName("any table name that is not a plain identifier never reaches the DDL")
+        void unsafeTableRefused(String table) {
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.metadataIndexSql(table));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.hnswIndexSql(table, 16, 64));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.quotedTable(table));
+        }
+
+        @Test
+        @DisplayName("an unsafe table name is refused before any statement runs")
+        void unsafeTableRunsNothing() throws SQLException {
+            Connection connection = mock(Connection.class);
+            Statement statement = mock(Statement.class);
+            when(connection.createStatement()).thenReturn(statement);
+            assertThrows(IllegalArgumentException.class,
+                    () -> PgVectorSchema.createIndexes(connection, "t; drop table x", PgVectorSchema.settings(Map.of()), 1536));
+            verify(statement, never()).executeUpdate(anyString());
+        }
+
+        @Test
+        @DisplayName("numeric DDL parameters are range-checked where they meet SQL")
+        void numbersOutOfRange() {
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.hnswIndexSql("t", 1, 64));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.hnswIndexSql("t", 101, 1000));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.hnswIndexSql("t", 16, 3));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.hnswIndexSql("t", 16, 1001));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.efSearchSql(0));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.efSearchSql(1001));
         }
 
         @Test
@@ -176,7 +220,7 @@ class PgVectorSchemaTest {
         @DisplayName("a schema-qualified table gets an unqualified, lower-case index name and keeps its qualified name in ON")
         void qualified() {
             assertEquals("kb_hnsw_idx", PgVectorSchema.indexName("Rag.KB", PgVectorSchema.SUFFIX_HNSW));
-            assertTrue(PgVectorSchema.hnswIndexSql("rag.kb", 16, 64).contains("kb_hnsw_idx ON rag.kb USING"));
+            assertTrue(PgVectorSchema.hnswIndexSql("rag.kb", 16, 64).contains("\"kb_hnsw_idx\" ON \"rag\".\"kb\" USING"));
         }
 
         @Test

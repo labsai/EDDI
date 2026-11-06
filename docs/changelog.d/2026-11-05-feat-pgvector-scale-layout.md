@@ -60,6 +60,12 @@ million chunks retrieval took seconds and each document replacement scanned the 
   bases, so the value is set on every borrow — one extra round trip per operation.
 - HNSW is skipped with a warning above 2000 dimensions (pgvector's limit) and when the server's
   pgvector is older than 0.5.0; the store then works with exact scans, as before.
+- **The DDL checks its own inputs (CodeQL `java/sql-injection`).** `PgVectorSchema` no longer relies on
+  `EmbeddingStoreFactory.physicalName` alone: `quotedTable` re-checks each part of the (optionally
+  schema-qualified) table name against `[A-Za-z_][A-Za-z0-9_$]{0,62}` and emits it as a quoted,
+  lower-cased identifier — the same table PostgreSQL resolves langchain4j's unquoted name to — and the
+  index names are quoted too. `m`, `ef_construction` and `ef_search` are range-checked ints where they
+  meet SQL; the table lookup in `inspect` was already a bind parameter.
 
 ### Follow-ups
 
