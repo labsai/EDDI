@@ -56,8 +56,12 @@ export const EXTENSION_TYPE_INFO: Record<
   "eddi://ai.labs.behavior": { label: "Behavior", labelKey: "extensionTypes.behavior", icon: ICONS.rules, order: 2, color: "text-pink-400" },
   "eddi://ai.labs.rules": { label: "Rules", labelKey: "extensionTypes.rules", icon: ICONS.rules, order: 3, color: "text-blue-400" },
   "eddi://ai.labs.property": { label: "Property Setter", labelKey: "extensionTypes.property", icon: ICONS.propertysetter, order: 4, color: "text-teal-400" },
-  "eddi://ai.labs.apicalls": { label: "API Calls", labelKey: "extensionTypes.apicalls", icon: ICONS.apicalls, order: 5, color: "text-orange-400" },
-  "eddi://ai.labs.httpcalls": { label: "API Calls (legacy)", labelKey: "extensionTypes.httpcallsLegacy", icon: ICONS.apicalls, order: 6, color: "text-orange-400" },
+  // One step under two names, neither of them legacy: `ai.labs.httpcalls` is the
+  // task's own id (ApiCallsTask.ID) and the name V6RenameMigration deliberately
+  // keeps; `ai.labs.apicalls` is an alias ApiCallsModule registers for the same
+  // task. Both run, and both are offered to the LLM as tools.
+  "eddi://ai.labs.httpcalls": { label: "API Calls", labelKey: "extensionTypes.apicalls", icon: ICONS.apicalls, order: 5, color: "text-orange-400" },
+  "eddi://ai.labs.apicalls": { label: "API Calls", labelKey: "extensionTypes.apicalls", icon: ICONS.apicalls, order: 6, color: "text-orange-400" },
   "eddi://ai.labs.llm": { label: "LLM", labelKey: "extensionTypes.llm", icon: ICONS.llm, order: 7, color: "text-purple-400" },
   "eddi://ai.labs.output": { label: "Output", labelKey: "extensionTypes.output", icon: ICONS.output, order: 8, color: "text-emerald-400" },
   "eddi://ai.labs.templating": { label: "Templating", labelKey: "extensionTypes.templating", icon: ICONS.templating, order: 9, color: "text-cyan-400" },

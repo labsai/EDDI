@@ -6273,7 +6273,6 @@
     "rules": "กฎ",
     "property": "ตัวกำหนดคุณสมบัติ",
     "apicalls": "การเรียก API",
-    "httpcallsLegacy": "การเรียก API (รูปแบบเดิม)",
     "llm": "LLM",
     "output": "เอาต์พุต",
     "templating": "เทมเพลต",
