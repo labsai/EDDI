@@ -87,12 +87,12 @@ interface IAgentOrchestrator {
 
     /**
      * Whether {@link #executeIfToolsEnabled} would run the tool loop for this task
-     * this turn on a tool of its own — anything other than the reply tool of
-     * {@code answerMode: "tool"}. It is answered from the same tool assembly the
-     * loop runs on, so the tools a workflow's {@code httpcalls} and
-     * {@code mcpcalls} contribute, attachments and lazy placeholders count exactly
-     * as they do there; {@link LlmConfiguration.Task#isAgentMode()} sees only the
-     * task's own {@code tools}, {@code enableBuiltInTools} and {@code a2aAgents}.
+     * this turn on a tool other than the reply tool of {@code answerMode: "tool"}.
+     * It is answered from the same tool assembly the loop runs on, so the tools a
+     * workflow's {@code httpcalls} and {@code mcpcalls} contribute, attachments and
+     * lazy placeholders count exactly as they do there;
+     * {@link LlmConfiguration.Task#isAgentMode()} sees only the task's own
+     * {@code tools}, {@code enableBuiltInTools} and {@code a2aAgents}.
      * <p>
      * A caller that has to know before the model phase starts — the model cascade's
      * tool decision, {@code enableInAgentMode}, the cost reservation's round count

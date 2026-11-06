@@ -15,7 +15,7 @@ one round instead of `1 + maxToolIterations`, and decided whether a spend refusa
 
 - **One answer per turn.** `IAgentOrchestrator.offersTools(task, memory)` (new; `AgentOrchestrator`
   answers from `buildToolSetup`, the assembly the loop itself runs on) says whether the task has a tool
-  other than the `answerMode: "tool"` reply tool. `LlmTask` computes `ownTools` once — the config check
+  other than the `answerMode: "tool"` reply tool. `LlmTask` computes `taskHasTools` once — the config check
   first, the orchestrator only when a cascade is configured or the reservation is on, so a plain chat
   agent pays nothing — and uses it for the cascade's tool decision (new `taskHasTools` argument on the
   `CascadingModelExecutor.execute` overload `LlmTask` calls), for `skipCascade`, for
@@ -49,7 +49,7 @@ now takes the single-model path. A cost reservation for a workflow-tool task, or
   runtime MCP discovery, and would drift. `offersTools` is the loop's own answer.
 - **Asked once, only when it matters.** The answer is computed in `LlmTask` and passed down, not asked
   again inside the cascade; a task with no cascade and no reservation never triggers the extra assembly.
-- **The reply tool does not count** as a tool of the task's own: a cascade already runs the loop for
+- **The reply tool does not count** as a tool of the task: a cascade already runs the loop for
   `answerMode: "tool"` regardless of `enableInAgentMode`, and that rule stays.
 
 ### Tests

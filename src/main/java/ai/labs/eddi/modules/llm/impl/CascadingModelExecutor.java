@@ -375,9 +375,9 @@ class CascadingModelExecutor {
      * calls, and the only one told whether the task has tools.
      *
      * @param taskHasTools
-     *            whether the task has tools of its own this turn, as
-     *            {@link IAgentOrchestrator#offersTools} answers it — including the
-     *            tools of the workflow's httpcalls and mcpcalls, which
+     *            whether the task has a tool this turn other than the reply tool,
+     *            as {@link IAgentOrchestrator#offersTools} answers it — including
+     *            the tools of the workflow's httpcalls and mcpcalls, which
      *            {@link LlmConfiguration.Task#isAgentMode()} cannot see. The other
      *            overloads pass {@code isAgentMode()}
      */
