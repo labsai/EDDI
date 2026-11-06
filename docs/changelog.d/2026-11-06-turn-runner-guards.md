@@ -26,7 +26,10 @@ plus one in the SSE stream.
   `EXECUTION_INTERRUPTED` over the `READY` the next turn had committed (and made that turn's pause commit
   miss); in cluster mode its expired lease put a lease-lost record in the map the next turn drains, so the
   next turn was dead-lettered as lease-lost after it had answered `200`. Once the dispatcher has given up,
-  the outcome now only refreshes the state cache. The comments that said a node runs at most one turn of a
+  the outcome now only refreshes the state cache. The same holds for a persist the completion callback
+  started just before the watchdog gave up and that failed afterwards: a fence or revision-guard refusal is
+  no longer recorded for the next turn to drain (which dead-lettered that turn), and a store failure no
+  longer stamps `ERROR` over the next turn's state. The comments that said a node runs at most one turn of a
   conversation at a time were wrong and are corrected.
 - **A stream whose turn hung past the watchdog (RT-2).** REST has its `408`; a stream had nothing and was
   kept open by the keep-alive for as long as the body hung. Once the turn has written its first event, a
@@ -41,7 +44,8 @@ covered.
 
 **Files:** [`ConversationStepRunner.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java),
 [`RestAgentEngineStreaming.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentEngineStreaming.java),
-[`configuration-reference.md`](../configuration-reference.md); tests in `ConversationServiceQueuedTurnTest`,
+[`configuration-reference.md`](../configuration-reference.md), [`hitl.md`](../hitl.md) (the resume stream's
+`turn_timeout`); tests in `ConversationServiceQueuedTurnTest`,
 `ConversationStepRunnerLeaseTest`, `ConversationStepRunnerAbandonedTurnTest` (new) and
 `RestAgentEngineStreamingKeepAliveTest`.
 

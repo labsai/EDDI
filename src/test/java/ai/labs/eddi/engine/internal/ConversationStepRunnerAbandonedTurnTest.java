@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -14,6 +15,8 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
@@ -46,9 +49,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -246,6 +256,81 @@ class ConversationStepRunnerAbandonedTurnTest {
         assertDoesNotThrow(next::call, "the next turn answered and committed; it must not be dead-lettered as lease-lost");
         verify(conversationMemoryStore, never()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
                 ConversationState.EXECUTION_INTERRUPTED);
+    }
+
+    @Test
+    @DisplayName("cluster: a store conflict the abandoned turn's persist meets after the dispatcher gave up does not dead-letter the next turn")
+    void lateStoreConflictDoesNotDeadLetterTheNextTurn() throws Exception {
+        runNextTurnPastALatePersistFailure(new ConcurrentConversationModificationException(CONVERSATION_ID, 1L));
+    }
+
+    @Test
+    @DisplayName("cluster: a fence refusal the abandoned turn's persist meets after the dispatcher gave up does not dead-letter the next turn")
+    void lateFenceRefusalDoesNotDeadLetterTheNextTurn() throws Exception {
+        runNextTurnPastALatePersistFailure(new ConversationFencedException(CONVERSATION_ID, 42L, 43L));
+    }
+
+    @Test
+    @DisplayName("a store failure the abandoned turn's persist meets after the dispatcher gave up does not stamp ERROR over the next turn's READY")
+    void lateStoreFailureLeavesTheNextTurnsStateAlone() throws Exception {
+        runNextTurnPastALatePersistFailure(new IResourceStore.ResourceStoreException("store stalled"));
+
+        verify(conversationMemoryStore, never()).compareAndSetState(CONVERSATION_ID, ConversationState.READY, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+    }
+
+    /**
+     * The first turn's body finishes just inside the agent timeout, and its
+     * completion callback is still persisting when the watchdog gives up (the
+     * runtime runs that callback before the turn's future completes, so the
+     * callback passed its cancel check before the watchdog raised the flag). The
+     * persist then fails after the dispatcher has returned, while the next turn of
+     * the conversation runs: the failure must not be recorded for that turn.
+     */
+    private void runNextTurnPastALatePersistFailure(Exception failure) throws Exception {
+        CountDownLatch persisting = new CountDownLatch(1);
+        CountDownLatch dispatcherGaveUp = new CountDownLatch(1);
+        AtomicBoolean firstPersist = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            if (firstPersist.compareAndSet(true, false)) {
+                persisting.countDown();
+                assertTrue(dispatcherGaveUp.await(5, TimeUnit.SECONDS), "the dispatcher gave up");
+                throw failure;
+            }
+            return CONVERSATION_ID;
+        }).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        List<Future<?>> latePersist = new ArrayList<>();
+        try {
+            doAnswer(invocation -> {
+                Callable<Object> callable = invocation.getArgument(0);
+                IRuntime.IFinishedExecution<Object> callback = invocation.getArgument(1);
+                callbacks.add(callback);
+                if (callbacks.size() == 1) {
+                    latePersist.add(pool.submit(() -> {
+                        callback.onComplete(callable.call());
+                        return null;
+                    }));
+                    assertTrue(persisting.await(5, TimeUnit.SECONDS), "the completion callback reached its persist");
+                    return new CompletableFuture<>();
+                }
+                Object result = callable.call();
+                callback.onComplete(result);
+                return CompletableFuture.completedFuture(result);
+            }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
+
+            ConversationStepRunner.TurnTask abandoned = submitTurn(1);
+            abandoned.bindLease(new TestLease(42L));
+            assertDoesNotThrow(abandoned::call, "the watchdog gives up while the completion callback persists");
+            dispatcherGaveUp.countDown();
+            latePersist.get(0).get(5, TimeUnit.SECONDS);
+
+            ConversationStepRunner.TurnTask next = submitTurn(2);
+            next.bindLease(new TestLease(43L));
+            assertDoesNotThrow(next::call, "the next turn answered and committed; the abandoned turn's failure is not its own");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     /** Submits a say and returns the coordinator's task for it (the n-th one). */

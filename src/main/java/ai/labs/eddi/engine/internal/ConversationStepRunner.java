@@ -678,6 +678,24 @@ class ConversationStepRunner {
     }
 
     /**
+     * Records a turn's write failure for its task to drain and dead-letter (see
+     * {@code call()}), but only while the dispatcher still waits for the turn.
+     * <p>
+     * The completion callback runs before the turn's future completes, so the
+     * watchdog can give up while it is still persisting: past its cancel check,
+     * then refused by the fence or by the revision guard once the dispatcher has
+     * returned. Recorded then, the failure was drained by the conversation's next
+     * turn, which was dead-lettered for a write it never made. The abandoned turn
+     * is still logged and counted by the caller.
+     */
+    private static <E extends Exception> void recordForTheWaitingDispatcher(Map<String, E> turns, String conversationId,
+                                                                            E failure, BooleanSupplier dispatcherGaveUp) {
+        if (!dispatcherGaveUp.getAsBoolean()) {
+            turns.put(conversationId, failure);
+        }
+    }
+
+    /**
      * Cluster mode: tell the document this turn's lease has started, so a holder
      * whose lease expired earlier (a stalled node, an abandoned pipeline thread)
      * can no longer write — see {@link IConversationMemoryStore#raiseFence}.
@@ -879,7 +897,11 @@ class ConversationStepRunner {
      * {@code READY} the next turn had committed, and in cluster mode its expired
      * lease dead-lettered the next turn as lease-lost after that turn had answered.
      * An outcome that arrives before the dispatcher gave up is settled as before:
-     * no newer turn can exist yet.
+     * no newer turn can exist yet. A persist the callback started before then and
+     * that fails afterwards is inert as well: a refusal by the fence or the
+     * revision guard is not recorded for the task to dead-letter (see
+     * {@link #recordForTheWaitingDispatcher}), and a store failure does not stamp
+     * {@code ERROR}.
      *
      * @param dispatcherGaveUp
      *            whether the dispatching thread has stopped waiting for this turn
@@ -1032,7 +1054,7 @@ class ConversationStepRunner {
                             LOGGER.errorf("Turn of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
                             conversationService.counterFenceRejected();
                             conversationService.forgetUnpersistedTurn(conversationId);
-                            fencedTurns.put(conversationId, e);
+                            recordForTheWaitingDispatcher(fencedTurns, conversationId, e, dispatcherGaveUp);
                             refreshCachedState(conversationId);
                         } catch (ConcurrentConversationModificationException e) {
                             // The turn ran, its reply was already handed to the caller
@@ -1048,13 +1070,23 @@ class ConversationStepRunner {
                             // conversation because THIS turn lost the race would trade one
                             // wrong outcome for another.
                             if (reportStoreConflict(loggingContext, conversationId, e)) {
-                                conflictedTurns.put(conversationId, e);
+                                recordForTheWaitingDispatcher(conflictedTurns, conversationId, e, dispatcherGaveUp);
                             }
                             conversationService.forgetUnpersistedTurn(conversationId);
                             refreshCachedState(conversationId);
                         } catch (ResourceStoreException e) {
                             conversationService.forgetUnpersistedTurn(conversationId);
-                            logConversationError(loggingContext, conversationId, e);
+                            if (dispatcherGaveUp.getAsBoolean()) {
+                                // Abandoned while it persisted: inert (see the method doc). The
+                                // watchdog recorded its state, and ERROR would land on the next
+                                // turn's.
+                                conversationService.contextLogger.setLoggingContext(loggingContext);
+                                LOGGER.warnf("Turn of conversation %s, abandoned by the watchdog, was not persisted: %s",
+                                        sanitize(conversationId), e.getMessage());
+                                refreshCachedState(conversationId);
+                            } else {
+                                logConversationError(loggingContext, conversationId, e);
+                            }
                         } finally {
                             // Ordering contract: a turn that ended AWAITING_HUMAN tells its
                             // client only NOW, after the pause commit above has succeeded
