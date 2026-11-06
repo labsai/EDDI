@@ -190,7 +190,11 @@
     "editLast": "編集",
     "editLastHint": "編集して再送信 (↑)",
     "regenerate": "再生成",
-    "regenerateHint": "新しい返信を求める"
+    "regenerateHint": "新しい返信を求める",
+    "attachUploadingPercent": "アップロード中… {{percent}}%",
+    "attachProgress": "{{name}} のアップロード",
+    "attachRetry": "再試行",
+    "attachHint": "ファイルを添付（ここに貼り付けやドロップも可）"
   },
   "editor": {
     "deployFailed": "デプロイに失敗しました",

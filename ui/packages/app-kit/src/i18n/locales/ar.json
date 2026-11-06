@@ -198,7 +198,11 @@
     "editLast": "تعديل",
     "editLastHint": "تعديل وإرسال مرة أخرى (↑)",
     "regenerate": "إعادة التوليد",
-    "regenerateHint": "طلب رد جديد"
+    "regenerateHint": "طلب رد جديد",
+    "attachUploadingPercent": "جارٍ الرفع… {{percent}}٪",
+    "attachProgress": "رفع {{name}}",
+    "attachRetry": "حاول مرة أخرى",
+    "attachHint": "إرفاق ملفات — أو الصقها أو أفلتها هنا"
   },
   "editor": {
     "deployFailed": "فشل النشر",

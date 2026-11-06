@@ -190,7 +190,11 @@
     "editLast": "编辑",
     "editLastHint": "编辑后重新发送 (↑)",
     "regenerate": "重新生成",
-    "regenerateHint": "请求新的回复"
+    "regenerateHint": "请求新的回复",
+    "attachUploadingPercent": "正在上传… {{percent}}%",
+    "attachProgress": "{{name}} 的上传进度",
+    "attachRetry": "重试",
+    "attachHint": "附加文件——也可以在此粘贴或拖放"
   },
   "editor": {
     "deployFailed": "部署失败",

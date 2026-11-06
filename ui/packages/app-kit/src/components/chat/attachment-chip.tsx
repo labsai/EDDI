@@ -4,7 +4,7 @@
  * chat-panel when the operator input gained attachments.
  */
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, FileText, Loader2, Paperclip, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Paperclip, RotateCcw, X } from "lucide-react";
 import { formatBytes, isImageMime } from "../../lib/api/attachments";
 import type { PendingAttachment } from "../../hooks/use-attachment-staging";
 import { cn } from "../../lib/utils";
@@ -35,13 +35,17 @@ export function FileDropOverlay() {
 export function PendingAttachmentChip({
   att,
   onRemove,
+  onRetry,
 }: {
   att: PendingAttachment;
   onRemove: () => void;
+  /** Offered on a chip whose upload failed. */
+  onRetry?: () => void;
 }) {
   const { t } = useTranslation();
   const isImage = isImageMime(att.file.type) && att.previewUrl;
   const isError = att.status === "error";
+  const percent = att.status === "uploading" && att.progress !== undefined ? Math.round(att.progress * 100) : null;
 
   return (
     <div
@@ -77,13 +81,44 @@ export function PendingAttachmentChip({
         <span className="max-w-[140px] truncate font-medium text-foreground">
           {att.file.name}
         </span>
-        <span className={cn("truncate", isError ? "text-destructive" : "text-muted-foreground")}>
+        <span
+          className={cn("truncate", isError ? "text-destructive" : "text-muted-foreground")}
+          // A failed upload says why, to a screen reader too.
+          role={isError ? "alert" : undefined}
+          data-testid="attachment-status"
+        >
           {att.status === "uploading"
-            ? t("chat.attachUploading", "Uploading...")
+            ? percent !== null
+              ? t("chat.attachUploadingPercent", "Uploading… {{percent}}%", { percent })
+              : t("chat.attachUploading", "Uploading...")
             : isError
               ? (att.error ?? t("chat.attachError", "Failed to upload file"))
               : formatBytes(att.result?.sizeBytes ?? att.file.size)}
         </span>
+        {percent !== null && (
+          <span
+            className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-label={t("chat.attachProgress", "Upload of {{name}}", { name: att.file.name })}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            data-testid="attachment-progress"
+          >
+            <span className="block h-full bg-primary transition-[width]" style={{ width: `${percent}%` }} />
+          </span>
+        )}
+        {isError && onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-0.5 inline-flex items-center gap-1 self-start text-[11px] font-medium text-primary hover:underline"
+            data-testid="attachment-retry"
+          >
+            <RotateCcw className="h-3 w-3" aria-hidden="true" />
+            {t("chat.attachRetry", "Try again")}
+          </button>
+        )}
       </div>
 
       {/* Uploading spinner overlays the remove slot */}

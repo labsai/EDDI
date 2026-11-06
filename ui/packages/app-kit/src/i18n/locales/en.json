@@ -190,7 +190,11 @@
     "editLast": "Edit",
     "editLastHint": "Edit and send again (↑)",
     "regenerate": "Regenerate",
-    "regenerateHint": "Ask for a new reply"
+    "regenerateHint": "Ask for a new reply",
+    "attachUploadingPercent": "Uploading… {{percent}}%",
+    "attachProgress": "Upload of {{name}}",
+    "attachRetry": "Try again",
+    "attachHint": "Attach files — or paste or drop them here"
   },
   "commandPalette": {
     "openChat": "Open Chat"

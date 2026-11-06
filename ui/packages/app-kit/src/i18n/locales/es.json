@@ -192,7 +192,11 @@
     "editLast": "Editar",
     "editLastHint": "Editar y volver a enviar (↑)",
     "regenerate": "Regenerar",
-    "regenerateHint": "Pedir una respuesta nueva"
+    "regenerateHint": "Pedir una respuesta nueva",
+    "attachUploadingPercent": "Subiendo… {{percent}} %",
+    "attachProgress": "Subida de {{name}}",
+    "attachRetry": "Reintentar",
+    "attachHint": "Adjuntar archivos — o pégalos o suéltalos aquí"
   },
   "editor": {
     "deployFailed": "Error en el despliegue",

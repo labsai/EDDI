@@ -27,6 +27,8 @@ export interface PendingAttachment {
   /** Object URL for image previews. */
   previewUrl?: string;
   status: "uploading" | "ready" | "error";
+  /** How much of the file has gone up, 0 to 1, while uploading (when the browser reports it). */
+  progress?: number;
   result?: AttachmentResult;
   error?: string;
 }
@@ -135,6 +137,8 @@ export interface AttachmentStaging {
   removeAttachment: (id: string) => void;
   /** Discard everything staged (e.g. secret mode switching on). */
   discardAll: () => void;
+  /** Upload a chip that failed again, into the same conversation. */
+  retryAttachment: (id: string) => void;
   /**
    * Drain the ready set for a send: returns the successfully-uploaded entries
    * and clears the staging area. Preview URLs of returned entries stay alive —
@@ -223,6 +227,37 @@ export function useAttachmentStaging(
     [],
   );
 
+  /** Upload one chip, tracking its progress, then mark it ready or failed (with the reason). */
+  const uploadEntry = useCallback(
+    async (targetId: string, entry: PendingAttachment) => {
+      const update = (patch: Partial<PendingAttachment>) => {
+        pendingRef.current = pendingRef.current.map((a) => (a.id === entry.id ? { ...a, ...patch } : a));
+        setPendingAttachments((prev) => prev.map((a) => (a.id === entry.id ? { ...a, ...patch } : a)));
+      };
+      try {
+        const result = await uploadAttachment(targetId, entry.file, (progress) => update({ progress }));
+        update({ status: "ready", result, progress: 1 });
+        if (result.forwardableInline === false) {
+          toast.warning(
+            t(
+              "chat.attachTooLargeToForward",
+              "{{name}} is stored but too large to send to the model inline.",
+              { name: result.fileName || entry.file.name },
+            ),
+          );
+        }
+      } catch (err) {
+        const message =
+          err instanceof AttachmentError
+            ? err.message
+            : t("chat.attachError", "Failed to upload file");
+        update({ status: "error", error: message });
+        toast.error(message);
+      }
+    },
+    [t],
+  );
+
   const stageFiles = useCallback(
     async (files: File[]) => {
       if (!files.length) return;
@@ -266,36 +301,22 @@ export function useAttachmentStaging(
       pendingRef.current = [...pendingRef.current, ...entries];
       setPendingAttachments((prev) => [...prev, ...entries]);
 
-      await Promise.all(
-        entries.map(async (entry) => {
-          try {
-            const result = await uploadAttachment(targetId, entry.file);
-            setPendingAttachments((prev) =>
-              prev.map((a) => (a.id === entry.id ? { ...a, status: "ready", result } : a)),
-            );
-            if (result.forwardableInline === false) {
-              toast.warning(
-                t(
-                  "chat.attachTooLargeToForward",
-                  "{{name}} is stored but too large to send to the model inline.",
-                  { name: result.fileName || entry.file.name },
-                ),
-              );
-            }
-          } catch (err) {
-            const message =
-              err instanceof AttachmentError
-                ? err.message
-                : t("chat.attachError", "Failed to upload file");
-            setPendingAttachments((prev) =>
-              prev.map((a) => (a.id === entry.id ? { ...a, status: "error", error: message } : a)),
-            );
-            toast.error(message);
-          }
-        }),
-      );
+      await Promise.all(entries.map((entry) => uploadEntry(targetId, entry)));
     },
-    [ensureConversation, t],
+    [ensureConversation, t, uploadEntry],
+  );
+
+  const retryAttachment = useCallback(
+    (id: string) => {
+      const entry = pendingRef.current.find((a) => a.id === id && a.status === "error");
+      const targetId = conversationIdRef.current;
+      if (!entry || !targetId) return;
+      const again: PendingAttachment = { ...entry, status: "uploading", progress: 0, error: undefined };
+      pendingRef.current = pendingRef.current.map((a) => (a.id === id ? again : a));
+      setPendingAttachments((prev) => prev.map((a) => (a.id === id ? again : a)));
+      void uploadEntry(targetId, again);
+    },
+    [uploadEntry],
   );
 
   const handleFileInput = useCallback(
@@ -348,6 +369,7 @@ export function useAttachmentStaging(
     handleFileInput,
     removeAttachment,
     discardAll,
+    retryAttachment,
     takeForSend,
   };
 }

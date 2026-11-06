@@ -190,7 +190,11 @@
     "editLast": "Bearbeiten",
     "editLastHint": "Bearbeiten und erneut senden (↑)",
     "regenerate": "Neu erzeugen",
-    "regenerateHint": "Um eine neue Antwort bitten"
+    "regenerateHint": "Um eine neue Antwort bitten",
+    "attachUploadingPercent": "Wird hochgeladen… {{percent}} %",
+    "attachProgress": "Hochladen von {{name}}",
+    "attachRetry": "Erneut versuchen",
+    "attachHint": "Dateien anhängen – oder hier einfügen bzw. ablegen"
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

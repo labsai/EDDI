@@ -190,7 +190,11 @@
     "editLast": "편집",
     "editLastHint": "편집 후 다시 보내기 (↑)",
     "regenerate": "다시 생성",
-    "regenerateHint": "새 답변 요청"
+    "regenerateHint": "새 답변 요청",
+    "attachUploadingPercent": "업로드 중… {{percent}}%",
+    "attachProgress": "{{name}} 업로드",
+    "attachRetry": "다시 시도",
+    "attachHint": "파일 첨부 — 여기에 붙여넣거나 끌어다 놓아도 됩니다"
   },
   "editor": {
     "deployFailed": "배포 실패",

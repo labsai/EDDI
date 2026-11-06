@@ -461,6 +461,7 @@ export function ChatPanel({
     handleFileInput,
     removeAttachment,
     discardAll,
+    retryAttachment,
     takeForSend,
   } = useAttachmentStaging(conversationId);
 
@@ -1204,6 +1205,7 @@ export function ChatPanel({
             hasConversation={!!conversationId}
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={removeAttachment}
+            onRetryAttachment={retryAttachment}
             hasReadyAttachment={hasReadyAttachment}
             // Disabled while either move (or a rerun) is pending: the flags
             // only change after the re-read, so a double click would otherwise
@@ -1241,6 +1243,7 @@ function ChatInputWithSecretToggle({
   hasConversation = false,
   pendingAttachments = [],
   onRemoveAttachment,
+  onRetryAttachment,
   hasReadyAttachment = false,
   onUndo,
   onRedo,
@@ -1265,6 +1268,7 @@ function ChatInputWithSecretToggle({
   hasConversation?: boolean;
   pendingAttachments?: PendingAttachment[];
   onRemoveAttachment?: (id: string) => void;
+  onRetryAttachment?: (id: string) => void;
   hasReadyAttachment?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -1350,6 +1354,7 @@ function ChatInputWithSecretToggle({
               key={att.id}
               att={att}
               onRemove={() => onRemoveAttachment?.(att.id)}
+              onRetry={onRetryAttachment ? () => onRetryAttachment(att.id) : undefined}
             />
           ))}
         </div>
@@ -1370,7 +1375,8 @@ function ChatInputWithSecretToggle({
             // must not carry a file).
             isSecretMode && "cursor-not-allowed opacity-40"
           )}
-          title={t("chat.attach", "Attach file")}
+          title={t("chat.attachHint", "Attach files — or paste or drop them here")}
+          aria-label={t("chat.attach", "Attach file")}
           data-testid="chat-attach-btn"
         >
           {isUploading ? (
