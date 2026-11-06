@@ -593,6 +593,45 @@
       "clear": "Borrar búsqueda",
       "more": "Más resultados",
       "moreFailed": "No se pudieron cargar más. Reintentar"
+    },
+    "memory": {
+      "navLabel": "Mi memoria",
+      "title": "Lo que recuerdo de ti",
+      "subtitle": "Lo que tus agentes han guardado sobre ti para usarlo en conversaciones posteriores. Haz que olviden lo que no quieras que conserven.",
+      "explainer": "Las entradas privadas solo las usa el agente que las guardó; las de equipo, los agentes de ese equipo; y las compartidas, todos tus agentes. Puedes olvidar cualquier entrada; al olvidar una compartida desaparece para todos los agentes que la usan.",
+      "search": "Buscar en lo que se recuerda",
+      "total": "Entradas: {{n}}",
+      "shown": "Mostrando {{shown}} de {{total}}",
+      "writtenBy": "Guardado por {{agent}}",
+      "writtenByUnknown": "Agente que lo guardó no registrado",
+      "updated": "Actualizado el {{date}}",
+      "badge": {
+        "self": "Privado",
+        "group": "Equipo",
+        "global": "Todos los agentes"
+      },
+      "visibility": {
+        "self": "Solo lo usa el agente que lo guardó",
+        "group": "Lo usan los agentes de {{teams}}",
+        "groupUnknown": "Lo usan los agentes de un equipo",
+        "global": "Lo usan todos tus agentes",
+        "unknown": "Visibilidad: {{value}}"
+      },
+      "forget": "Olvidar",
+      "forgetAria": "Olvidar «{{key}}»",
+      "forgotten": "Olvidado: {{key}}",
+      "forgetFailed": "No se pudo olvidar: {{message}}",
+      "forgetAll": "Olvidarlo todo",
+      "forgetAllTitle": "¿Olvidar todo sobre ti?",
+      "forgetAllDescription": "Se eliminan las {{n}} entradas, para cada agente y cada equipo. Tus agentes ya no sabrán nada de esto en conversaciones nuevas y no se puede deshacer. Tus conversaciones se conservan.",
+      "forgetAllConfirm": "Olvidarlo todo",
+      "forgetAllDone": "Todo lo que tus agentes recordaban de ti se ha olvidado.",
+      "reserved": "Los registros que tu administrador guarda para solicitudes de protección de datos no aparecen aquí y no se pueden eliminar desde esta página.",
+      "empty": "Todavía no se recuerda nada de ti. Cuando un agente guarde algo sobre ti, aparecerá aquí.",
+      "noMatch": "Nada coincide con tu búsqueda.",
+      "loadFailed": "No se pudo cargar tu memoria.",
+      "retry": "Reintentar",
+      "noSignIn": "El inicio de sesión está desactivado en esta instalación, así que no hay memoria personal que mostrar."
     }
   },
   "analyticsPage": {

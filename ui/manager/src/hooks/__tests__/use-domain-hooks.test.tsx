@@ -29,7 +29,7 @@ import {
   useUserMemories,
   useDeleteMemory,
   useDeleteAllMemories,
-} from "@/hooks/use-user-memory";
+} from "@eddi/app-kit/hooks/use-user-memory";
 import {
   useUserProperties,
   useDeleteProperties,

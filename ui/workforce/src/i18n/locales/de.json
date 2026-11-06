@@ -591,6 +591,45 @@
       "clear": "Suche löschen",
       "more": "Weitere Ergebnisse",
       "moreFailed": "Weitere konnten nicht geladen werden. Erneut versuchen"
+    },
+    "memory": {
+      "navLabel": "Mein Gedächtnis",
+      "title": "Was ich über dich weiß",
+      "subtitle": "Was deine Agenten über dich gespeichert haben, um es in späteren Unterhaltungen zu nutzen. Lass sie vergessen, was sie nicht behalten sollen.",
+      "explainer": "Private Einträge nutzt nur der Agent, der sie gespeichert hat, Team-Einträge die Agenten dieses Teams und geteilte Einträge alle deine Agenten. Du kannst jeden Eintrag vergessen lassen; ein geteilter verschwindet dann für jeden Agenten, der ihn nutzt.",
+      "search": "Gespeichertes durchsuchen",
+      "total": "Einträge: {{n}}",
+      "shown": "{{shown}} von {{total}} angezeigt",
+      "writtenBy": "Gespeichert von {{agent}}",
+      "writtenByUnknown": "Speichernder Agent nicht erfasst",
+      "updated": "Aktualisiert am {{date}}",
+      "badge": {
+        "self": "Privat",
+        "group": "Team",
+        "global": "Alle Agenten"
+      },
+      "visibility": {
+        "self": "Nur der Agent, der es gespeichert hat, nutzt es",
+        "group": "Genutzt von den Agenten von {{teams}}",
+        "groupUnknown": "Genutzt von den Agenten eines Teams",
+        "global": "Genutzt von allen deinen Agenten",
+        "unknown": "Sichtbarkeit: {{value}}"
+      },
+      "forget": "Vergessen",
+      "forgetAria": "„{{key}}“ vergessen",
+      "forgotten": "Vergessen: {{key}}",
+      "forgetFailed": "Konnte nicht vergessen werden: {{message}}",
+      "forgetAll": "Alles vergessen",
+      "forgetAllTitle": "Alles über dich vergessen?",
+      "forgetAllDescription": "Alle {{n}} Einträge werden gelöscht, für jeden Agenten und jedes Team. Deine Agenten wissen in neuen Unterhaltungen nichts mehr davon, und das lässt sich nicht rückgängig machen. Deine Unterhaltungen selbst bleiben erhalten.",
+      "forgetAllConfirm": "Alles vergessen",
+      "forgetAllDone": "Alles, was deine Agenten über dich wussten, ist vergessen.",
+      "reserved": "Aufzeichnungen, die deine Administration für Datenschutzanfragen führt, werden hier nicht aufgeführt und können auf dieser Seite nicht gelöscht werden.",
+      "empty": "Über dich ist noch nichts gespeichert. Sobald ein Agent etwas über dich speichert, erscheint es hier.",
+      "noMatch": "Nichts passt zu deiner Suche.",
+      "loadFailed": "Dein Gedächtnis konnte nicht geladen werden.",
+      "retry": "Erneut versuchen",
+      "noSignIn": "Die Anmeldung ist in dieser Installation ausgeschaltet, daher gibt es kein persönliches Gedächtnis anzuzeigen."
     }
   },
   "analyticsPage": {

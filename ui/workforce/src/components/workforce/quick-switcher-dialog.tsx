@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, Loader2, MessageSquare, MessageSquarePlus, Search, Users } from "lucide-react";
+import { Bot, Brain, Loader2, MessageSquare, MessageSquarePlus, Search, Users } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useDeployedAgents } from "@eddi/app-kit/hooks/use-chat";
@@ -14,7 +14,7 @@ import { NEW_CHAT_STATE } from "@/lib/workforce-keyboard";
 /** One row of the switcher: where it goes and how it reads. */
 interface SwitcherItem {
   id: string;
-  kind: "new" | "chat" | "team" | "agent";
+  kind: "new" | "memory" | "chat" | "team" | "agent";
   label: string;
   detail?: string;
   go: () => void;
@@ -53,6 +53,8 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
     };
     const all: SwitcherItem[] = [
       { id: "new", kind: "new", label: t("Workforce.switcher.newChat", "New chat"), go: open("/workforce", NEW_CHAT_STATE) },
+      // What the person's agents remember about them (T2.4).
+      { id: "memory", kind: "memory", label: t("Workforce.memory.title"), go: open("/workforce/memory") },
       ...sessions.map<SwitcherItem>((s) => ({
         id: `${s.kind}:${s.id}`,
         kind: s.kind,
@@ -112,7 +114,7 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
   };
 
   const icon = (kind: SwitcherItem["kind"]) =>
-    kind === "new" ? MessageSquarePlus : kind === "team" ? Users : kind === "agent" ? Bot : MessageSquare;
+    kind === "new" ? MessageSquarePlus : kind === "memory" ? Brain : kind === "team" ? Users : kind === "agent" ? Bot : MessageSquare;
 
   return (
     <>
@@ -178,7 +180,7 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
                     <span className="min-w-0 flex-1 truncate" dir="auto">
                       {item.label}
                     </span>
-                    {item.detail && item.kind !== "new" && (
+                    {item.detail && item.kind !== "new" && item.kind !== "memory" && (
                       <span className="max-w-[40%] truncate text-xs text-muted-foreground" dir="auto">
                         {item.detail}
                       </span>
