@@ -117,24 +117,27 @@ public class AdminActionAuditFilter implements ContainerResponseFilter {
         if (!recorder.isEnabled() || !MUTATING_METHODS.contains(request.getMethod())) {
             return;
         }
+        String resource = "unknown";
         try {
             Method resourceMethod = resourceInfo != null ? resourceInfo.getResourceMethod() : null;
             if (resourceMethod == null) {
                 return; // no endpoint matched — a scanner's 404, not an action
             }
+            resource = resourceMethod.getDeclaringClass().getSimpleName() + "#" + resourceMethod.getName();
             String path = request.getUriInfo().getPath();
             if (!isAdministrative(path) && !adminOnly(resourceMethod)) {
                 return;
             }
-            recorder.record(request.getMethod(), path, request.getUriInfo().getPathParameters(),
-                    resourceMethod.getDeclaringClass().getSimpleName() + "#" + resourceMethod.getName(), response.getStatus());
+            recorder.record(request.getMethod(), path, request.getUriInfo().getPathParameters(), resource, response.getStatus());
         } catch (Exception e) {
             // Recording an action must never change its outcome. The recorder never
             // throws; this guards the request-side lookups above.
-            // The method and path are the caller's, and an exception message can echo
-            // them: strip line breaks so a request cannot forge log records (CWE-117).
+            // Neither the request path nor the exception message is logged: both can
+            // hold the raw user id the record pseudonymises (CWE-532). The endpoint and
+            // the exception type are enough to diagnose with, and the endpoint name is
+            // sanitized so line breaks cannot forge log records (CWE-117).
             LOGGER.warnf("Could not record administrative action %s %s in the audit ledger: %s", sanitize(request.getMethod()),
-                    sanitize(request.getUriInfo().getPath()), sanitize(e.toString()));
+                    sanitize(resource), e.getClass().getName());
         }
     }
 

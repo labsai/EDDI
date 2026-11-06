@@ -48,8 +48,10 @@ to it, and the two MCP tools record every call through it in a `finally`: method
 answers for the same outcome — `200`, `207` (incomplete erasure or export), `400`, `403` (role refusal;
 the `ForbiddenException` still propagates) or `500`. The subject is pseudonymised whole rather than
 matched against path segments, so an id containing `/` cannot leave part of itself behind. The
-recorder's failure WARN names the method and endpoint, no longer the request path, which could hold the
-raw id the record pseudonymises.
+recorder's and the filter's failure WARNs name the method and endpoint, no longer the request path or the
+exception message (the filter logs the exception type only), which could hold the raw id the record
+pseudonymises. A REST path parameter that contains `/` (sent as `%2F`) is now pseudonymised whole in the
+recorded path too.
 
 The entry tests moved from `AdminActionAuditFilterTest` to the new `AdminActionRecorderTest`; the filter
 test now runs a real recorder over a mocked ledger and checks what reaches it.

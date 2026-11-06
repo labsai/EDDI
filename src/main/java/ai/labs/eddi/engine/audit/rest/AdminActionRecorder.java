@@ -158,6 +158,14 @@ public class AdminActionRecorder {
         if (people.isEmpty()) {
             return path;
         }
+        // An id that contains a "/" (arriving as %2F) spans several segments of the
+        // decoded path, so no single segment equals it. Replace it whole, on segment
+        // boundaries and after the first segment, before the per-segment pass.
+        for (String person : people) {
+            if (person.indexOf('/') >= 0) {
+                path = replaceSegmentSpan(auditLedger, path, person);
+            }
+        }
         // Whole path segments only, and never the first one (the resource root,
         // never a parameter): a user called "admin" must not rewrite the "/admin/"
         // prefix, nor a one-letter id every letter of the path.
@@ -169,6 +177,33 @@ public class AdminActionRecorder {
             }
         }
         return String.join("/", segments);
+    }
+
+    /**
+     * Replaces each occurrence of a slash-containing {@code person} that starts at
+     * a segment boundary after the first segment and ends at one.
+     */
+    private static String replaceSegmentSpan(AuditLedgerService auditLedger, String path, String person) {
+        int firstSegmentEnd = path.indexOf('/', path.startsWith("/") ? 1 : 0);
+        if (firstSegmentEnd < 0) {
+            return path;
+        }
+        StringBuilder out = new StringBuilder();
+        int from = 0;
+        int at;
+        while ((at = path.indexOf(person, from)) >= 0) {
+            int end = at + person.length();
+            boolean startsOnBoundary = at > firstSegmentEnd && path.charAt(at - 1) == '/';
+            boolean endsOnBoundary = end == path.length() || path.charAt(end) == '/';
+            if (startsOnBoundary && endsOnBoundary) {
+                out.append(path, from, at).append(auditLedger.pseudonymOf(person));
+                from = end;
+            } else {
+                out.append(path, from, at + 1);
+                from = at + 1;
+            }
+        }
+        return out.append(path, from, path.length()).toString();
     }
 
     static AuditEntry buildEntry(String method, String recordedPath, String resource, int status, String actor) {

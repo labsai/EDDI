@@ -316,4 +316,21 @@ class AdminActionAuditFilterTest {
             assertFalse(value.contains("\r") || value.contains("\n"), "a CR/LF reached the log: " + value);
         }
     }
+
+    @Test
+    @DisplayName("the failure WARN names neither the request path nor the exception message (CWE-532)")
+    void failureLogLineCarriesNoRequestData() {
+        when(uriInfo.getPathParameters()).thenThrow(new IllegalStateException("lookup failed for alice@example.com"));
+        when(request.getMethod()).thenReturn("DELETE");
+        when(uriInfo.getPath()).thenReturn("/admin/gdpr/alice@example.com");
+        when(response.getStatus()).thenReturn(200);
+
+        List<String> captured = AdminActionRecorderTest.logged(AdminActionAuditFilter.class, () -> filter.filter(request, response));
+
+        assertTrue(captured.stream().anyMatch(value -> value.contains("Could not record administrative action")),
+                "the line under test did not fire; captured: " + captured);
+        for (String value : captured) {
+            assertFalse(value.contains("alice"), "the subject reached the log: " + value);
+        }
+    }
 }

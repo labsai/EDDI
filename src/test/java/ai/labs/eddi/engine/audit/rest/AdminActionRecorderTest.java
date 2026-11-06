@@ -100,6 +100,16 @@ class AdminActionRecorderTest {
         assertEquals(3, path.split("/").length - 1, path);
     }
 
+    @Test
+    @DisplayName("a REST user id containing a slash (sent as %2F) is pseudonymised whole")
+    void restSubjectContainingASlashIsPseudonymisedWhole() {
+        recorder.record("DELETE", "/admin/gdpr/tenant/alice", Map.of("userId", List.of("tenant/alice")), "RestGdprAdmin#deleteUserData", 200);
+
+        String path = (String) recorded().input().get("path");
+        assertEquals("/admin/gdpr/gdpr-erased:k1:" + "tenant/alice".hashCode(), path);
+        assertFalse(path.contains("tenant") || path.contains("alice"), path);
+    }
+
     /**
      * {@code delete_user_data} and {@code export_user_data} reach the GDPR service
      * without passing through REST; their record names the tool, and the subject
