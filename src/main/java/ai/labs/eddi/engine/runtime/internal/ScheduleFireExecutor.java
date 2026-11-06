@@ -11,6 +11,9 @@ import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -154,6 +157,14 @@ public class ScheduleFireExecutor {
 
     @Inject
     IConversationMemoryStore conversationMemoryStore;
+
+    /**
+     * Announces finished and failed runs on the owner's event stream.
+     * Field-injected like the rest; {@code null} in tests that build this class by
+     * hand.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     /**
      * Steps after which a {@code conversationStrategy=persistent} schedule rolls
@@ -423,9 +434,48 @@ public class ScheduleFireExecutor {
         // quantities; see ScheduleFireLog#cost and docs/scheduling.md.
         cost = Math.max(0.0, conversationCost(conversationId) - costBefore);
 
+        // Before the fire log: recordFire re-asserts a remembered interrupt, which
+        // would
+        // fail the owner lookup.
+        announceFire(schedule, conversationId, status, UserEvent.JOB_SCHEDULE);
+
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
         return recordFire(fireLogId, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, cost, "conversation",
                 interrupted);
+    }
+
+    /**
+     * Tells the conversation's owner, on {@code GET /me/events}, that a scheduled
+     * run completed or that a scheduled run or a continuation turn failed. The
+     * owner is read from the conversation's descriptor — the record every ownership
+     * check reads — never taken from the schedule. A completed continuation turn
+     * announces nothing here: whether the job goes on is decided when that turn
+     * commits ({@code job.finished}, from {@code ConversationContinuations}). A
+     * skipped fire announces nothing. Never throws.
+     */
+    private void announceFire(ScheduleConfiguration schedule, String conversationId, String status, String jobKind) {
+        UserEventPublisher publisher = userEventPublisher;
+        if (publisher == null || conversationId == null) {
+            return;
+        }
+        String kind;
+        if (ScheduleConfiguration.FireStatus.FAILED.name().equals(status)) {
+            kind = UserEvent.KIND_JOB_FAILED;
+        } else if (ScheduleConfiguration.FireStatus.COMPLETED.name().equals(status) && UserEvent.JOB_SCHEDULE.equals(jobKind)) {
+            kind = UserEvent.KIND_JOB_RUN_COMPLETED;
+        } else {
+            return;
+        }
+        try {
+            UserEventPublisher.ConversationOwner owner = publisher.conversationOwner(conversationId);
+            if (owner == null) {
+                return;
+            }
+            publisher.publish(UserEvent.of(kind).withSurface(UserEvent.SURFACE_REGULAR).withConversation(conversationId, owner.agentId())
+                    .withJob(jobKind, schedule.getId()).withState(status), UserEventAudience.principal(owner.userId()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("[SCHEDULE] Could not announce the fire of schedule %s: %s", sanitize(schedule.getId()), e.getMessage());
+        }
     }
 
     private ScheduleFireLog fireContinuation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
@@ -439,6 +489,7 @@ public class ScheduleFireExecutor {
         // The handler re-asserts an interrupt it caught; park it across the fire-log
         // write (a set flag can fail the store's connection checkout), as fire() does.
         boolean interrupted = Thread.interrupted();
+        announceFire(schedule, conversationId, result.status(), UserEvent.JOB_CONTINUATION);
         return recordFire(null, schedule, startedAt, result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0,
                 "continuation", interrupted);
     }

@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.userevents.GroupUserEvents;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
@@ -244,6 +246,14 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * Raises the per-user stream's team events ({@code GET /me/events}). Same
+     * field-injection pattern and null-safety as {@link #liveDiscussionRegistry}:
+     * {@code null} in the direct-construction unit tests, which then raise nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     /**
      * I8's lesson store. Same field-injection pattern and null-safety as
@@ -877,6 +887,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 listener.onRoundStart(new GroupConversationEventSink.RoundStartEvent(
                         gc.getId(), gc.getRound(), question, phaseList.size()));
             }
+        }
+        if (startPhaseIndex == 0) {
+            // Round 1 or a continuation round; a resume after a pause is not a start.
+            GroupUserEvents.started(userEventPublisher, gc, config);
         }
 
         // I1: set once the cost ceiling fires under SYNTHESIZE_NOW. From then on the
@@ -1716,7 +1730,32 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.CANCELLED) {
                 cleanupEphemeralAgents(gc, config);
             }
+            // Last, once the state this leg leaves behind is settled (a pause converted to
+            // a cancel above included): paused, waiting for a human, or ended.
+            GroupUserEvents.afterLeg(userEventPublisher, gc, config);
         }
+    }
+
+    /**
+     * Raises the per-user stream's event for a discussion's current state outside a
+     * running leg — the cancel of a paused discussion. Best effort: the group's
+     * configuration is read for its HUMAN members, and without it only the owner is
+     * told.
+     */
+    public void announceUserEvents(GroupConversation gc) {
+        if (userEventPublisher == null || gc == null) {
+            return;
+        }
+        AgentGroupConfiguration config = null;
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Group %s not readable for its user events: %s", LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+        }
+        GroupUserEvents.afterLeg(userEventPublisher, gc, config);
     }
 
     // =================================================================
