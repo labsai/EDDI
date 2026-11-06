@@ -1324,6 +1324,22 @@ class PostgresResourceStorageTest {
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'state' = ?"), sql.getValue());
     }
 
+    @Test
+    void containsIgnoreCase_isAnEscapedIlike_neverAPattern() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        storage.findResources(new IResourceFilter.QueryFilters[]{new IResourceFilter.QueryFilters(
+                List.of(new IResourceFilter.QueryFilter("title", new IResourceFilter.ContainsIgnoreCase("50%_a\\b"))))}, null, 0, 10);
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        assertTrue(sql.getValue().contains("data ->> 'title' ILIKE ? ESCAPE '\\'"), sql.getValue());
+        // %, _ and \ are wildcards / the escape in LIKE: each is escaped, so the text
+        // is matched literally. Bound as a parameter, never spliced into the SQL.
+        verify(preparedStatement).setString(2, "%50\\%\\_a\\\\b%");
+        assertFalse(sql.getValue().contains("50"), sql.getValue());
+    }
+
     // ==================== substring search: planning and indexing
     // ====================
 

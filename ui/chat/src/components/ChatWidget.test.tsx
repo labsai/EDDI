@@ -1051,6 +1051,23 @@ describe("ChatWidget — live tool calls", () => {
     expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("ignores tool_result: nothing of its payload reaches the page, the status stays", async () => {
+    // tool_result (B6) is additive. The widget shows no tool cards, so the
+    // event is ignored like any it does not handle: the summary — tool output,
+    // even if redacted — must never appear as transcript text, and the status
+    // line keeps waiting for the next token as before.
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"calculator"}\n\n',
+      'event: tool_result\ndata: {"tool":"calculator","ok":true,"summary":"SUMMARY-MARKER 4"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
+    );
+    expect(document.body.textContent).not.toMatch(/SUMMARY-MARKER/);
+  });
+
   it("gives way to the escalation hint when the cascade escalates", async () => {
     mockOpenStream([
       'event: tool_call\ndata: {"tool":"calculator"}\n\n',
