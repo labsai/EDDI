@@ -65,7 +65,8 @@ public class ToolResponseTruncator {
             "Request more specific data or use pagination if available.]";
     private static final String PAGINATION_SUFFIX = "\n\n[PAGINATED: Response was %d characters. " +
             "This is page 1 of %d. Use fetch_tool_response_page(responseId=\"%s\", pageNumber=N) to retrieve more pages.]";
-    private static final String SUMMARY_HEADER = "[SUMMARY — original: %d chars, tool: %s]\n";
+    private static final String SUMMARY_PREFIX = "[SUMMARY — original: ";
+    private static final String SUMMARY_HEADER = SUMMARY_PREFIX + "%d chars, tool: %s]\n";
     private static final String HEAD_TAIL_MARKER = "\n\n[TRUNCATED: Response was %d characters, limit is %d. " +
             "The middle %d characters were omitted; the first %d and the last %d are shown. " +
             "Request more specific data or use pagination if available.]\n\n";
@@ -106,6 +107,16 @@ public class ToolResponseTruncator {
         this.chatModelRegistry = chatModelRegistry;
         this.globalVariableResolver = globalVariableResolver;
         this.paginatedResponseStore = paginatedResponseStore;
+    }
+
+    /**
+     * Whether {@code text} is a summary this truncator wrote, as opposed to a
+     * result it passed through or cut. A summary is new text a model wrote, which
+     * is why {@code ToolLoopRunner} screens it again; a cut, including the one
+     * {@code summarize} falls back to, only removes text.
+     */
+    static boolean isSummary(String text) {
+        return text != null && text.startsWith(SUMMARY_PREFIX);
     }
 
     /**

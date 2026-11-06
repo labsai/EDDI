@@ -1890,9 +1890,11 @@ class ToolLoopRunner {
 
         // A summary is new text, written by a model from third-party content, and a
         // summarizer that normalises an obfuscated instruction the pattern missed can
-        // produce one it matches — so it is screened in turn. The other strategies
-        // only remove text, and their output is not scanned twice.
-        if (summarizes(task.getToolResponseLimits()) && toolResult != null && !toolResult.equals(screened.result())) {
+        // produce one it matches — so it is screened in turn. The other strategies,
+        // and the truncation summarize falls back to, only remove text, and their
+        // output is not scanned twice. The equality check keeps a result that merely
+        // starts like a summary, and was not cut, from being screened again.
+        if (ToolResponseTruncator.isSummary(toolResult) && !toolResult.equals(screened.result())) {
             var summary = toolResultGuardrail.screen(toolRequest.name(), source, toolResult, guardrails);
             toolResult = summary.result();
             if (!ToolResultGuardrail.ACTION_ALLOW.equals(summary.action())) {
@@ -1953,11 +1955,6 @@ class ToolLoopRunner {
     static boolean indicatesUnfinishedCall(String rawResult) {
         ToolOutcomeClassifier.Outcome outcome = ToolOutcomeClassifier.classify(rawResult);
         return outcome.isFailure() || outcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED;
-    }
-
-    /** Whether the task truncates its tool results with the summarize strategy. */
-    private static boolean summarizes(LlmConfiguration.ToolResponseLimits limits) {
-        return limits != null && "summarize".equalsIgnoreCase(limits.getTruncationStrategy());
     }
 
     /**

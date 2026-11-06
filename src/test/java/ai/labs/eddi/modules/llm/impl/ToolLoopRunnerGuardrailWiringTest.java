@@ -20,6 +20,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.tool.ToolExecutor;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -59,9 +60,11 @@ class ToolLoopRunnerGuardrailWiringTest {
     private ToolExecutionService toolExecutionService;
     private ToolLoopRunner runner;
     private LlmConfiguration.Task task;
+    private SimpleMeterRegistry guardrailMeters;
 
     @BeforeEach
     void setUp() {
+        guardrailMeters = new SimpleMeterRegistry();
         toolExecutionService = mock(ToolExecutionService.class);
         // Execute the supplier straight through: rate limiting, caching and cost
         // tracking are not what is under test, and the real service would need four
@@ -156,7 +159,14 @@ class ToolLoopRunnerGuardrailWiringTest {
         lenient().when(variables.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         var truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), chatModelRegistry, variables, paginatedResponseStore);
         return new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
-                new ToolResultGuardrail(new SimpleMeterRegistry()));
+                new ToolResultGuardrail(guardrailMeters));
+    }
+
+    /**
+     * How many times the guardrail screened, summed over every action and source.
+     */
+    private double screenings() {
+        return guardrailMeters.find("eddi.guardrail.toolresult.count").counters().stream().mapToDouble(Counter::count).sum();
     }
 
     private static LlmConfiguration.ToolResponseLimits limits(int maxChars, String strategy) {
@@ -253,6 +263,22 @@ class ToolLoopRunnerGuardrailWiringTest {
         var guardrailEntries = trace.stream().filter(step -> "tool_result_guardrail".equals(step.get("type"))).toList();
         assertEquals(1, guardrailEntries.size(), trace.toString());
         assertEquals(ToolResultGuardrailConfig.ACTION_REDACT, guardrailEntries.get(0).get("action"));
+        assertEquals(2.0, screenings(), "the whole result once, then the summary");
+    }
+
+    @Test
+    @DisplayName("summarize falling back to a cut screens once: the cut only removes already-screened text")
+    void aSummarizeFallbackIsScreenedOnce() {
+        // No summarizerModel, so the strategy falls back to truncate. Its output
+        // differs from the screened text, but it is no summary, and screening it
+        // again would cost a regex pass and count one tool result twice.
+        task.setToolResponseLimits(limits(1_000, "summarize"));
+        runner = runnerWithRealTruncator();
+
+        String result = execute("o".repeat(2_500), Map.of("get_order", "mcp"), new ArrayList<>());
+
+        assertTrue(result.contains("[TRUNCATED"), "the strategy must actually have fallen back: " + result.substring(0, 200));
+        assertEquals(1.0, screenings());
     }
 
     @Test
