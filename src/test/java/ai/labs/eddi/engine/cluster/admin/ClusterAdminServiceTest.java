@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.ISharedStateFactory;
 import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.events.JetStreamEventBus;
@@ -30,6 +32,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ActionResult;
 import ai.labs.eddi.engine.model.ClusterAdminModels.BulkResult;
 import ai.labs.eddi.engine.model.ClusterAdminModels.BucketView;
+import ai.labs.eddi.engine.model.ClusterAdminModels.ClusterNode;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ClusterOverview;
 import ai.labs.eddi.engine.model.ClusterAdminModels.DeadLetterPage;
 import ai.labs.eddi.engine.model.ClusterAdminModels.DeadLetterSummary;
@@ -54,10 +57,12 @@ import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -106,6 +111,11 @@ class ClusterAdminServiceTest {
      */
     private LocalSharedStateFactory shared;
     private final List<Map<String, Object>> members = new ArrayList<>();
+    /**
+     * How long ago this node saw each member's record change, on its own clock; a
+     * member not listed has a fresh record, a negative age is unknown.
+     */
+    private final Map<String, Long> heartbeatAges = new HashMap<>();
 
     @SuppressWarnings("unchecked")
     private static <T> Instance<T> instance(T value) {
@@ -147,6 +157,11 @@ class ClusterAdminServiceTest {
         when(presence.members()).thenAnswer(i -> List.copyOf(members));
         when(presence.currentMembers()).thenAnswer(i -> List.copyOf(members));
         when(presence.selfRecord()).thenAnswer(i -> members.get(0));
+        heartbeatAges.clear();
+        when(presence.heartbeatAgeMillis(anyString())).thenAnswer(i -> {
+            long age = heartbeatAges.getOrDefault(i.<String>getArgument(0), 0L);
+            return age < 0 ? OptionalLong.empty() : OptionalLong.of(age);
+        });
         natsLeases = mock(NatsLeaseManager.class);
         eventBus = mock(JetStreamEventBus.class);
         memoryStore = mock(IConversationMemoryStore.class);
@@ -282,10 +297,37 @@ class ClusterAdminServiceTest {
         @Test
         @DisplayName("a member whose heartbeat is late is STALE and degrades the verdict")
         void staleMember() {
-            members.set(1, member("n2", "b2", NOW - 25_000));
+            heartbeatAges.put("n2", 25_000L);
             ClusterOverview overview = service.overview();
             assertEquals("DEGRADED", overview.verdict());
-            assertEquals("STALE", overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow().state());
+            ClusterNode n2 = overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow();
+            assertEquals("STALE", n2.state());
+            assertEquals(25_000L, n2.heartbeatAgeMs());
+        }
+
+        @Test
+        @DisplayName("OPS-1: a member whose clock runs behind is LIVE while this node sees its record rewritten")
+        void skewedMemberIsLive() {
+            members.set(1, member("n2", "b2", NOW - 60_000));
+            heartbeatAges.put("n2", 3_000L);
+            ClusterOverview overview = service.overview();
+            assertEquals("HEALTHY", overview.verdict(), String.valueOf(overview.reasons()));
+            ClusterNode n2 = overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow();
+            assertEquals("LIVE", n2.state());
+            assertEquals(3_000L, n2.heartbeatAgeMs(), "the age is this node's observation, not the writer's timestamp");
+            assertEquals(NOW - 60_000, n2.lastHeartbeat(), "the writer's own timestamp is still shown");
+        }
+
+        @Test
+        @DisplayName("OPS-1: a member whose age this node cannot tell yet is LIVE, with the age its own timestamp gives")
+        void unknownAgeIsLive() {
+            members.set(1, member("n2", "b2", NOW - 25_000));
+            heartbeatAges.put("n2", -1L);
+            ClusterOverview overview = service.overview();
+            ClusterNode n2 = overview.nodes().stream().filter(n -> n.nodeId().equals("n2")).findFirst().orElseThrow();
+            assertEquals("LIVE", n2.state());
+            assertTrue(n2.heartbeatAgeMs() >= 25_000L, String.valueOf(n2.heartbeatAgeMs()));
+            assertFalse(overview.reasons().contains("NODE_STALE"));
         }
 
         private ClusterAdminService withReplicas(boolean offline, boolean current) {
@@ -339,7 +381,7 @@ class ClusterAdminServiceTest {
         @DisplayName("flags a gone holder, a missed renewal and a waiting node; suspicious first; agents read in one call")
         void flags() throws Exception {
             long renewedLongAgo = NOW - 60_000;
-            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+            when(natsLeases.snapshot(ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
                     new LeaseSnapshot("c.healthy", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null),
                     new LeaseSnapshot("c.orphan", new LeaseInfo("n9", "b9", 11, NOW - 90_000), renewedLongAgo, "n1"),
                     new LeaseSnapshot("leader.hitl-recovery", new LeaseInfo("n1", "b1", 12, NOW - 5_000), NOW - 100, null)));
@@ -364,7 +406,7 @@ class ClusterAdminServiceTest {
         @Test
         @DisplayName("D6: consoles polling the lease page share one scan until a force-release on this node")
         void leaseScanIsShared() throws Exception {
-            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+            when(natsLeases.snapshot(ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
                     new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
             when(natsLeases.forceRelease("c.conv1", 10L))
                     .thenReturn(new ForceRelease(ForceReleaseOutcome.RELEASED, new LeaseInfo("n2", "b2", 10, NOW), 10));
@@ -372,18 +414,18 @@ class ClusterAdminServiceTest {
             service.leases(null, false, 100);
             service.leases("conv", true, 100);
             service.leases(null, false, 10);
-            verify(natsLeases, times(1)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(natsLeases, times(1)).snapshot(ClusterAdminService.MAX_LEASE_SCAN);
             verify(memoryStore, times(1)).loadListingSummaries(anyCollection());
 
             service.forceRelease("conv1", 10L, "admin-1");
             service.leases(null, false, 100);
-            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(natsLeases, times(2)).snapshot(ClusterAdminService.MAX_LEASE_SCAN);
         }
 
         @Test
         @DisplayName("D6: a scan that runs while the force-release is in flight is not served afterwards")
         void scanDuringForceReleaseIsDropped() {
-            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+            when(natsLeases.snapshot(ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
                     new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
             when(natsLeases.forceRelease("c.conv1", 10L)).thenAnswer(inv -> {
                 service.leases(null, false, 100); // a console refresh racing the release
@@ -392,26 +434,26 @@ class ClusterAdminServiceTest {
 
             service.forceRelease("conv1", 10L, "admin-1");
             service.leases(null, false, 100);
-            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(natsLeases, times(2)).snapshot(ClusterAdminService.MAX_LEASE_SCAN);
         }
 
         @Test
         @DisplayName("D6: a scan invalidated while it reads the bucket is returned but not cached")
         void scanInvalidatedMidwayIsNotCached() {
-            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenAnswer(inv -> {
+            when(natsLeases.snapshot(ClusterAdminService.MAX_LEASE_SCAN)).thenAnswer(inv -> {
                 service.invalidateLeaseScan();
                 return List.of(new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null));
             });
 
             assertEquals(1, service.leases(null, false, 100).leases().size());
             service.leases(null, false, 100);
-            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(natsLeases, times(2)).snapshot(ClusterAdminService.MAX_LEASE_SCAN);
         }
 
         @Test
         @DisplayName("a holder that came back with a new boot is RESTARTED")
         void restartedHolder() {
-            when(natsLeases.snapshot(anyString(), anyInt()))
+            when(natsLeases.snapshot(anyInt()))
                     .thenReturn(List.of(new LeaseSnapshot("c.x", new LeaseInfo("n2", "old-boot", 10, NOW), NOW, null)));
             LeaseView v = service.leases(null, false, 10).leases().get(0);
             assertEquals("RESTARTED", v.holderStatus());
@@ -840,6 +882,79 @@ class ClusterAdminServiceTest {
             }
         }
 
+        @Test
+        @DisplayName("OPS-1: a member whose clock runs behind still counts as taking turns: draining the other node is allowed")
+        void lastNodeGuardIgnoresWriterClockSkew() {
+            when(rpc.call(anyString(), eq(ClusterAdminService.RPC_DRAIN), anyMap())).thenReturn(Optional.of(Map.of("draining", true)));
+            drainKey("n1");
+            members.set(2, member("n3", "b3", NOW - 60_000)); // n3's wall clock is a minute behind
+            heartbeatAges.put("n3", 2_000L); // ... and this node saw its record rewritten 2 s ago
+            assertEquals("DRAINED", service.drain("n2", true, "a").outcome());
+        }
+
+        @Test
+        @DisplayName("OPS-1: a member this node saw rewritten too long ago, or cannot date yet, does not count as taking turns")
+        void lastNodeGuardRefusesStaleOrUnknownAge() {
+            drainKey("n1");
+            heartbeatAges.put("n3", 25_000L);
+            assertEquals("LAST_NODE", outcome(() -> service.drain("n2", true, "a")));
+            heartbeatAges.put("n3", -1L);
+            assertEquals("LAST_NODE", outcome(() -> service.drain("n2", true, "a")));
+            verify(rpc, never()).call(anyString(), eq(ClusterAdminService.RPC_DRAIN), anyMap());
+        }
+
+        @Test
+        @DisplayName("OPS-1: the drained node's own check does not read the other members' clocks either")
+        void remoteDrainCheckIgnoresWriterClockSkew() {
+            putAdminKey(ClusterAdminService.DRAIN_GATE);
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            members.set(1, member("n2", "b2", NOW - 60_000));
+            members.set(2, member("n3", "b3", NOW - 60_000));
+            assertNull(service.remoteDrainRefusal());
+
+            heartbeatAges.put("n2", 25_000L);
+            heartbeatAges.put("n3", -1L);
+            assertTrue(String.valueOf(service.remoteDrainRefusal()).contains("last node"), service.remoteDrainRefusal());
+        }
+
+        @Test
+        @DisplayName("OPS-9: the drain key written for a decision being applied survives this node's own key sync")
+        void drainKeySurvivesSyncWhileGateIsHeld() {
+            putAdminKey(ClusterAdminService.DRAIN_GATE);
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            service.syncOwnDrainKey(); // the scheduled sync runs before the drain request arrives
+            assertEquals(Map.of("draining", true), service.onDrainRequest(Map.of("drain", true)));
+        }
+
+        @Test
+        @DisplayName("OPS-9: a leftover drain key of a node that is not draining is removed when no decision is open")
+        void leftoverDrainKeyIsRemoved() {
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            service.syncOwnDrainKey();
+            assertTrue(shared.bucket(ClusterAdminService.ADMIN_BUCKET).get(ClusterAdminService.DRAIN_PREFIX + "n1").isEmpty());
+        }
+
+        @Test
+        @DisplayName("OPS-9: a drain key rewritten between the sync's read and its delete is kept (the delete is conditional)")
+        void drainKeyRewrittenDuringSyncIsKept() {
+            ISharedKv bucket = spy(shared.bucket(ClusterAdminService.ADMIN_BUCKET));
+            ISharedStateFactory factory = mock(ISharedStateFactory.class);
+            when(factory.bucket(any())).thenReturn(bucket);
+            ClusterAdminService node = new ClusterAdminService(config, activity, watcher, coordinator, leaseManager, rpc,
+                    instance(connections), instance(presence), instance(natsLeases), instance(eventBus), memoryStore,
+                    conversationService, deployments, audit, new SimpleMeterRegistry(), factory, instance(null));
+            String key = ClusterAdminService.DRAIN_PREFIX + "n1";
+            bucket.put(key, "x".getBytes(StandardCharsets.UTF_8)); // left over from an earlier drain
+            doAnswer(i -> {
+                // Meanwhile another node decides to drain this one: it opens the gate,
+                // writes the key and closes the gate before this sync looks at it.
+                bucket.put(key, "1".getBytes(StandardCharsets.UTF_8));
+                return Optional.empty();
+            }).when(bucket).getConsistent(ClusterAdminService.DRAIN_GATE);
+            node.syncOwnDrainKey();
+            assertTrue(bucket.get(key).isPresent(), "the fresh key is not deleted at the revision read before it was written");
+        }
+
         private String outcome(Supplier<ActionResult> action) {
             try {
                 return action.get().outcome();
@@ -903,6 +1018,8 @@ class ClusterAdminServiceTest {
             assertEquals("DRAINED", self.outcome());
             verify(natsLeases).setDraining(true);
             verify(presence).publishNow();
+            assertTrue(shared.bucket(ClusterAdminService.ADMIN_BUCKET).get(ClusterAdminService.DRAIN_PREFIX + "n1").isPresent(),
+                    "the key sync run while the drain gate is held keeps the key of the decision");
 
             when(rpc.call("n2", ClusterAdminService.RPC_DRAIN, Map.of("drain", true))).thenReturn(Optional.of(Map.of("draining", true)));
             assertEquals("DRAINED", service.drain("n2", true, "a").outcome());
@@ -915,6 +1032,8 @@ class ClusterAdminServiceTest {
             assertEquals(404, missing.status());
 
             // a node that answers with an error did answer: NODE_FAILED, naming the error
+            // (n2 is undrained first: with n1 and n2 drained, n3 would be the last node)
+            shared.bucket(ClusterAdminService.ADMIN_BUCKET).delete(ClusterAdminService.DRAIN_PREFIX + "n2");
             when(rpc.call("n3", ClusterAdminService.RPC_DRAIN, Map.of("drain", true))).thenReturn(Optional.of(Map.of("error", "handler failed")));
             var failed = assertThrows(ClusterAdminService.ActionRefusedException.class, () -> service.drain("n3", true, "a"));
             assertEquals("NODE_FAILED", failed.code());
