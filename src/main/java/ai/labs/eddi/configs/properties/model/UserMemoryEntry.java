@@ -106,6 +106,23 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
                 newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy);
     }
 
+    /**
+     * This entry as a new statement of its fact: {@code ACCEPTED}, no
+     * {@code supersededBy}, not {@code conflicted}. Both stores apply it to every
+     * value write — upsert, insert, owned upsert, compare-and-set replace — so a
+     * client that edits a contested entry and sends it back (REST {@code PUT}
+     * echoes whatever it read) cannot carry the old verdict onto the new value, and
+     * {@code conflicted} can never disagree with {@code assessment}. The only way
+     * to store any other assessment is
+     * {@code IUserMemoryStore#setAssessmentIfUnchanged}, which Dream uses.
+     */
+    public UserMemoryEntry asStatement() {
+        if (assessment == Assessment.ACCEPTED && supersededBy == null && !conflicted) {
+            return this;
+        }
+        return withAssessment(Assessment.ACCEPTED, null);
+    }
+
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");
 

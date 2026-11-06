@@ -260,6 +260,41 @@ class DatastoreParityTest extends MongoTestBase {
         assertNull(merged.supersededBy(), backend);
     }
 
+    /**
+     * Every value write is a new statement of the fact. An entry that arrives
+     * carrying a verdict — a REST client echoing what it read, a caller building
+     * one from a stored entry — is stored ACCEPTED on every path, so conflicted can
+     * never disagree with assessment.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory assessment: no value write stores the verdict it was handed")
+    void userMemoryValueWritesStoreAccepted(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-assess-echo-" + UUID.randomUUID();
+
+        String upserted = store.upsert(entry(user, "a", "x").withAssessment(Assessment.CONTESTED, null));
+        assertAccepted(backend + " upsert", store.findEntryById(upserted).orElseThrow());
+
+        String inserted = store.insertIfAbsent(entry(user, "b", "x").withAssessment(Assessment.SUPERSEDED, upserted));
+        assertAccepted(backend + " insertIfAbsent", store.findEntryById(inserted).orElseThrow());
+
+        UserMemoryEntry read = store.findEntryById(upserted).orElseThrow();
+        assertTrue(store.replaceIfUnchanged(upserted, read.withAssessment(Assessment.SUPERSEDED, inserted), read.updatedAt()), backend);
+        assertAccepted(backend + " replaceIfUnchanged", store.findEntryById(upserted).orElseThrow());
+
+        var global = new UserMemoryEntry(null, user, "c", "x", "fact", Visibility.global, "parity-agent", List.of(), null, true, 0, null, null,
+                Assessment.CONTESTED, null);
+        assertTrue(store.upsertIfOwnedBy(global, "parity-agent"), backend);
+        assertAccepted(backend + " upsertIfOwnedBy", store.getAllEntries(user).stream().filter(e -> "c".equals(e.key())).findFirst().orElseThrow());
+    }
+
+    private static void assertAccepted(String what, UserMemoryEntry stored) {
+        assertEquals(Assessment.ACCEPTED, stored.assessment(), what);
+        assertNull(stored.supersededBy(), what);
+        assertFalse(stored.conflicted(), what);
+    }
+
     private static UserMemoryEntry entry(String user, String key, Object value) {
         return new UserMemoryEntry(null, user, key, value, "fact", Visibility.self, "parity-agent", List.of(), null, false, 0, null, null);
     }
