@@ -310,9 +310,10 @@ public class RestConversationStore implements IRestConversationStore {
         //
         // `mine` narrows any caller, an admin included, to the conversations they own:
         // a client choosing one to continue must not be handed somebody else's.
-        // Without a named caller there is no owner to narrow to, and it does nothing.
+        // Without a named caller, or with authorization disabled, there is no owner
+        // to narrow to, and it does nothing.
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
-        final String onlyOwner = Boolean.TRUE.equals(mine) ? conversationAccessGuard.callerActor(null) : null;
+        final String onlyOwner = Boolean.TRUE.equals(mine) ? conversationAccessGuard.ownConversationsOwner() : null;
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();

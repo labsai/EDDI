@@ -658,4 +658,31 @@ class RestConversationStoreOwnershipTest {
         verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
     }
+
+    @Test
+    @DisplayName("mine=true changes nothing with authorization disabled, even for a caller a token names")
+    @SuppressWarnings("unchecked")
+    void mineWithAuthorizationDisabledIgnoresANamedCaller() throws Exception {
+        // With authorization.enabled=false a conversation records the userId the
+        // client passed, or a generated anonymous one, never the principal: matching
+        // the principal would hide every conversation, and the chat panel would
+        // never find one to resume.
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(OWNER);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(false), mock(IConversationDescriptorStore.class));
+        var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
+                30, 90, attachmentStorageInstance);
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", "anonymous-0a1b"), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
+
+        List<ConversationDescriptor> result = store.readConversationDescriptors(0, 20, null, null, null, null, null, null, true);
+
+        assertEquals(2, result.size());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertTrue(captor.getValue().isEmpty());
+    }
 }

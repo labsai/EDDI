@@ -71,8 +71,10 @@ public interface IRestConversationStore {
      * included. A client that picks a conversation to continue (the chat panel's
      * resume) must ask this, or it continues another user's. The owner is an exact
      * match on the descriptor's {@code userId}, so a pre-v5.1.6 conversation that
-     * records no owner there is left out. Without a named caller (authorization
-     * disabled) there is no owner to match and the flag changes nothing.
+     * records no owner there is left out. Without a named caller, or with
+     * authorization disabled (a conversation then records the userId the client
+     * passed, not the principal), there is no owner to match and the flag changes
+     * nothing.
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)

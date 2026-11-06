@@ -20,8 +20,9 @@ resolved, which the Manager does not reliably know. So the listing gained a flag
   conversations). The owner is pushed into the descriptor query as an exact match on `userId`, so a
   pre-v5.1.6 conversation that records no owner on its descriptor is left out, and the per-row check
   enforces the same, as it stays the authority over the query. The "search matches nothing, list
-  everything" fallback is decided within the same set. Without a named caller (authorization disabled)
-  there is no owner and the flag changes nothing. The default is `false`: existing clients are unchanged.
+  everything" fallback is decided within the same set. Without a named caller, or with authorization
+  disabled (a conversation then records the userId the client passed, not the principal, even when a
+  token names the caller), there is no owner and the flag changes nothing. The default is `false`: existing clients are unchanged.
 - **Manager:** the chat panel's resume and its history list (they share one cache entry, so they must
   ask the same question), the operator's restore and its History list all ask for `mine`. Browsing
   everybody's conversations stays on the Conversations page.
