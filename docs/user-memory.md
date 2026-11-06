@@ -97,7 +97,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 |---|---|---|---|
 | `maxKeyLength` | `int` | `100` | Maximum characters for memory keys |
 | `maxValueLength` | `int` | `1000` | Maximum characters for memory values |
-| `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn. A re-save of a fact that is already stored unchanged is not a write and does not count |
+| `maxWritesPerTurn` | `int` | `10` | Write-rate limit per conversation turn, shared by `rememberFact` and `forgetFact`: a stored fact and a deleted one each count once. The turn is the whole turn — every step of an agent-mode model cascade, and the continuation of a turn resumed after a HITL tool approval, spend the same budget. A re-save of a fact that is already stored unchanged is not a write and does not count, and neither does a refused write or a `forgetFact` that finds nothing to delete |
 | `allowedCategories` | `List<String>` | `["preference","fact","context"]` | Allowed memory categories |
 | `allowedVisibilities` | `List<String>` | `["self"]` | Visibilities the `rememberFact` tool may write (`self`, `group`, `global`). By default the model can only store memories private to this agent, so a prompt-injected model cannot broadcast to every agent (`global`) or the group. The configured `defaultVisibility` is always added, so a default can never block every write |
 | `allowGlobalKeyOverwrite` | `boolean` | `false` | Whether a `global` write may replace the value of an existing global key this agent does not provably own — one owned by another agent, or one whose entry records no owning agent (legacy/migrated data). Off by default: such a write is refused with a message suggesting a different key or `self` visibility |
@@ -186,7 +186,7 @@ Returns: matching entries formatted as bullet list
 
 ### `forgetFact`
 
-Delete a specific memory by key. Only a memory this agent can see is deleted, and a `global` memory only when this agent owns it — unless `allowGlobalKeyOverwrite` is on, the same rule `rememberFact` applies, since deleting another agent's global key and writing it again would replace its value.
+Delete a specific memory by key. Only a memory this agent can see is deleted, and a `global` memory only when this agent owns it — unless `allowGlobalKeyOverwrite` is on, the same rule `rememberFact` applies, since deleting another agent's global key and writing it again would replace its value. A deletion counts against `maxWritesPerTurn` like a write, so one turn cannot erase more memories than it could store.
 
 ```
 Parameters:
