@@ -2979,6 +2979,28 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String summarizationPrompt;
 
         /**
+         * When true, the summarizer is told to end every point with the conversation
+         * steps it came from ({@code [turns 4-7]}, numbered as
+         * {@code conversationRecall} reads them), to copy numbers verbatim and to write
+         * "unclear in source" rather than guess — and its answer is checked, without a
+         * model, before it is stored: every citation must lie in the summarized range
+         * and every number must appear verbatim in the turns it cites. Off by default;
+         * while off, the check never runs and the prompt is unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What happens to a summary that fails the {@link #citeSources} check:
+         * {@code keep} (store it anyway — the default), {@code retry_once} (one more
+         * summarizer call with the problems listed, screened and spend-checked like the
+         * first; if that fails too, as {@code fallback_to_previous}) or
+         * {@code fallback_to_previous} (discard it; the previous summary and its
+         * boundary stay, and the next turn tries again). Unknown values log a WARN and
+         * act as {@code keep}. Ignored while {@code citeSources} is false.
+         */
+        private String onValidationFailure = "keep";
+
+        /**
          * Validate and sanitize configuration values. Enforces sensible floor values to
          * prevent IndexOutOfBoundsException (negative window), wasteful LLM calls (zero
          * window triggers every turn), and NPE (null provider).
@@ -3083,6 +3105,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
     }
 

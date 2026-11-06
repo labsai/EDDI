@@ -303,4 +303,37 @@ class ConversationRecallToolTest {
         assertFalse(result.contains("User message 3"), result);
         assertTrue(result.contains("User message 2"), result);
     }
+
+    @Test
+    void recallConversationDetail_aSummaryCitationReturnsEveryTurnItNames() {
+        var tool = new ConversationRecallTool(createOutputs(15), 12, 20);
+
+        String result = tool.recallConversationDetail("[turns 2-3, 7]");
+
+        assertTrue(result.startsWith("**Recalled conversation turns 2-3, 7:**"), result);
+        assertTrue(result.contains("User message 2") && result.contains("User message 3") && result.contains("User message 7"), result);
+        assertFalse(result.contains("User message 4"), result);
+    }
+
+    @Test
+    void recallConversationDetail_citedTurnsAreDeduplicatedOrderedAndCapped() {
+        var tool = new ConversationRecallTool(createOutputs(15), 12, 3);
+
+        String result = tool.recallConversationDetail("[steps 9, 2-3; 3-4]");
+
+        // 9 is cited first and kept; 2 and 3 fill the cap; 4 is left out
+        assertTrue(result.startsWith("**Recalled conversation turns 2-3, 9:**"), result);
+        assertFalse(result.contains("User message 4"), result);
+        assertTrue(result.contains("1 more cited turns were not returned"), result);
+    }
+
+    @Test
+    void recallConversationDetail_citedTurnsPastTheSummaryAreClamped() {
+        var tool = new ConversationRecallTool(createOutputs(15), 5, 20);
+
+        String result = tool.recallConversationDetail("[turns 3-40]");
+
+        assertTrue(result.startsWith("**Recalled conversation turns 3-4:**"), result);
+        assertFalse(result.contains("User message 5"), result);
+    }
 }
