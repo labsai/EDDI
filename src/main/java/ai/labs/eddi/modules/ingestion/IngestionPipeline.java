@@ -915,6 +915,11 @@ public class IngestionPipeline {
 
         @Override
         public void reportFailure(String documentId, String location, SourceError error) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Source '%s' could not read %s: %s (%s)", LogSanitizer.sanitize(context.source().getName()),
+                        location == null ? "the source" : LogSanitizer.sanitize(location),
+                        LogSanitizer.sanitize(error.reason()), error.getClass().getSimpleName());
+            }
             collector.onFailure(documentId, error);
         }
 
