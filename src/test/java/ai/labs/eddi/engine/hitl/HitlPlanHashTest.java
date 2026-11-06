@@ -97,6 +97,8 @@ class HitlPlanHashTest {
             assertThrows(JsonProcessingException.class, () -> HitlPlanHash.canonicalJson("{\"a\":1,\"a\":2}"));
             assertThrows(JsonProcessingException.class, () -> HitlPlanHash.canonicalJson("not json"));
             assertThrows(JsonProcessingException.class, () -> HitlPlanHash.canonicalJson(""));
+            assertThrows(JsonProcessingException.class, () -> HitlPlanHash.canonicalJson("{\"amount\":1} {\"amount\":9999}"));
+            assertThrows(JsonProcessingException.class, () -> HitlPlanHash.canonicalJson("{\"amount\":1} trailing"));
         }
     }
 
@@ -176,6 +178,13 @@ class HitlPlanHashTest {
             assertNotEquals(hash(batch(call("c1", "t", "\"x\""))), hash(batch(call("c1", "t", "x"))),
                     "a JSON string and the same raw text do not collide");
             assertNotNull(hash(batch(call("c1", "t", null))));
+            // Anything after the first value is part of the plan: two documents are
+            // hashed as text, so neither the second value nor its change is lost.
+            String single = hash(batch(call("c1", "t", "{\"amount\":1}")));
+            String trailing = hash(batch(call("c1", "t", "{\"amount\":1} {\"amount\":9999}")));
+            assertNotEquals(single, trailing, "a trailing document must not be dropped from the plan");
+            assertNotEquals(trailing, hash(batch(call("c1", "t", "{\"amount\":1} {\"amount\":1}"))));
+            assertEquals(single, hash(batch(call("c1", "t", " {\"amount\":1}\n"))), "surrounding whitespace is not a trailing token");
         }
 
         @Test

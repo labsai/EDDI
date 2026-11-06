@@ -547,8 +547,10 @@ public class SlackInteractivityHandler {
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, resolutionDetail(decision));
         } catch (IConversationService.PlanMismatchException e) {
             // The plan this card was posted for is not the pending one. Nothing ran and
-            // the pause is untouched; the card is left as it is — it was not resolved.
+            // the pause is untouched. The card's buttons can never succeed again (they
+            // carry the old plan), so the card says so instead of staying clickable.
             LOGGER.warnf("Slack HITL decision for %s refused: the card's plan is not the pending one", sanitize(conversationId));
+            finalizePlanChanged(auth, approvalChannelId, messageTs);
         } catch (IllegalStateException e) {
             // Already decided / timed out / not paused, or the pause changed after
             // the check above (PauseMismatchException) — idempotent. Do NOT
@@ -580,9 +582,10 @@ public class SlackInteractivityHandler {
             groupConversationService.resumeDiscussion(groupConversationId, request, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, null);
         } catch (IGroupConversationService.GroupPlanMismatchException e) {
-            // As for a conversation: not resolved, nothing changed, card left intact.
+            // As for a conversation: not resolved, nothing changed, the card says why.
             LOGGER.warnf("Slack HITL decision for group %s refused: the card's plan is not the pending one",
                     sanitize(groupConversationId));
+            finalizePlanChanged(auth, approvalChannelId, messageTs);
         } catch (IllegalStateException
                 | GroupDiscussionException
                 | IResourceStore.ResourceModifiedException
@@ -739,6 +742,26 @@ public class SlackInteractivityHandler {
                     SlackHitlSupport.buildResolvedBlocks(text));
         } catch (SlackDeliveryException e) {
             LOGGER.warnf("Failed to update resolved HITL message %s: %s", sanitize(messageTs), e.getMessage());
+        }
+    }
+
+    /** Text of a card whose plan is no longer the pending one. */
+    static final String PLAN_CHANGED_TEXT = "⚠️ Not applied: the request this card was posted for has changed since. "
+            + "Nothing was run and the request is still waiting — review the current request in the Manager.";
+
+    /**
+     * Replaces a card whose plan is no longer the pending one: its buttons carry
+     * the old plan hash and could only be refused again. The pause itself is left
+     * as it is, still awaiting a decision.
+     */
+    private void finalizePlanChanged(String auth, String channelId, String messageTs) {
+        if (auth == null || messageTs == null) {
+            return;
+        }
+        try {
+            slackApi.updateMessage(auth, channelId, messageTs, PLAN_CHANGED_TEXT, SlackHitlSupport.buildResolvedBlocks(PLAN_CHANGED_TEXT));
+        } catch (SlackDeliveryException e) {
+            LOGGER.warnf("Failed to update plan-changed HITL message %s: %s", sanitize(messageTs), e.getMessage());
         }
     }
 

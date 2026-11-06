@@ -77,15 +77,16 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * </ul>
  * <b>Canonicalization.</b> Object keys sorted by UTF-16 code unit (as RFC 8785
  * sorts them); arrays keep their order; no insignificant whitespace; strings as
- * parsed (so {@code "é"} and {@code "é"} hash alike, but no Unicode
- * normalization is applied — a precomposed and a decomposed character are
- * different strings to the tool and therefore different plans); numbers by
- * VALUE: {@code 1}, {@code 1.0}, {@code 1e0} and {@code 1.00} are all
- * {@code 1}, {@code 0.10} is {@code 0.1}, {@code -0} is {@code 0}. Value
- * equality is deliberate: a store or a provider that re-serializes the
- * arguments must not turn a pure re-encoding into a refused approval. Arguments
- * that are not a valid JSON document (or repeat a key) are hashed as their
- * exact text instead.
+ * parsed (so a JSON escape sequence and the literal character it stands for
+ * hash alike, but no Unicode normalization is applied — a precomposed and a
+ * decomposed character are different strings to the tool and therefore
+ * different plans); numbers by VALUE: {@code 1}, {@code 1.0}, {@code 1e0} and
+ * {@code 1.00} are all {@code 1}, {@code 0.10} is {@code 0.1}, {@code -0} is
+ * {@code 0}. Value equality is deliberate: a store or a provider that
+ * re-serializes the arguments must not turn a pure re-encoding into a refused
+ * approval. Arguments that are not exactly one valid JSON document (they repeat
+ * a key, or carry anything after the first value) are hashed as their exact
+ * text instead.
  * <p>
  * <b>Why a nonce.</b> The tool-call hash covers the RAW arguments and is served
  * next to the REDACTED ones; a plain digest would let anyone holding both guess
@@ -109,7 +110,11 @@ public final class HitlPlanHash {
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build())
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
+            .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
+            // One document, nothing after it: otherwise {"amount":1} {"amount":9999}
+            // would parse as its first value and hash like {"amount":1}, leaving a
+            // trailing change outside the plan.
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private static final ObjectMapper WRITER = new ObjectMapper();
     private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
     private static final SecureRandom RANDOM = new SecureRandom();
