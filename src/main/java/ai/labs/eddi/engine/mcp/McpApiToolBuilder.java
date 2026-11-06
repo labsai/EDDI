@@ -179,6 +179,9 @@ public final class McpApiToolBuilder {
         var summaryLines = new ArrayList<String>();
         var matchedFilters = new ArrayList<String>();
         var unusableEndpoints = new ArrayList<String>();
+        // Tool names already handed out, to keep them unique — see uniqueToolName.
+        var toolNames = new HashSet<String>();
+        var renamedTools = new ArrayList<String>();
 
         if (openAPI.getPaths() != null) {
             for (var pathEntry : openAPI.getPaths().entrySet()) {
@@ -216,6 +219,15 @@ public final class McpApiToolBuilder {
                     }
 
                     ApiCall httpCall = buildApiCall(method, path, pathItem, operation, apiAuth, authHeader, openAPI);
+                    String uniqueName = uniqueToolName(httpCall.getName(), method, path, toolNames);
+                    if (!uniqueName.equals(httpCall.getName())) {
+                        renamedTools.add(method.toUpperCase() + " " + path + ": " + httpCall.getName() + " -> " + uniqueName);
+                        httpCall.setName(uniqueName);
+                        httpCall.setResponseObjectName(uniqueName + "_response");
+                        if (httpCall.getResponseHeaderObjectName() != null) {
+                            httpCall.setResponseHeaderObjectName(uniqueName + "_responseHeaders");
+                        }
+                    }
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -225,6 +237,9 @@ public final class McpApiToolBuilder {
             }
         }
 
+        if (!renamedTools.isEmpty()) {
+            LOGGER.warnf("The OpenAPI spec repeats operationIds; these tools were renamed to stay unique: %s", renamedTools);
+        }
         List<String> unmatchedEndpoints = allowedEndpoints.stream().filter(filter -> !matchedFilters.contains(filter)).sorted().toList();
         if (!unusableEndpoints.isEmpty()) {
             LOGGER.warnf("Operations skipped because they require an input a generated tool cannot send: %s", unusableEndpoints);
@@ -517,6 +532,31 @@ public final class McpApiToolBuilder {
     }
 
     /**
+     * A tool name no earlier operation of this spec has taken.
+     * <p>
+     * A tool is named after its operationId, and OpenAPI requires those to be
+     * unique — but specs repeat them anyway (EDDI's own once gave a group's lessons
+     * and its outcomes both {@code list}). Every tool source registers its tools by
+     * name, so the second of two equal names was DROPPED at assembly ("Tool name
+     * collision") and the model never saw it, although the endpoint had been
+     * granted and the admin was told it was. The first operation keeps the
+     * operationId, so a spec without repeats generates exactly what it always did;
+     * a repeat takes the method-and-path slug, then a numeric suffix.
+     */
+    static String uniqueToolName(String name, String method, String path, Set<String> taken) {
+        String candidate = name;
+        if (taken.contains(candidate)) {
+            candidate = generateSlug(method, path);
+        }
+        String base = candidate;
+        for (int suffix = 2; taken.contains(candidate); suffix++) {
+            candidate = base + "_" + suffix;
+        }
+        taken.add(candidate);
+        return candidate;
+    }
+
+    /**
      * Build a single ApiCall from an OpenAPI operation.
      */
     private static ApiCall buildApiCall(String method, String path, PathItem pathItem, Operation operation, String apiAuth, String authHeader,
@@ -599,6 +639,10 @@ public final class McpApiToolBuilder {
         // Parameters (path + query)
         var paramDescriptions = new LinkedHashMap<String, String>();
         var queryParams = new LinkedHashMap<String, String>();
+        // Tool parameters the model may leave out: query parameters the spec does not
+        // mark required. Path parameters are always required, by OpenAPI's own rule.
+        var optionalVariables = new LinkedHashSet<String>();
+        var optionalQueryKeys = new ArrayList<String>();
         // The JSON Schema of the same parameters, for ApiCall.argumentSchema: typed
         // tool parameters, and a check of every call before the approval gate.
         var argumentProperties = new LinkedHashMap<String, Object>();
@@ -611,9 +655,8 @@ public final class McpApiToolBuilder {
             String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
             String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
             // The description is the model's ONLY view of the value space —
-            // the generated tool schema types every parameter as a plain
-            // string, and every one is REQUIRED. Without the allowed values
-            // and the default spelled out, the model guesses: observed with
+            // the allowed values and the default are spelled out in it, because
+            // without them the model guesses: observed with
             // `environment`, where a guessed value silently falls back to
             // production on the lenient server-side enum parse — a
             // test-drive that quietly exercises the wrong deployment.
@@ -626,6 +669,10 @@ public final class McpApiToolBuilder {
                 queryParams.put(paramName, "{" + variableName + "}");
                 paramDescriptions.put(variableName, paramDesc);
                 argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
+                if (!Boolean.TRUE.equals(param.getRequired())) {
+                    optionalVariables.add(variableName);
+                    optionalQueryKeys.add(paramName);
+                }
             } else if ("path".equals(param.getIn())) {
                 paramDescriptions.put(variableName, paramDesc);
                 argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
@@ -633,6 +680,9 @@ public final class McpApiToolBuilder {
             // header/cookie params are skipped for now
         }
         request.setQueryParams(queryParams);
+        if (!optionalQueryKeys.isEmpty()) {
+            request.setOptionalQueryParams(optionalQueryKeys);
+        }
 
         // Request body. Dispatch on the media type the operation consumes; a type
         // with no case here is refused up front by findUnmappableInput (when the
@@ -675,13 +725,22 @@ public final class McpApiToolBuilder {
         // Set parameter descriptions for LLM tool use
         if (!paramDescriptions.isEmpty()) {
             httpCall.setParameters(paramDescriptions);
-            // Every parameter stays required, as the untyped tools always made them: an
-            // omitted query value would render as an empty "?name=". Requiredness INSIDE
-            // the body is the spec's own.
+            // Required: every path parameter and body variable, and the query parameters
+            // the spec marks required. An optional query parameter the model leaves out
+            // renders empty and is then not sent at all (Request#getOptionalQueryParams),
+            // so the server applies its own default — it used to be required too, and
+            // the model had to invent a value for every filter and paging knob.
+            // Requiredness INSIDE the body is the spec's own.
             var argumentSchema = new LinkedHashMap<String, Object>();
             argumentSchema.put("type", "object");
             argumentSchema.put("properties", argumentProperties);
-            argumentSchema.put("required", new ArrayList<>(paramDescriptions.keySet()));
+            var required = new ArrayList<String>();
+            for (String variable : paramDescriptions.keySet()) {
+                if (!optionalVariables.contains(variable)) {
+                    required.add(variable);
+                }
+            }
+            argumentSchema.put("required", required);
             httpCall.setArgumentSchema(argumentSchema);
             httpCall.setUnknownFields(ApiCall.UNKNOWN_FIELDS_REJECT);
         }

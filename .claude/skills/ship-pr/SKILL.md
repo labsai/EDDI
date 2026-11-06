@@ -205,7 +205,7 @@ is advisory — which makes a red one *your* problem, not the button's. So:
   workflow, every PR), `Docs Site` (`docs-site.yml`, every PR: the docs-site tests always, the site
   build only when `docs/` or `docs-site/` changed) and `GitBook (docs)` (until the docs move off
   GitBook — `planning/docs-site-migration-plan.md`).
-- `Backend E2E (mongodb)` and `Auth E2E (Keycloak)` feed `E2E Gate`; the UI jobs feed
+- `Backend E2E (mongodb)`, `Auth E2E (Keycloak)` and `Operator Activation E2E` feed `E2E Gate`; the UI jobs feed
   `UI Gate`.
 
 Known traps:

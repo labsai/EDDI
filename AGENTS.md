@@ -530,7 +530,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
 | `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |

@@ -933,6 +933,27 @@ class ApiCallExecutorTest {
     }
 
     @Test
+    void execute_optionalQueryParamRenderedEmpty_isNotSent() throws Exception {
+        // A generated tool's optional argument the model left out renders as "".
+        // Sending "?limit=" would replace the server's default with nothing.
+        ApiCall call = createSimpleApiCall("optional-qp", false);
+        call.getRequest().getQueryParams().put("limit", "");
+        call.getRequest().getQueryParams().put("filter", "abc");
+        call.getRequest().getQueryParams().put("index", "");
+        call.getRequest().setOptionalQueryParams(List.of("limit", "filter"));
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest, never()).setQueryParam(eq("limit"), any());
+        // Optional but supplied: sent.
+        verify(mockRequest).setQueryParam("filter", "abc");
+        // Not optional: sent even when empty, as configurations without the field
+        // expect.
+        verify(mockRequest).setQueryParam("index", "");
+    }
+
+    @Test
     void execute_requestWithHeaders_setsHeaders() throws Exception {
         ApiCall call = createSimpleApiCall("hdr-call", false);
         call.getRequest().getHeaders().put("Accept", "application/json");

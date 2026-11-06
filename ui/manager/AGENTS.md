@@ -348,6 +348,14 @@ what it finds. Off by default. Worth knowing before touching it:
   blocked at activation when OIDC is on, because every tool call would 401.
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
+- **Activation is tested against a real backend, not MSW.** Every unit and
+  component test of the operator runs on mocks, which is how 6.7.0 shipped with
+  `setup-api` refusing the real prompt. `e2e/operator/` (CI: `Operator Activation
+  E2E`, part of `E2E Gate`) activates it through the shipped bundle against the
+  image under test with `llm-stub.mjs` as the model. A change to activation, the
+  canaries, the tool generator or a tool's argument shape can break the stub's
+  assumptions too: it calls `readAgentDescriptors` for "list the agents" and the
+  tool the write canary names, filling arguments from the tool's own schema.
 
 #### 4b. Router, navigation guard and route labels
 
