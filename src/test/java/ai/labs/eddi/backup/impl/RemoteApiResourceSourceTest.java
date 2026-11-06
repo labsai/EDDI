@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.io.IOException;
@@ -113,6 +114,29 @@ class RemoteApiResourceSourceTest {
 
             var source = createSource(AGENT_ID, 1);
             assertThrows(RuntimeException.class, source::readAgent);
+        }
+
+        /**
+         * The agent id is one path segment. Concatenated as it was, the source URL's
+         * resolution normalised {@code ../} away, so an id like this one read any path
+         * on the source with the caller's token. The import service refuses such an id
+         * up front; this is the second line, and the same encoding the archive export
+         * already applies to the id.
+         */
+        @Test
+        @DisplayName("an agent id is sent as one encoded path segment, never as a path")
+        void agentIdCannotLeaveTheAgentPath() throws Exception {
+            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenThrow(new IOException("not answered"));
+
+            var source = createSource("../../secretstore/x", 1);
+            assertThrows(RuntimeException.class, source::readAgent);
+
+            var sent = ArgumentCaptor.forClass(HttpRequest.class);
+            Mockito.verify(mockHttpClient, Mockito.atLeastOnce()).send(sent.capture(), any(HttpResponse.BodyHandler.class));
+            for (HttpRequest request : sent.getAllValues()) {
+                assertTrue(request.uri().getRawPath().startsWith("/agentstore/agents/"), "left the agent path: " + request.uri());
+            }
         }
     }
 
