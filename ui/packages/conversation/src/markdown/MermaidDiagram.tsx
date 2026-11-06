@@ -2,7 +2,7 @@
    (Markdown.tsx), so nothing of it, let alone Mermaid, is in a first load. */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { CopyButton } from "./Markdown";
+import { CopyButton } from "./CopyButton";
 import { useConversationText } from "../react/hooks";
 
 type MermaidRenderer = (source: string, dark: boolean) => Promise<string>;

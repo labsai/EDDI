@@ -30,14 +30,11 @@ import {
   memo,
   Suspense,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
-  useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from "react";
-import { Check, Copy, X } from "lucide-react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import { remarkGfmParse as remarkGfm } from "./remark-gfm-parse";
 import rehypeSanitize from "rehype-sanitize";
@@ -46,59 +43,9 @@ import { useConversationText } from "../react/hooks";
 
 type PluggableList = NonNullable<Options["rehypePlugins"]>;
 
-/** Write text to the clipboard; false when the browser refuses (insecure frame, no permission). */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { CopyButton } from "./CopyButton";
 
-/** A copy button that confirms for a moment, visually and to screen readers. */
-export function CopyButton({
-  getText,
-  label,
-  className,
-}: {
-  getText: () => string;
-  label: string;
-  className: string;
-}) {
-  const t = useConversationText();
-  // Last outcome, shown for a moment: a refused copy must not look like a
-  // button that did nothing.
-  const [status, setStatus] = useState<"idle" | "done" | "failed">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-  const onClick = useCallback(async () => {
-    const ok = await copyText(getText());
-    setStatus(ok ? "done" : "failed");
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setStatus("idle"), 1500);
-  }, [getText]);
-  const shown =
-    status === "done" ? t("conversation.copy.done") : status === "failed" ? t("conversation.copy.failed") : label;
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onClick}
-      aria-label={shown}
-      title={shown}
-      data-copy-status={status}
-      data-testid="copy-button"
-    >
-      {status === "done" ? <Check size="1em" /> : status === "failed" ? <X size="1em" /> : <Copy size="1em" />}
-    </button>
-  );
-}
+export { CopyButton };
 
 /** The language a fenced block names (`language-ts` on its `<code>`), if any. */
 export function codeLanguage(children: ReactNode): string | null {
