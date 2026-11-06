@@ -90,16 +90,33 @@ class McpGdprToolsTest {
         verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 500);
     }
 
-    /** The record carries what the caller was told, as the REST record does. */
+    /**
+     * The record says what the erasure did, as the REST record does: the REST
+     * filter reads the 200 before the body is written, so a reply that cannot be
+     * serialized does not turn a completed erasure into a failed one there either.
+     * Recorded as 500, an erasure that ran would be missing from a search for the
+     * erasures someone carried out.
+     */
     @Test
-    void deleteUserData_unanswerableCallIsRecordedAs500() throws Exception {
+    void deleteUserData_erasureWhoseReplyCannotBeWrittenIsRecordedAsDone() throws Exception {
         when(gdprService.deleteUserData("user-1")).thenReturn(new GdprDeletionResult("user-1", 5, 3, 2, 10,
                 15, Instant.now()));
         when(jsonSerialization.serialize(any())).thenThrow(new IOException("cannot serialize"));
 
         tools.deleteUserData("user-1", "CONFIRM");
 
-        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 500);
+        verify(recorder).recordToolCall("delete_user_data", "user-1", "McpGdprTools#deleteUserData", 200);
+    }
+
+    @Test
+    void exportUserData_exportWhoseReplyCannotBeWrittenIsRecordedWithItsOutcome() throws Exception {
+        when(gdprService.exportUserData("user-1"))
+                .thenReturn(new UserDataExport("user-1", Instant.now(), List.of(), List.of(), List.of(), List.of()));
+        when(jsonSerialization.serialize(any())).thenThrow(new IOException("cannot serialize"));
+
+        tools.exportUserData("user-1");
+
+        verify(recorder).recordToolCall("export_user_data", "user-1", "McpGdprTools#exportUserData", 207);
     }
 
     @Test

@@ -148,7 +148,9 @@ public class McpGdprTools {
                 }
                 return jsonSerialization.serialize(map);
             } catch (Exception e) {
-                outcome = OUTCOME_FAILED;
+                // The outcome stays what the cascade did: if only the reply failed, the
+                // erasure still ran, and the REST record (whose filter reads the status
+                // before the body is written) says so too.
                 LOGGER.errorf(e, "MCP delete_user_data failed");
                 return errorJson("Failed to delete user data");
             }
@@ -221,7 +223,8 @@ public class McpGdprTools {
                 map.put("failedCategories", export.failedCategories());
                 return jsonSerialization.serialize(map);
             } catch (Exception e) {
-                outcome = OUTCOME_FAILED;
+                // As in delete_user_data: a reply that cannot be written leaves the
+                // outcome of the export itself on record.
                 LOGGER.errorf(e, "MCP export_user_data failed");
                 return errorJson("Failed to export user data");
             }
