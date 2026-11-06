@@ -6273,7 +6273,6 @@
     "rules": "Regeln",
     "property": "Eigenschaften-Setzer",
     "apicalls": "API-Aufrufe",
-    "httpcallsLegacy": "API-Aufrufe (veraltet)",
     "llm": "LLM",
     "output": "Ausgabe",
     "templating": "Templating",

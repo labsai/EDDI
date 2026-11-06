@@ -6273,7 +6273,6 @@
     "rules": "नियम",
     "property": "प्रॉपर्टी सेटर",
     "apicalls": "API कॉल",
-    "httpcallsLegacy": "API कॉल (लीगेसी)",
     "llm": "LLM",
     "output": "आउटपुट",
     "templating": "टेम्पलेटिंग",

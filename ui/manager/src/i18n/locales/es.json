@@ -6333,7 +6333,6 @@
     "rules": "Reglas",
     "property": "Asignador de propiedades",
     "apicalls": "Llamadas a la API",
-    "httpcallsLegacy": "Llamadas a la API (heredadas)",
     "llm": "LLM",
     "output": "Salida",
     "templating": "Plantillas",

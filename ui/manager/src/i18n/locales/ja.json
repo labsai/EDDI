@@ -6273,7 +6273,6 @@
     "rules": "ルール",
     "property": "プロパティ設定",
     "apicalls": "API 呼び出し",
-    "httpcallsLegacy": "API 呼び出し（旧形式）",
     "llm": "LLM",
     "output": "出力",
     "templating": "テンプレート",

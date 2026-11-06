@@ -130,9 +130,10 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
     expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.behavior"]).toBe("rules");
   });
 
-  it("labels the v6 api-calls step as current and the v5 spelling as legacy", () => {
+  it("labels both names of the api-calls step the same, and neither as legacy", () => {
+    // ai.labs.httpcalls is ApiCallsTask.ID, the canonical name; ai.labs.apicalls is its alias.
+    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.httpcalls"]?.label).toBe("API Calls");
     expect(EXTENSION_TYPE_INFO["eddi://ai.labs.apicalls"]?.label).toBe("API Calls");
-    expect(EXTENSION_TYPE_INFO["eddi://ai.labs.httpcalls"]?.label).toBe("API Calls (legacy)");
   });
 
   it("hasResourceStore returns true for rag", () => {
@@ -182,7 +183,7 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
 
   it("getExtensionLabel resolves a known type through i18n", () => {
     expect(getExtensionLabel("eddi://ai.labs.apicalls", t)).toBe("API Calls");
-    expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls (legacy)");
+    expect(getExtensionLabel("eddi://ai.labs.httpcalls", t)).toBe("API Calls");
   });
 
   it("getExtensionIcon returns the unknown-type icon for unknown, resolves for known", () => {
