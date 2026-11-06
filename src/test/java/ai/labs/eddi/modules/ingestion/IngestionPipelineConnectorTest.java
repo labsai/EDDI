@@ -299,6 +299,28 @@ class IngestionPipelineConnectorTest {
     }
 
     @Test
+    @DisplayName("a request the provider rejects as made keeps the document, even under a complete listing")
+    void rejectedRequestKeepsTheDocument() {
+        // A malformed request is a fault in the connector, not an answer about the
+        // document. Were it definitive, a connector bug or an API change would
+        // tombstone every document it touched on the next complete listing.
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.upsert("f", "rev-1", context.partition(), null));
+        run(connector);
+
+        connector.discovery = context -> context.accept(WorkItem.upsert("f", "rev-2", context.partition(), null));
+        connector.fetchFailure = new SourceException(new SourceError.Rejected("400 invalid field mask"));
+        connector.coverage = Coverage.FULL_LISTING;
+        IngestionReport report = run(connector);
+
+        assertEquals(1, report.documentsFailed());
+        assertEquals(0, report.documentsTombstoned());
+        assertFalse(embeddingStore.segmentsOf("f").isEmpty());
+        assertFalse(stateStore.lookup(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), "f").orElseThrow()
+                .tombstoned());
+    }
+
+    @Test
     @DisplayName("a FULL_TRAVERSAL that met only a source-level failure concludes nothing")
     void sourceLevelFailureIsNoTraversalEvidence() {
         // The guard against a blank site used to read "failed minus unreachable" as

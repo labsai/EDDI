@@ -198,7 +198,10 @@ class WebSourceConnectorTest {
         var connector = new WebSourceConnector(new WebCrawler(new FakeSite()));
         var item = WorkItem.upsert(SITE + "/", null, Partition.IMPLICIT, Map.of());
         var e = assertThrows(SourceException.class, () -> connector.fetch(item, new Recording().source()));
-        assertInstanceOf(SourceError.Permanent.class, e.error());
+        // Rejected, not Permanent: a misdirected call says nothing about the page, so
+        // it must never count as an answer that removes the page's chunks.
+        assertInstanceOf(SourceError.Rejected.class, e.error());
+        assertFalse(e.error().isDefinitive());
     }
 
     @Nested

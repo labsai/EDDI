@@ -238,6 +238,9 @@ class SourceConnectorContractTest {
             assertFalse(new SourceError.Transient("503").isDefinitive());
             assertFalse(new SourceError.Throttled("429").isDefinitive());
             assertFalse(new SourceError.Auth("401").isDefinitive());
+            // A request refused as made is a fault in the request, not an answer
+            // about the document: counting it would let a broken connector delete.
+            assertFalse(new SourceError.Rejected("400 invalid field mask").isDefinitive());
             assertFalse(new SourceError.CursorInvalid("stale").isDefinitive());
         }
 
@@ -249,6 +252,7 @@ class SourceConnectorContractTest {
             assertEquals(SourceError.Kind.AUTH, new SourceError.Auth("x").kind());
             assertEquals(SourceError.Kind.NOT_FOUND, new SourceError.NotFound("x").kind());
             assertEquals(SourceError.Kind.PERMANENT, new SourceError.Permanent("x").kind());
+            assertEquals(SourceError.Kind.REJECTED, new SourceError.Rejected("x").kind());
             assertEquals(SourceError.Kind.CURSOR_INVALID, new SourceError.CursorInvalid("x").kind());
 
             assertEquals(Duration.ofSeconds(30),

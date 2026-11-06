@@ -76,7 +76,7 @@ public class WebSourceConnector implements SourceConnector {
      */
     @Override
     public SourceDocument fetch(WorkItem item, SourceContext context) throws SourceException {
-        throw new SourceException(new SourceError.Permanent(
+        throw new SourceException(new SourceError.Rejected(
                 "A web source delivers every page while crawling; there is nothing to fetch separately"));
     }
 

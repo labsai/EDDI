@@ -23,7 +23,7 @@ public sealed interface SourceError {
 
     /** The classification, for metrics, logs and switch statements. */
     enum Kind {
-        TRANSIENT, THROTTLED, AUTH, NOT_FOUND, PERMANENT, CURSOR_INVALID
+        TRANSIENT, THROTTLED, AUTH, NOT_FOUND, PERMANENT, REJECTED, CURSOR_INVALID
     }
 
     /** Human-readable; may reach run history, so never a credential. */
@@ -103,8 +103,13 @@ public sealed interface SourceError {
     }
 
     /**
-     * Will fail the same way every time: a request the provider rejects as
-     * malformed, a format that cannot be exported.
+     * An answer about the document itself: it exists but can never be read as it is
+     * — a format that cannot be exported, a client error a web server returns for
+     * that page. Definitive, so the document's old chunks are removed once it goes
+     * unseen.
+     * <p>
+     * Not for a request the provider refused because of how the connector built it:
+     * that says nothing about the document and is {@link Rejected}.
      */
     record Permanent(String reason) implements SourceError {
         @Override
@@ -115,6 +120,21 @@ public sealed interface SourceError {
         @Override
         public boolean isDefinitive() {
             return true;
+        }
+    }
+
+    /**
+     * The provider refused the request as the connector made it: malformed, an
+     * unsupported parameter, a field mask it does not know. It will fail the same
+     * way every time, but it is a fault in the request — usually a connector defect
+     * or an API change — and says nothing about whether the document exists or can
+     * be read. Not definitive: the document keeps its chunks and is not counted as
+     * missed, so a broken connector cannot empty a knowledge base.
+     */
+    record Rejected(String reason) implements SourceError {
+        @Override
+        public Kind kind() {
+            return Kind.REJECTED;
         }
     }
 

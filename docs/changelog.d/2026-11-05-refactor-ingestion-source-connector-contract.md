@@ -22,8 +22,11 @@ modification.
     schema only.
   - `Coverage` is `FULL_LISTING`/`FULL_TRAVERSAL`/`INCREMENTAL`/`PARTIAL`. `StopReason` uses the same
     names as `WebCrawler.StopReason`.
-  - `SourceError` is a sealed type: `Transient`, `Throttled`, `Auth`, `NotFound`, `Permanent` and
-    `CursorInvalid`, plus `isDefinitive()`. The checked `SourceException` carries it.
+  - `SourceError` is a sealed type: `Transient`, `Throttled`, `Auth`, `NotFound`, `Permanent`,
+    `Rejected` and `CursorInvalid`, plus `isDefinitive()`. The checked `SourceException` carries it.
+    `Permanent` is an answer about the document (it can never be read as it is). `Rejected` is a
+    request the provider refused as made (malformed, an unknown field mask). It says nothing about the
+    document and is not definitive, so a connector defect or an API change cannot tombstone a corpus.
   - `KnownVersion`, `Partition` and `SourceContext`.
   - `SourceConnectors` is the CDI registry by type, and fails startup when two beans claim one type.
 - **Adapters:** `crawl/WebSourceConnector` wraps `WebCrawler` unchanged. Pages arrive prefetched, a
@@ -71,5 +74,6 @@ The following are not in F1:
 | 2026-11-05 | `Coverage.FULL_TRAVERSAL` is separate from `FULL_LISTING` | A crawl needs a "learned something definitive" guard before absence counts as deletion, but an authoritative listing (uploads) must believe an empty result | One FULL_LISTING value plus a flag; applying the crawl guard to every source, which would never delete the last uploaded file |
 | 2026-11-05 | Text extraction stays in the framework, selected by `Content` kind (HtmlPage / FileBytes / Text) | Keeps the limits and the blank-page-skipped and blank-file-failed semantics in one place for every source | Connectors extracting their own text |
 | 2026-11-05 | `SourceError.isDefinitive()` (NotFound, Permanent) decides "gone" vs "could not look"; a failure with no document id is never evidence | It is a lossless mapping of the crawler's `contentUnknown`, and it generalises to provider errors | Exposing a raw contentUnknown boolean in the contract |
+| 2026-11-05 | A request the provider refuses as made is `SourceError.Rejected`, not definitive; `Permanent` is kept for answers about the document | "Malformed request" was listed under `Permanent`, which counts as absence, so a connector bug would delete the documents it touched. The web connector's content-known 4xx stays `Permanent`: that is the server's answer for the page, as the crawler always treated it | One `Permanent` kind for both; making `Permanent` non-definitive, which would keep unexportable files' stale chunks for ever |
 | 2026-11-05 | `SourceMetadataKeys.CITATION_URL` is `"url"`, the key chunks already carry | The vocabulary describes stored data rather than renaming it | A new `citationUrl` key on chunks |
 ```
