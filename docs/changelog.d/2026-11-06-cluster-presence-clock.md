@@ -29,8 +29,10 @@ opens `gate.drain`, writes `drain.<node>` and then asks the node over RPC. If th
 The node then refused the request as "not recorded", and the administrator got `409 NODE_FAILED`. The
 sync now reads the key's revision first, then skips the delete while the drain gate is held, and
 deletes only at that revision. A key written after the read is either covered by a gate the check
-sees or carries a newer revision, and the conditional delete then fails. A leftover key from a drain
-that a restart ended is still removed on the next sync.
+sees or carries a newer revision, and the conditional delete then fails. The drain flag is read
+again just before the delete, so a drain applied on the node while the sync ran — the gate already
+closed again after the reply — keeps its key too. A leftover key from a drain that a restart ended
+is still removed on the next sync.
 
 **Dead code (OPS-18).** `ClusterPresence.duplicateDetail()` had no caller; the same detail is in the
 ERROR log. `KvLeaseManager.snapshot(prefix, max)` listed `max * 2 + 16` entries before filtering by
@@ -52,5 +54,5 @@ key is rewritten between the sync's read and its delete.
 ```
 
 ```regression-note
-| 2026-11-06 | A drain could fail with `NODE_FAILED` ("the drain of this node was not recorded") | The target node's scheduled drain-key sync deleted the key the deciding node had just written under the drain gate | Sync reads the key's revision, skips while the gate is held, and deletes only at that revision | fix/cluster-presence-clock |
+| 2026-11-06 | A drain could fail with `NODE_FAILED` ("the drain of this node was not recorded") | The target node's scheduled drain-key sync deleted the key the deciding node had just written under the drain gate | Sync reads the key's revision, skips while the gate is held or once the node drains, and deletes only at that revision | fix/cluster-presence-clock |
 ```

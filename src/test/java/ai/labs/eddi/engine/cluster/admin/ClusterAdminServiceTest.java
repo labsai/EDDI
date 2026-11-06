@@ -955,6 +955,19 @@ class ClusterAdminServiceTest {
             assertTrue(bucket.get(key).isPresent(), "the fresh key is not deleted at the revision read before it was written");
         }
 
+        @Test
+        @DisplayName("OPS-9: a drain applied here while the sync runs keeps its key, although the gate is closed again by then")
+        void drainAppliedDuringSyncKeepsTheKey() {
+            // The sync reads "not draining"; before it reads the key, a drain request is
+            // applied on this node (its own sync rewrites the key) and the deciding node
+            // closes the gate after the reply.
+            when(natsLeases.isDraining()).thenReturn(false, true);
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            service.syncOwnDrainKey();
+            assertTrue(shared.bucket(ClusterAdminService.ADMIN_BUCKET).get(ClusterAdminService.DRAIN_PREFIX + "n1").isPresent(),
+                    "a draining node's key is never deleted");
+        }
+
         private String outcome(Supplier<ActionResult> action) {
             try {
                 return action.get().outcome();

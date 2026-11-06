@@ -1802,8 +1802,10 @@ public class ClusterAdminService implements ClusterStartable {
      * it here made this node refuse the drain as "not recorded". So the key's
      * revision is read first, the gate checked after, and the delete is conditional
      * on that revision: a key written after the read is either guarded by a gate
-     * this check sees, or carries a newer revision the delete fails on. A leftover
-     * key goes on the next sync.
+     * this check sees, or carries a newer revision the delete fails on. The flag is
+     * read again last: a drain applied here while this sync ran (the gate already
+     * closed again after the reply) leaves the flag set, and its key stays. A
+     * leftover key goes on the next sync.
      */
     void syncOwnDrainKey() {
         if (!isClustered()) {
@@ -1817,7 +1819,7 @@ public class ClusterAdminService implements ClusterStartable {
                 return;
             }
             Optional<ISharedKv.Versioned> leftover = kv.get(key);
-            if (leftover.isPresent() && kv.getConsistent(DRAIN_GATE).isEmpty()) {
+            if (leftover.isPresent() && kv.getConsistent(DRAIN_GATE).isEmpty() && !natsLeases.get().isDraining()) {
                 kv.delete(key, leftover.get().revision());
             }
         } catch (ClusterUnavailableException e) {
