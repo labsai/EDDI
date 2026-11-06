@@ -128,10 +128,9 @@ class WorkspaceSettingsStoreParityTest extends MongoTestBase {
     @DisplayName("updatedAt keeps the millisecond on both, and only Postgres keeps more")
     void timestampPrecision(String storeName, Supplier<IWorkspaceSettingsStore> factory) {
         // Mongo stores a Date (milliseconds), Postgres a TIMESTAMPTZ (microseconds).
-        // The
-        // millisecond is what they share, which is why the settings endpoint writes its
-        // timestamp truncated to it: what this instance adopts is then what any replica
-        // reads back, on either backend.
+        // The millisecond is what they share, which is why the settings endpoint
+        // writes its timestamp truncated to it: what this instance adopts is then what
+        // any replica reads back, on either backend.
         IWorkspaceSettingsStore store = factory.get();
         String tenant = freshTenant(storeName);
         // Sub-microsecond digits below one half, so rounding and truncating to the
