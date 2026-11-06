@@ -593,6 +593,45 @@
       "clear": "Limpar pesquisa",
       "more": "Mais resultados",
       "moreFailed": "Não foi possível carregar mais. Tentar novamente"
+    },
+    "memory": {
+      "navLabel": "Minha memória",
+      "title": "O que eu lembro sobre você",
+      "subtitle": "O que seus agentes salvaram sobre você para usar em conversas futuras. Faça-os esquecer o que você não quer que guardem.",
+      "explainer": "Entradas privadas são usadas apenas pelo agente que as salvou, entradas de equipe pelos agentes dessa equipe e entradas compartilhadas por todos os seus agentes. Você pode esquecer qualquer entrada; esquecer uma compartilhada a remove para todos os agentes que a usam.",
+      "search": "Pesquisar no que é lembrado",
+      "total": "Entradas: {{n}}",
+      "shown": "Mostrando {{shown}} de {{total}}",
+      "writtenBy": "Salvo por {{agent}}",
+      "writtenByUnknown": "Agente que salvou não registrado",
+      "updated": "Atualizado em {{date}}",
+      "badge": {
+        "self": "Privado",
+        "group": "Equipe",
+        "global": "Todos os agentes"
+      },
+      "visibility": {
+        "self": "Só o agente que salvou usa isto",
+        "group": "Usado pelos agentes de {{teams}}",
+        "groupUnknown": "Usado pelos agentes de uma equipe",
+        "global": "Usado por todos os seus agentes",
+        "unknown": "Visibilidade: {{value}}"
+      },
+      "forget": "Esquecer",
+      "forgetAria": "Esquecer “{{key}}”",
+      "forgotten": "Esquecido: {{key}}",
+      "forgetFailed": "Não foi possível esquecer: {{message}}",
+      "forgetAll": "Esquecer tudo",
+      "forgetAllTitle": "Esquecer tudo sobre você?",
+      "forgetAllDescription": "Todas as {{n}} entradas são excluídas, para cada agente e equipe. Seus agentes não saberão mais nada disso em novas conversas, e não é possível desfazer. Suas conversas são mantidas.",
+      "forgetAllConfirm": "Esquecer tudo",
+      "forgetAllDone": "Tudo o que seus agentes lembravam sobre você foi esquecido.",
+      "reserved": "Os registros que seu administrador mantém para pedidos de proteção de dados não são listados aqui e não podem ser excluídos nesta página.",
+      "empty": "Ainda não há nada lembrado sobre você. Quando um agente salvar algo sobre você, aparecerá aqui.",
+      "noMatch": "Nada corresponde à sua pesquisa.",
+      "loadFailed": "Não foi possível carregar sua memória.",
+      "retry": "Tentar novamente",
+      "noSignIn": "O login está desativado nesta implantação, então não há memória pessoal para mostrar."
     }
   },
   "analyticsPage": {

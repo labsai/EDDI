@@ -1193,6 +1193,29 @@ your tool schemas do not cover it, not as a routine first step:
   the tools, since neither undoes what a tool did. The cards are live only: a
   reload, a conversation opened later, or a turn answered without streaming
   shows none. The embeddable chat widget shows no tool activity.
+- Embedding a chat button on another site: one tag,
+  <script src="https://<this-server>/chat/embed.js" data-agent-id="<agentId>" defer>,
+  draws a floating button that opens the agent's /chat widget in a panel.
+  Optional data- attributes: environment (default production), position
+  (bottom-right or bottom-left), color (a plain colour), label, open ("true":
+  opens on load, not on a phone), lang, theme, and token-provider (the name of a
+  host-page function returning an access token, for authentication on). Two
+  things must be set or it fails: the operator lists the host page's origin in
+  eddi.chat.frame-ancestors (otherwise the browser refuses the panel), and a
+  host page with its own CSP allows this server's origin in script-src and
+  frame-src. The agent must be deployed to that environment. You cannot change
+  either setting; docs page "chat-ui-embedding", section "The launcher".
+- Users see and delete what agents remember about them in Workforce, "My
+  memory" (/workforce/memory): each entry's agent, its visibility (private to
+  one agent, a team's agents, or all their agents), search, forget one, and
+  forget everything (after a confirm). A user may delete any of their own
+  entries, shared ones included — deleting a shared entry removes it for every
+  agent. The GDPR bookkeeping rows (keys starting _gdpr_) are not listed and
+  cannot be deleted there; a full erasure is the admin's GDPR endpoint.
+- An agent asks for one typed value with an inputField output item: only
+  subType "password" (or none) is masked and sent as a secret turn; "text"
+  and "email" are ordinary turns of that type, and the user can choose "Type a
+  message instead". Quick replies hide while the user's own secret mode is on.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.
@@ -1546,8 +1569,9 @@ if the one you want is missing; this deployment may ship a subset):
 - email channel (IMAP trigger mode, SMTP conversation mode, suppressions): "email-integration"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
-- embedding the chat widget in another site (iframe, frame-ancestors, token
-  hand-off with auth on, image CSP): "chat-ui-embedding"
+- embedding the chat widget in another site (the /chat/embed.js launcher,
+  iframe, frame-ancestors, token hand-off with auth on, image CSP):
+  "chat-ui-embedding"
 - white-labeling (the Branding page, eddi.branding.* properties, the login
   theme download): "white-labeling"`;
 

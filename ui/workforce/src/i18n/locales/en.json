@@ -591,6 +591,45 @@
       "clear": "Clear search",
       "more": "More results",
       "moreFailed": "Couldn't load more. Retry"
+    },
+    "memory": {
+      "navLabel": "My memory",
+      "title": "What I remember about you",
+      "subtitle": "What your agents have saved about you to use in later conversations. Forget anything you do not want them to keep.",
+      "explainer": "Private entries are used only by the agent that saved them, team entries by the agents of that team, and shared entries by all your agents. You can forget any entry; forgetting a shared one removes it for every agent that uses it.",
+      "search": "Search what is remembered",
+      "total": "Entries: {{n}}",
+      "shown": "Showing {{shown}} of {{total}}",
+      "writtenBy": "Saved by {{agent}}",
+      "writtenByUnknown": "Saving agent not recorded",
+      "updated": "Updated {{date}}",
+      "badge": {
+        "self": "Private",
+        "group": "Team",
+        "global": "All agents"
+      },
+      "visibility": {
+        "self": "Only the agent that saved it uses it",
+        "group": "Used by the agents of {{teams}}",
+        "groupUnknown": "Used by the agents of a team",
+        "global": "Used by all your agents",
+        "unknown": "Visibility: {{value}}"
+      },
+      "forget": "Forget",
+      "forgetAria": "Forget “{{key}}”",
+      "forgotten": "Forgotten: {{key}}",
+      "forgetFailed": "Could not forget this: {{message}}",
+      "forgetAll": "Forget everything",
+      "forgetAllTitle": "Forget everything about you?",
+      "forgetAllDescription": "All {{n}} entries are deleted, for every agent and team. Your agents will no longer know any of this in new conversations, and it cannot be undone. Your conversations themselves are kept.",
+      "forgetAllConfirm": "Forget everything",
+      "forgetAllDone": "Everything your agents remembered about you is forgotten.",
+      "reserved": "Records your administrator keeps for data-protection requests are not listed here and cannot be deleted from this page.",
+      "empty": "Nothing is remembered about you yet. When an agent saves something about you, it appears here.",
+      "noMatch": "Nothing matches your search.",
+      "loadFailed": "Your memory could not be loaded.",
+      "retry": "Try again",
+      "noSignIn": "Sign-in is off on this deployment, so there is no personal memory to show."
     }
   },
   "analyticsPage": {

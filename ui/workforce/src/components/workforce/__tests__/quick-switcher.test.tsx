@@ -93,6 +93,14 @@ describe("QuickSwitcher", () => {
     expect(screen.getByTestId("where")).toHaveAttribute("data-new-chat", "true");
   });
 
+  it("goes to what is remembered about the person (T2.4), and finds it by name", async () => {
+    renderSwitcher();
+    press({ key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByTestId("quick-switcher-input"), { target: { value: "remember" } });
+    fireEvent.click(await screen.findByTestId("quick-switcher-item-memory"));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(/^\/workforce\/memory$/));
+  });
+
   it("Ctrl+Shift+O starts a new chat from anywhere", async () => {
     renderSwitcher("/workforce/chat");
     press({ key: "O", ctrlKey: true, shiftKey: true });

@@ -143,6 +143,16 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
   its controller's `tool_result` events into a page-wide `ToolActivityLog` and draws
   `ToolActivityCards` under each turn's question. The chat page gets the same from
   `ChatPanel`.
+- **"What I remember about you" (T2.4, phase 8).** `pages/workforce/workforce-memory.tsx` at
+  `/workforce/memory` (in `WORKFORCE_SUBPAGES`; linked from the sidebar footer, "My memory",
+  and the quick switcher). It reads the person's own entries with
+  `GET /usermemorystore/memories/{preferred_username}` (the API and hooks are
+  `@eddi/app-kit/lib/api/user-memory` and `hooks/use-user-memory`, moved there from the
+  Manager, which uses them for its admin tab), names agents and teams from the catalog, and
+  shapes rows in `lib/memory-entries.ts` (reserved `_gdpr_` rows counted, not listed; values
+  as text; newest first; client-side search). Forget one is `DELETE /entry/{id}`; forget
+  everything is `DELETE /{userId}` behind an `AlertDialog` that names the consequence. With
+  `method === "none"` there is no principal and nothing is requested.
 - **Installable, no service worker.** The shells link `/workforce/manifest.webmanifest`,
   which EDDI renders in the brand (`RestWorkforceResource#manifest`, `WorkforceManifest`;
   the dev server answers with the default brand's, `vite.config.ts`). There is deliberately

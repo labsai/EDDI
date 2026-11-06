@@ -213,7 +213,7 @@ request is written to conversation memory. Disable with
 
 ### Requesting specialized input fields from the UI
 
-The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
+The output system supports an `inputField` output type that tells the UI to switch its input control. Every chat surface handles it as the composer's "field" mode (`resolveComposerMode` in `ui/packages/conversation/src/controller/composer-mode.ts`): the Chat UI widget (`SecretInput`), and the Manager's and Workforce's chat and the test drawer (`SecretInputField` in `@eddi/app-kit`).
 
 ```json
 {
@@ -226,7 +226,7 @@ The output system supports an `inputField` output type that tells the UI to swit
 }
 ```
 
-Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response, and the user can leave it early with "Type a message instead". Only a `password` field (or one with no `subType`) is masked, sent exactly as typed and flagged `secretInput`; a `text` or `email` field is an ordinary turn with an input of that type. Quick replies the same output offers stay visible beside the field.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
 

@@ -31,6 +31,7 @@ const WorkforceSettings = lazyPage(() => import("@/pages/workforce/workforce-set
 const WorkforceHistory = lazyPage(() => import("@/pages/workforce/workforce-history"), "WorkforceHistory");
 const WorkforceAnalytics = lazyPage(() => import("@/pages/workforce/workforce-analytics"), "WorkforceAnalytics");
 const WorkforceChat = lazyPage(() => import("@/pages/workforce/workforce-chat"), "WorkforceChat");
+const WorkforceMemory = lazyPage(() => import("@/pages/workforce/workforce-memory"), "WorkforceMemory");
 
 /** Redirect /Workforce/* (capital W) → /workforce/* preserving sub-paths */
 function WorkforceRedirect() {
@@ -50,6 +51,8 @@ export function App() {
             <Route path="new" element={<AuthorRoute><WorkforceWizard /></AuthorRoute>} />
             <Route path="analytics" element={<AuthorRoute><WorkforceAnalytics /></AuthorRoute>} />
             <Route path="chat" element={<WorkforceChat />} />
+            {/* The signed-in person's own memory (T2.4) — every role has one. */}
+            <Route path="memory" element={<WorkforceMemory />} />
             <Route path=":boardId" element={<WorkforceBoard />} />
             <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
             <Route path=":boardId/settings" element={<AuthorRoute><WorkforceSettings /></AuthorRoute>} />

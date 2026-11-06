@@ -19,6 +19,10 @@
       "dist": "chat/dist",
       "pages": {
         "chat.html": { "baselineKb": 224.8, "budgetKb": 170 }
+      },
+      "$scripts": "Standalone scripts a host page loads by themselves, each its own budget. The embed launcher (T2.9, served at /chat/embed.js) is new in phase 8: baselineKb is its first build (2026-11-06); the budget keeps it a small fraction of the widget it opens.",
+      "scripts": {
+        "scripts/js/chat-ui-embed.js": { "baselineKb": 3.7, "budgetKb": 5 }
       }
     }
   }
