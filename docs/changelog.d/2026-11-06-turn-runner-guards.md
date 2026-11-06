@@ -45,14 +45,9 @@ covered.
 **Files:** [`ConversationStepRunner.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java),
 [`RestAgentEngineStreaming.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestAgentEngineStreaming.java),
 [`configuration-reference.md`](../configuration-reference.md), [`hitl.md`](../hitl.md) (the resume stream's
-`turn_timeout`); tests in `ConversationServiceQueuedTurnTest`,
+`turn_timeout`), [`rest-api-reference.md`](../rest-api-reference.md) (the stream's `turn_timeout` code); tests in `ConversationServiceQueuedTurnTest`,
 `ConversationStepRunnerLeaseTest`, `ConversationStepRunnerAbandonedTurnTest` (new) and
 `RestAgentEngineStreamingKeepAliveTest`.
-
-### Open
-
-- `docs/rest-api-reference.md` (streaming section) should name the `turn_timeout` error code; that page
-  is being edited by another open change, so the line follows it.
 
 ```decision-log
 | 2026-11-06 | A queued turn of a vanished conversation is reported as ENDED through the skip contract | RT-1: it ran on its stale snapshot and wrote erased properties back | A new 404 channel on the skip contract, which carries only a snapshot |

@@ -300,7 +300,10 @@ Rules for clients:
   ```
 
   Any other failure is `{"message":"Internal server error","correlationId":"…"}`;
-  the correlation id is in the server log next to the real cause.
+  the correlation id is in the server log next to the real cause. A started turn
+  that then carries none of its events for `systemRuntime.agentTimeoutInSeconds`
+  plus one keep-alive interval ends with `code` `turn_timeout` (the turn was
+  abandoned and never returned); retry the message.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
 - **`/resume/stream` does not cancel on disconnect by default.** A resume is a
@@ -326,7 +329,8 @@ Rules for clients:
   (cancelled, ended, busy) ends with `error` and a `code`
   (`conversation_ended`, `awaiting_approval`, `conversation_busy` or
   `resume_dropped`); a failure, or losing the cluster lease, ends with `error`
-  too.
+  too, and so does a turn that went silent past `systemRuntime.agentTimeoutInSeconds`
+  plus one keep-alive interval (`turn_timeout`).
 - **Disconnecting cancels the turn** by default
   (`eddi.streaming.cancel-on-client-disconnect=true`; this governs `/stream`
   only, `/resume/stream` has its own switch, below). Set it to `false` to let
