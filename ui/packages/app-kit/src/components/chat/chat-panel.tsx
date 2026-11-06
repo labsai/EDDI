@@ -814,7 +814,7 @@ export function ChatPanel({
                       <div className="flex-1 min-w-0 text-start">
                         <p className="truncate font-medium">{agent.name}</p>
                         {agent.description && (
-                          <p className="line-clamp-2 text-xs text-muted-foreground/80 leading-snug">
+                          <p className="line-clamp-2 text-xs text-muted-foreground leading-snug">
                             {agent.description}
                           </p>
                         )}
@@ -930,10 +930,13 @@ export function ChatPanel({
           <button
             onClick={() => setContextOpen((p) => !p)}
             className={cn(
-              "flex w-full items-center justify-center py-0.5 text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/30 transition-colors",
+              "flex w-full items-center justify-center py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors",
               contextOpen && "border-b border-border/30",
             )}
-            title={contextOpen ? "Hide conversation info" : "Show conversation info"}
+            // Two keys, not a ternary default: the toggled state has its own words.
+            title={contextOpen ? t("chat.context.hide", "Hide conversation info") : t("chat.context.show", "Show conversation info")}
+            aria-label={contextOpen ? t("chat.context.hide", "Hide conversation info") : t("chat.context.show", "Show conversation info")}
+            aria-expanded={contextOpen}
             data-testid="context-toggle"
           >
             {contextOpen ? (
@@ -1618,7 +1621,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
   return (
     <div
-      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground/70"
+      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground"
       data-testid="thinking-indicator"
     >
       {/* Pulsing dots */}
@@ -1639,7 +1642,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
       {/* Tool names — inline, comma-separated */}
       {activeToolNames.length > 0 && (
-        <span className="flex items-center gap-1 text-muted-foreground/50">
+        <span className="flex items-center gap-1 text-muted-foreground">
           <Wrench className="h-2.5 w-2.5 shrink-0" />
           <span className="truncate max-w-[200px]">
             {activeToolNames.join(", ")}

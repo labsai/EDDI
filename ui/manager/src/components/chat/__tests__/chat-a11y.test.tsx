@@ -7,6 +7,45 @@ import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+/**
+ * T1.12 — contrast. Muted text faded further with an opacity modifier
+ * (`text-muted-foreground/60`) falls below 4.5:1 on the card and the
+ * background in both themes. The chat's own text and controls use the token
+ * as it is; a faded colour is allowed only on a purely decorative icon.
+ */
+describe("chat contrast", () => {
+  const CHAT_DIR = resolve(process.cwd(), "..", "packages", "app-kit", "src", "components", "chat");
+  const FILES = ["chat-panel.tsx", "chat-message.tsx", "attachment-chip.tsx", "input-hint.tsx", "chat-rating.tsx"];
+
+  it("never fades muted text or a control below the token", () => {
+    const offenders = FILES.flatMap((file) =>
+      readFileSync(join(CHAT_DIR, file), "utf8")
+        .split("\n")
+        .map((line, i) => ({ line, at: `${file}:${i + 1}` }))
+        .filter(({ line }) => /text-muted-foreground\/[1-8]0\b/.test(line))
+        // A decorative illustration (the empty state's large bot) may be faint.
+        .filter(({ line }) => !/<Bot className="mx-auto h-12 w-12/.test(line))
+        .map(({ at }) => at),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("gives the conversation-info toggle a name and its state", () => {
+    useChatStore.getState().reset();
+    useChatStore.getState().setSelectedAgent("agent1", "Support Bot");
+    useChatStore.getState().setConversationId("conv1");
+    renderWithProviders(<ChatPanel />);
+    const toggle = screen.getByTestId("context-toggle");
+    expect(toggle).toHaveAccessibleName("Show conversation info");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAccessibleName("Hide conversation info");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+});
 
 describe("SecretInputField — IME and eye toggle", () => {
   it("does not send on the Enter that confirms an IME composition", () => {

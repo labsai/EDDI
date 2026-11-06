@@ -241,7 +241,7 @@ export const ChatMessage = memo(function ChatMessage({
         )}>
           {/* Timestamp */}
           <span
-            className="text-[10px] text-muted-foreground/60 select-none"
+            className="text-[10px] text-muted-foreground select-none"
             title={formatFullTime(message.timestamp)}
           >
             {formatShortTime(message.timestamp)}
@@ -387,7 +387,7 @@ function CopyMessageButton({ content }: { content: string }) {
         "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] transition-colors",
         copied
           ? "text-emerald-500"
-          : "text-muted-foreground/50 hover:text-foreground hover:bg-muted/50"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
       )}
       title={t("chat.copyMessage", "Copy message")}
       aria-label={t("chat.copyMessage", "Copy message")}
