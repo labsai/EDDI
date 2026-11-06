@@ -263,6 +263,52 @@ class StrictBoundaryShippedConfigsTest {
                         .reduce("", (a, b) -> a + b + "\n"));
     }
 
+    /**
+     * The sweep above only reports unknown keys: {@link #check} deliberately
+     * swallows malformed JSON and wrong value types. For a connection that is the
+     * worse failure, because {@code RestImportService.importConnections} reads the
+     * file leniently, counts one it cannot deserialize as skipped, and the agent
+     * then imports with a {@code ${connection:…}} reference that resolves to
+     * nothing. So every shipped connection is read the way the importer reads it
+     * and then validated the way {@code createConnection} validates it.
+     */
+    @Test
+    @DisplayName("Every shipped connection deserializes and validates as the importer would")
+    void shippedConnectionsImport() throws IOException {
+        var lenient = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        var failures = new LinkedHashMap<String, String>();
+        var checked = new ArrayList<String>();
+        for (Path root : ROOTS) {
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+            List<Path> connections;
+            try (Stream<Path> walk = Files.walk(root)) {
+                connections = walk.filter(p -> p.getFileName().toString().endsWith(".connection.json")).sorted().toList();
+            }
+            for (Path p : connections) {
+                String label = root.relativize(p).toString().replace('\\', '/');
+                checked.add(label);
+                try {
+                    var connection = lenient.readValue(Files.readString(p, StandardCharsets.UTF_8), ConnectionConfiguration.class);
+                    if (connection == null || connection.getName() == null || connection.getName().isBlank()) {
+                        failures.put(label, "carries no name, so the importer skips it");
+                        continue;
+                    }
+                    connection.validate();
+                } catch (IOException | RuntimeException e) {
+                    failures.put(label, e.getClass().getSimpleName() + ": " + e.getMessage());
+                }
+            }
+        }
+
+        assertFalse(checked.isEmpty(), "no *.connection.json found under " + ROOTS + " — the recipe moved, so this test guards nothing");
+        assertTrue(failures.isEmpty(), () -> "shipped connections the importer would skip or createConnection would reject:\n"
+                + failures.entrySet().stream()
+                        .map(e -> "  " + e.getKey() + "\n      " + e.getValue())
+                        .reduce("", (a, b) -> a + b + "\n"));
+    }
+
     /** Strict-parses one document, recording the offending key on rejection. */
     private static void check(ObjectMapper mapper, String label, String body, Class<?> model,
                               Map<String, String> failures) {

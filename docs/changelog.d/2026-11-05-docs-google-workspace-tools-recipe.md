@@ -48,7 +48,11 @@ Google's publishing-status rules) were scattered or missing.
   guarantee; Jakarta Mail's `MimeUtility.encodeText` was rejected because it leaves all-ASCII text,
   CR and LF included, unencoded. Words carry at most 39 bytes (64 characters framed, so `Subject: `
   plus the first word fits a 76-character line), split on code points and joined with CRLF SP.
-  `EncoderExtensionsTest` round-trips them through `MimeUtility.decodeText`. Verified against qute-core 3.40.1.1: a raw CR/LF inside a Qute string literal is kept,
+  `EncoderExtensionsTest` round-trips them through `MimeUtility.decodeText`.
+- **`StrictBoundaryShippedConfigsTest.shippedConnectionsImport`.** The strict sweep swallows malformed
+  JSON and wrong value types, and the importer silently skips a connection it cannot read, leaving the
+  agent's `${connection:…}` reference unresolved. Every shipped `*.connection.json` is now read as
+  `RestImportService` reads it and passed through `ConnectionConfiguration.validate()`. Verified against qute-core 3.40.1.1: a raw CR/LF inside a Qute string literal is kept,
   and nested namespace calls work as `str:concat` arguments.
 - **`readThread` returns Gmail's base64url body parts as-is** — templating has no decoder; documented
   as a limitation rather than worked around.
