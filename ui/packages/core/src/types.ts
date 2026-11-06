@@ -20,7 +20,8 @@ export type ConversationState =
  * SSE event types emitted by POST /agents/{conversationId}/stream.
  * Mirrors RestAgentEngineStreaming — all twelve; stream-events.review.test.ts
  * reads the Java and fails when the two disagree. `tool_result` (B6) is
- * parsed by `@eddi/core/tool-events`; `llm_retry` is not acted on by any UI.
+ * parsed by `@eddi/core/tool-events`; `llm_retry` and `cascade_escalation` also feed
+ * the signed-in apps' turn notes (`@eddi/conversation/tool-activity`, T2.7).
  *
  * Note: there is no "thinking" event. A UI once declared one and the backend
  * never emitted it, so the thinking indicator was only ever cleared by the

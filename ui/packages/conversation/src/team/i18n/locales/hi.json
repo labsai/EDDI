@@ -163,6 +163,31 @@
       "roundOption": "{{total}} में से {{n}}",
       "rosterShowAll_one": "सभी {{count}} सदस्य दिखाएँ",
       "rosterShowAll_other": "सभी {{count}} सदस्य दिखाएँ"
+    },
+    "humanTurnOtherTitle": "{{name}} की बारी",
+    "humanTurnWhoMayAnswer": "चर्चा {{name}} की प्रतीक्षा कर रही है। इस बारी का उत्तर केवल {{name}} या कोई व्यवस्थापक दे सकता है।",
+    "decisionPlain": {
+      "voteWon": "टीम ने मतदान किया, और “{{winner}}” जीता।",
+      "voteNoWinner": "टीम ने मतदान किया, पर कोई विकल्प नहीं जीता।",
+      "arbitration": "एक मध्यस्थ ने फ़ैसला किया। निर्णय नीचे है।",
+      "verdictWinner": "निर्णायक ने {{winner}} के पक्ष में फ़ैसला दिया।",
+      "verdictTie": "निर्णायक ने इसे बराबरी घोषित किया।",
+      "agreement": "सदस्य एक समझौते पर पहुँचे।",
+      "award": "काम {{winner}} को मिला।",
+      "awardNone": "काम किसी को नहीं दिया गया।",
+      "none": "टीम किसी स्पष्ट निर्णय पर नहीं पहुँची।",
+      "dissents": "असहमत सदस्य: {{n}}।"
+    },
+    "artifactPanel": {
+      "empty": "इस सत्र में अभी कोई साझा आर्टिफ़ैक्ट नहीं है।",
+      "allArtifacts": "सभी आर्टिफ़ैक्ट",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (वर्तमान)",
+      "version": "संस्करण",
+      "editedByAt": "{{editor}} ने {{at}} को लिखा",
+      "olderVersion": "यह पुराना संस्करण (v{{shown}}) है। वर्तमान संस्करण v{{current}} है।",
+      "showCurrent": "वर्तमान संस्करण दिखाएँ",
+      "historyTrimmed": "v{{oldest}} से पहले के संस्करण अब नहीं रखे जाते।"
     }
   },
   "taskBoard": {

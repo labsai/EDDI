@@ -163,6 +163,31 @@
       "roundOption": "{{total}}개 중 {{n}}",
       "rosterShowAll_one": "멤버 {{count}}명 모두 보기",
       "rosterShowAll_other": "멤버 {{count}}명 모두 보기"
+    },
+    "humanTurnOtherTitle": "{{name}} 님의 차례",
+    "humanTurnWhoMayAnswer": "토론이 {{name}} 님을 기다리고 있습니다. 이 차례에는 {{name}} 님이나 관리자만 답할 수 있습니다.",
+    "decisionPlain": {
+      "voteWon": "팀이 투표했고 “{{winner}}”이(가) 이겼습니다.",
+      "voteNoWinner": "팀이 투표했지만 이긴 선택지가 없습니다.",
+      "arbitration": "중재자가 결정했습니다. 판정은 아래에 있습니다.",
+      "verdictWinner": "심판이 {{winner}}의 손을 들어주었습니다.",
+      "verdictTie": "심판이 무승부로 판정했습니다.",
+      "agreement": "멤버들이 합의에 이르렀습니다.",
+      "award": "작업은 {{winner}}에게 돌아갔습니다.",
+      "awardNone": "작업을 맡은 사람이 없습니다.",
+      "none": "팀이 명확한 결정을 내리지 못했습니다.",
+      "dissents": "반대한 멤버: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "이 세션에는 아직 공유 아티팩트가 없습니다.",
+      "allArtifacts": "모든 아티팩트",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (현재)",
+      "version": "버전",
+      "editedByAt": "{{editor}}이(가) {{at}}에 작성",
+      "olderVersion": "이전 버전(v{{shown}})입니다. 현재 버전은 v{{current}}입니다.",
+      "showCurrent": "현재 버전 보기",
+      "historyTrimmed": "v{{oldest}} 이전 버전은 더 이상 보관되지 않습니다."
     }
   },
   "taskBoard": {

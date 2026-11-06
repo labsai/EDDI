@@ -23,7 +23,9 @@ Home is the first screen. From top to bottom:
 1. **A box to type in.** Pick an agent from the list under the box, type your question and press
    **Enter** (or the arrow button). **Shift+Enter** starts a new line. The list starts on the agent
    of your most recent chat, or on the first agent offered to you. Sending opens a new chat with
-   that agent, and your question is its first message.
+   that agent, and your question is its first message. The list offers your **teams** too, below
+   the agents: with a team picked, sending opens the team's board and starts a new discussion with
+   your question.
 2. **Suggestions.** If the agent's designer wrote conversation starters, they appear as buttons
    under the box. Clicking one starts a new chat with that text.
 3. **A notice about review**, above the box, when the agent's maintainers may read conversations.
@@ -124,6 +126,40 @@ while you watched: they are not kept with the conversation, so after a reload, o
 conversation you open from the list, they are gone. A team member's conversation (from a team's
 board) shows them too.
 
+### Why an answer came the way it did
+
+Sometimes a line under an answer explains how it was reached, in plain words:
+
+- **"Answered by a larger model because the first answer wasn't confident enough."** The agent's
+  designer set it up to try a fast model first and to hand the question to a stronger one when
+  needed. The line also says when the first model took too long, failed, or gave an answer that
+  could not be used.
+- **"The model was asked again because its first reply was cut off."** (or was empty, was stopped
+  by the provider's content filter, was not in the expected format, or the conversation was too
+  long for it).
+- **"A safety check removed part of the answer (…)."** A guardrail the designer configured acted on
+  your message or on the answer: it stopped it, removed part of it, flagged it, or sent the answer
+  back to be rewritten. The name in brackets says which check it was.
+
+These lines appear only when the server reported such a step while you watched the answer arrive.
+Like the tool cards, they are not kept: after a reload they are gone. Nothing is shown for things
+the server does not report, such as a spending limit that ended a cascade early.
+
+### Handing a question to another agent or team (@)
+
+Type **@** in the message box to hand your question to another agent or to a team instead of the
+agent of this chat. A list of the agents and teams offered to you appears; keep typing to narrow
+it, pick one with **↑ ↓** and **Enter** (or **Tab**), or click it. **Esc** closes the list. The
+choice shows above the box ("Hand over to …"); type your question and send it. **Backspace** in an
+empty box, or the **×**, takes the choice back.
+
+Sending opens a new chat with that agent, or a new discussion of that team, with your question as
+its first message. The chat you came from gets a line saying where the question went, with a link
+to it, and the new conversation says where it came from, with a link back. These two lines are
+kept **in this browser only**: on another device, or after signing out, the conversations are still
+there but the lines are not. The agent or team you hand over to sees your question, not the chat it
+came from. Files you attached are not handed over.
+
 ### Changing what you asked
 
 - **Edit** (under your last message, or **↑** in an empty message box) takes your last message and
@@ -167,6 +203,7 @@ Who sees your rating is said under the rating card.
 | **⌘⇧O** / **Ctrl+Shift+O** | New chat (Home, with the message box ready) |
 | **Enter** · **Shift+Enter** | Send · new line |
 | **↑** (in an empty message box) | Edit your last message |
+| **@** · **↑ ↓** · **Enter** or **Tab** · **Esc** | Hand the question to another agent or team: open the list · pick · choose · close the list |
 | **Esc** | Stop the reply being written; close a dialog |
 | **?** | The list of shortcuts |
 
@@ -189,9 +226,32 @@ kept on the device beyond what a browser tab keeps: Workforce does not work offl
 ## A team
 
 A team's board shows its members, its discussions and, while one runs, the discussion as it
-happens. Start a discussion by typing your question on the board. The sidebar lists it under
-**Your conversations** from then on. See [Group Conversations](group-conversations.md) for how
-the discussion styles work.
+happens. Start a discussion by typing your question on the board, from Home with the team picked,
+or by handing a chat question to the team with **@**. The sidebar lists it under **Your
+conversations** from then on. See [Group Conversations](group-conversations.md) for how the
+discussion styles work.
+
+- **The decision, in plain words.** When the team votes, a judge rules, or the members agree, the
+  decision card starts with one sentence that says what happened, for example "The team voted, and
+  “Ship it” won. Members who disagreed: 1." The tally, the ballots and what the members who
+  disagreed said follow below it. With a screen reader the sentence is read out when the decision
+  arrives.
+- **Your turn.** A team can include people as members. When it is a person's turn, the discussion
+  waits, and the board shows what they are asked and a box to answer. If it is your turn, the box
+  says "It's your turn"; if it is somebody else's, it says whose turn it is and that only they, or
+  an administrator, can answer. The team's designer may give the turn a time limit, shown beside
+  it; when it runs out, the turn is skipped or the discussion stops.
+- **Shared artifacts.** Some teams write documents together while they discuss, such as a plan, a
+  draft or a table. When a discussion has any, a button with a document icon and their number
+  appears at the top of the board. It opens a panel (the whole screen on a phone) with the
+  documents: open one to read it, and pick an earlier **version** from the list to see what it said
+  before, with who wrote it and when. The server keeps the ten most recent earlier versions of each
+  document; the panel says when older ones are gone. You can read the documents but not change
+  them: the team's members write them.
+
+A team's preset **templates** (research pod, decision board, …) are for the people who build teams:
+creating a team from one needs the editor role. As a user, you start from the teams offered to you,
+which your organisation built, often from those templates.
 
 ---
 
@@ -226,6 +286,18 @@ the discussion styles work.
 - **Search** uses `GET /conversationstore/conversations/search` ([REST API reference](rest-api-reference.md#searching-my-conversations)):
   the caller's own conversations, by title only, administrators included. It keeps no index of its
   own, so GDPR erasure removes what it can find with the conversations.
+- **Hand-offs with @** offer the entries of the end-user catalog (`GET /catalog/agents`,
+  `GET /catalog/groups`), so only what the person may use and what is listed. A hand-off starts the
+  target conversation the ordinary way, with the question as its first message; the server has no
+  record that it came from another chat. EDDI's own hand-off concept, [Cross-Team
+  Handoff](team-handoff.md), is something else: an agent filing a task into a standing team's
+  backlog under rules both teams' authors set. The marker lines are kept in the browser's storage,
+  under the signed-in user, and removed at sign-out.
+- **The lines under an answer** come from three stream events: `cascade_escalation` (its
+  `reason`), `llm_retry` (its `reason`) and `guardrail_triggered` (`type`, `phase`, `action`). Only
+  those are explained. A cascade's `maxCostPerRun` or `maxTotalDurationMs` stopping escalation early
+  sends no event, so nothing says so; neither the model's name nor a cost is shown to users. Like
+  the tool cards, the lines are not restored from the stored conversation.
 - **Tool cards** come from the `tool_result` events of a streamed turn: the tool's name, whether it
   worked, and a summary the server redacts like the `task_complete` tool trace and cuts to 200
   characters. Workforce shows the summary as plain text, never as markup. The cards are not stored:

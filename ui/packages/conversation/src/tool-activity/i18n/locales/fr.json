@@ -12,5 +12,33 @@
       "regenerate": "A exécuté {{tools}}. Ce qu’ils ont fait reste acquis, et une nouvelle réponse peut les relancer.",
       "edited": "Votre message est de retour dans la zone de saisie. Ce que {{tools}} a fait n’a pas été annulé."
     }
+  },
+  "turnNotes": {
+    "region": "Comment cette réponse a été obtenue",
+    "escalation": {
+      "lowConfidence": "Un modèle plus grand a répondu, car la première réponse n’était pas assez sûre.",
+      "timeout": "Un autre modèle a répondu, car le premier mettait trop de temps.",
+      "error": "Un autre modèle a répondu, car le premier a échoué.",
+      "invalidOutput": "Un autre modèle a répondu, car la première réponse était inutilisable.",
+      "other": "Un autre modèle que celui essayé en premier a répondu."
+    },
+    "retry": {
+      "empty": "Le modèle a été interrogé à nouveau, car sa première réponse était vide.",
+      "truncated": "Le modèle a été interrogé à nouveau, car sa première réponse était tronquée.",
+      "contentFilter": "Le modèle a été interrogé à nouveau, car le filtre de contenu de son fournisseur a bloqué la première réponse.",
+      "format": "Le modèle a été interrogé à nouveau, car sa première réponse n’était pas au format attendu.",
+      "contextTooLong": "Le modèle a été interrogé à nouveau, car la conversation était trop longue pour lui.",
+      "other": "Le modèle a été interrogé à nouveau, car sa première réponse était inutilisable."
+    },
+    "guardrail": {
+      "inputBlock": "Un contrôle de sécurité a bloqué votre message ({{type}}).",
+      "inputRedact": "Un contrôle de sécurité a retiré une partie de votre message avant que l’agent ne le voie ({{type}}).",
+      "inputWarn": "Un contrôle de sécurité a signalé votre message ({{type}}).",
+      "outputBlock": "Un contrôle de sécurité a retenu la réponse ({{type}}).",
+      "outputRedact": "Un contrôle de sécurité a retiré une partie de la réponse ({{type}}).",
+      "outputReprompt": "Un contrôle de sécurité a renvoyé la réponse pour qu’elle soit réécrite ({{type}}).",
+      "outputWarn": "Un contrôle de sécurité a signalé la réponse ({{type}}).",
+      "other": "Un contrôle de sécurité est intervenu sur cet échange ({{type}} : {{phase}}, {{action}})."
+    }
   }
 }

@@ -159,13 +159,6 @@
     "searchAgents": "एजेंट खोजें",
     "noAgentMatches": "आपकी खोज से कोई एजेंट मेल नहीं खाता",
     "transcript": "वार्तालाप",
-    "guardrailPhaseInput": "इनपुट",
-    "guardrailPhaseOutput": "आउटपुट",
-    "guardrailActionBlock": "ने ब्लॉक किया",
-    "guardrailActionRedact": "ने रिडैक्ट किया",
-    "guardrailActionReprompt": "ने मॉडल से दोबारा पूछा",
-    "guardrailActionWarn": "ने चेतावनी दी",
-    "guardrailNotice": "गार्डरेल ({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "इस बातचीत को रेट करें",
       "reply": "इस जवाब को रेट करें",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "अपलोड हो रहा है… {{percent}}%",
     "attachProgress": "{{name}} का अपलोड",
     "attachRetry": "फिर से कोशिश करें",
-    "attachHint": "फ़ाइलें जोड़ें — या उन्हें यहाँ पेस्ट करें या छोड़ें"
+    "attachHint": "फ़ाइलें जोड़ें — या उन्हें यहाँ पेस्ट करें या छोड़ें",
+    "mention": {
+      "listLabel": "इन्हें सौंपें",
+      "team": "टीम",
+      "agent": "एजेंट",
+      "handOffToTeam": "टीम {{name}} को सौंपें",
+      "handOffToAgent": "{{name}} को सौंपें",
+      "remove": "न सौंपें",
+      "count": "सुझाव: {{n}}। तीर कुंजियों से चुनें, Enter दबाएँ।",
+      "placeholder": "{{name}} के लिए आपका प्रश्न…",
+      "hint": "संदेश — किसी दूसरे एजेंट या टीम को सौंपने के लिए @ लिखें"
+    }
   },
   "editor": {
     "deployFailed": "परिनियोजन विफल",

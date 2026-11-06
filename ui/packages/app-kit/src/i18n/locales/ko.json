@@ -159,13 +159,6 @@
     "searchAgents": "에이전트 검색",
     "noAgentMatches": "검색과 일치하는 에이전트가 없습니다",
     "transcript": "대화",
-    "guardrailPhaseInput": "입력",
-    "guardrailPhaseOutput": "출력",
-    "guardrailActionBlock": "차단됨",
-    "guardrailActionRedact": "마스킹됨",
-    "guardrailActionReprompt": "모델에 재요청됨",
-    "guardrailActionWarn": "경고됨",
-    "guardrailNotice": "가드레일({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "이 대화 평가하기",
       "reply": "이 답변 평가하기",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "업로드 중… {{percent}}%",
     "attachProgress": "{{name}} 업로드",
     "attachRetry": "다시 시도",
-    "attachHint": "파일 첨부 — 여기에 붙여넣거나 끌어다 놓아도 됩니다"
+    "attachHint": "파일 첨부 — 여기에 붙여넣거나 끌어다 놓아도 됩니다",
+    "mention": {
+      "listLabel": "넘길 대상",
+      "team": "팀",
+      "agent": "에이전트",
+      "handOffToTeam": "{{name}} 팀에 넘기기",
+      "handOffToAgent": "{{name}}에게 넘기기",
+      "remove": "넘기지 않기",
+      "count": "제안: {{n}}개. 화살표 키로 이동하고 Enter로 선택하세요.",
+      "placeholder": "{{name}}에게 할 질문…",
+      "hint": "메시지 — @를 입력해 다른 에이전트나 팀에 넘기세요"
+    }
   },
   "editor": {
     "deployFailed": "배포 실패",

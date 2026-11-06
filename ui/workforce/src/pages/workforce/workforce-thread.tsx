@@ -52,13 +52,18 @@ import {
   useAgentConversation,
   type ConversationMessage,
 } from "@eddi/conversation";
-import { extractOutputTexts, lastStepIndex, type ContextMap, type ConversationSnapshot } from "@eddi/core";
+import { extractOutputTexts, lastStepIndex, stepIndexes, type ContextMap, type ConversationSnapshot } from "@eddi/core";
 import { toolResultListener } from "@eddi/core/tool-events";
 import {
+  GuardrailNote,
   ToolActivityCards,
   ToolActivityLog,
+  TurnNotes,
+  TurnNotesLog,
   toolCardPositions,
+  turnNoteListener,
   useToolTurns,
+  useTurnNotes,
 } from "@eddi/conversation/tool-activity";
 import { translateStreamError } from "@eddi/app-kit/hooks/use-chat";
 import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
@@ -695,18 +700,24 @@ function firstAttachmentName(context: ContextMap | undefined): string | undefine
  * streaming, the reconcile, dropped vs paused turns — is the controller's, the
  * thread keeps its own error banner and Retry (`presentFailure`) and its pause
  * notice (`onTurnSnapshot`). One per advisor. The `tool_result` events of its
- * turns go into `tools`, for the tool cards (T1.9).
+ * turns go into `tools`, for the tool cards (T1.9); its cascade and re-ask
+ * events into `notes`, for the plain-language turn notes (T2.7).
  */
 function createThreadConversation(
   memberId: string,
   hooksRef: MutableRefObject<ThreadHooks | null>,
   turnRef: MutableRefObject<ThreadTurn | null>,
   tools: ToolActivityLog,
+  notes: TurnNotesLog,
 ): AgentConversation {
   // Filed under the conversation and step on screen when each call finishes.
   const recordToolResult = toolResultListener((result) => {
     const { conversationId, messages } = controller.getSnapshot();
     tools.record(conversationId, lastStepIndex(messages), result);
+  });
+  const recordTurnNote = turnNoteListener((note) => {
+    const { conversationId, messages } = controller.getSnapshot();
+    notes.record(conversationId, lastStepIndex(messages), note);
   });
   const controller: AgentConversation = new AgentConversation({
     stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
@@ -741,9 +752,11 @@ function createThreadConversation(
     onTurnStarting: () => {
       const { conversationId, messages } = controller.getSnapshot();
       tools.beginTurn(conversationId, lastStepIndex(messages));
+      notes.beginTurn(conversationId, lastStepIndex(messages));
     },
     onStreamEvent: (event) => {
       recordToolResult(event);
+      recordTurnNote(event);
       const turn = turnRef.current;
       if (!turn) return;
       if (event.type === "token") turn.tokens = true;
@@ -863,15 +876,26 @@ function WorkforceThread() {
   // One for the page: it files every call under its conversation, so another
   // advisor's thread simply reads other entries.
   const [toolLog] = useState(() => new ToolActivityLog({ maxConversations: 5 }));
+  const [noteLog] = useState(() => new TurnNotesLog());
   const controller = useMemo(
-    () => createThreadConversation(memberId, hooksRef, turnRef, toolLog),
-    [memberId, toolLog],
+    () => createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog),
+    [memberId, toolLog, noteLog],
   );
   const conversation = useAgentConversation(controller);
   const conversationId = conversation.conversationId;
   const messages = conversation.messages;
   const toolTurns = useToolTurns(toolLog, conversationId);
   const toolCardsAt = useMemo(() => toolCardPositions(messages, toolTurns), [messages, toolTurns]);
+  // The turn notes go under each turn's last message (T2.7).
+  const turnNotes = useTurnNotes(noteLog, conversationId);
+  const turnNotesAt = useMemo(() => {
+    const at = new Map<number, number>();
+    if (turnNotes.size === 0) return at;
+    stepIndexes(messages).forEach((step, i) => {
+      if (step !== null && turnNotes.has(step)) at.set(step, i);
+    });
+    return new Map([...at].map(([step, i]) => [i, step]));
+  }, [messages, turnNotes]);
   const isLoading = conversation.isProcessing;
   const setConversationId = useCallback(
     (id: string | null) => controller.dispatch({ type: "SET_CONVERSATION_ID", id }),
@@ -1314,6 +1338,9 @@ function WorkforceThread() {
           {messages.map((msg, idx) => {
             const toolStep = toolCardsAt.get(idx);
             const toolActivity = toolStep === undefined ? undefined : toolTurns.get(toolStep);
+            const notesStep = turnNotesAt.get(idx);
+            const notes = notesStep === undefined ? undefined : turnNotes.get(notesStep);
+            const guardrails = msg.role === "agent" ? (msg.guardrails ?? []) : [];
             return (
             <Fragment key={`${msg.role}-${msg.timestamp}-${idx}`}>
             <div
@@ -1459,6 +1486,20 @@ function WorkforceThread() {
             {toolActivity && (
               <div className="ps-10">
                 <ToolActivityCards activity={toolActivity} />
+              </div>
+            )}
+            {/* Why the answer came the way it did (T2.7): a guardrail that
+                acted, a cascade that moved on, a re-ask — only what the stream said. */}
+            {guardrails.length > 0 && (
+              <ul className="flex flex-col gap-0.5 ps-10" data-testid="guardrail-notices">
+                {guardrails.map((n, i) => (
+                  <GuardrailNote key={i} notice={n} />
+                ))}
+              </ul>
+            )}
+            {notes && (
+              <div className="ps-10">
+                <TurnNotes notes={notes} />
               </div>
             )}
             </Fragment>

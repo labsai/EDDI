@@ -82,7 +82,15 @@
       "confirmNewDescription": "仍有讨论在进行中。开始新的讨论会先将其停止——所有进行中的工作都将被放弃。",
       "confirmNewButton": "停止并开始新的讨论",
       "keepRunning": "继续运行",
-      "questionRequired": "请为你的任务组添加一个问题——文件会在讨论开始时共享给它。"
+      "questionRequired": "请为你的任务组添加一个问题——文件会在讨论开始时共享给它。",
+      "humanTurnForbidden": "只有轮到的成员或管理员可以回答这一轮。",
+      "announceOtherTurn": "讨论正在等待 {{name}}。",
+      "announceYourTurn": "这次讨论轮到你了。",
+      "artifacts": "共享成果（{{n}}）",
+      "artifactsPanel": "共享成果面板",
+      "artifactsTitle": "共享成果",
+      "artifactsClose": "关闭共享成果",
+      "artifactsHint": "这些由团队成员用工具撰写。你可以查看服务器仍保留的每个版本。"
     },
     "thread": {
       "fileTooLarge": "文件必须小于20MB",
@@ -567,7 +575,11 @@
       "agentLabel": "智能体",
       "send": "发送",
       "starters": "建议",
-      "recent": "最近"
+      "recent": "最近",
+      "placeholderTeam": "向团队 {{team}} 提问…",
+      "recipientLabel": "智能体或团队",
+      "agentsGroup": "智能体",
+      "teamsGroup": "团队"
     },
     "switcher": {
       "newChat": "新对话",
@@ -591,6 +603,16 @@
       "clear": "清除搜索",
       "more": "更多结果",
       "moreFailed": "无法加载更多。重试"
+    },
+    "handoff": {
+      "localOnly": "仅记录在此浏览器中",
+      "toTeam": "你把“{{question}}”转交给了团队 {{name}}。",
+      "toAgent": "你把“{{question}}”转交给了 {{name}}。",
+      "openSession": "打开团队会话",
+      "openChat": "打开那个对话",
+      "notStarted": "未能开始。",
+      "fromChat": "从你与 {{name}} 的对话转交而来。",
+      "backToChat": "返回那个对话"
     }
   },
   "analyticsPage": {

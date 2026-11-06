@@ -12,5 +12,33 @@
       "regenerate": "Executou {{tools}}. O que elas fizeram permanece, e uma nova resposta pode executá-las novamente.",
       "edited": "Sua mensagem voltou para a caixa de texto. O que {{tools}} fez não foi desfeito."
     }
+  },
+  "turnNotes": {
+    "region": "Como esta resposta foi obtida",
+    "escalation": {
+      "lowConfidence": "Um modelo maior respondeu porque a primeira resposta não era confiável o suficiente.",
+      "timeout": "Outro modelo respondeu porque o primeiro demorou demais.",
+      "error": "Outro modelo respondeu porque o primeiro falhou.",
+      "invalidOutput": "Outro modelo respondeu porque a primeira resposta não pôde ser usada.",
+      "other": "Respondeu um modelo diferente do que foi tentado primeiro."
+    },
+    "retry": {
+      "empty": "O modelo foi consultado de novo porque a primeira resposta veio vazia.",
+      "truncated": "O modelo foi consultado de novo porque a primeira resposta veio cortada.",
+      "contentFilter": "O modelo foi consultado de novo porque o filtro de conteúdo do provedor bloqueou a primeira resposta.",
+      "format": "O modelo foi consultado de novo porque a primeira resposta não estava no formato esperado.",
+      "contextTooLong": "O modelo foi consultado de novo porque a conversa era longa demais para ele.",
+      "other": "O modelo foi consultado de novo porque a primeira resposta não pôde ser usada."
+    },
+    "guardrail": {
+      "inputBlock": "Uma verificação de segurança bloqueou sua mensagem ({{type}}).",
+      "inputRedact": "Uma verificação de segurança removeu parte da sua mensagem antes que o agente a visse ({{type}}).",
+      "inputWarn": "Uma verificação de segurança sinalizou sua mensagem ({{type}}).",
+      "outputBlock": "Uma verificação de segurança reteve a resposta ({{type}}).",
+      "outputRedact": "Uma verificação de segurança removeu parte da resposta ({{type}}).",
+      "outputReprompt": "Uma verificação de segurança devolveu a resposta para ser reescrita ({{type}}).",
+      "outputWarn": "Uma verificação de segurança sinalizou a resposta ({{type}}).",
+      "other": "Uma verificação de segurança agiu neste turno ({{type}}: {{phase}}, {{action}})."
+    }
   }
 }

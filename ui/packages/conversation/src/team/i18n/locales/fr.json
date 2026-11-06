@@ -171,6 +171,31 @@
       "rosterShowAll_one": "Afficher le {{count}} membre",
       "rosterShowAll_other": "Afficher les {{count}} membres",
       "rosterShowAll_many": "Afficher les {{count}} membres"
+    },
+    "humanTurnOtherTitle": "Au tour de {{name}}",
+    "humanTurnWhoMayAnswer": "La discussion attend {{name}}. Seul {{name}} ou un administrateur peut répondre à ce tour.",
+    "decisionPlain": {
+      "voteWon": "L’équipe a voté, et « {{winner}} » l’a emporté.",
+      "voteNoWinner": "L’équipe a voté, mais aucune option ne l’a emporté.",
+      "arbitration": "Un arbitre a tranché. La décision figure ci-dessous.",
+      "verdictWinner": "Le juge a tranché en faveur de {{winner}}.",
+      "verdictTie": "Le juge a déclaré une égalité.",
+      "agreement": "Les membres sont parvenus à un accord.",
+      "award": "Le travail a été confié à {{winner}}.",
+      "awardNone": "Le travail n’a été confié à personne.",
+      "none": "L’équipe n’est pas parvenue à une décision claire.",
+      "dissents": "Membres en désaccord : {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "Aucun artefact partagé dans cette session pour l’instant.",
+      "allArtifacts": "Tous les artefacts",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (actuelle)",
+      "version": "Version",
+      "editedByAt": "Rédigé par {{editor}} le {{at}}",
+      "olderVersion": "Ceci est une version antérieure (v{{shown}}). La version actuelle est la v{{current}}.",
+      "showCurrent": "Afficher la version actuelle",
+      "historyTrimmed": "Les versions antérieures à la v{{oldest}} ne sont plus conservées."
     }
   },
   "taskBoard": {

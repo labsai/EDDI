@@ -159,13 +159,6 @@
     "searchAgents": "Search agents",
     "noAgentMatches": "No agents match your search",
     "transcript": "Conversation",
-    "guardrailPhaseInput": "input",
-    "guardrailPhaseOutput": "output",
-    "guardrailActionBlock": "blocked",
-    "guardrailActionRedact": "redacted",
-    "guardrailActionReprompt": "re-asked the model",
-    "guardrailActionWarn": "flagged",
-    "guardrailNotice": "Guardrail ({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "Rate this conversation",
       "reply": "Rate this reply",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "Uploading… {{percent}}%",
     "attachProgress": "Upload of {{name}}",
     "attachRetry": "Try again",
-    "attachHint": "Attach files — or paste or drop them here"
+    "attachHint": "Attach files — or paste or drop them here",
+    "mention": {
+      "listLabel": "Hand over to",
+      "team": "Team",
+      "agent": "Agent",
+      "handOffToTeam": "Hand over to the team {{name}}",
+      "handOffToAgent": "Hand over to {{name}}",
+      "remove": "Don't hand over",
+      "count": "Suggestions: {{n}}. Use the arrow keys, Enter to choose.",
+      "placeholder": "Your question for {{name}}…",
+      "hint": "Message — type @ to hand over to another agent or team"
+    }
   },
   "commandPalette": {
     "openChat": "Open Chat"

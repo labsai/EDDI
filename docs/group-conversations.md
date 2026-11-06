@@ -391,6 +391,11 @@ roster like any agent, but their turn **pauses the discussion**
 - **PARALLEL phases**: agents fan out first; humans are then prompted one at a
   time against the *pre-fan-out* snapshot, so an independent round stays
   independent — a human answering after the agents cannot read their answers.
+- **In Workforce** the board shows the pending turn with its rendered prompt and a box to answer
+  ([Workforce guide](workforce-guide.md#a-team)). It says "It's your turn" to the member and whose
+  turn it is to anyone else, and a refused submission (`403`) is explained in those words. The
+  client compares the signed-in username or e-mail with the member's `agentId` only to choose the
+  wording; whether a submission is accepted is the server's check above.
 - **v1 bounds (save-time rejected)**: no HUMAN members in task-force groups
   (PLAN/EXECUTE/VERIFY) or `targetEachPeer` phases, and a group containing
   humans cannot be nested as a GROUP member. A human **moderator** is allowed —
@@ -669,6 +674,16 @@ new artifact. `markFinal: true` freezes an
 artifact — FINAL artifacts accept no further updates. Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
+
+People read artifacts in Workforce's side panel on the team board, with each
+version the `history` still holds (current first, then up to
+`ARTIFACT_HISTORY_CAP` = 10 earlier ones, each with its editor and time); the
+Manager's discussion view lists them too. Both are read-only, since no REST
+endpoint lets a person write an artifact. Content is rendered by type: MARKDOWN
+through the shared markdown renderer with raw HTML escaped, JSON pretty-printed,
+TEXT as plain text. The panel follows a running discussion through the polled
+status read, which carries `artifacts`; the `artifact_updated` event itself has
+metadata only.
 
 ## Preset Templates (I10)
 

@@ -15,7 +15,8 @@ import { entryBodyToMarkdown, isStructuredBody, readMessageBody } from "@eddi/co
 import { isImageMime, formatBytes } from "../../lib/api/attachments";
 import type { OwnRating, RatingInput, RatingProfile } from "../../lib/api/ratings";
 import { ChatStepRating } from "./chat-rating";
-import { Bot, User, Copy, Check, FileText, AlertTriangle, ShieldAlert } from "lucide-react";
+import { Bot, User, Copy, Check, FileText, AlertTriangle } from "lucide-react";
+import { GuardrailNote } from "@eddi/conversation/tool-activity";
 
 // ==================== Helpers ====================
 
@@ -272,46 +273,16 @@ export const ChatMessage = memo(function ChatMessage({
 // ==================== Guardrail notices ====================
 
 /**
- * One quiet line per guardrail that fired on this turn: the phase it ran in, which
- * guardrail, and what it did. The outcome itself is already in the bubble (a
- * block message, a rewritten answer); this is the reason.
+ * One quiet line per guardrail that fired on this turn, in plain words: what
+ * the safety check did, naming which one (T2.7). The outcome itself is already
+ * in the bubble (a block message, a rewritten answer); this is the reason.
  */
 function GuardrailNotices({ notices }: { notices: NonNullable<ChatMessageType["guardrails"]> }) {
-  const { t } = useTranslation();
   return (
     <ul className="flex flex-col gap-0.5 px-1" data-testid="guardrail-notices">
-      {notices.map((n, i) => {
-        const phase =
-          n.phase === "input"
-            ? t("chat.guardrailPhaseInput", "input")
-            : n.phase === "output"
-              ? t("chat.guardrailPhaseOutput", "output")
-              : n.phase;
-        const action =
-          n.action === "block"
-            ? t("chat.guardrailActionBlock", "blocked")
-            : n.action === "redact"
-              ? t("chat.guardrailActionRedact", "redacted")
-              : n.action === "reprompt"
-                ? t("chat.guardrailActionReprompt", "re-asked the model")
-                : n.action === "warn"
-                  ? t("chat.guardrailActionWarn", "flagged")
-                  : n.action;
-        return (
-          <li
-            key={i}
-            className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-            data-testid="guardrail-notice"
-          >
-            <ShieldAlert className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {t("chat.guardrailNotice", "Guardrail ({{phase}}): {{type}} {{action}}", {
-              phase,
-              type: n.type,
-              action,
-            })}
-          </li>
-        );
-      })}
+      {notices.map((n, i) => (
+        <GuardrailNote key={i} notice={n} />
+      ))}
     </ul>
   );
 }

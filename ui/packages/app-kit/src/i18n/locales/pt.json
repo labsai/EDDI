@@ -161,13 +161,6 @@
     "searchAgents": "Pesquisar agentes",
     "noAgentMatches": "Nenhum agente corresponde à sua pesquisa",
     "transcript": "Conversa",
-    "guardrailPhaseInput": "entrada",
-    "guardrailPhaseOutput": "saída",
-    "guardrailActionBlock": "bloqueou",
-    "guardrailActionRedact": "ocultou texto",
-    "guardrailActionReprompt": "repetiu a pergunta ao modelo",
-    "guardrailActionWarn": "emitiu um aviso",
-    "guardrailNotice": "Guardrail ({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "Avaliar esta conversa",
       "reply": "Avaliar esta resposta",
@@ -196,7 +189,18 @@
     "attachUploadingPercent": "Enviando… {{percent}}%",
     "attachProgress": "Envio de {{name}}",
     "attachRetry": "Tentar de novo",
-    "attachHint": "Anexar arquivos — ou cole ou solte aqui"
+    "attachHint": "Anexar arquivos — ou cole ou solte aqui",
+    "mention": {
+      "listLabel": "Passar para",
+      "team": "Equipe",
+      "agent": "Agente",
+      "handOffToTeam": "Passar para a equipe {{name}}",
+      "handOffToAgent": "Passar para {{name}}",
+      "remove": "Não passar",
+      "count": "Sugestões: {{n}}. Use as setas e Enter para escolher.",
+      "placeholder": "Sua pergunta para {{name}}…",
+      "hint": "Mensagem — digite @ para passar a outro agente ou equipe"
+    }
   },
   "editor": {
     "deployFailed": "Falha na implantação",
