@@ -354,6 +354,37 @@ class McpGroupToolsTest {
         assertFalse(result.contains("INTERNAL"), result);
     }
 
+    /**
+     * The store refuses an assigned agent the caller may not use (REST answers that
+     * with 403). It is the caller's own missing access, not a server failure:
+     * FORBIDDEN with the guard's text, never an INTERNAL reference.
+     */
+    @Test
+    void createGroupFromTemplate_storeAccessRefusal_isForbiddenNotInternal() throws Exception {
+        when(groupStore.createGroup(any())).thenThrow(new ForbiddenException("You do not have access to agent a1"));
+        StringBuilder assignments = new StringBuilder("{");
+        for (var role : templateService().find("research-pod").manifest().requiredRoles()) {
+            assignments.append(assignments.length() > 1 ? "," : "").append('"').append(role.role()).append("\":\"a1\"");
+        }
+        assignments.append('}');
+
+        String result = tools.create_group_from_template("research-pod", null, assignments.toString());
+
+        assertTrue(result.contains("\"errorCode\":\"FORBIDDEN\""), result);
+        assertTrue(result.contains("You do not have access to agent a1"), result);
+        assertFalse(result.contains("INTERNAL"), result);
+    }
+
+    @Test
+    void createGroup_storeAccessRefusal_isForbiddenNotInternal() {
+        when(groupStore.createGroup(any())).thenThrow(new ForbiddenException("You do not have access to agent a1"));
+
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null, null);
+
+        assertTrue(result.contains("\"errorCode\":\"FORBIDDEN\""), result);
+        assertFalse(result.contains("INTERNAL"), result);
+    }
+
     @Test
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));

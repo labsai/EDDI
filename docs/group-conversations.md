@@ -701,8 +701,9 @@ POST /groupstore/templates/{id}/instantiate      {"name": "...", "roleAssignment
 
 MCP: `list_group_templates`, `create_group_from_template`. Missing or unknown
 roles fail loudly, naming the template's real roles. The group is saved through
-the normal store path, so an assigned agent you may not use is refused there
-with `403`, exactly as for a hand-written config.
+the normal store path, so an assigned agent you may not use is refused there,
+exactly as for a hand-written config: `403` over REST, and
+`"errorCode": "FORBIDDEN"` from the MCP tool.
 
 | Template | Style | What it packages |
 |---|---|---|

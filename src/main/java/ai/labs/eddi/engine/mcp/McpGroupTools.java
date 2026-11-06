@@ -164,13 +164,20 @@ public class McpGroupTools {
      * from the store such as a validation message, a stale version — are described,
      * because the caller can act on them ({@link McpToolUtils#isCallerFacing}
      * decides, so an {@link IllegalArgumentException} a library raised is not one
-     * of them). A missing group or conversation is reported as such. Anything else
-     * is a server-side failure: its exception text can carry datastore or
-     * configuration detail (and a {@code NullPointerException} reads literally as
-     * "null"), so it is logged under a short reference id and the caller gets a
-     * fixed message with errorCode {@code INTERNAL} and that reference.
+     * of them). A missing group or conversation is reported as such, and an access
+     * refusal from a guard the store runs (an assigned agent the caller may not
+     * use, which REST answers with 403) as {@code FORBIDDEN}, the way
+     * {@link McpToolUtils#toolFailure(Logger, String, String, Throwable)} answers
+     * it. Anything else is a server-side failure: its exception text can carry
+     * datastore or configuration detail (and a {@code NullPointerException} reads
+     * literally as "null"), so it is logged under a short reference id and the
+     * caller gets a fixed message with errorCode {@code INTERNAL} and that
+     * reference.
      */
     private String failure(String tool, String message, Exception e) {
+        if (e instanceof ForbiddenException denied) {
+            return accessRefusal(LOGGER, tool, message, denied);
+        }
         if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
             LOGGER.debugf("%s: not found: %s", tool, LogSanitizer.sanitize(e.getMessage()));
             return errorJson(message + ": not found", "NOT_FOUND", null);

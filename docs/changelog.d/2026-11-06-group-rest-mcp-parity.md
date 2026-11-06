@@ -35,6 +35,12 @@ Three places where one surface of the group API did less than its sibling.
   as an error with a stack trace and answered `500`. A `ForbiddenException` or a
   JAX-RS `WebApplicationException` is now rethrown, as `RestTeamHandoffs` and
   `RestGroupWorkspace` do, so the caller gets the `403` (or the store's own status).
+  The MCP side had the same fault: `create_group_from_template`, and every other
+  group tool that ends in `McpGroupTools.failure` (`create_group`, `update_group`
+  and the rest), answered the store's `ForbiddenException` with an `INTERNAL`
+  reference and a logged stack trace. `failure` now answers it with
+  `"errorCode": "FORBIDDEN"` and the guard's text, through the shared
+  `McpToolUtils.accessRefusal` that `toolFailure` already uses.
 
 The Javadoc on `budgetRefused` said the team-budget refusal "carries no
 caller-supplied id". It does carry the group id: the stored one, already resolved
