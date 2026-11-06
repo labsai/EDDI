@@ -74,6 +74,7 @@ class MongoContainsFilterTest extends MongoTestBase {
         String lower = store(Map.of("title", "trip to rome (a+b) 50% a_b"));
         String upper = store(Map.of("title", "TRIP TO ROME (A+B) 50% A_B!"));
         store(Map.of("title", "trip to rome (aab) 50X axb")); // "+", "%" and "_" are not special
+        store(Map.of("title", "trip to rome (a+b) 50XYZ aXb")); // "%" and "_" as LIKE wildcards would match this
         store(Map.of("title", "trip to rome abcx")); // "rome .+x" as a regex would match this
         store(Map.of("name", "trip to rome (a+b) 50% a_b")); // the field is absent
 
