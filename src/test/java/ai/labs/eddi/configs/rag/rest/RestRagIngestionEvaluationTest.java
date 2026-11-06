@@ -240,9 +240,8 @@ class RestRagIngestionEvaluationTest {
     }
 
     @Test
-    @DisplayName("a baseline with one key twice is a bad request")
+    @DisplayName("a baseline with one key twice is refused before any embedding call")
     void baselineDuplicates() {
-        when(inspector.search(any(), any(), any(), anyString(), anyInt(), anyDouble())).thenReturn(List.of());
         var baseline = new EvaluationBaseline(List.of(new BaselineQuery(null, "q", 5, true, 1.0, 1.0),
                 new BaselineQuery(null, "q", 5, false, 0.0, 0.0)));
 
@@ -250,18 +249,21 @@ class RestRagIngestionEvaluationTest {
                 new RetrievalEvaluation(List.of(golden("q", "a")), null, null, null, null, baseline));
 
         assertEquals(400, response.getStatus());
+        assertTrue(error(response).contains("baseline"), error(response));
+        verifyNoInteractions(inspector);
     }
 
     @Test
-    @DisplayName("a baseline query with neither id nor text is a bad request")
+    @DisplayName("a baseline query with neither id nor text is refused before any embedding call")
     void baselineUnkeyed() {
-        when(inspector.search(any(), any(), any(), anyString(), anyInt(), anyDouble())).thenReturn(List.of());
         var baseline = new EvaluationBaseline(List.of(new BaselineQuery(" ", null, 5, true, 1.0, 1.0)));
 
         Response response = rest.evaluateRetrieval(KB_ID, 1,
                 new RetrievalEvaluation(List.of(golden("q", "a")), null, null, null, null, baseline));
 
         assertEquals(400, response.getStatus());
+        assertTrue(error(response).contains("baseline"), error(response));
+        verifyNoInteractions(inspector);
     }
 
     @Test

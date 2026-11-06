@@ -533,23 +533,22 @@ public class RestRagIngestion implements IRestRagIngestion {
         body.put("summary", RetrievalMetrics.aggregate(scores));
         body.put("queries", described);
         if (evaluation.baseline() != null) {
+            // validateEvaluation has already refused unkeyed and duplicate baseline
+            // queries, so the comparison cannot fail once the calls have been paid for.
             List<RetrievalMetrics.Observation> baseline = new ArrayList<>();
-            for (BaselineQuery query : evaluation.baseline().queries() == null
-                    ? List.<BaselineQuery>of()
-                    : evaluation.baseline().queries()) {
-                if (query == null || (blank(query.id()) && blank(query.query()))) {
-                    return badRequest("Every baseline query needs an 'id' or a 'query' to be paired by");
-                }
+            for (BaselineQuery query : baselineQueries(evaluation)) {
                 baseline.add(new RetrievalMetrics.Observation(queryKey(query.id(), query.query()), query.k(),
                         query.hit(), query.reciprocalRank(), query.recall()));
             }
-            try {
-                body.put("comparison", RetrievalMetrics.compare(observations, baseline));
-            } catch (IllegalArgumentException e) {
-                return badRequest(e.getMessage());
-            }
+            body.put("comparison", RetrievalMetrics.compare(observations, baseline));
         }
         return Response.ok(body).build();
+    }
+
+    private static List<BaselineQuery> baselineQueries(RetrievalEvaluation evaluation) {
+        return evaluation.baseline() == null || evaluation.baseline().queries() == null
+                ? List.of()
+                : evaluation.baseline().queries();
     }
 
     /**
@@ -607,6 +606,18 @@ public class RestRagIngestion implements IRestRagIngestion {
             if (!keys.add(queryKey(query.id(), query.query()))) {
                 return at + " repeats the key '" + queryKey(query.id(), query.query())
                         + "'; give each query a unique 'id'";
+            }
+        }
+        Set<String> baselineKeys = new HashSet<>();
+        List<BaselineQuery> baseline = baselineQueries(evaluation);
+        for (int i = 0; i < baseline.size(); i++) {
+            BaselineQuery query = baseline.get(i);
+            if (query == null || (blank(query.id()) && blank(query.query()))) {
+                return "Query " + i + " of the baseline needs an 'id' or a 'query' to be paired by";
+            }
+            String key = queryKey(query.id(), query.query());
+            if (!baselineKeys.add(key)) {
+                return "The baseline holds the query '" + key + "' twice; give each query a unique id";
             }
         }
         return null;
