@@ -548,6 +548,26 @@ public class ConnectionConfiguration {
     private static final Pattern HEX = Pattern.compile("[0-9A-Fa-f]+");
 
     /**
+     * Upper bound on a thumbprint once colons and spaces are removed: 64 hex digits
+     * is the longest valid spelling (SHA-256), so twice that leaves room for
+     * nothing a real certificate produces.
+     */
+    private static final int MAX_THUMBPRINT_CHARS = 128;
+
+    /**
+     * {@code value} without its trailing {@code '='} run. A loop rather than
+     * {@code replaceAll("=+$", "")}, which backtracks quadratically on a long run
+     * of '=' that is not at the end.
+     */
+    private static String stripTrailingPadding(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '=') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    /**
      * The base64url form a JOSE {@code x5t} / {@code x5t#S256} header carries, from
      * a thumbprint written either as hex (how Entra, AD FS and {@code openssl x509
      * -fingerprint} show it, colons and spaces allowed) or already as base64url.
@@ -563,11 +583,15 @@ public class ConnectionConfiguration {
         int expected = OAuthConfig.THUMBPRINT_X5T.equals(header) ? 20 : 32;
         String compact = thumbprint.strip().replace(":", "").replace(" ", "");
         byte[] digest;
-        if (HEX.matcher(compact).matches() && compact.length() % 2 == 0) {
+        if (compact.length() > MAX_THUMBPRINT_CHARS) {
+            // Longer than any SHA-256 thumbprint in any accepted spelling; refused
+            // before anything scans it.
+            digest = null;
+        } else if (HEX.matcher(compact).matches() && compact.length() % 2 == 0) {
             digest = HexFormat.of().parseHex(compact);
         } else {
             try {
-                digest = Base64.getUrlDecoder().decode(compact.replace('+', '-').replace('/', '_').replaceAll("=+$", ""));
+                digest = Base64.getUrlDecoder().decode(stripTrailingPadding(compact.replace('+', '-').replace('/', '_')));
             } catch (IllegalArgumentException e) {
                 digest = null;
             }

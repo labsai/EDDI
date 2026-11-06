@@ -6117,14 +6117,14 @@
       "basic": "用户名与密码",
       "clientCredentials": "OAuth 服务账户",
       "authorizationCode": "OAuth 用户登录",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "签名密钥服务账号"
     },
     "choice": {
       "staticBody": "一个固定请求头，对所有人相同 —— X-Api-Key，或 Authorization: Bearer …",
       "basicBody": "HTTP Basic。编码由 {{productName}} 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
       "clientCredentialsBody": "智能体以自身身份登录。一个访问令牌供所有人共享，并自动续期。",
       "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "代理使用私钥而非密钥以自身身份登录——例如 Google 服务账号。所有人共用一个访问令牌。"
     },
     "binding": {
       "perUser": "按用户",
@@ -6158,7 +6158,7 @@
     "clientId": "客户端 ID",
     "clientSecret": "客户端密钥",
     "clientAuthMethod": "客户端认证方式",
-    "clientAuthMethodHint": "客户端密钥以何种方式送达令牌端点。猜错时的表现与密钥错误完全一样，所以这是一项设置而不是自动回退。",
+    "clientAuthMethodHint": "客户端在令牌端点证明身份的方式：通过 Basic 或请求体发送客户端密钥，或使用 private_key_jwt——用保管库中的私钥签名的断言，适用于以证书注册的应用。选错的表现与密钥错误完全相同，因此这是一个设置而不是自动回退。",
     "discoveryUrl": "发现 URL（可选）",
     "pkceAlwaysOn": "用户登录始终启用 PKCE（S256）且无法关闭 —— 重定向目标是一条公开路径。",
     "scopes": "权限范围",
@@ -6245,7 +6245,7 @@
       "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
       "paramValueTooLong": "参数值最多 512 个字符。",
       "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "指纹长度不正确：x5t#S256 需要 SHA-256 指纹，x5t 需要 SHA-1 指纹——以十六进制或 base64url 表示。"
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -6269,19 +6269,19 @@
     "confirmAuthChangeAccept": "更改",
     "deleted": "连接“{{name}}”已删除",
     "confirmDeleteNamed": "删除连接“{{name}}”？",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "私钥",
+    "privateKeyHint": "一个保管库条目，包含未加密的 PKCS#8 PEM（BEGIN PRIVATE KEY）RSA 密钥，或完整的 Google 服务账号 JSON 密钥文件。密钥永远不会离开 {{productName}}；只发送短期有效的签名断言。",
+    "certificateThumbprint": "证书指纹",
+    "certificateThumbprintHint": "上传到身份提供方的证书的指纹——可用门户显示的十六进制，或 base64url。它是公开的，不是机密。",
+    "certificateThumbprintHeader": "指纹头",
+    "thumbprintS256": "x5t#S256 — SHA-256（Entra 默认）",
+    "thumbprintSha1": "x5t — SHA-1 指纹",
+    "serviceAccountEmail": "服务账号（签发者）",
+    "serviceAccountEmailHint": "例如 agent@project.iam.gserviceaccount.com。如果私钥是 JSON 密钥文件则可选，因为该文件会写明自己的账号。",
+    "audience": "断言受众（可选）",
+    "audienceHint": "签名断言的 aud 声明。留空则使用令牌 URL，这正是 Google 所期望的。",
+    "preset": "从模板开始",
+    "presetNone": "无——填写所有字段"
   },
   "extensionTypes": {
     "parser": "输入解析器",

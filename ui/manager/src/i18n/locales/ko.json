@@ -6117,14 +6117,14 @@
       "basic": "아이디와 비밀번호",
       "clientCredentials": "OAuth 서비스 계정",
       "authorizationCode": "OAuth 사용자 로그인",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "서명 키 서비스 계정"
     },
     "choice": {
       "staticBody": "모두에게 동일한 고정 헤더 하나 — X-Api-Key 또는 Authorization: Bearer …",
       "basicBody": "HTTP Basic. 인코딩은 {{productName}}(이)가 처리하므로 비밀번호는 볼트의 별도 항목으로 남아 따로 교체할 수 있습니다.",
       "clientCredentialsBody": "에이전트가 자기 자신으로 로그인합니다. 모두가 공유하는 액세스 토큰 하나가 자동으로 갱신됩니다.",
       "authorizationCodeBody": "각자 자기 계정을 연결하고 에이전트가 그 사람으로서 행동합니다. 로그인 활성화와 볼트가 필요합니다.",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "에이전트가 시크릿 대신 개인 키로 자기 자신으로 로그인합니다 — 예를 들어 Google 서비스 계정. 모두가 하나의 액세스 토큰을 공유합니다."
     },
     "binding": {
       "perUser": "사용자별",
@@ -6158,7 +6158,7 @@
     "clientId": "클라이언트 ID",
     "clientSecret": "클라이언트 시크릿",
     "clientAuthMethod": "클라이언트 인증",
-    "clientAuthMethodHint": "클라이언트 시크릿이 토큰 엔드포인트에 전달되는 방식입니다. 잘못 고르면 시크릿이 틀린 경우와 증상이 똑같아서, 추측이 아니라 설정으로 두었습니다.",
+    "clientAuthMethodHint": "클라이언트가 토큰 엔드포인트에서 자신을 증명하는 방식입니다. 클라이언트 시크릿을 Basic 또는 본문으로 보내거나, private_key_jwt — 인증서로 등록한 앱을 위해 볼트에 저장된 개인 키로 서명한 어설션 — 을 사용합니다. 잘못 고르면 잘못된 시크릿과 똑같이 보이므로 자동 대체가 아닌 설정입니다.",
     "discoveryUrl": "디스커버리 URL (선택)",
     "pkceAlwaysOn": "사용자 로그인에는 PKCE(S256)가 항상 적용되며 끌 수 없습니다 — 리디렉션 대상이 공개 경로이기 때문입니다.",
     "scopes": "스코프",
@@ -6245,7 +6245,7 @@
       "paramValueReference": "매개변수 값은 쓴 그대로 전송됩니다. 여기의 ${…} 참조는 해석되지 않으며 볼트 포인터가 URL에 실리게 됩니다. 일반 프로토콜 값만 사용하세요.",
       "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
       "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다.",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "올바른 길이의 지문이 아닙니다. x5t#S256에는 SHA-256 지문, x5t에는 SHA-1 지문이 필요합니다 — 16진수 또는 base64url로 입력하세요."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -6269,19 +6269,19 @@
     "confirmAuthChangeAccept": "변경",
     "deleted": "연결 \"{{name}}\"을(를) 삭제했습니다",
     "confirmDeleteNamed": "연결 \"{{name}}\"을(를) 삭제하시겠습니까?",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "개인 키",
+    "privateKeyHint": "암호화되지 않은 PKCS#8 PEM(BEGIN PRIVATE KEY) RSA 키 또는 Google 서비스 계정 JSON 키 파일 전체를 담은 볼트 항목입니다. 키는 {{productName}} 밖으로 나가지 않으며, 수명이 짧은 서명된 어설션만 전송됩니다.",
+    "certificateThumbprint": "인증서 지문",
+    "certificateThumbprintHint": "ID 공급자에 업로드한 인증서의 지문 — 포털에 표시되는 16진수 또는 base64url. 공개 정보이며 시크릿이 아닙니다.",
+    "certificateThumbprintHeader": "지문 헤더",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra 기본값)",
+    "thumbprintSha1": "x5t — SHA-1 지문",
+    "serviceAccountEmail": "서비스 계정(발급자)",
+    "serviceAccountEmailHint": "예: agent@project.iam.gserviceaccount.com. 개인 키가 자체 계정을 명시하는 JSON 키 파일이면 선택 사항입니다.",
+    "audience": "어설션 대상(선택 사항)",
+    "audienceHint": "서명된 어설션의 aud 클레임입니다. 비워 두면 토큰 URL을 사용하며, 이것이 Google이 기대하는 값입니다.",
+    "preset": "템플릿에서 시작",
+    "presetNone": "없음 — 모든 필드 직접 입력"
   },
   "extensionTypes": {
     "parser": "입력 파서",

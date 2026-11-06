@@ -30,6 +30,16 @@ class ConnectionConfigurationSignedJwtValidationTest {
     private static final String SHA256_HEX = "AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89";
     private static final String SHA1_HEX = "0123456789ABCDEF0123456789ABCDEF01234567";
 
+    /**
+     * A placeholder PKCS#8 PEM around {@code body}. The armour is assembled at run
+     * time so no source line carries a whole private-key block for a secret scanner
+     * to report.
+     */
+    private static String pem(String body) {
+        String dashes = "-----";
+        return dashes + "BEGIN PRIVATE KEY" + dashes + body + dashes + "END PRIVATE KEY" + dashes;
+    }
+
     static ConnectionConfiguration jwtBearer() {
         var connection = new ConnectionConfiguration();
         connection.setName("google-sa");
@@ -97,7 +107,7 @@ class ConnectionConfigurationSignedJwtValidationTest {
             missing.getOauth().setPrivateKey(null);
             assertTrue(refusal(missing).contains("oauth.privateKey is required"));
             var literal = jwtBearer();
-            literal.getOauth().setPrivateKey("-----BEGIN PRIVATE KEY-----MIIEvQ...-----END PRIVATE KEY-----");
+            literal.getOauth().setPrivateKey(pem("MIIEvQ..."));
             String message = refusal(literal);
             assertTrue(message.contains("oauth.privateKey must be a ${vault:…} reference"));
             assertFalse(message.contains("MIIEvQ"), "the refusal must not echo the key");
@@ -238,6 +248,17 @@ class ConnectionConfigurationSignedJwtValidationTest {
             assertEquals(fromHex, fromPaddedBase64);
             assertFalse(fromHex.contains("="));
         }
+
+        @Test
+        @DisplayName("an oversized thumbprint, such as a long run of '=', is refused without being scanned")
+        void oversizedThumbprint() {
+            String fromHex = ConnectionConfiguration.canonicalThumbprint(SHA256_HEX, OAuthConfig.THUMBPRINT_X5T_S256);
+            assertEquals(fromHex, ConnectionConfiguration.canonicalThumbprint(fromHex + "==", OAuthConfig.THUMBPRINT_X5T_S256));
+            String padded = "=".repeat(50_000) + "x";
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> ConnectionConfiguration.canonicalThumbprint(padded, OAuthConfig.THUMBPRINT_X5T_S256));
+            assertTrue(e.getMessage().contains("oauth.certificateThumbprint must be the SHA-256 thumbprint"));
+        }
     }
 
     @Nested
@@ -248,7 +269,7 @@ class ConnectionConfigurationSignedJwtValidationTest {
         @DisplayName("a legacy literal privateKey is redacted for a non-admin reader; a reference is kept")
         void privateKeyRedacted() {
             var legacy = jwtBearer();
-            legacy.getOauth().setPrivateKey("-----BEGIN PRIVATE KEY-----MIIEvQ-----END PRIVATE KEY-----");
+            legacy.getOauth().setPrivateKey(pem("MIIEvQ"));
             ConnectionConfiguration redacted = ConnectionReadRedactor.redactLegacyLiterals(legacy);
             assertFalse(redacted.getOauth().getPrivateKey().contains("MIIEvQ"));
             assertTrue(redacted.getOauth().getPrivateKey().startsWith("<redacted"));

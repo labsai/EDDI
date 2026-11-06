@@ -49,7 +49,8 @@ import static org.mockito.Mockito.when;
  */
 class OAuthTokenServiceJwtBearerTest {
 
-    private static final String KEY_MATERIAL = "-----BEGIN PRIVATE KEY-----resolved-----END PRIVATE KEY-----";
+    private static final String KEY_MATERIAL = JwtAssertionsTest.armour("BEGIN PRIVATE KEY") + "resolved"
+            + JwtAssertionsTest.armour("END PRIVATE KEY");
 
     private InMemoryConnectionGrantStore grantStore;
     private OAuthTokenClient tokenClient;

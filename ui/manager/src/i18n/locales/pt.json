@@ -6177,14 +6177,14 @@
       "basic": "Usuário e senha",
       "clientCredentials": "Conta de serviço OAuth",
       "authorizationCode": "Login de usuário OAuth",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "Conta de serviço com chave de assinatura"
     },
     "choice": {
       "staticBody": "Um cabeçalho fixo, igual para todos — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. O {{productName}} faz a codificação, então a senha continua sendo uma entrada separada do cofre, que você pode trocar sozinha.",
       "clientCredentialsBody": "O agente se identifica como ele mesmo. Um token de acesso compartilhado por todos, renovado automaticamente.",
       "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre.",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos."
     },
     "binding": {
       "perUser": "Por pessoa",
@@ -6218,7 +6218,7 @@
     "clientId": "ID do cliente",
     "clientSecret": "Segredo do cliente",
     "clientAuthMethod": "Autenticação do cliente",
-    "clientAuthMethodHint": "Como o segredo do cliente chega ao endpoint do token. Errar aqui parece exatamente um segredo errado, por isso é um ajuste e não um chute.",
+    "clientAuthMethodHint": "Como o cliente se identifica no endpoint de token: com o segredo do cliente via Basic ou no corpo, ou com private_key_jwt — uma asserção assinada com uma chave privada guardada no cofre, para um aplicativo registrado com certificado. Escolher errado parece exatamente um segredo incorreto, por isso é uma configuração e não uma alternativa automática.",
     "discoveryUrl": "URL de descoberta (opcional)",
     "pkceAlwaysOn": "O PKCE (S256) é sempre aplicado a um login de usuário e não pode ser desligado — o destino do redirecionamento é um caminho público.",
     "scopes": "Escopos",
@@ -6305,7 +6305,7 @@
       "paramValueReference": "Os valores dos parâmetros são enviados exatamente como escritos — uma referência ${…} aqui não é resolvida e colocaria um ponteiro do cofre num URL. Use apenas valores de protocolo simples.",
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
       "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -6329,19 +6329,19 @@
     "confirmAuthChangeAccept": "Alterar",
     "deleted": "Conexão \"{{name}}\" excluída",
     "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "Chave privada",
+    "privateKeyHint": "Uma entrada do cofre com uma chave RSA PKCS#8 PEM não criptografada (BEGIN PRIVATE KEY), ou o arquivo de chave JSON completo de uma conta de serviço do Google. A chave nunca sai do {{productName}}; só uma asserção assinada de curta duração é enviada.",
+    "certificateThumbprint": "Impressão digital do certificado",
+    "certificateThumbprintHint": "Do certificado enviado ao provedor de identidade — em hexadecimal como o portal mostra, ou em base64url. Pública, não é um segredo.",
+    "certificateThumbprintHeader": "Cabeçalho da impressão digital",
+    "thumbprintS256": "x5t#S256 — SHA-256 (padrão do Entra)",
+    "thumbprintSha1": "x5t — impressão SHA-1",
+    "serviceAccountEmail": "Conta de serviço (emissor)",
+    "serviceAccountEmailHint": "ex.: agent@project.iam.gserviceaccount.com. Opcional quando a chave privada é um arquivo de chave JSON, que indica a própria conta.",
+    "audience": "Público da asserção (opcional)",
+    "audienceHint": "A claim aud da asserção assinada. Deixe em branco para usar a URL do token, que é o que o Google espera.",
+    "preset": "Começar de um modelo",
+    "presetNone": "Nenhum — preencher todos os campos"
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",

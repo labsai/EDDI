@@ -6357,14 +6357,14 @@
       "basic": "اسم مستخدم وكلمة مرور",
       "clientCredentials": "حساب خدمة OAuth",
       "authorizationCode": "تسجيل دخول مستخدم عبر OAuth",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "حساب خدمة بمفتاح توقيع"
     },
     "choice": {
       "staticBody": "ترويسة ثابتة واحدة للجميع — ‎X-Api-Key‎ أو ‎Authorization: Bearer …‎",
       "basicBody": "‏HTTP Basic. يتولى {{productName}} الترميز، فتبقى كلمة المرور مدخلًا مستقلًا في الخزنة يمكنك تدويره وحده.",
       "clientCredentialsBody": "يسجّل الوكيل دخوله باسمه هو. رمز وصول واحد يتشاركه الجميع ويُجدَّد تلقائيًا.",
       "authorizationCodeBody": "يربط كل شخص حسابه الخاص ويتصرف الوكيل نيابةً عنه. يتطلب تفعيل تسجيل الدخول ووجود خزنة.",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "يسجّل الوكيل الدخول باسمه باستخدام مفتاح خاص بدلًا من سرّ — حساب خدمة Google مثلًا. رمز وصول واحد يشترك فيه الجميع."
     },
     "binding": {
       "perUser": "لكل شخص",
@@ -6398,7 +6398,7 @@
     "clientId": "معرّف العميل",
     "clientSecret": "سر العميل",
     "clientAuthMethod": "مصادقة العميل",
-    "clientAuthMethodHint": "كيف يصل سر العميل إلى نقطة الرمز. الخطأ هنا يبدو تمامًا كأنه سر خاطئ، لذلك هو إعداد لا تخمين.",
+    "clientAuthMethodHint": "كيف يثبت العميل هويته عند نقطة نهاية الرموز: بسرّ العميل عبر Basic أو في جسم الطلب، أو عبر private_key_jwt — تأكيد موقّع بمفتاح خاص محفوظ في الخزنة، لتطبيق مسجّل بشهادة. الاختيار الخاطئ يبدو تمامًا كسرّ خاطئ، لذا فهو إعداد وليس بديلًا تلقائيًا.",
     "discoveryUrl": "عنوان الاكتشاف (اختياري)",
     "pkceAlwaysOn": "يُطبَّق PKCE (S256) دائمًا على تسجيل دخول المستخدم ولا يمكن إيقافه — فوجهة إعادة التوجيه مسار عام.",
     "scopes": "النطاقات",
@@ -6485,7 +6485,7 @@
       "paramValueReference": "تُرسل قيم المعاملات كما هي مكتوبة — لا يُحلّ مرجع ${…} هنا، وسيضع مؤشرًا إلى الخزنة داخل عنوان URL. استخدم قيم بروتوكول عادية فقط.",
       "paramValueTooLong": "تتكوّن قيمة المعامل من 512 حرفًا على الأكثر.",
       "paramValueCredentialShaped": "إحدى هذه القيم تبدو مفتاحًا أو رمزًا. تُخزَّن هذه الخريطة نصًا صريحًا وتُرسل في عنوان URL — لا يجوز هنا سوى معاملات بروتوكول غير سرية.",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "ليست بصمة بالطول الصحيح: يتطلب x5t#S256 بصمة SHA-256، ويتطلب x5t بصمة SHA-1 — بصيغة سداسية عشرية أو base64url."
     },
     "backToList": "العودة إلى الاتصالات",
     "headerSecret": "السر المخزّن",
@@ -6509,19 +6509,19 @@
     "confirmAuthChangeAccept": "تغيير",
     "deleted": "تم حذف الاتصال \"{{name}}\"",
     "confirmDeleteNamed": "هل تريد حذف الاتصال \"{{name}}\"؟",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "المفتاح الخاص",
+    "privateKeyHint": "إدخال في الخزنة يحتوي مفتاح RSA غير مشفّر بصيغة PKCS#8 PEM (BEGIN PRIVATE KEY)، أو ملف مفتاح JSON كاملًا لحساب خدمة Google. لا يغادر المفتاح {{productName}} أبدًا؛ يُرسَل فقط تأكيد موقّع قصير الأجل.",
+    "certificateThumbprint": "بصمة الشهادة",
+    "certificateThumbprintHint": "بصمة الشهادة المرفوعة إلى موفّر الهوية — بالصيغة السداسية العشرية كما تعرضها البوابة، أو base64url. عامة وليست سرًّا.",
+    "certificateThumbprintHeader": "ترويسة البصمة",
+    "thumbprintS256": "x5t#S256 — SHA-256 (الافتراضي في Entra)",
+    "thumbprintSha1": "x5t — بصمة SHA-1",
+    "serviceAccountEmail": "حساب الخدمة (المُصدِر)",
+    "serviceAccountEmailHint": "مثلًا agent@project.iam.gserviceaccount.com. اختياري إذا كان المفتاح الخاص ملف مفتاح JSON، إذ يذكر حسابه بنفسه.",
+    "audience": "جمهور التأكيد (اختياري)",
+    "audienceHint": "مطالبة aud في التأكيد الموقّع. اتركه فارغًا لاستخدام عنوان URL للرمز، وهو ما تتوقعه Google.",
+    "preset": "البدء من قالب",
+    "presetNone": "لا شيء — املأ كل الحقول"
   },
   "extensionTypes": {
     "parser": "محلّل الإدخال",

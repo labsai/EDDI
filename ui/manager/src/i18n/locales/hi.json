@@ -6117,14 +6117,14 @@
       "basic": "उपयोगकर्ता नाम और पासवर्ड",
       "clientCredentials": "OAuth सेवा खाता",
       "authorizationCode": "OAuth उपयोगकर्ता लॉगिन",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "हस्ताक्षर-कुंजी सेवा खाता"
     },
     "choice": {
       "staticBody": "एक निश्चित हेडर, सबके लिए एक जैसा — X-Api-Key, या Authorization: Bearer …",
       "basicBody": "HTTP Basic. एन्कोडिंग {{productName}} करता है, इसलिए पासवर्ड वॉल्ट में अलग प्रविष्टि बना रहता है जिसे अकेले बदला जा सकता है।",
       "clientCredentialsBody": "एजेंट स्वयं के रूप में साइन इन करता है। सबके लिए साझा एक ऐक्सेस टोकन, जो अपने आप नवीनीकृत होता है।",
       "authorizationCodeBody": "हर व्यक्ति अपना खाता जोड़ता है और एजेंट उसी के रूप में कार्य करता है। इसके लिए साइन-इन चालू होना और एक वॉल्ट चाहिए।",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "एजेंट किसी सीक्रेट के बजाय निजी कुंजी से स्वयं के रूप में साइन इन करता है — उदाहरण के लिए Google सेवा खाता। सभी के लिए एक साझा एक्सेस टोकन।"
     },
     "binding": {
       "perUser": "प्रति व्यक्ति",
@@ -6158,7 +6158,7 @@
     "clientId": "क्लाइंट आईडी",
     "clientSecret": "क्लाइंट सीक्रेट",
     "clientAuthMethod": "क्लाइंट प्रमाणीकरण",
-    "clientAuthMethodHint": "क्लाइंट सीक्रेट टोकन एंडपॉइंट तक किस तरह पहुँचता है। ग़लत चुनने पर वैसा ही दिखता है जैसे सीक्रेट ग़लत हो, इसलिए यह अनुमान नहीं बल्कि एक सेटिंग है।",
+    "clientAuthMethodHint": "टोकन एंडपॉइंट पर क्लाइंट अपनी पहचान कैसे सिद्ध करता है: क्लाइंट सीक्रेट Basic से या बॉडी में, या private_key_jwt — वॉल्ट में रखी निजी कुंजी से हस्ताक्षरित एक assertion, प्रमाणपत्र के साथ पंजीकृत ऐप के लिए। गलत चुनना बिल्कुल गलत सीक्रेट जैसा दिखता है, इसलिए यह एक सेटिंग है, स्वचालित विकल्प नहीं।",
     "discoveryUrl": "डिस्कवरी URL (वैकल्पिक)",
     "pkceAlwaysOn": "उपयोगकर्ता लॉगिन पर PKCE (S256) हमेशा लागू होता है और इसे बंद नहीं किया जा सकता — रीडायरेक्ट का गंतव्य एक सार्वजनिक पथ है।",
     "scopes": "स्कोप",
@@ -6245,7 +6245,7 @@
       "paramValueReference": "पैरामीटर मान ठीक वैसे ही भेजे जाते हैं जैसे लिखे गए हैं — यहाँ ${…} संदर्भ हल नहीं होता और वॉल्ट पॉइंटर को URL में डाल देगा। केवल सादे प्रोटोकॉल मान उपयोग करें।",
       "paramValueTooLong": "पैरामीटर मान अधिकतम 512 अक्षरों का हो सकता है।",
       "paramValueCredentialShaped": "इनमें से एक मान कुंजी या टोकन जैसा दिखता है। यह मैप सादे पाठ में संग्रहीत होता है और URL में भेजा जाता है — यहाँ केवल गैर-गुप्त प्रोटोकॉल पैरामीटर ही होने चाहिए।",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "सही लंबाई का थंबप्रिंट नहीं है: x5t#S256 को SHA-256 थंबप्रिंट चाहिए, x5t को SHA-1 — हेक्स या base64url में।"
     },
     "backToList": "कनेक्शन सूची पर लौटें",
     "headerSecret": "संग्रहीत गुप्त मान",
@@ -6269,19 +6269,19 @@
     "confirmAuthChangeAccept": "बदलें",
     "deleted": "कनेक्शन \"{{name}}\" हटा दिया गया",
     "confirmDeleteNamed": "कनेक्शन \"{{name}}\" हटाएँ?",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "निजी कुंजी",
+    "privateKeyHint": "एक वॉल्ट प्रविष्टि जिसमें अनएन्क्रिप्टेड PKCS#8 PEM (BEGIN PRIVATE KEY) RSA कुंजी हो, या Google सेवा खाते की पूरी JSON कुंजी फ़ाइल। कुंजी कभी {{productName}} से बाहर नहीं जाती; केवल अल्पकालिक हस्ताक्षरित assertion भेजा जाता है।",
+    "certificateThumbprint": "प्रमाणपत्र थंबप्रिंट",
+    "certificateThumbprintHint": "पहचान प्रदाता पर अपलोड किए गए प्रमाणपत्र का — पोर्टल जैसा दिखाता है वैसा हेक्स, या base64url। यह सार्वजनिक है, कोई सीक्रेट नहीं।",
+    "certificateThumbprintHeader": "थंबप्रिंट हेडर",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra डिफ़ॉल्ट)",
+    "thumbprintSha1": "x5t — SHA-1 थंबप्रिंट",
+    "serviceAccountEmail": "सेवा खाता (जारीकर्ता)",
+    "serviceAccountEmailHint": "जैसे agent@project.iam.gserviceaccount.com। वैकल्पिक, जब निजी कुंजी एक JSON कुंजी फ़ाइल हो, जो अपना खाता स्वयं बताती है।",
+    "audience": "Assertion ऑडियंस (वैकल्पिक)",
+    "audienceHint": "हस्ताक्षरित assertion का aud क्लेम। टोकन URL उपयोग करने के लिए खाली छोड़ें, जिसकी Google अपेक्षा करता है।",
+    "preset": "टेम्पलेट से शुरू करें",
+    "presetNone": "कोई नहीं — हर फ़ील्ड स्वयं भरें"
   },
   "extensionTypes": {
     "parser": "इनपुट पार्सर",

@@ -6117,14 +6117,14 @@
       "basic": "ชื่อผู้ใช้และรหัสผ่าน",
       "clientCredentials": "บัญชีบริการ OAuth",
       "authorizationCode": "การเข้าสู่ระบบผู้ใช้แบบ OAuth",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "บัญชีบริการแบบคีย์ลงนาม"
     },
     "choice": {
       "staticBody": "ส่วนหัวคงที่หนึ่งค่า เหมือนกันทุกคน — X-Api-Key หรือ Authorization: Bearer …",
       "basicBody": "HTTP Basic โดย {{productName}} จัดการการเข้ารหัสให้ รหัสผ่านจึงยังเป็นรายการแยกในห้องนิรภัยที่หมุนเปลี่ยนได้ตามลำพัง",
       "clientCredentialsBody": "เอเจนต์เข้าสู่ระบบในนามของตัวเอง โทเคนเข้าถึงหนึ่งชุดใช้ร่วมกันทุกคนและต่ออายุอัตโนมัติ",
       "authorizationCodeBody": "แต่ละคนเชื่อมบัญชีของตัวเอง และเอเจนต์ทำงานในนามของคนนั้น ต้องเปิดการเข้าสู่ระบบและมีห้องนิรภัย",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "เอเจนต์ลงชื่อเข้าใช้ในนามตัวเองด้วยคีย์ส่วนตัวแทนความลับ — เช่น บัญชีบริการของ Google โทเค็นการเข้าถึงเดียวที่ทุกคนใช้ร่วมกัน"
     },
     "binding": {
       "perUser": "รายบุคคล",
@@ -6158,7 +6158,7 @@
     "clientId": "รหัสไคลเอนต์",
     "clientSecret": "ความลับของไคลเอนต์",
     "clientAuthMethod": "การยืนยันตัวตนของไคลเอนต์",
-    "clientAuthMethodHint": "วิธีที่ความลับของไคลเอนต์ไปถึงปลายทางโทเคน เลือกผิดจะดูเหมือนความลับผิดทุกประการ จึงทำเป็นการตั้งค่าแทนการเดา",
+    "clientAuthMethodHint": "วิธีที่ไคลเอนต์ยืนยันตัวตนกับปลายทางโทเค็น: ส่งความลับของไคลเอนต์ผ่าน Basic หรือในเนื้อหาคำขอ หรือใช้ private_key_jwt — การยืนยันที่ลงนามด้วยคีย์ส่วนตัวที่เก็บในห้องนิรภัย สำหรับแอปที่ลงทะเบียนด้วยใบรับรอง การเลือกผิดจะดูเหมือนความลับผิดทุกประการ จึงเป็นการตั้งค่าแทนการสลับอัตโนมัติ",
     "discoveryUrl": "URL ค้นหาข้อมูล (ไม่บังคับ)",
     "pkceAlwaysOn": "การเข้าสู่ระบบผู้ใช้จะใช้ PKCE (S256) เสมอและปิดไม่ได้ — เพราะปลายทางการเปลี่ยนเส้นทางเป็นเส้นทางสาธารณะ",
     "scopes": "ขอบเขตสิทธิ์",
@@ -6245,7 +6245,7 @@
       "paramValueReference": "ค่าพารามิเตอร์ถูกส่งตามที่เขียนไว้ทุกประการ การอ้างอิง ${…} ตรงนี้จะไม่ถูกแปลง และจะทำให้ตัวชี้ห้องนิรภัยไปอยู่ใน URL ใช้ค่าโปรโตคอลธรรมดาเท่านั้น",
       "paramValueTooLong": "ค่าพารามิเตอร์ยาวได้ไม่เกิน 512 อักขระ",
       "paramValueCredentialShaped": "ค่าตัวหนึ่งในนี้ดูเหมือนคีย์หรือโทเค็น แมปนี้ถูกเก็บเป็นข้อความธรรมดาและส่งใน URL ควรมีเฉพาะพารามิเตอร์โปรโตคอลที่ไม่เป็นความลับเท่านั้น",
-      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url."
+      "thumbprintFormat": "ลายนิ้วมือมีความยาวไม่ถูกต้อง: x5t#S256 ต้องใช้ลายนิ้วมือ SHA-256 ส่วน x5t ต้องใช้ SHA-1 — ในรูปแบบเลขฐานสิบหกหรือ base64url"
     },
     "backToList": "กลับไปที่การเชื่อมต่อ",
     "headerSecret": "ความลับที่เก็บไว้",
@@ -6269,19 +6269,19 @@
     "confirmAuthChangeAccept": "เปลี่ยน",
     "deleted": "ลบการเชื่อมต่อ \"{{name}}\" แล้ว",
     "confirmDeleteNamed": "ลบการเชื่อมต่อ \"{{name}}\" หรือไม่?",
-    "privateKey": "Private key",
-    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
-    "certificateThumbprint": "Certificate thumbprint",
-    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
-    "certificateThumbprintHeader": "Thumbprint header",
-    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
-    "thumbprintSha1": "x5t — SHA-1",
-    "serviceAccountEmail": "Service account (issuer)",
-    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
-    "audience": "Assertion audience (optional)",
-    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
-    "preset": "Start from a template",
-    "presetNone": "None — fill in every field"
+    "privateKey": "คีย์ส่วนตัว",
+    "privateKeyHint": "รายการในห้องนิรภัยที่เก็บคีย์ RSA แบบ PKCS#8 PEM ที่ไม่เข้ารหัส (BEGIN PRIVATE KEY) หรือไฟล์คีย์ JSON ทั้งไฟล์ของบัญชีบริการ Google คีย์จะไม่ออกจาก {{productName}} เลย มีเพียงการยืนยันที่ลงนามซึ่งมีอายุสั้นเท่านั้นที่ถูกส่งออกไป",
+    "certificateThumbprint": "ลายนิ้วมือของใบรับรอง",
+    "certificateThumbprintHint": "ของใบรับรองที่อัปโหลดไปยังผู้ให้บริการข้อมูลประจำตัว — เป็นเลขฐานสิบหกตามที่พอร์ทัลแสดง หรือ base64url เป็นข้อมูลสาธารณะ ไม่ใช่ความลับ",
+    "certificateThumbprintHeader": "ส่วนหัวลายนิ้วมือ",
+    "thumbprintS256": "x5t#S256 — SHA-256 (ค่าเริ่มต้นของ Entra)",
+    "thumbprintSha1": "x5t — ลายนิ้วมือ SHA-1",
+    "serviceAccountEmail": "บัญชีบริการ (ผู้ออก)",
+    "serviceAccountEmailHint": "เช่น agent@project.iam.gserviceaccount.com ไม่บังคับหากคีย์ส่วนตัวเป็นไฟล์คีย์ JSON ซึ่งระบุบัญชีของตัวเองไว้แล้ว",
+    "audience": "ผู้รับของการยืนยัน (ไม่บังคับ)",
+    "audienceHint": "เคลม aud ของการยืนยันที่ลงนาม เว้นว่างไว้เพื่อใช้ URL ของโทเค็น ซึ่งเป็นสิ่งที่ Google คาดหวัง",
+    "preset": "เริ่มจากเทมเพลต",
+    "presetNone": "ไม่มี — กรอกทุกช่องเอง"
   },
   "extensionTypes": {
     "parser": "ตัวแยกวิเคราะห์อินพุต",

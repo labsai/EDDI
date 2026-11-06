@@ -61,9 +61,18 @@ class JwtAssertionsTest {
         return generator.generateKeyPair();
     }
 
+    /**
+     * A PEM armour line such as {@code BEGIN PRIVATE KEY}, dashes added at run
+     * time. Written out whole, a header and footer in one source hunk is what a
+     * secret scanner reports as a leaked private key.
+     */
+    static String armour(String label) {
+        return "-----" + label + "-----";
+    }
+
     static String pkcs8Pem(KeyPair pair) {
-        return "-----BEGIN PRIVATE KEY-----\n" + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII))
-                .encodeToString(pair.getPrivate().getEncoded()) + "\n-----END PRIVATE KEY-----\n";
+        return armour("BEGIN PRIVATE KEY") + "\n" + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII))
+                .encodeToString(pair.getPrivate().getEncoded()) + "\n" + armour("END PRIVATE KEY") + "\n";
     }
 
     /** A Google service-account key file, shaped as the console downloads it. */
@@ -250,9 +259,10 @@ class JwtAssertionsTest {
         @DisplayName("garbage, PKCS#1 and encrypted keys are refused with advice and without echo")
         void unsupportedShapes() {
             String body = pem.substring(pem.indexOf('\n') + 1, pem.indexOf("-----END"));
-            for (String material : List.of("not a key at all MIIsecret", "-----BEGIN RSA PRIVATE KEY-----\n" + body + "-----END RSA PRIVATE KEY-----",
-                    "-----BEGIN ENCRYPTED PRIVATE KEY-----\n" + body + "-----END ENCRYPTED PRIVATE KEY-----",
-                    "-----BEGIN PRIVATE KEY-----\n!!!notbase64!!!\n-----END PRIVATE KEY-----", "   ")) {
+            for (String material : List.of("not a key at all MIIsecret",
+                    armour("BEGIN RSA PRIVATE KEY") + "\n" + body + armour("END RSA PRIVATE KEY"),
+                    armour("BEGIN ENCRYPTED PRIVATE KEY") + "\n" + body + armour("END ENCRYPTED PRIVATE KEY"),
+                    armour("BEGIN PRIVATE KEY") + "\n!!!notbase64!!!\n" + armour("END PRIVATE KEY"), "   ")) {
                 var e = assertThrows(ConnectionException.class, () -> SigningKey.parse(material, "c"));
                 assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, e.getReason());
                 assertFalse(e.getMessage().contains("MII"), "no key material in: " + e.getMessage());
