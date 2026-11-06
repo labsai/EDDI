@@ -18,6 +18,8 @@ import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetRefusedException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
@@ -322,6 +324,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
             return "Invalid approval request: " + e.getMessage();
         }
+        // Fixed text of its own, naming the field only.
+        if (e instanceof HitlPlanBinding.PlanHashRequired) {
+            return "Invalid approval request: " + e.getMessage();
+        }
         return "Invalid approval request: an unknown task id was referenced, or a task is not awaiting approval.";
     }
 
@@ -607,6 +613,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
     private static final String PAUSE_CHANGED_MESSAGE = "The pending approval changed since this decision was made "
             + "(pauseId no longer current) — re-read approval-status and decide again.";
+    private static final String PLAN_CHANGED_MESSAGE = "The pending approval's plan is not the one this decision was made for "
+            + "(planHash does not match) — re-read approval-status and decide again.";
 
     @Override
     @RunOnVirtualThread
@@ -643,6 +651,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            // The decision named a plan (planHash) other than the pending one.
+            LOGGER.infof("Approve of group conversation %s rejected (plan changed)", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity(PLAN_CHANGED_MESSAGE).build();
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             // The decision named a pause (pauseId) that is no longer current: the
             // discussion is still awaiting approval, but on something the reviewer
@@ -917,6 +930,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
             closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            // Still awaiting approval, but not on the plan this decision was made for.
+            sendErrorEvent(eventSink, sse, PLAN_CHANGED_MESSAGE);
+            closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             // Still awaiting approval, but not the pause this decision was made for.
             sendErrorEvent(eventSink, sse, PAUSE_CHANGED_MESSAGE);
@@ -1030,6 +1047,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
+            // The plan hash a decision passes back as HitlDecision.planHash
+            // (HitlPlanHash#forGroup) — derived from what is awaiting approval, so it
+            // is reported only for an approval pause.
+            summary.put("planHash", awaitingApproval ? HitlPlanHash.forGroup(gc) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");

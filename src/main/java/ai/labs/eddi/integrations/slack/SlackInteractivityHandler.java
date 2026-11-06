@@ -197,11 +197,12 @@ public class SlackInteractivityHandler {
             }
             return;
         }
+        String planHash = parsed.value().planHash();
         if (parsed.value().isGroup()) {
-            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(), pauseId,
+            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(), pauseId, planHash,
                     auth, parsed.approvalChannelId(), parsed.messageTs());
         } else {
-            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(), pauseId,
+            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(), pauseId, planHash,
                     auth, parsed.approvalChannelId(), parsed.messageTs());
         }
     }
@@ -346,6 +347,7 @@ public class SlackInteractivityHandler {
                 return;
             }
             decision.setPauseId(authorized.pauseId());
+            decision.setPlanHash(parsed.value().planHash());
             resolveConversationDecision(conversationId, decision, parsed.slackUserId(), authorized.auth(), parsed.approvalChannelId(),
                     parsed.messageTs());
             return;
@@ -354,7 +356,7 @@ public class SlackInteractivityHandler {
             return;
         }
         var metadata = new SlackHitlEditModal.Metadata(authorized.integration().getName(), conversationId, parsed.value().cardId(),
-                authorized.pauseId(), parsed.approvalChannelId(), parsed.messageTs(), null);
+                authorized.pauseId(), parsed.approvalChannelId(), parsed.messageTs(), null, parsed.value().planHash());
         ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
         Map<String, String> vocabulary = reasonCodesOf(snapshot);
         Map<String, Object> view = parsed.interaction() == Interaction.OPEN_EDIT
@@ -407,6 +409,7 @@ public class SlackInteractivityHandler {
                 return Map.of(e.blockId(), e.getMessage());
             }
             decision.setPauseId(authorized.pauseId());
+            decision.setPlanHash(parsed.value().planHash());
             try {
                 conversationService.validateHitlDecision(conversationId, decision);
             } catch (IllegalArgumentException e) {
@@ -505,7 +508,8 @@ public class SlackInteractivityHandler {
         }
         String slackUserTeamId = payload.path("user").path("team_id").asText("");
         HitlVerdict verdict = SlackHitlEditModal.CALLBACK_EDIT.equals(callbackId) ? HitlVerdict.APPROVED : HitlVerdict.REJECTED;
-        return new ParsedAction(verdict, new SlackHitlSupport.ActionValue(metadata.integration(), metadata.subject(), metadata.cardId()),
+        return new ParsedAction(verdict,
+                new SlackHitlSupport.ActionValue(metadata.integration(), metadata.subject(), metadata.cardId(), metadata.planHash()),
                 payload.path("user").path("id").asText(""), slackUserTeamId.isBlank() ? null : slackUserTeamId, metadata.channel(),
                 metadata.ts(), Interaction.SUBMIT, null, callbackId, view.path("state").path("values"), metadata);
     }
@@ -529,10 +533,10 @@ public class SlackInteractivityHandler {
         return channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, integrationName);
     }
 
-    private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId, String pauseId,
+    private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId, String pauseId, String planHash,
                                      String auth, String approvalChannelId, String messageTs) {
-        resolveConversationDecision(conversationId, buildDecision(verdict, slackUserId, pauseId), slackUserId, auth, approvalChannelId,
-                messageTs);
+        resolveConversationDecision(conversationId, buildDecision(verdict, slackUserId, pauseId, planHash), slackUserId, auth,
+                approvalChannelId, messageTs);
     }
 
     private void resolveConversationDecision(String conversationId, HitlDecision decision, String slackUserId, String auth,
@@ -541,6 +545,10 @@ public class SlackInteractivityHandler {
         try {
             conversationService.resumeConversation(conversationId, decision, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, resolutionDetail(decision));
+        } catch (IConversationService.PlanMismatchException e) {
+            // The plan this card was posted for is not the pending one. Nothing ran and
+            // the pause is untouched; the card is left as it is — it was not resolved.
+            LOGGER.warnf("Slack HITL decision for %s refused: the card's plan is not the pending one", sanitize(conversationId));
         } catch (IllegalStateException e) {
             // Already decided / timed out / not paused, or the pause changed after
             // the check above (PauseMismatchException) — idempotent. Do NOT
@@ -564,13 +572,17 @@ public class SlackInteractivityHandler {
         }
     }
 
-    private void resolveGroup(String groupConversationId, HitlVerdict verdict, String slackUserId, String pauseId,
+    private void resolveGroup(String groupConversationId, HitlVerdict verdict, String slackUserId, String pauseId, String planHash,
                               String auth, String approvalChannelId, String messageTs) {
         var request = new GroupApprovalRequest();
-        request.setDecision(buildDecision(verdict, slackUserId, pauseId));
+        request.setDecision(buildDecision(verdict, slackUserId, pauseId, planHash));
         try {
             groupConversationService.resumeDiscussion(groupConversationId, request, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, null);
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            // As for a conversation: not resolved, nothing changed, card left intact.
+            LOGGER.warnf("Slack HITL decision for group %s refused: the card's plan is not the pending one",
+                    sanitize(groupConversationId));
         } catch (IllegalStateException
                 | GroupDiscussionException
                 | IResourceStore.ResourceModifiedException
@@ -662,12 +674,15 @@ public class SlackInteractivityHandler {
     /**
      * Build a decision. {@code decidedBy} is ALWAYS derived from the verified Slack
      * user id ({@code slack:<userId>}) — never trusted from the payload. The
-     * decision is bound to {@code pauseId}, the pause its card was matched against.
+     * decision is bound to {@code pauseId}, the pause its card was matched against,
+     * and to {@code planHash}, the plan the card was posted for (null on a card
+     * posted before plan hashing).
      */
-    private HitlDecision buildDecision(HitlVerdict verdict, String slackUserId, String pauseId) {
+    private HitlDecision buildDecision(HitlVerdict verdict, String slackUserId, String pauseId, String planHash) {
         var decision = new HitlDecision();
         decision.setVerdict(verdict);
         decision.setPauseId(pauseId);
+        decision.setPlanHash(planHash);
         decision.setDecidedBy("slack:" + slackUserId);
         decision.setNote("Decided via Slack by " + slackUserId);
         return decision;
