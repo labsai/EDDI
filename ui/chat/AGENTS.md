@@ -56,6 +56,9 @@ src/
 ├── i18n/
 │   ├── index.ts        # t(), initLocale() on i18next via @eddi/ui — ALL widget-owned text goes through t()
 │   └── locales/        # en.json (bundled) + 10 lazily loaded locales, the Manager's eleven
+├── embed/              # /chat/embed.js, the launcher (T2.9): standalone, no React, no import from the widget
+│   ├── launcher.ts         # data- attributes → config, the button + dialog in a shadow root, the token relay
+│   └── embed.ts            # The entry: reads document.currentScript, mounts, sets window.EddiChat
 ├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
@@ -170,6 +173,21 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 ```bash
 npm run build    # Outputs to dist/
 ```
+
+`npm run build` runs a second Vite build, `vite.embed.config.ts`: the **embed launcher**
+(`src/embed/`, frontend unification plan T2.9) as one IIFE,
+`dist/scripts/js/chat-ui-embed.js`. The Maven patterns for `scripts/js/chat-ui*.js` already
+copy, exclude and clean it; EDDI serves it at **`/chat/embed.js`**
+(`RestHtmlChatResource#fetchEmbedScript`, a literal path beside the SPA catch-all, cached an
+hour because host pages hard-code the URL). It has its own budget in
+`ui/bundle-budget.json` (`chat.scripts`), checked by `npm run budget` with the widget's.
+Rules for it, pinned by `src/embed/launcher.test.ts`: no import from the widget or any
+package (it is the whole download on someone else's page); no `innerHTML`, `eval`,
+`new Function`, cookies or storage; a message is answered only from its own iframe's window
+and EDDI's origin, and the token is posted to that exact origin; `tokenOrigin` goes on the
+widget URL only when the host gave a token provider (the widget would otherwise hold its
+start five seconds for a token). Its contract for embedders is section 6 of
+`docs/chat-ui-embedding.md`.
 
 Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
 shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).
