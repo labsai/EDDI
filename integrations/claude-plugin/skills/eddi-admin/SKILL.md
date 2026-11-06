@@ -91,6 +91,17 @@ id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 Run the suite before every promotion when the agent has one. `read_docs("agent-testing")`
 has the suite format.
 
+## Offering agents to end users
+
+End users (`eddi-user`) pick agents and teams from the catalog, which Workforce shows them. An agent
+appears there only when it is deployed, the person may use it, and it is **listed**: the agent
+document carries `"listed": true` (a group: the group document), default false. With workspaces
+enforced, `published` and `internal` visibility list it as well. For a group, set the flag with
+`update_group`. No MCP tool writes the agent document (`update_resource` does not take the agent
+type, and `update_agent` edits only its name and description), so for an agent point the admin at
+the **Listed in the catalog** switch on the agent's page in the Manager, then redeploy. Listing never grants
+access. `read_docs("catalog")` has the details.
+
 ## Feedback from users
 
 If the agent's `ratingConfig` is on, the people chatting rate conversations and replies.

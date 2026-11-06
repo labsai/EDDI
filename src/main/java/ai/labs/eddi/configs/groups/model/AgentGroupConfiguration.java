@@ -56,6 +56,17 @@ public class AgentGroupConfiguration {
     private String name;
     private String description;
 
+    /**
+     * Whether this group appears in the end-user catalog
+     * ({@code GET /catalog/groups}). Opt-in, default {@code false}, exactly like
+     * {@code AgentConfiguration.listed}: listing decides what is offered, the
+     * group's USE check still decides who may run it. With workspaces enforced,
+     * {@code published} and {@code internal} visibility count as listed too.
+     *
+     * @since 6.7.0
+     */
+    private Boolean listed = false;
+
     @Size(max = MAX_MEMBERS, message = "'members' must contain at most {max} entries")
     private List<GroupMember> members = new ArrayList<>();
     private String moderatorAgentId;
@@ -1532,6 +1543,14 @@ public class AgentGroupConfiguration {
     }
 
     // --- Getters/Setters ---
+
+    public Boolean getListed() {
+        return listed;
+    }
+
+    public void setListed(Boolean listed) {
+        this.listed = listed;
+    }
 
     public String getName() {
         return name;

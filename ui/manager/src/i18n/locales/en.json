@@ -5542,7 +5542,18 @@
       "useStarterPrompt": "Insert a starter prompt",
       "yourAdvisors": "Your Advisors"
     },
-    "workforce": "Workforce"
+    "workforce": "Workforce",
+    "operatorLink": "Platform Operator",
+    "catalog": {
+      "emptyTitle": "Nothing to show here yet",
+      "emptyAuthorHint": "End users only see agents and teams that are listed. Open an agent or a group in the Manager and switch on \"Listed in the catalog\" — or, with workspaces on, make it published or internal. People still need access to use it.",
+      "openAgents": "Open agents in the Manager",
+      "emptyUserHint": "No agents or teams have been made available to you yet. Check back later.",
+      "agents": "Agents",
+      "teams": "Teams",
+      "previewTitle": "What end users see",
+      "previewCounts": "{{agents}} listed agents and {{teams}} listed teams are offered to the people allowed to use them."
+    }
   },
   "operator": {
     "title": "Platform Operator",
@@ -7671,6 +7682,13 @@
       "lte": "is at most",
       "contains": "contains"
     }
+  },
+  "catalogListing": {
+    "label": "Listed in the catalog",
+    "agentDescription": "Offer this agent to end users in Workforce. Only people who may use it see it, and only once it is deployed. With workspaces on, published and internal agents are listed anyway.",
+    "groupDescription": "Offer this team to end users in Workforce. Only people who may use it see it. With workspaces on, published and internal teams are listed anyway.",
+    "listedToast": "Listed in the catalog",
+    "unlistedToast": "Removed from the catalog"
   },
   "groupLearning": {
     "betToggle": "File as a bet",

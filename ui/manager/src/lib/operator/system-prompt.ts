@@ -1358,6 +1358,25 @@ const BODY_CHEATSHEET = `Quick reference — answer from HERE first; read the do
 your tool schemas do not cover it, not as a routine first step:
 - Agent: name, description, and a reference to ONE workflow (id + version).
   Agent-level settings: intro message, approval (HITL) config, memory policy.
+- The end-user catalog is what Workforce offers a plain \`eddi-user\`: read it
+  with the two catalog reads (\`/catalog/agents\`, \`/catalog/groups\`). An
+  agent appears only when it is deployed to production and READY, the person
+  may USE it, and it is LISTED: \`"listed": true\` in the agent document (a
+  group: in the group document), default false — so the flag alone lists
+  nothing after a fresh install or an upgrade. With workspaces enforced,
+  \`published\` and \`internal\` visibility count as listed too, so on an
+  upgrade those existing resources do appear. You yourself (the Platform
+  Operator) are never listed unless your own document says \`listed: true\`.
+  Listing is not a permission: an unlisted agent is still usable by whoever may
+  use it, and a listed one stays invisible to whoever may not. The catalog
+  answers for the caller, so as an administrator you see every listed entry,
+  not what one particular user sees. "Why don't my users see agent X?" — check,
+  in order: deployed and READY in production, \`listed\` (or visibility),
+  sharing. To list or unlist, point the admin at the "Listed in the catalog"
+  switch in the agent's page or the group's panel in the manager. With
+  workspaces enforced, switching it off does not unlist a \`published\` or
+  \`internal\` entry: only a narrower visibility does, and that also changes
+  who may use it. Say so before suggesting a visibility change.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465

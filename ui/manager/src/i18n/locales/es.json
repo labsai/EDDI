@@ -5597,7 +5597,18 @@
       "useStarterPrompt": "Insertar un prompt inicial",
       "yourAdvisors": "Tus asesores"
     },
-    "workforce": "Grupo de trabajo"
+    "workforce": "Grupo de trabajo",
+    "operatorLink": "Operador de la plataforma",
+    "catalog": {
+      "emptyTitle": "Todavía no hay nada que mostrar",
+      "emptyAuthorHint": "Los usuarios finales solo ven los agentes y equipos que están listados. Abre un agente o un grupo en el Manager y activa «Listado en el catálogo», o, con los espacios de trabajo activados, hazlo publicado o interno. Para usarlo sigue haciendo falta acceso.",
+      "openAgents": "Abrir agentes en el Manager",
+      "emptyUserHint": "Todavía no se te ha puesto a disposición ningún agente ni equipo. Vuelve más tarde.",
+      "agents": "Agentes",
+      "teams": "Equipos",
+      "previewTitle": "Lo que ven los usuarios finales",
+      "previewCounts": "Se ofrecen {{agents}} agentes listados y {{teams}} equipos listados a las personas autorizadas a usarlos."
+    }
   },
   "operator": {
     "title": "Operador de plataforma",
@@ -7742,6 +7753,13 @@
       "lte": "es como máximo",
       "contains": "contiene"
     }
+  },
+  "catalogListing": {
+    "label": "Listado en el catálogo",
+    "agentDescription": "Ofrece este agente a los usuarios finales en Workforce. Solo lo ven quienes pueden usarlo, y solo una vez desplegado. Con los espacios de trabajo activados, los agentes publicados e internos se listan de todos modos.",
+    "groupDescription": "Ofrece este equipo a los usuarios finales en Workforce. Solo lo ven quienes pueden usarlo. Con los espacios de trabajo activados, los equipos publicados e internos se listan de todos modos.",
+    "listedToast": "Listado en el catálogo",
+    "unlistedToast": "Retirado del catálogo"
   },
   "groupLearning": {
     "betToggle": "Registrar como apuesta",

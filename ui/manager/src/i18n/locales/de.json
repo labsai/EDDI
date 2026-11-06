@@ -5542,7 +5542,18 @@
       "useStarterPrompt": "Start-Prompt einfügen",
       "yourAdvisors": "Ihre Berater"
     },
-    "workforce": "Belegschaft"
+    "workforce": "Belegschaft",
+    "operatorLink": "Plattform-Operator",
+    "catalog": {
+      "emptyTitle": "Hier gibt es noch nichts zu sehen",
+      "emptyAuthorHint": "Endnutzer sehen nur Agenten und Teams, die gelistet sind. Öffnen Sie einen Agenten oder eine Gruppe im Manager und aktivieren Sie „Im Katalog gelistet“ — oder machen Sie ihn bei aktivierten Workspaces veröffentlicht oder intern. Für die Nutzung braucht man weiterhin Zugriff.",
+      "openAgents": "Agenten im Manager öffnen",
+      "emptyUserHint": "Für Sie wurden noch keine Agenten oder Teams bereitgestellt. Schauen Sie später wieder vorbei.",
+      "agents": "Agenten",
+      "teams": "Teams",
+      "previewTitle": "Was Endnutzer sehen",
+      "previewCounts": "{{agents}} gelistete Agenten und {{teams}} gelistete Teams werden den Personen angeboten, die sie nutzen dürfen."
+    }
   },
   "operator": {
     "title": "Plattform-Operator",
@@ -7671,6 +7682,13 @@
       "lte": "ist höchstens",
       "contains": "enthält"
     }
+  },
+  "catalogListing": {
+    "label": "Im Katalog gelistet",
+    "agentDescription": "Bietet diesen Agenten Endnutzern in Workforce an. Nur wer ihn nutzen darf, sieht ihn, und erst wenn er bereitgestellt ist. Bei aktivierten Workspaces sind veröffentlichte und interne Agenten ohnehin gelistet.",
+    "groupDescription": "Bietet dieses Team Endnutzern in Workforce an. Nur wer es nutzen darf, sieht es. Bei aktivierten Workspaces sind veröffentlichte und interne Teams ohnehin gelistet.",
+    "listedToast": "Im Katalog gelistet",
+    "unlistedToast": "Aus dem Katalog entfernt"
   },
   "groupLearning": {
     "betToggle": "Als Wette anlegen",

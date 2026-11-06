@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/layout/theme-provider";
 import { BrandIcon } from "@/components/layout/brand-logo";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -128,6 +129,17 @@ export function LandingPage() {
   // changed from here.
   const [searchParams] = useSearchParams();
   const forceChooser = searchParams.has("choose");
+  const { canAuthor } = useWorkforceAccess();
+
+  // An end user (`eddi-user` without `eddi-editor` / `eddi-admin`) has one
+  // place to go: Workforce (decision D6). The chooser offers the Manager, whose
+  // building screens they cannot use, so it is skipped — even with `?choose`
+  // and whatever preference an older visit stored. `/` reaches this page for
+  // everyone but a remembered Workforce visitor (`landing-redirect.js` cannot
+  // read roles), so this is where the role decides.
+  if (!canAuthor) {
+    return <Navigate to="/workforce" replace />;
+  }
 
   // Synchronous redirect — no flash
   const pref = getStoredPreference();

@@ -587,6 +587,11 @@ export const DEFAULT_DELEGATION_TIMEOUT_SECONDS = 60;
 export interface AgentGroupConfiguration {
   name: string;
   description: string;
+  /**
+   * Offered in the end-user catalog (`GET /catalog/groups`). Opt-in, default
+   * false; who may run the group is still decided by its sharing.
+   */
+  listed?: boolean;
   members: GroupMember[];
   moderatorAgentId: string | null;
   style: DiscussionStyle;
