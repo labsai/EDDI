@@ -370,7 +370,7 @@ Location: eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | Integer        | `eddi://ai.labs.parser.dictionaries.integer`       | Matches positive integers                                                                                                     | `"42"` → `integer(42)`                           |
 | Decimal        | `eddi://ai.labs.parser.dictionaries.decimal`       | Matches decimal numbers (both `.` and `,` separators)                                                                       | `"3.14"` → `decimal(3.14)`                       |
 | Punctuation    | `eddi://ai.labs.parser.dictionaries.punctuation`   | Matches common punctuation: `!` (exclamation_mark), `?` (question_mark), `.` (dot), `,` (comma), `:` (colon), `;` (semicolon) | `"!"` → `punctuation(exclamation_mark)`          |
-| Email          | `eddi://ai.labs.parser.dictionaries.email`         | Matches email addresses                                                                                                       | `"user@example.com"` → `email(user@example.com)` |
+| Email          | `eddi://ai.labs.parser.dictionaries.email`         | Matches email addresses, with any top-level domain (`.com` as well as `.technology`)                                          | `"user@example.com"` → `email(user@example.com)` |
 | Time           | `eddi://ai.labs.parser.dictionaries.time`          | Matches 24-hour clock formats only: `13:43`, `13:43:23`, `01h20`, `22h`. **No am/pm parsing** — `"3pm"` is not a time.       | `"13:43"` → `time(<epoch-millis>)`               |
 | Ordinal Number | `eddi://ai.labs.parser.dictionaries.ordinalNumber` | Ordinal numbers, either in English suffix notation (1st, 2nd, 3rd, …) or in dot notation (`3.`, at most two digits)         | `"1st"` → `ordinal_number(1)`, `"3."` → `ordinal_number(3)` |
 | Regular        | `eddi://ai.labs.parser.dictionaries.regular`       | Custom dictionary for agent routing                                                                                           | `"billing"` → `category(billing)`                |
@@ -424,7 +424,7 @@ curl -X POST "http://localhost:7070/parser/PARSER_ID?version=1" \
 ]
 ```
 
-The parser returns an array of solutions, where each solution contains expressions representing the classification of the input.
+The parser returns an array of solutions — every reading of the input, best first — where each solution contains expressions representing the classification of the input. The input runs through the parser's normalizers first, as it does in a conversation; the default conversation language (`en`) applies.
 
 ## Using Pattern Matcher in Agent Orchestration
 
@@ -464,16 +464,81 @@ To use the pattern matcher in your agent orchestration, add it as the first step
 
 **Configuration Options** (all live under the step's `config` object):
 
-| Option              | Default | Description                                                                       |
-| ------------------- | ------- | --------------------------------------------------------------------------------- |
-| `includeUnknown`    | `true`  | Include `unknown(...)` expressions for unrecognized words                         |
-| `includeUnused`     | `true`  | Include `unused(...)` expressions for words that matched no dictionary entry      |
-| `appendExpressions` | `true`  | Append the freshly parsed expressions to the ones already in the step             |
-| `maxInputTokens`    | `200`   | Hard cap on tokens taken from one input; anything beyond is dropped               |
-| `maxSuggestions`    | `1000`  | Hard cap on dictionary suggestions evaluated per input                            |
-| `maxSolutions`      | `100`   | Hard cap on solutions collected per input                                         |
+| Option                     | Default | Description |
+| -------------------------- | ------- | ----------- |
+| `includeUnknown`           | `true`  | Include `unknown(...)` expressions for words no dictionary or correction recognized |
+| `includeUnused`            | `true`  | Include `unused(...)` expressions: words of a phrase that did not complete it, and dictionary words defined without expressions |
+| `appendExpressions`        | `true`  | Append the freshly parsed expressions to the ones already in the step |
+| `minMatchingAccuracy`      | `0`     | Matches less accurate than this (0..1) contribute no expressions — see [Match quality](#match-quality). `0` keeps every match |
+| `maxAlternatives`          | `0`     | Also store up to this many other readings (0..10) as `expressions:alternatives` |
+| `matchPartialPhrases`      | `false` | Let a fragment of a phrase yield the phrase — see [Partial phrases](#partial-phrases) |
+| `minPartialPhraseCoverage` | `0.5`   | Smallest share of a phrase's words a fragment must cover, when `matchPartialPhrases` is on |
+| `semanticFallback`         | —       | Embedding-based fallback for input the dictionaries did not understand — see [Semantic fallback](#semantic-fallback) |
+| `maxInputTokens`           | `200`   | Hard cap on tokens taken from one input; anything beyond is dropped and `expressions:inputTruncated` is set |
+| `maxSuggestions`           | `1000`  | Hard cap on dictionary suggestions evaluated per input |
+| `maxSolutions`             | `100`   | Hard cap on solutions collected per input |
 
-The three `max*` limits guard against pathological inputs. Values below `1` are ignored and fall back to the default.
+The three `max*` limits guard against pathological inputs. Values below `1` are ignored and fall back to the default. A fraction outside 0..1 (or `0` for `minPartialPhraseCoverage`) falls back to its default too, with a warning in the log.
+
+### How the parser chooses a reading
+
+Every token can have several matches: a dictionary word, a phrase word, a regex, a number, typo corrections. The parser tries the combinations **best first** — first every token's best match, then each combination that takes one token's second-best, and so on — and keeps the first that completes a phrase, or else the first one. Dictionaries are consulted in the order they are configured, temporary (quick-reply) dictionaries before them, corrections after them. A phrase is only matched in a conversation whose language its dictionary applies to.
+
+### Match quality
+
+Every match carries an accuracy between 0 and 1: `1.0` for the word as typed, `0.9` when only the case differs, lower for a typo correction (by edit distance), `0.3` for a phonetic guess. A phrase is as accurate as its least accurate word, so a phrase put together from a typo correction is not reported as exact. The parser stores:
+
+| Memory key | Content |
+| ---------- | ------- |
+| `expressions:parsed` | The chosen expressions — what behavior rules match on |
+| `expressions:matches` | Which input word produced which expression, marked `[phrase]`, `[regex]` and, for anything not exact, `[accuracy 0.67, corrected]` |
+| `expressions:confidence` | The accuracy of the least accurate match that contributed an expression; absent when nothing was understood |
+| `expressions:alternatives` | With `maxAlternatives` above 0: the other readings, best first, as expression strings |
+| `expressions:inputTruncated` | `true` when the input had more than `maxInputTokens` tokens |
+
+`minMatchingAccuracy` is the switch for "don't act on a guess": with `0.9`, `"delte my account"` no longer becomes `delete(account)` through a typo correction. The rejected match contributes no expression at all — it does not turn into `unknown(...)` either — so write the fallback rule for "nothing matched" (for example on the absence of the expressions you expect), not for `unknown(*)`.
+
+### Partial phrases
+
+With `matchPartialPhrases: true`, a run of input words that is a run of a longer phrase's words yields that phrase: for the phrase `good morning sir`, the input `good morning` matches with accuracy `2/3`, the share of the phrase it covers. The fragment has to cover at least `minPartialPhraseCoverage` of the phrase. When two phrases are covered equally well by the same words — `good` of `good morning` and of `good night` — the reading is ambiguous and neither is taken. A full match always wins over a fragment. It is off by default because it lets fewer words trigger a phrase than the agent designer wrote.
+
+### Semantic fallback
+
+Dictionaries only know the words they were given. The semantic fallback catches the paraphrases they miss, without giving up deterministic rules: when the dictionaries produced nothing but `unknown`/`unused` for an input, the parser compares the input with example sentences by embedding similarity and, if one is similar enough, uses **that example's expressions**. Behavior rules keep matching on expressions they know.
+
+```json
+"config": {
+  "semanticFallback": {
+    "embeddingProvider": "openai",
+    "embeddingParameters": {
+      "apiKey": "${vault:openai-key}",
+      "modelName": "text-embedding-3-small"
+    },
+    "minScore": 0.82,
+    "includeDictionaryPhrases": true,
+    "examples": [
+      { "text": "I want to cancel my order", "expressions": "intent(cancel_order)" },
+      { "text": "ich möchte meine Bestellung stornieren", "expressions": "intent(cancel_order)", "lang": "de" }
+    ]
+  }
+}
+```
+
+| Key | Default | Description |
+| --- | ------- | ----------- |
+| `embeddingProvider`, `embeddingParameters` | — (required) | The embedding model, configured exactly as for a [knowledge base](rag.md): `openai`, `azure-openai`, `ollama`, `mistral`, `bedrock`, `cohere`, `gemini`, `vertex`. API keys are vault references |
+| `minScore` | `0.8` | Least cosine similarity that counts as a match, above 0 and at most 1 |
+| `includeDictionaryPhrases` | `true` | Use the parser's dictionary phrases that carry expressions as examples, so a paraphrase of a phrase you already wrote finds it |
+| `includeDictionaryWords` | `false` | Use the single dictionary words as examples too |
+| `examples` | — | Further examples: `text`, `expressions` and optionally `lang` (an example with a `lang` is only used in conversations in that language) |
+
+What it costs and how it fails:
+
+- **One embedding request per turn the dictionaries did not understand**, and one batch of requests for the examples the first time it is used (at most 2,000 examples; inputs are cut at 1,000 characters). Turns the dictionaries understood never reach the provider. The counter `eddi_parser_semantic_fallback_total{outcome="match"|"no_match"}` counts the consultations.
+- **A provider failure only means "no match"**: the turn continues with the dictionaries' result. If the examples cannot be embedded, the next attempt waits 60 seconds.
+- **A malformed block fails the deployment**, not a conversation: a missing provider, no examples at all, an example without parseable expressions or a `minScore` out of range are refused when the workflow is built.
+- The matched example shows up in `expressions:matches` as `"<input>" [semantic 0.87, like "<example>"] → <expressions>`, and its similarity is the stored `expressions:confidence`.
+- The standalone `/parser` endpoint below does not consult the fallback; it shows what the dictionaries make of an input.
 
 ### Referencing a stored parser instead
 
@@ -487,7 +552,7 @@ The document's `config` and `extensions` are used as if they were written in the
 
 ### Quick replies as a temporary dictionary
 
-The quick replies the agent offered on the previous turn — from its output set, or built by an httpcall / LLM / MCP `postResponse` — become a temporary dictionary for the next input, so a click on one produces its `expressions` (or, without any, an expression generated from its value). Quick replies a **client** sends as `context` are only displayed: they are never matched and never produce an expression, so a client cannot hand itself an expression (and, with `expressionsAsActions`, an action) by offering itself a quick reply.
+The quick replies the agent offered on the previous turn — from its output set, or built by an httpcall / LLM / MCP `postResponse` — become a temporary dictionary for the next input, so a click on one produces its `expressions` (or, without any, an expression generated from its value: its letters and digits, of any script, lower-cased and joined by `_` — `"Größe M"` becomes `größe_m`). Their values pass through the parser's normalizers like the input does, so a quick reply with punctuation still matches its own click under the punctuation normalizer. Quick replies a **client** sends as `context` are only displayed: they are never matched and never produce an expression, so a client cannot hand itself an expression (and, with `expressionsAsActions`, an action) by offering itself a quick reply.
 
 ## Complete Example: Multi-Agent Customer Service Orchestration
 

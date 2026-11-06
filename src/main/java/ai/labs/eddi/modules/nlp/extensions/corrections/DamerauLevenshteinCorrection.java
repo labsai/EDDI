@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.nlp.model.Word;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -58,7 +59,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
             return IDictionary.NO_WORDS_FOUND;
         }
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
-        var lowerCaseLookup = lookup.toLowerCase();
+        var lowerCaseLookup = lookup.toLowerCase(Locale.ROOT);
 
         collectCandidates(lowerCaseLookup, temporaryDictionaries, userLanguage, foundWords);
         collectCandidates(lowerCaseLookup, dictionaries, userLanguage, foundWords);
@@ -86,8 +87,15 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 continue;
             }
 
+            int lookupLength = lowerCaseLookup.length();
             for (IDictionary.IWord word : dictionary.getWords()) {
-                final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
+                String value = word.getValue();
+                // The length bound first: it rules out most of a dictionary without
+                // lower-casing (allocating) every word of it for every unknown token.
+                if (value == null || Math.abs(value.length() - lookupLength) > maxDistance) {
+                    continue;
+                }
+                final int distance = calculateDistance(lowerCaseLookup, value.toLowerCase(Locale.ROOT));
 
                 if (distance > -1) {
                     Word entry = new Word(word.getValue(), word.getExpressions(), word.getLanguageCode(), word.getFrequency(), word.isPartOfPhrase());
