@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -302,5 +303,26 @@ class UserMemoryEntryTest {
         assertTrue(json.contains("\"assessment\":\"SUPERSEDED\""), json);
         assertTrue(json.contains("\"supersededBy\":\"2\""), json);
         assertEquals(superseded, mapper.readValue(json, UserMemoryEntry.class));
+    }
+
+    @Test
+    void sourceEntryIds_absentReadsAsNone_andSurvivesAssessmentAndJson() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var legacy = mapper.readValue("""
+                {"id":"1","userId":"u","key":"k","value":"v","category":"fact","visibility":"self","sourceAgentId":"a"}
+                """, UserMemoryEntry.class);
+        assertEquals(List.of(), legacy.sourceEntryIds());
+
+        var consolidated = legacy.withSourceEntryIds(Arrays.asList("a1", null, "b2"));
+        assertEquals(List.of("a1", "b2"), consolidated.sourceEntryIds(), "nulls are dropped");
+        assertEquals(List.of("a1", "b2"), consolidated.withAssessment(Assessment.CONTESTED, null).sourceEntryIds());
+
+        String json = mapper.writeValueAsString(consolidated);
+        assertTrue(json.contains("\"sourceEntryIds\":[\"a1\",\"b2\"]"), json);
+        assertEquals(consolidated, mapper.readValue(json, UserMemoryEntry.class));
+
+        var fifteenArgs = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null,
+                Assessment.ACCEPTED, null);
+        assertEquals(List.of(), fifteenArgs.sourceEntryIds());
     }
 }

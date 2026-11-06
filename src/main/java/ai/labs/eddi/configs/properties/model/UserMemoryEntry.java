@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * A structured memory entry stored in the {@code usermemories} collection.
@@ -36,12 +37,20 @@ import java.util.Locale;
  * @param supersededBy
  *            id of the entry that replaced this one; only kept when
  *            {@code assessment} is {@link Assessment#SUPERSEDED}
+ * @param sourceEntryIds
+ *            ids of the entries a Dream consolidation built this one from, when
+ *            {@code dream.citeSources} is on; empty otherwise and for every
+ *            ordinary write, which replaces the value and so the provenance.
+ *            Consolidation deletes those originals afterwards (except one it
+ *            overwrote in place, whose own id is then listed), so the ids
+ *            identify them in logs, backups and exports rather than pointing at
+ *            live entries. Never null
  * @author ginccc
  * @since 6.0.0
  */
 public record UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
         List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
-        Assessment assessment, String supersededBy) {
+        Assessment assessment, String supersededBy, List<String> sourceEntryIds) {
 
     /**
      * Where an entry stands against the other entries holding the same key. Only
@@ -85,6 +94,17 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     public UserMemoryEntry {
         assessment = assessment != null ? assessment : Assessment.ACCEPTED;
         supersededBy = assessment == Assessment.SUPERSEDED ? supersededBy : null;
+        sourceEntryIds = sourceEntryIds == null ? List.of() : sourceEntryIds.stream().filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * The shape before {@code sourceEntryIds}: an entry with no recorded sources.
+     */
+    public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
+            List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
+            Assessment assessment, String supersededBy) {
+        this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
+                updatedAt, assessment, supersededBy, List.of());
     }
 
     /**
@@ -94,7 +114,7 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
             List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
         this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
-                updatedAt, Assessment.ACCEPTED, null);
+                updatedAt, Assessment.ACCEPTED, null, List.of());
     }
 
     /**
@@ -103,7 +123,13 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      */
     public UserMemoryEntry withAssessment(Assessment newAssessment, String newSupersededBy) {
         return new UserMemoryEntry(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId,
-                newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy);
+                newAssessment == Assessment.CONTESTED, accessCount, createdAt, updatedAt, newAssessment, newSupersededBy, sourceEntryIds);
+    }
+
+    /** This entry with other recorded sources. Nothing else changes. */
+    public UserMemoryEntry withSourceEntryIds(List<String> newSourceEntryIds) {
+        return new UserMemoryEntry(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted,
+                accessCount, createdAt, updatedAt, assessment, supersededBy, newSourceEntryIds);
     }
 
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */

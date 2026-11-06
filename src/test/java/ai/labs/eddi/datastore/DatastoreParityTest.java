@@ -260,6 +260,51 @@ class DatastoreParityTest extends MongoTestBase {
         assertNull(merged.supersededBy(), backend);
     }
 
+    // ─── user-memory provenance ─────────────────────────────────
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory provenance: sourceEntryIds round-trips through insertIfAbsent, upsert, replaceIfUnchanged and the assessment")
+    void userMemorySourceEntryIdsRoundTrip(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-sources-" + UUID.randomUUID();
+        assertEquals(List.of(), store.findEntryById(store.upsert(entry(user, "plain", "x"))).orElseThrow().sourceEntryIds(),
+                backend + ": an ordinary entry has none");
+
+        String id = store.insertIfAbsent(entry(user, "trip", "2 seats").withSourceEntryIds(List.of("a1", "b2")));
+        UserMemoryEntry inserted = store.findEntryById(id).orElseThrow();
+        assertEquals(List.of("a1", "b2"), inserted.sourceEntryIds(), backend);
+
+        assertTrue(store.replaceIfUnchanged(id, entry(user, "trip", "3 seats").withSourceEntryIds(List.of("c3")), inserted.updatedAt()), backend);
+        UserMemoryEntry replaced = store.findEntryById(id).orElseThrow();
+        assertEquals(List.of("c3"), replaced.sourceEntryIds(), backend);
+
+        assertTrue(store.setAssessmentIfUnchanged(id, Assessment.CONTESTED, null, replaced.updatedAt()), backend);
+        assertEquals(List.of("c3"), store.findEntryById(id).orElseThrow().sourceEntryIds(), backend + ": an assessment keeps the sources");
+        assertEquals(List.of("c3"), store.getVisibleEntries(user, "parity-agent", List.of(), "most_recent", 10).stream()
+                .filter(e -> "trip".equals(e.key())).findFirst().orElseThrow().sourceEntryIds(), backend);
+
+        store.upsert(entry(user, "trip", "4 seats"));
+        assertEquals(List.of(), store.findEntryById(id).orElseThrow().sourceEntryIds(),
+                backend + ": an ordinary rewrite states the fact anew, so it has no sources");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory provenance: a flat property merge clears a global entry's sources")
+    void userMemoryPropertyMergeClearsSources(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-sources-merge-" + UUID.randomUUID();
+        var global = new UserMemoryEntry(null, user, "city", "Vienna", "fact", Visibility.global, "parity-agent", List.of(), null, false, 0, null,
+                null).withSourceEntryIds(List.of("x9"));
+        String globalId = store.upsert(global);
+        assertEquals(List.of("x9"), store.findEntryById(globalId).orElseThrow().sourceEntryIds(), backend);
+        var props = new Properties();
+        props.put("city", "Graz");
+        store.mergeProperties(user, props);
+        assertEquals(List.of(), store.findEntryById(globalId).orElseThrow().sourceEntryIds(), backend);
+    }
+
     private static UserMemoryEntry entry(String user, String key, Object value) {
         return new UserMemoryEntry(null, user, key, value, "fact", Visibility.self, "parity-agent", List.of(), null, false, 0, null, null);
     }
