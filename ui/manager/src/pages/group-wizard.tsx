@@ -1488,7 +1488,9 @@ function MembersStep({
   // slot id: the agent creations below write back after awaiting the server,
   // by when other cards may have been created, edited or removed.
   function addMember() {
-    onChange((s) => ({ members: [...s.members, createEmptySlot(s.members.length)] }));
+    // Built outside the updater: `nextSlotId` must not run inside one.
+    const slot = createEmptySlot(state.members.length);
+    onChange((s) => ({ members: [...s.members, slot] }));
   }
 
   function removeMember(id: string) {
