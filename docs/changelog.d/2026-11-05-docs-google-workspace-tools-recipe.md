@@ -41,8 +41,14 @@ Google's publishing-status rules) were scattered or missing.
 - **CR/LF in `to`/`subject` is neutralised in the template, not rejected by the schema.** The argument
   schema check deliberately drops `pattern` (backtracking risk on model text), so a pattern forbidding
   `\r\n` would accept everything. Instead `to` has CR and LF removed with `.replace(…)` and `subject`
-  is an RFC 2047 encoded word around `encoder:base64(subject)`; the body is `base64Mime` after the
-  header block. Verified against qute-core 3.40.1.1: a raw CR/LF inside a Qute string literal is kept,
+  goes through the new `encoder:mimeHeader`; the body is `base64Mime` after the header block.
+- **`encoder:mimeHeader` (new, `EddiTemplateExtensions`).** The first version wrapped the whole subject
+  in one `=?UTF-8?B?…?=` word, which breaks RFC 2047's 75-character word limit from 46 UTF-8 bytes up (24
+  `é`); the review caught it. The function always B-encodes, ASCII included, so it keeps the CR/LF
+  guarantee; Jakarta Mail's `MimeUtility.encodeText` was rejected because it leaves all-ASCII text,
+  CR and LF included, unencoded. Words carry at most 39 bytes (64 characters framed, so `Subject: `
+  plus the first word fits a 76-character line), split on code points and joined with CRLF SP.
+  `EncoderExtensionsTest` round-trips them through `MimeUtility.decodeText`. Verified against qute-core 3.40.1.1: a raw CR/LF inside a Qute string literal is kept,
   and nested namespace calls work as `str:concat` arguments.
 - **`readThread` returns Gmail's base64url body parts as-is** — templating has no decoder; documented
   as a limitation rather than worked around.

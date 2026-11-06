@@ -201,9 +201,12 @@ risk), so such a pattern accepts every value. The template neutralises both fiel
 
 - **`to`** has every `\r` and `\n` removed (`to.replace(…)`) before it is spliced in, so the injected
   text becomes part of one malformed address line rather than a new header.
-- **`subject`** is written as an RFC 2047 encoded word, `=?UTF-8?B?…?=`, around
-  `{encoder:base64(subject)}`. Base64 contains no line break, so nothing in the subject can end the
-  header — and non-ASCII subjects come out right as a side effect.
+- **`subject`** goes through `{encoder:mimeHeader(subject)}`, which writes it as RFC 2047 encoded
+  words, `=?UTF-8?B?…?=`. Every character is base64-encoded, ASCII included, so nothing in the
+  subject can end the header, and non-ASCII subjects come out right as a side effect. A long subject
+  is split into several words, each within RFC 2047's 75-character limit and never cutting a character
+  in half, folded onto continuation lines. Wrapping the whole subject in one `encoder:base64` word
+  would exceed that limit from 46 UTF-8 bytes up (24 `é`), and a strict reader then shows the encoded text.
 - **`body`** follows the blank line that ends the headers, as `Content-Transfer-Encoding: base64`
   (`encoder:base64Mime`); a line break there is body text.
 

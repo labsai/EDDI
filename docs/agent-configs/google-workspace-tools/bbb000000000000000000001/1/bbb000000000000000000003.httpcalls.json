@@ -94,7 +94,7 @@
       },
       "method" : "post",
       "contentType" : "application/json",
-      "body" : "{\"message\":{\"raw\":{json:serialize(encoder:base64Url(str:concat('To: ', to.replace('\r', '').replace('\n', ''), '\r\nSubject: =?UTF-8?B?', encoder:base64(subject), '?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n', encoder:base64Mime(body))))}}}"
+      "body" : "{\"message\":{\"raw\":{json:serialize(encoder:base64Url(str:concat('To: ', to.replace('\r', '').replace('\n', ''), '\r\nSubject: ', encoder:mimeHeader(subject), '\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n', encoder:base64Mime(body))))}}}"
     }
   } ]
 }
