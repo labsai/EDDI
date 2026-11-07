@@ -30,7 +30,8 @@ import java.util.List;
  * {@code data} (without {@code recorded_by}, which lives only in its column so
  * an erasure is a column update). Insert is
  * {@code ON CONFLICT (id) DO NOTHING}, which makes a retrying webhook
- * idempotent.
+ * idempotent, behind a per-subject advisory lock that makes the subject cap
+ * exact.
  *
  * @since 6.8.0
  */
@@ -59,6 +60,7 @@ public class PostgresOutcomeEventStore implements IOutcomeEventStore {
 
     private static final String COLUMNS = "id, group_id, subject_id, recorded_at, recorded_by, data";
     private static final String ORDER = " ORDER BY recorded_at DESC, id DESC";
+    private static final String ADVISORY_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -84,12 +86,60 @@ public class PostgresOutcomeEventStore implements IOutcomeEventStore {
         }
     }
 
+    /**
+     * Count and insert in one transaction, serialised per subject by
+     * {@code pg_advisory_xact_lock} (as in {@code PostgresAttachmentStore}): a
+     * concurrent insert into the same subject waits for this one's commit, so it
+     * counts the row this one added. A hash collision between two subjects only
+     * serialises them.
+     */
     @Override
-    public boolean insertIfAbsent(OutcomeEvent e) {
+    public InsertOutcome insert(OutcomeEvent e, int maxPerSubject) {
         ensureSchema();
-        String sql = "INSERT INTO group_outcomes (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING";
-        return update(sql, List.of(e.id(), e.groupId(), e.subjectId(), e.recordedAt() != null ? e.recordedAt().toEpochMilli() : 0L,
-                e.recordedBy() != null ? e.recordedBy() : "", OversightJson.write(e.withRecordedBy(null)))) > 0;
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                InsertOutcome outcome = insertLocked(conn, e, maxPerSubject);
+                conn.commit();
+                return outcome;
+            } catch (SQLException | RuntimeException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Failed to write group outcomes", ex);
+        }
+    }
+
+    private static InsertOutcome insertLocked(Connection conn, OutcomeEvent e, int maxPerSubject) throws SQLException {
+        try (PreparedStatement lock = conn.prepareStatement(ADVISORY_LOCK)) {
+            lock.setString(1, "group_outcomes:" + e.groupId() + "|" + e.subjectId());
+            try (ResultSet rs = lock.executeQuery()) {
+                rs.next();
+            }
+        }
+        long held;
+        try (PreparedStatement count = conn.prepareStatement("SELECT COUNT(*) FROM group_outcomes WHERE group_id = ? AND subject_id = ?")) {
+            PostgresApprovalDecisionStore.bind(count, List.of(e.groupId(), e.subjectId()));
+            try (ResultSet rs = count.executeQuery()) {
+                held = rs.next() ? rs.getLong(1) : 0L;
+            }
+        }
+        if (held >= maxPerSubject) {
+            try (PreparedStatement exists = conn.prepareStatement("SELECT 1 FROM group_outcomes WHERE id = ?")) {
+                exists.setString(1, e.id());
+                try (ResultSet rs = exists.executeQuery()) {
+                    return rs.next() ? InsertOutcome.DUPLICATE : InsertOutcome.FULL;
+                }
+            }
+        }
+        try (PreparedStatement insert = conn
+                .prepareStatement("INSERT INTO group_outcomes (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")) {
+            PostgresApprovalDecisionStore.bind(insert,
+                    List.of(e.id(), e.groupId(), e.subjectId(), e.recordedAt() != null ? e.recordedAt().toEpochMilli() : 0L,
+                            e.recordedBy() != null ? e.recordedBy() : "", OversightJson.write(e.withRecordedBy(null))));
+            return insert.executeUpdate() > 0 ? InsertOutcome.INSERTED : InsertOutcome.DUPLICATE;
+        }
     }
 
     @Override

@@ -11,19 +11,30 @@ import java.util.List;
 /**
  * Stores {@link OutcomeEvent}s: MongoDB ({@code group_outcomes} collection) and
  * PostgreSQL ({@code group_outcomes} table), selected by
- * {@code DataStoreProducers}. Bounded by the service, which trims per team on
- * every write.
+ * {@code DataStoreProducers}. Bounded per subject by {@link #insert} and per
+ * team by the service, which trims on every write.
  *
  * @since 6.8.0
  */
 public interface IOutcomeEventStore {
 
+    /** What {@link #insert} did. */
+    enum InsertOutcome {
+        INSERTED,
+        /** An event with this id is already stored; nothing changed. */
+        DUPLICATE,
+        /** The subject already holds {@code maxPerSubject} events; nothing changed. */
+        FULL
+    }
+
     /**
-     * Stores the event unless one with its id exists.
-     *
-     * @return whether it was inserted
+     * Stores the event unless one with its id exists or its subject already holds
+     * {@code maxPerSubject} events. The check and the insert are one atomic step
+     * per subject, so concurrent writers at {@code maxPerSubject - 1} store one
+     * event between them, not one each. A duplicate is reported as such even on a
+     * full subject.
      */
-    boolean insertIfAbsent(OutcomeEvent event);
+    InsertOutcome insert(OutcomeEvent event, int maxPerSubject);
 
     /** The events about one subject of a team, newest {@code recordedAt} first. */
     List<OutcomeEvent> listBySubject(String groupId, String subjectId, int limit);

@@ -43,21 +43,30 @@ class OutcomeEventServiceTest {
     private static final Instant NOW = Instant.parse("2026-11-03T12:00:00Z");
     private static final String GROUP = "g1";
 
-    /** The store contract, in memory, so the service's bounding is observable. */
+    /**
+     * The store contract, in memory (one lock around each operation), so the
+     * service's bounding is observable; {@link InMemoryOutcomeStoreContractTest}
+     * holds it to the contract.
+     */
     static class MemoryStore implements IOutcomeEventStore {
         final List<OutcomeEvent> rows = new ArrayList<>();
 
         @Override
-        public boolean insertIfAbsent(OutcomeEvent event) {
+        public synchronized InsertOutcome insert(OutcomeEvent event, int maxPerSubject) {
             if (rows.stream().anyMatch(r -> r.id().equals(event.id()))) {
-                return false;
+                return InsertOutcome.DUPLICATE;
+            }
+            if (rows.stream().filter(r -> r.groupId().equals(event.groupId()) && r.subjectId().equals(event.subjectId()))
+                    .count() >= maxPerSubject) {
+                return InsertOutcome.FULL;
             }
             rows.add(event);
-            return true;
+            return InsertOutcome.INSERTED;
         }
 
-        private List<OutcomeEvent> sorted(Predicate<OutcomeEvent> p, int limit) {
-            return rows.stream().filter(p).sorted(Comparator.comparing(OutcomeEvent::recordedAt).reversed()).limit(limit).toList();
+        private synchronized List<OutcomeEvent> sorted(Predicate<OutcomeEvent> p, int limit) {
+            return rows.stream().filter(p)
+                    .sorted(Comparator.comparing(OutcomeEvent::recordedAt).thenComparing(OutcomeEvent::id).reversed()).limit(limit).toList();
         }
 
         @Override
@@ -77,7 +86,7 @@ class OutcomeEventServiceTest {
 
         @Override
         public long countByGroup(String groupId) {
-            return rows.stream().filter(e -> e.groupId().equals(groupId)).count();
+            return sorted(e -> e.groupId().equals(groupId), Integer.MAX_VALUE).size();
         }
 
         @Override
@@ -86,14 +95,14 @@ class OutcomeEventServiceTest {
         }
 
         @Override
-        public long deleteOldestBeyond(String groupId, int keep) {
+        public synchronized long deleteOldestBeyond(String groupId, int keep) {
             List<OutcomeEvent> doomed = sorted(e -> e.groupId().equals(groupId), Integer.MAX_VALUE).stream().skip(keep).toList();
             rows.removeAll(doomed);
             return doomed.size();
         }
 
         @Override
-        public long deleteRecordedBefore(String groupId, Instant cutoff) {
+        public synchronized long deleteRecordedBefore(String groupId, Instant cutoff) {
             List<OutcomeEvent> doomed = rows.stream().filter(e -> e.groupId().equals(groupId) && e.recordedAt().isBefore(cutoff)).toList();
             rows.removeAll(doomed);
             return doomed.size();
@@ -106,12 +115,19 @@ class OutcomeEventServiceTest {
 
         @Override
         public List<OutcomeEvent> readByUser(String userId, int limit) {
-            return List.of();
+            return sorted(e -> userId.equals(e.recordedBy()), limit);
         }
 
         @Override
-        public long eraseUser(String userId, String pseudonym) {
-            return 0;
+        public synchronized long eraseUser(String userId, String pseudonym) {
+            long erased = 0;
+            for (int i = 0; i < rows.size(); i++) {
+                if (userId.equals(rows.get(i).recordedBy())) {
+                    rows.set(i, rows.get(i).withRecordedBy(pseudonym));
+                    erased++;
+                }
+            }
+            return erased;
         }
     }
 
@@ -262,6 +278,28 @@ class OutcomeEventServiceTest {
     }
 
     @Test
+    @DisplayName("the cap holds when another write fills the subject after this one counted it")
+    void theSubjectCapIsDecidedByTheStoreNotByAnEarlierCount() {
+        // A count that lags behind concurrent writes: every request sees room.
+        store = new MemoryStore() {
+            @Override
+            public long countBySubject(String groupId, String subjectId) {
+                return 0;
+            }
+        };
+        service = new OutcomeEventService(groupStore, workspaceStore, store, new SimpleMeterRegistry());
+        service.clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        config.setOutcomeConfig(new OutcomeConfig(2, 0, 0, null));
+        service.record(GROUP, onTask("a"), "svc");
+        service.record(GROUP, onTask("b"), "svc");
+
+        var third = service.record(GROUP, onTask("c"), "svc");
+
+        assertEquals(Status.SUBJECT_FULL, third.status());
+        assertEquals(2, store.rows.size());
+    }
+
+    @Test
     @DisplayName("a retry of an event on a full subject is a duplicate, not a refusal")
     void retryOnAFullSubject() {
         config.setOutcomeConfig(new OutcomeConfig(1, 0, 0, null));
@@ -369,8 +407,8 @@ class OutcomeEventServiceTest {
     @Test
     void eventsOlderThanRetentionAreNotQuoted() {
         config.setOutcomeConfig(new OutcomeConfig(0, 0, 5, null));
-        store.insertIfAbsent(new OutcomeEvent("stale", GROUP, OutcomeEvent.SubjectType.DECISION, "dec-stale", "k", null, null, null, null, null,
-                "svc", NOW.minus(Duration.ofDays(30)), NOW.minus(Duration.ofDays(30)), null));
+        store.insert(new OutcomeEvent("stale", GROUP, OutcomeEvent.SubjectType.DECISION, "dec-stale", "k", null, null, null, null, null, "svc",
+                NOW.minus(Duration.ofDays(30)), NOW.minus(Duration.ofDays(30)), null), 1);
         assertEquals("", service.retroDigest(GROUP));
     }
 

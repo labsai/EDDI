@@ -22,10 +22,13 @@ import org.bson.conversions.Bson;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
@@ -36,7 +39,8 @@ import static com.mongodb.client.model.Updates.set;
  * {@code group_outcomes}. Indexed fields are top-level; the row is the JSON in
  * {@code data} without {@code recordedBy}, which lives only in its own field so
  * an erasure is a plain field update. Times are epoch milliseconds, as in the
- * PostgreSQL table.
+ * PostgreSQL table. The per-subject cap is held by a unique {@code slot} per
+ * subject (see {@link #insert}).
  *
  * @since 6.8.0
  */
@@ -53,6 +57,12 @@ public class MongoOutcomeEventStore implements IOutcomeEventStore {
     static final String RECORDED_AT = "recordedAt";
     static final String RECORDED_BY = "recordedBy";
     static final String DATA = "data";
+    /**
+     * The event's place in its subject, {@code 0 .. maxPerSubject - 1}, unique per
+     * subject: what makes the cap hold under concurrent inserts without a
+     * transaction.
+     */
+    static final String SLOT = "slot";
 
     private final MongoCollection<Document> collection;
 
@@ -64,19 +74,54 @@ public class MongoOutcomeEventStore implements IOutcomeEventStore {
         collection.createIndex(Indexes.compoundIndex(Indexes.ascending(GROUP_ID), Indexes.ascending(SUBJECT_ID), Indexes.descending(RECORDED_AT)),
                 new IndexOptions().name("idx_outcome_subject"));
         collection.createIndex(Indexes.ascending(RECORDED_BY), new IndexOptions().name("idx_outcome_user"));
+        collection.createIndex(Indexes.ascending(GROUP_ID, SUBJECT_ID, SLOT),
+                new IndexOptions().name("idx_outcome_subject_slot").unique(true).partialFilterExpression(exists(SLOT)));
     }
 
+    /**
+     * Claims the lowest free slot of the subject and inserts with it. Two writers
+     * that read the same subject pick the same slot, and the unique slot index lets
+     * only one of them store; the other reads again and finds the subject one
+     * fuller. Every lost slot is an event someone else stored, so
+     * {@code maxPerSubject + 1} attempts always end in a decision.
+     */
     @Override
-    public boolean insertIfAbsent(OutcomeEvent event) {
-        try {
-            collection.insertOne(toDocument(event));
-            return true;
-        } catch (MongoException e) {
-            if (e.getCode() == DUPLICATE_KEY) {
-                return false;
+    public InsertOutcome insert(OutcomeEvent event, int maxPerSubject) {
+        Bson subject = and(eq(GROUP_ID, event.groupId()), eq(SUBJECT_ID, event.subjectId()));
+        for (int attempt = 0; attempt <= maxPerSubject; attempt++) {
+            int held = 0;
+            Set<Integer> taken = new HashSet<>();
+            for (Document doc : collection.find(subject).projection(new Document(SLOT, 1))) {
+                held++;
+                if (doc.get(SLOT) instanceof Integer slot) {
+                    taken.add(slot);
+                }
             }
-            throw e;
+            if (held >= maxPerSubject) {
+                return isStored(event.id()) ? InsertOutcome.DUPLICATE : InsertOutcome.FULL;
+            }
+            int slot = 0;
+            while (taken.contains(slot)) {
+                slot++;
+            }
+            try {
+                collection.insertOne(toDocument(event).append(SLOT, slot));
+                return InsertOutcome.INSERTED;
+            } catch (MongoException e) {
+                if (e.getCode() != DUPLICATE_KEY) {
+                    throw e;
+                }
+                if (isStored(event.id())) {
+                    return InsertOutcome.DUPLICATE;
+                }
+                // another writer stored into this slot first: read the subject again
+            }
         }
+        throw new IllegalStateException("Could not store an outcome: the subject kept changing");
+    }
+
+    private boolean isStored(String id) {
+        return collection.find(eq(ID, id)).projection(new Document(ID, 1)).first() != null;
     }
 
     @Override
