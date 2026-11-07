@@ -4,8 +4,9 @@
 
 ### What changed and why
 
-The Google Workspace plan's conversation-tools slice, as configuration only: nothing here is new
-engine code. Per-user Google access was the motivating case for connections, but no worked config
+The Google Workspace plan's conversation-tools slice. It is configuration apart from one engine
+addition, the `encoder:mimeHeader` template function that `createDraft` uses for the subject (see
+below), so the recipe needs a build that includes it. Per-user Google access was the motivating case for connections, but no worked config
 showed it end to end, and the prerequisites (verified identity, allowlisted credential endpoints,
 Google's publishing-status rules) were scattered or missing.
 
