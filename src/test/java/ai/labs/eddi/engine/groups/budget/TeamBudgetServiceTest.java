@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -191,6 +192,67 @@ class TeamBudgetServiceTest {
         assertThrows(IllegalArgumentException.class, () -> t.service.setCurrentMonthCap("free", 5.0, "x", "a"));
         verify(t.audit, never()).adjusted(anyString(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyDouble(),
                 org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.anyDouble(), anyString());
+    }
+
+    @Test
+    void aSetThatRacesAnotherSetEndsAtItsOwnCapAndAuditsTheCapItReplaced() {
+        // Another SET (an admin, or an approved proposal) lands between this call's
+        // read and its write.
+        var raced = new AtomicBoolean(false);
+        var racing = new InMemoryTeamBudgetStore() {
+            TeamBudgetService service;
+
+            @Override
+            public Optional<TeamBudgetMonth> read(String g, String m) {
+                Optional<TeamBudgetMonth> stale = super.read(g, m);
+                if (raced.compareAndSet(false, true)) {
+                    service.setCurrentMonthCap(g, 80.0, "the other admin", "bob");
+                }
+                return stale;
+            }
+        };
+        racing.service = new TeamBudgetService(racing, t.groupStore, t.tenant, t.registry, t.audit, TeamBudgetTestSupport.CLOCK);
+
+        var s = racing.service.setCurrentMonthCap("studio", 100.0, "launch week", "alice");
+
+        assertEquals(100.0, s.capUsd(), "the cap is what was asked for, not 100 plus the other SET's delta");
+        assertEquals(65.0, racing.read("studio", MONTH).orElseThrow().adjustmentUsd());
+        verify(t.audit).adjusted(eq("alice"), eq("studio"), eq(MONTH), eq(20.0), eq(80.0), eq(100.0), eq("launch week"));
+    }
+
+    @Test
+    void aSetThatKeepsLosingTheRaceGivesUpAsUnavailableWithoutAnAuditEntry() {
+        var attempts = new AtomicInteger();
+        var contended = new InMemoryTeamBudgetStore() {
+            @Override
+            public synchronized AdjustOutcome setAdjustment(String g, String m, double expected, double next, double b,
+                                                            TeamBudgetMonth.Adjustment e, Instant x) {
+                attempts.incrementAndGet();
+                return AdjustOutcome.CONFLICT;
+            }
+        };
+        var service = new TeamBudgetService(contended, t.groupStore, t.tenant, t.registry, t.audit, TeamBudgetTestSupport.CLOCK);
+
+        assertThrows(TeamBudgetAccountingUnavailableException.class, () -> service.setCurrentMonthCap("studio", 50.0, "x", "alice"));
+
+        assertEquals(3, attempts.get(), "a bounded number of re-reads, not a spin");
+        verify(t.audit, never()).adjusted(anyString(), anyString(), anyString(), org.mockito.ArgumentMatchers.anyDouble(),
+                org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.anyDouble(), anyString());
+    }
+
+    @Test
+    void aSetRefusedByTheStoreBecauseSpendGrewIsRejected() {
+        var spendGrew = new InMemoryTeamBudgetStore() {
+            @Override
+            public synchronized AdjustOutcome setAdjustment(String g, String m, double expected, double next, double b,
+                                                            TeamBudgetMonth.Adjustment e, Instant x) {
+                return AdjustOutcome.REFUSED;
+            }
+        };
+        var service = new TeamBudgetService(spendGrew, t.groupStore, t.tenant, t.registry, t.audit, TeamBudgetTestSupport.CLOCK);
+
+        var e = assertThrows(IllegalArgumentException.class, () -> service.setCurrentMonthCap("studio", 20.0, "cut", "alice"));
+        assertTrue(e.getMessage().contains("already been spent"), e.getMessage());
     }
 
     @Test

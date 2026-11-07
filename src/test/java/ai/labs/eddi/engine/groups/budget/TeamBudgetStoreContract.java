@@ -157,6 +157,69 @@ public interface TeamBudgetStoreContract {
     }
 
     @Test
+    default void aSetReplacesTheAdjustmentItWasReadWithAndRecordsTheEntry() {
+        String group = fresh();
+        assertEquals(AdjustOutcome.APPLIED, store().setAdjustment(group, MONTH, 0.0, 15.0, 10.0, entry("SET", 15.0), later()),
+                "a month not stored yet has an adjustment of 0");
+        assertEquals(AdjustOutcome.APPLIED, store().setAdjustment(group, MONTH, 15.0, 5.0, 10.0, entry("SET", -10.0), later()));
+        var month = store().read(group, MONTH).orElseThrow();
+        assertEquals(5.0, month.adjustmentUsd(), 1e-9, "set, not added");
+        assertEquals(List.of("SET", "SET"), month.adjustments().stream().map(TeamBudgetMonth.Adjustment::kind).toList());
+        assertTrue(month.appliedTransferIds().isEmpty());
+    }
+
+    @Test
+    default void aSetFromAStaleReadIsAConflictAndChangesNothing() {
+        String group = fresh();
+        store().setAdjustment(group, MONTH, 0.0, 20.0, 10.0, entry("SET", 20.0), later());
+        assertEquals(AdjustOutcome.CONFLICT, store().setAdjustment(group, MONTH, 0.0, 40.0, 10.0, entry("SET", 40.0), later()));
+        var month = store().read(group, MONTH).orElseThrow();
+        assertEquals(20.0, month.adjustmentUsd(), 1e-9);
+        assertEquals(1, month.adjustments().size());
+    }
+
+    @Test
+    default void aSetBelowTheSpendIsRefusedAndAtExactlyTheSpendApplied() {
+        String group = fresh();
+        store().addSpend(group, MONTH, 8.0, later());
+        // base 10: an adjustment of -3 is a cap of 7 < 8
+        assertEquals(AdjustOutcome.REFUSED, store().setAdjustment(group, MONTH, 0.0, -3.0, 10.0, entry("SET", -3.0), later()));
+        assertEquals(0.0, store().read(group, MONTH).orElseThrow().adjustmentUsd(), 1e-9);
+        assertEquals(AdjustOutcome.APPLIED, store().setAdjustment(group, MONTH, 0.0, -2.0, 10.0, entry("SET", -2.0), later()));
+        assertEquals(-2.0, store().read(group, MONTH).orElseThrow().adjustmentUsd(), 1e-9);
+    }
+
+    @Test
+    default void concurrentSetsFromTheSameReadApplyOnce() throws Exception {
+        String group = fresh();
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<AdjustOutcome>> futures = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            double adjustment = 10.0 + i;
+            futures.add(pool.submit(() -> {
+                start.await();
+                return store().setAdjustment(group, MONTH, 0.0, adjustment, 10.0, entry("SET", adjustment), later());
+            }));
+        }
+        start.countDown();
+        int applied = 0;
+        for (Future<AdjustOutcome> f : futures) {
+            AdjustOutcome outcome = f.get();
+            if (outcome == AdjustOutcome.APPLIED) {
+                applied++;
+            } else {
+                assertEquals(AdjustOutcome.CONFLICT, outcome);
+            }
+        }
+        pool.shutdown();
+        assertEquals(1, applied);
+        var month = store().read(group, MONTH).orElseThrow();
+        assertEquals(month.adjustments().get(0).deltaUsd(), month.adjustmentUsd(), 1e-9, "the stored adjustment is the one that applied");
+        assertEquals(1, month.adjustments().size());
+    }
+
+    @Test
     default void historyAndTransferIdsStayBounded() {
         String group = fresh();
         for (int i = 0; i < ITeamBudgetStore.MAX_ADJUSTMENTS + 20; i++) {
