@@ -23,8 +23,8 @@
   value.** `OutputMatchBuilder` read the type back from the value; an unset number is
   `null`, which reads as Text, so choosing Number snapped back, and clearing a number
   field or typing a lone `-` flipped it to Text mid-edit. The chosen type is now held by
-  the builder; a value of another type arriving from outside (another rule or version
-  loaded) still decides it.
+  the builder; a non-null value of another type (a stored rule opened in the editor, or
+  the text value a switch to the actions source leaves) still decides it.
 - **Platform Operator:** the alert section names the limit and the refusal; operator
   revision bumped.
 

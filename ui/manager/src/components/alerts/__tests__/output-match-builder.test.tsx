@@ -80,7 +80,7 @@ describe("OutputMatchBuilder — the value type is the author's choice, not read
     expect(opValues()).toEqual(NUMERIC_OPS);
   });
 
-  it("follows a condition replaced from outside, such as another rule or version being loaded", () => {
+  it("follows a non-null value of another type given by the condition", () => {
     const { rerender } = renderWithProviders(
       <OutputMatchBuilder condition={{ path: "properties.score", op: "eq", value: "high" }} onChange={vi.fn()} />,
     );

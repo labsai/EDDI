@@ -45,8 +45,8 @@ export function OutputMatchBuilder({ condition, onChange }: OutputMatchBuilderPr
   // The type is the author's choice, held here: an unset number is null, and
   // reading the type back from null would answer Text — Number could not be
   // chosen before a value is entered, and clearing the field would flip it.
-  // A value of another type arriving from outside (another rule or version
-  // loaded) still decides it.
+  // A non-null value of another type still decides it, so the choice follows
+  // a value set elsewhere (switching the source to actions makes it text).
   const valueType = condition.value === null || condition.value === undefined ? null : valueTypeOf(condition.value);
   const [chosenType, setChosenType] = useState<ValueType>(valueType ?? "text");
   if (valueType !== null && valueType !== chosenType) {
