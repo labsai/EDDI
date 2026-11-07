@@ -182,7 +182,7 @@ class ConversationServiceContinuationTest {
 
             InOrder order = inOrder(conversationMemoryStore, scheduleStore);
             order.verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
-            order.verify(scheduleStore).createSchedule(any());
+            order.verify(scheduleStore).createScheduleIfAbsent(any());
             assertEquals(1, ((Number) stepValue(persistedSnapshot(), ConversationContinuations.STEP_NEXT)).intValue(),
                     "the committed step says which continuation it scheduled");
 
@@ -200,7 +200,7 @@ class ConversationServiceContinuationTest {
             say(new InputData("start the job", new HashMap<>()));
             runQueuedTurns(1);
 
-            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).createScheduleIfAbsent(any());
             assertEquals(ConversationContinuations.REASON_DISABLED, stepValue(persistedSnapshot(), ConversationContinuations.STEP_REFUSED));
         }
 
@@ -213,7 +213,7 @@ class ConversationServiceContinuationTest {
             say(new InputData("start the job", new HashMap<>()));
             runQueuedTurns(1);
 
-            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).createScheduleIfAbsent(any());
         }
 
         @Test
@@ -224,7 +224,7 @@ class ConversationServiceContinuationTest {
             say(new InputData("start the job", new HashMap<>()));
             runQueuedTurns(1);
 
-            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).createScheduleIfAbsent(any());
         }
 
         @Test
@@ -235,7 +235,7 @@ class ConversationServiceContinuationTest {
             say(new InputData("start the job", new HashMap<>()));
             runQueuedTurns(1);
 
-            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).createScheduleIfAbsent(any());
         }
 
         @Test
@@ -272,7 +272,7 @@ class ConversationServiceContinuationTest {
             runQueuedTurns(1);
 
             assertTrue(ConversationContinuations.ranIn(persistedSnapshot(), 3));
-            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).createScheduleIfAbsent(any());
             assertEquals(ConversationContinuations.REASON_LIMIT, stepValue(persistedSnapshot(), ConversationContinuations.STEP_REFUSED));
         }
 
@@ -405,7 +405,7 @@ class ConversationServiceContinuationTest {
 
     private ScheduleConfiguration armedSchedule() throws Exception {
         ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        verify(scheduleStore).createSchedule(captor.capture());
+        verify(scheduleStore).createScheduleIfAbsent(captor.capture());
         return captor.getValue();
     }
 

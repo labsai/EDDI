@@ -828,7 +828,7 @@ class ConversationHitlService {
                         // A resumed turn that settled may ask to continue, like any turn:
                         // decided before the store, armed below once it is committed.
                         if (!rePaused) {
-                            conversationService.decideContinuation(memory);
+                            conversationService.decideContinuation(memory, environment);
                         }
                         boolean persisted;
                         try {

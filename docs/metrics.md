@@ -372,6 +372,7 @@ Metrics Reference, since every continuation is delivered as a one-shot schedule.
 eddi_continuation_scheduled_total           # Continuations armed after a committed turn
 eddi_continuation_run_total                 # Continuation turns that ran
 eddi_continuation_refused_total             # Continuations ignored or stopped; tag: reason
+eddi_continuation_recovered_total           # Decided continuations the recovery sweep armed after a crash
 ```
 
 `reason` is one of `disabled` (the agent sets no `maxContinuations`), `limit`,
@@ -386,6 +387,13 @@ backoff and dead-lettered like any failed fire. A steady `disabled` rate means a
 rule emits the action on an agent that never opted in. `duplicate` counts
 re-delivered fires that found their turn already ran — the at-least-once
 delivery working as designed, not an error.
+
+`recovered` counts continuations a turn decided and committed but never armed —
+its node stopped between the commit and the schedule write, or the write kept
+failing (`schedule_failed`) — which the recovery sweep then armed (see
+[Long jobs → Crash recovery](long-jobs.md#crash-recovery)). It should be near
+zero; a steady rate means nodes are dying mid-turn or the schedule store is
+failing writes.
 
 ### Agent Test Metrics
 

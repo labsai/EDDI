@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
+import ai.labs.eddi.engine.memory.model.PendingContinuationCandidate;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -539,6 +541,53 @@ public interface IConversationMemoryStore {
      *             on persistence failures
      */
     void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException;
+
+    // === Self-continuation outbox (#1180) ===
+
+    /**
+     * Conversations that carry a {@link PendingContinuation} decided before
+     * {@code decidedBefore} (epoch milliseconds), oldest first, at most
+     * {@code limit}. Backs the continuation recovery sweep, so it must be served by
+     * an index on the record's {@code decidedAt} — the sweep runs every minute and
+     * may never scan the collection — and must return projections, never full
+     * documents.
+     *
+     * @return the candidates (never null)
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    List<PendingContinuationCandidate> findPendingContinuations(long decidedBefore, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Marks the conversation's {@link PendingContinuation} as handled — its
+     * schedule is known to exist — by removing the record's {@code decidedAt},
+     * which takes it out of the sweep's index. The record itself stays until a
+     * cancel, an end or the next committed turn removes it, so its presence still
+     * tells a sweep that nobody withdrew the continuation. A narrow field update:
+     * neither the revision nor the fence moves, so a turn in flight is never
+     * refused for it.
+     *
+     * @return whether the conversation still carries a record naming continuation
+     *         {@code number} (handled before or not) — {@code false} when a cancel,
+     *         an end or a newer turn removed or replaced it
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean markPendingContinuationHandled(String conversationId, int number) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Removes the conversation's {@link PendingContinuation} with a narrow field
+     * update that moves neither the revision nor the fence.
+     *
+     * @param expectedNumber
+     *            remove it only while it names this continuation; {@code null}
+     *            removes whatever is there (end, cancel)
+     * @return whether the record removed was still unhandled — a continuation that
+     *         was decided and whose schedule nobody had confirmed yet
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean clearPendingContinuation(String conversationId, Integer expectedNumber) throws IResourceStore.ResourceStoreException;
 
     // === GDPR ===
 

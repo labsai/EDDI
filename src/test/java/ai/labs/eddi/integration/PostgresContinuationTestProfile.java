@@ -17,6 +17,7 @@ public class PostgresContinuationTestProfile extends PostgresIntegrationTestProf
     public Map<String, String> getConfigOverrides() {
         Map<String, String> overrides = new HashMap<>(super.getConfigOverrides());
         overrides.put("eddi.schedule.poll-interval", ContinuationTestProfile.POLL_INTERVAL);
+        overrides.putAll(ContinuationTestProfile.RECOVERY_OVERRIDES);
         return overrides;
     }
 }

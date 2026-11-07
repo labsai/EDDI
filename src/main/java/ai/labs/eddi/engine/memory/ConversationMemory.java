@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -114,6 +115,8 @@ public class ConversationMemory implements IConversationMemory {
     private final transient TenantCostHolds tenantCostHolds = new TenantCostHolds();
     /** The agent's self-continuation settings; NOT persisted. */
     private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
+    /** The outbox record of the continuation the current step decided on. */
+    private PendingContinuation pendingContinuation;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -615,6 +618,16 @@ public class ConversationMemory implements IConversationMemory {
     public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
         this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
 
+    }
+
+    @Override
+    public PendingContinuation getPendingContinuation() {
+        return pendingContinuation;
+    }
+
+    @Override
+    public void setPendingContinuation(PendingContinuation pendingContinuation) {
+        this.pendingContinuation = pendingContinuation;
     }
 
     @Override

@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.integration;
 
+import ai.labs.eddi.engine.continuation.ContinuationRecoverySweep;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
+import ai.labs.eddi.engine.continuation.ConversationContinuations.Recovery;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
+import ai.labs.eddi.engine.memory.model.PendingContinuationCandidate;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import io.quarkus.scheduler.Scheduler;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -19,6 +27,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import static io.restassured.RestAssured.given;
@@ -86,6 +98,18 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
 
     @Inject
     Scheduler scheduler;
+
+    @Inject
+    IScheduleStore scheduleStore;
+
+    @Inject
+    IConversationMemoryStore conversationMemoryStore;
+
+    @Inject
+    ConversationContinuations continuations;
+
+    @Inject
+    ContinuationRecoverySweep recoverySweep;
 
     @BeforeEach
     void deployAgents() throws Exception {
@@ -295,6 +319,215 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
 
         assertStaysTrue(QUIET_WINDOW, () -> steps(conversationId).size() == stepsAfterTurn, "a continuation ran although it is off");
         assertTrue(continuationSchedules(defaultOffAgent, conversationId).isEmpty(), "no continuation schedule was written");
+    }
+
+    // ==================== 6. Crash recovery (#1180) ====================
+
+    @Test
+    @DisplayName("a crash between the commit and the arm: the stored outbox record is armed by the sweep exactly once, and the job runs on")
+    void crashBetweenCommitAndArmIsRecoveredOnce() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        int stepsBefore = steps(conversationId).size();
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+
+        // The node "died" before its arm: no schedule, only what the commit wrote.
+        simulateLostArm(conversationId);
+
+        // Through the real loader: the decision was stored with the step, in full.
+        PendingContinuation stored = conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation();
+        assertNotNull(stored, "the committed turn carries its outbox record");
+        assertEquals(1, stored.getNumber());
+        assertEquals(MAX_CONTINUATIONS, stored.getMaxContinuations());
+        assertEquals(CONTINUATION_INPUT, stored.getInput());
+        assertNotNull(stored.getDecidedAt());
+        awaitCandidate(conversationId);
+
+        recoverySweep.sweep();
+
+        List<Map<String, Object>> armed = pendingContinuations(continuingAgent, conversationId);
+        assertEquals(1, armed.size(), "the sweep armed the lost continuation: " + armed);
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), armed.getFirst().get("id"));
+        assertEquals(USER_ID, armed.getFirst().get("userId"), "armed for the conversation's owner");
+        assertNull(conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation().getDecidedAt(),
+                "the record is marked handled");
+        assertFalse(isCandidate(conversationId), "a handled record is out of the sweep's index");
+
+        // A second pass changes nothing.
+        recoverySweep.sweep();
+        assertEquals(1, continuationSchedules(continuingAgent, conversationId).size(), "a second sweep wrote nothing");
+
+        // The job runs on from the recovered continuation, each continuation once.
+        scheduler.resume(POLLER_IDENTITY);
+        awaitUntil(CHAIN_DEADLINE, () -> value(steps(conversationId).getLast(), STEP_REFUSED) != null,
+                "the recovered job did not run to its cap");
+        assertStaysTrue(QUIET_WINDOW, () -> steps(conversationId).size() == stepsBefore + 1 + MAX_CONTINUATIONS,
+                "a continuation ran twice or after the cap");
+        List<Map<String, Object>> steps = steps(conversationId);
+        for (int n = 1; n <= MAX_CONTINUATIONS; n++) {
+            assertEquals(n, asInt(value(steps.get(stepsBefore + n), STEP_NUMBER)), "continuation " + n + " ran once, in order");
+        }
+    }
+
+    @Test
+    @DisplayName("an armed continuation is left as it is: the sweep writes no second schedule and the job runs normally")
+    void alreadyArmedContinuationIsUntouched() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        int stepsBefore = steps(conversationId).size();
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+        Map<String, Object> original = pendingContinuations(continuingAgent, conversationId).getFirst();
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), original.get("id"), "the turn armed under the derived id");
+        awaitCandidate(conversationId);
+
+        recoverySweep.sweep();
+
+        List<Map<String, Object>> after = continuationSchedules(continuingAgent, conversationId);
+        assertEquals(1, after.size(), "no second schedule: " + after);
+        assertEquals(original.get("id"), after.getFirst().get("id"));
+        assertEquals(original.get("createdAt"), after.getFirst().get("createdAt"), "the original row was not rewritten");
+        assertFalse(isCandidate(conversationId), "the record is marked handled");
+
+        scheduler.resume(POLLER_IDENTITY);
+        awaitUntil(CHAIN_DEADLINE, () -> value(steps(conversationId).getLast(), STEP_REFUSED) != null, "the job did not run to its cap");
+        assertStaysTrue(QUIET_WINDOW, () -> steps(conversationId).size() == stepsBefore + 1 + MAX_CONTINUATIONS,
+                "a continuation ran twice");
+    }
+
+    @Test
+    @DisplayName("an ended conversation with a lost arm is not revived: nothing is armed and its record is removed")
+    void endedConversationIsNotRevived() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+        simulateLostArm(conversationId);
+        // Ended by a path that never reached the disarm (the node died mid-end): the
+        // record is still on the document.
+        conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+        awaitCandidate(conversationId);
+        int stepsAfterTurn = steps(conversationId).size();
+
+        recoverySweep.sweep();
+
+        assertTrue(continuationSchedules(continuingAgent, conversationId).isEmpty(), "nothing armed for an ended conversation");
+        assertNull(conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation(),
+                "the record is removed");
+        scheduler.resume(POLLER_IDENTITY);
+        assertStaysTrue(QUIET_WINDOW, () -> steps(conversationId).size() == stepsAfterTurn, "an ended conversation ran a turn");
+        assertEquals("ENDED", state(conversationId));
+    }
+
+    @Test
+    @DisplayName("ending through the API removes the record, so a lost arm is not revived either")
+    void endThroughTheApiRemovesTheRecord() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+        simulateLostArm(conversationId);
+
+        given().post("agents/" + conversationId + "/endConversation").then().statusCode(200);
+        assertNull(conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation());
+
+        recoverySweep.sweep();
+        assertTrue(continuationSchedules(continuingAgent, conversationId).isEmpty(), "nothing armed after the end");
+    }
+
+    @Test
+    @DisplayName("cancelling a job whose arm was lost answers CANCELLED and the sweep does not start it again")
+    void cancelOfALostArmStopsTheJob() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+        simulateLostArm(conversationId);
+        int stepsAfterTurn = steps(conversationId).size();
+
+        given().post("agents/" + conversationId + "/cancel").then().statusCode(200);
+        recoverySweep.sweep();
+
+        assertTrue(continuationSchedules(continuingAgent, conversationId).isEmpty(), "the cancelled job was not re-armed");
+        scheduler.resume(POLLER_IDENTITY);
+        assertStaysTrue(QUIET_WINDOW, () -> steps(conversationId).size() == stepsAfterTurn, "a continuation ran after the cancel");
+        given().post("agents/" + conversationId + "/cancel").then().statusCode(409);
+    }
+
+    @Test
+    @DisplayName("concurrent sweeps against the real stores write one schedule between them")
+    void concurrentSweepsWriteOneSchedule() throws Exception {
+        String conversationId = startConversation(continuingAgent);
+        scheduler.pause(POLLER_IDENTITY);
+        sendUserInput(continuingAgent.id(), conversationId, "startjob", false, true).then().statusCode(200);
+        awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
+                "the first turn did not arm its continuation");
+        simulateLostArm(conversationId);
+        PendingContinuationCandidate candidate = awaitCandidate(conversationId);
+
+        int sweepers = 4;
+        var start = new CyclicBarrier(sweepers);
+        var pool = Executors.newFixedThreadPool(sweepers);
+        List<Recovery> outcomes = new ArrayList<>();
+        try {
+            List<Future<Recovery>> futures = new ArrayList<>();
+            for (int i = 0; i < sweepers; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    return continuations.recover(candidate);
+                }));
+            }
+            for (Future<Recovery> future : futures) {
+                outcomes.add(future.get(30, TimeUnit.SECONDS));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertEquals(1, outcomes.stream().filter(o -> o == Recovery.RECOVERED).count(), "exactly one sweep armed it: " + outcomes);
+        assertEquals(sweepers - 1, outcomes.stream().filter(o -> o == Recovery.ALREADY_ARMED).count(), "the rest found it: " + outcomes);
+        List<Map<String, Object>> armed = pendingContinuations(continuingAgent, conversationId);
+        assertEquals(1, armed.size(), "one schedule for the continuation: " + armed);
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), armed.getFirst().get("id"));
+
+        // Leave nothing running for the next test.
+        given().post("agents/" + conversationId + "/cancel").then().statusCode(200);
+    }
+
+    /**
+     * Deletes the conversation's continuation schedule: as if its arm never ran.
+     */
+    private void simulateLostArm(String conversationId) throws Exception {
+        scheduleStore.deleteSchedulesByName(ConversationContinuations.scheduleName(conversationId));
+        assertTrue(continuationSchedules(continuingAgent, conversationId).isEmpty(), "the lost arm left no schedule");
+    }
+
+    private boolean isCandidate(String conversationId) {
+        return candidateOf(conversationId) != null;
+    }
+
+    private PendingContinuationCandidate candidateOf(String conversationId) {
+        try {
+            return conversationMemoryStore.findPendingContinuations(System.currentTimeMillis() + 1, 1000).stream()
+                    .filter(c -> conversationId.equals(c.conversationId())).findFirst().orElse(null);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Waits until the sweep's query lists the conversation — the index is built in
+     * the background after the store first starts.
+     */
+    private PendingContinuationCandidate awaitCandidate(String conversationId) throws InterruptedException {
+        awaitUntil(Duration.ofSeconds(30), () -> isCandidate(conversationId), "the sweep's query does not list the stored decision");
+        return candidateOf(conversationId);
     }
 
     // ==================== Helpers ====================

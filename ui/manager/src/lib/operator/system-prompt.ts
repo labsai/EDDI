@@ -1725,14 +1725,18 @@ your tool schemas do not cover it, not as a routine first step:
   records "continuation:next" (intent to schedule — the marker is written
   before the schedule is, so it is NOT proof the next turn exists: confirm the
   "continuation-<conversationId>" schedule is there before saying it is
-  scheduled; a failed schedule write, "schedule_failed", happens after the
-  step is committed, so it is NOT in the step: it is only a warning in the
-  platform logs and the eddi_continuation_refused_total metric, which you
-  cannot read — check the logs, or ask an administrator to check the metric) or
+  scheduled. A schedule missing right after the turn — the node stopped after
+  the commit, or the write failed ("schedule_failed", a log warning and a
+  metric, never in the step) — is not a stopped job: a recovery sweep arms it
+  from the decision stored with the step, normally within about two minutes
+  (eddi.continuation.recovery.*; eddi_continuation_recovered_total counts it).
+  Still missing well after that: the sweep is switched off or failing — ask an
+  administrator to check the logs) or
   "continuation:refused" (why not: disabled, limit, cost_ceiling, not_settled,
   group_member, ...) — read the conversation with returnDetailed=true. It never runs for an ENDED or
-  AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
-  the next turn. Metrics: eddi_continuation_{scheduled,run,refused}_total.
+  AWAITING_HUMAN conversation, and the sweep never revives one; ending or
+  cancelling the conversation withdraws the next turn, recovered or not.
+  Metrics: eddi_continuation_{scheduled,run,refused,recovered}_total.
   The "long-jobs" docs page explains it.
 - Channel integrations: channelType "slack", "webhook" or "email". A webhook
   integration lets an external system (GitHub, Stripe, monitoring) start agent

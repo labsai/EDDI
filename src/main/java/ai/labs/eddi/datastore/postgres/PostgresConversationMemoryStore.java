@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
+import ai.labs.eddi.engine.memory.model.PendingContinuationCandidate;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import io.quarkus.arc.DefaultBean;
@@ -43,6 +45,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
@@ -88,6 +92,36 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     private static final String CREATE_INDEX_STATE = "CREATE INDEX IF NOT EXISTS idx_conv_state ON conversation_memories (conversation_state)";
     private static final String CREATE_INDEX_AGENT = "CREATE INDEX IF NOT EXISTS idx_conv_agent ON conversation_memories (AGENT_ID, AGENT_VERSION)";
+    /**
+     * The continuation recovery sweep (#1180): a partial expression index over the
+     * outbox record's {@code decidedAt}, holding only the conversations whose
+     * latest step decided to continue. The sweep's WHERE repeats the index
+     * predicate and expression verbatim, which is what lets the planner use it.
+     * <p>
+     * It arrived after the table already held production data, so it is built
+     * {@code CONCURRENTLY} on a background thread
+     * ({@link #buildPendingContinuationIndex}) rather than in
+     * {@link #initSchema()}: a plain build takes a SHARE lock and would stop every
+     * conversation write for the length of a full-table scan. Until it is valid the
+     * sweep reads nothing ({@link #findPendingContinuations}), so it never scans
+     * the table either.
+     */
+    private static final String PENDING_CONTINUATION_PRESENT = "(data->'pendingContinuation') IS NOT NULL";
+    private static final String PENDING_CONTINUATION_UNHANDLED = "(data->'pendingContinuation'->'decidedAt') IS NOT NULL";
+    private static final String PENDING_CONTINUATION_NUMBER = " AND (data->'pendingContinuation'->>'number')::int = ?";
+    private static final String PENDING_CONTINUATION_DECIDED_AT = "((data->'pendingContinuation'->>'decidedAt')::bigint)";
+    static final String PENDING_CONTINUATION_INDEX = "idx_conv_pending_continuation";
+    private static final String CREATE_INDEX_PENDING_CONTINUATION = "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + PENDING_CONTINUATION_INDEX
+            + " ON conversation_memories (" + PENDING_CONTINUATION_DECIDED_AT + ") WHERE " + PENDING_CONTINUATION_UNHANDLED;
+    /** First half of the index build's advisory lock key ("pcon"). */
+    private static final int PENDING_CONTINUATION_INDEX_LOCK = 0x70636f6e;
+    /** Delays before the retries of an index build that failed transiently. */
+    private static final long[] INDEX_RETRY_DELAYS_MILLIS = {30_000L, 120_000L, 600_000L};
+
+    /** Where the index build runs: a virtual thread; replaced in tests. */
+    Consumer<Runnable> indexBuildLauncher = task -> Thread.ofVirtual().name("pg-pending-continuation-index").start(task);
+    private final AtomicBoolean indexBuildStarted = new AtomicBoolean();
+    private volatile boolean pendingContinuationIndexReady;
 
     private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
@@ -118,6 +152,78 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize conversation_memories table", e);
         }
+    }
+
+    private void buildPendingContinuationIndexWithRetries() {
+        for (int attempt = 0;; attempt++) {
+            try {
+                buildPendingContinuationIndex();
+                return;
+            } catch (SQLException e) {
+                if (attempt >= INDEX_RETRY_DELAYS_MILLIS.length) {
+                    LOGGER.warnf("Could not build the index %s (%s). Continuation crash recovery stays off until it exists: "
+                            + "the next restart retries, or build it by hand (docs/long-jobs.md#crash-recovery).",
+                            PENDING_CONTINUATION_INDEX, e.getMessage());
+                    return;
+                }
+                LOGGER.infof("Index %s build failed (%s); retrying in %d s", PENDING_CONTINUATION_INDEX, e.getMessage(),
+                        INDEX_RETRY_DELAYS_MILLIS[attempt] / 1000);
+                try {
+                    Thread.sleep(INDEX_RETRY_DELAYS_MILLIS[attempt]);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Builds the sweep's index with {@code CREATE INDEX CONCURRENTLY}, which does
+     * not block writes, under a session advisory lock so replicas starting together
+     * do not build it twice. An index an interrupted build left INVALID is dropped
+     * and rebuilt; a build that ends INVALID throws, so it is retried.
+     */
+    void buildPendingContinuationIndex() throws SQLException {
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            conn.setAutoCommit(true); // CREATE INDEX CONCURRENTLY refuses to run inside a transaction
+            if (!advisoryLock(conn, "SELECT pg_try_advisory_lock(?, 0)")) {
+                throw new SQLException("another instance is building " + PENDING_CONTINUATION_INDEX, "55P03");
+            }
+            try (Statement stmt = conn.createStatement()) {
+                if (Boolean.FALSE.equals(PostgresAuditStore.isIndexValid(conn, PENDING_CONTINUATION_INDEX))) {
+                    stmt.execute("DROP INDEX CONCURRENTLY IF EXISTS " + PENDING_CONTINUATION_INDEX);
+                }
+                stmt.execute(CREATE_INDEX_PENDING_CONTINUATION);
+                if (!Boolean.TRUE.equals(PostgresAuditStore.isIndexValid(conn, PENDING_CONTINUATION_INDEX))) {
+                    throw new SQLException("index " + PENDING_CONTINUATION_INDEX + " is not valid after its build", "55000");
+                }
+                pendingContinuationIndexReady = true;
+            } finally {
+                advisoryLock(conn, "SELECT pg_advisory_unlock(?, 0)");
+            }
+        }
+    }
+
+    private static boolean advisoryLock(Connection conn, String sql) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, PENDING_CONTINUATION_INDEX_LOCK);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
+    /**
+     * Whether the sweep's index exists and is valid — once true, it stays true.
+     * Asked again on every sweep until then, so an index another replica (or an
+     * operator) built is picked up without a restart.
+     */
+    private boolean pendingContinuationIndexReady(Connection conn) throws SQLException {
+        if (!pendingContinuationIndexReady && Boolean.TRUE.equals(PostgresAuditStore.isIndexValid(conn, PENDING_CONTINUATION_INDEX))) {
+            pendingContinuationIndexReady = true;
+        }
+        return pendingContinuationIndexReady;
     }
 
     @Override
@@ -1348,6 +1454,123 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to clear HITL bookmark", e);
+        }
+    }
+
+    @Override
+    public List<PendingContinuationCandidate> findPendingContinuations(long decidedBefore, int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT id, AGENT_ID, conversation_state, data->>'userId' AS user_id, data->'pendingContinuation' AS pending_json"
+                + " FROM conversation_memories WHERE " + PENDING_CONTINUATION_UNHANDLED + " AND " + PENDING_CONTINUATION_DECIDED_AT + " < ?"
+                + " ORDER BY " + PENDING_CONTINUATION_DECIDED_AT + " ASC LIMIT ?";
+        List<PendingContinuationCandidate> out = new ArrayList<>();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            if (!pendingContinuationIndexReady(conn)) {
+                // Never a full-table scan every minute: nothing is swept until the index
+                // is built — started here, by the first sweep, so nothing that merely
+                // opens the store pays for it. The records wait in the documents meanwhile.
+                if (indexBuildStarted.compareAndSet(false, true)) {
+                    indexBuildLauncher.accept(this::buildPendingContinuationIndexWithRetries);
+                }
+                return out;
+            }
+            return readPendingContinuations(conn, sql, decidedBefore, limit, out);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to list pending continuations", e);
+        }
+    }
+
+    private List<PendingContinuationCandidate> readPendingContinuations(Connection conn, String sql, long decidedBefore, int limit,
+                                                                        List<PendingContinuationCandidate> out)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, decidedBefore);
+            ps.setInt(2, Math.max(1, limit));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    PendingContinuation pending = readPendingContinuation(rs.getString("id"), rs.getString("pending_json"));
+                    if (pending == null || pending.getNumber() == null) {
+                        continue;
+                    }
+                    out.add(new PendingContinuationCandidate(rs.getString("id"), rs.getString("AGENT_ID"), rs.getString("user_id"),
+                            conversationStateOf(rs.getString("conversation_state")), pending));
+                }
+            }
+            return out;
+        }
+    }
+
+    @Override
+    public boolean markPendingContinuationHandled(String conversationId, int number) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
+        ensureSchema();
+        // Narrow on purpose: neither _rev nor _fence moves. The row count is the rows
+        // MATCHED, so a record another sweep already marked still names the
+        // continuation.
+        String sql = "UPDATE conversation_memories SET data = data #- '{pendingContinuation,decidedAt}' WHERE id = ?::uuid AND "
+                + PENDING_CONTINUATION_PRESENT + PENDING_CONTINUATION_NUMBER;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            ps.setInt(2, number);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to mark the pending continuation handled", e);
+        }
+    }
+
+    @Override
+    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
+        ensureSchema();
+        // Two narrow updates: the first removes a record that was still unhandled and
+        // reports it, the second removes a handled one. Neither moves _rev or _fence.
+        String base = "UPDATE conversation_memories SET data = data - 'pendingContinuation' WHERE id = ?::uuid AND "
+                + PENDING_CONTINUATION_PRESENT + (expectedNumber != null ? PENDING_CONTINUATION_NUMBER : "");
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            boolean unhandled = clearPendingContinuation(conn, base + " AND " + PENDING_CONTINUATION_UNHANDLED, conversationId,
+                    expectedNumber) > 0;
+            clearPendingContinuation(conn, base, conversationId, expectedNumber);
+            return unhandled;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to clear the pending continuation", e);
+        }
+    }
+
+    private static int clearPendingContinuation(Connection conn, String sql, String conversationId, Integer expectedNumber) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            if (expectedNumber != null) {
+                ps.setInt(2, expectedNumber);
+            }
+            return ps.executeUpdate();
+        }
+    }
+
+    private PendingContinuation readPendingContinuation(String conversationId, String json) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return jsonSerialization.deserialize(json, PendingContinuation.class);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.warnf("Unparseable pendingContinuation for conversation %s: %s", conversationId, e.getMessage());
+            return null;
+        }
+    }
+
+    private static ConversationState conversationStateOf(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return ConversationState.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

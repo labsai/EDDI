@@ -29,6 +29,23 @@ public interface IScheduleStore {
 
     String createSchedule(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Inserts the schedule under the id it already carries, unless a schedule with
+     * that id exists. The insert and the existence check are one atomic operation
+     * (MongoDB's unique {@code _id}, PostgreSQL's primary key with
+     * {@code ON CONFLICT DO NOTHING}), so two writers that derive the same id — the
+     * original arm of a continuation and the recovery sweep, or two nodes sweeping
+     * at once — write one row between them.
+     *
+     * @param schedule
+     *            a schedule whose {@code id} is set by the caller
+     * @return {@code true} when this call wrote the row, {@code false} when a
+     *         schedule with that id already existed
+     * @throws IllegalArgumentException
+     *             when the schedule carries no id
+     */
+    boolean createScheduleIfAbsent(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException;
+
     ScheduleConfiguration readSchedule(String scheduleId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     /**

@@ -161,6 +161,13 @@ public class ConversationMemorySnapshot {
      * by a turn; absent in documents written before it existed.
      */
     private String endReason;
+    /**
+     * The self-continuation the latest committed step decided on and that may not
+     * be armed yet — the outbox record the recovery sweep arms from (see
+     * {@link PendingContinuation}). {@code null} when the latest step did not
+     * decide to continue; derived from that step on every write.
+     */
+    private PendingContinuation pendingContinuation;
     private String hitlPausedWorkflowId;
     private int hitlPausedAbsoluteTaskIndex = -1;
     private Instant hitlPausedAt;
@@ -623,6 +630,14 @@ public class ConversationMemorySnapshot {
 
     public void setEndReason(String endReason) {
         this.endReason = endReason;
+    }
+
+    public PendingContinuation getPendingContinuation() {
+        return pendingContinuation;
+    }
+
+    public void setPendingContinuation(PendingContinuation pendingContinuation) {
+        this.pendingContinuation = pendingContinuation;
     }
 
     public String getHitlPausedWorkflowId() {

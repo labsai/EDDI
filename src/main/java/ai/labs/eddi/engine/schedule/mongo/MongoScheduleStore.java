@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
 import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -162,28 +164,51 @@ public class MongoScheduleStore implements IScheduleStore {
         try {
             String id = UUID.randomUUID().toString();
             schedule.setId(id);
-            Instant now = Instant.now();
-            schedule.setCreatedAt(now);
-            schedule.setUpdatedAt(now);
-
-            Document doc = toDocument(schedule);
-            doc.put(ID, id);
-            doc.remove("id"); // use _id instead
-            // cronDescription is computed for the API response, not state. The `transient`
-            // marker does not stop Jackson (PROPAGATE_TRANSIENT_MARKER is off), so a PUT
-            // that echoed a GET body used to persist a stale description here.
-            doc.remove("cronDescription");
-            // Store every Instant field as an epoch-millis Long read straight from
-            // the getters — never trusting whatever numeric format the shared mapper
-            // produced (see writeScheduleInstants).
-            writeScheduleInstants(doc, schedule);
-            scheduleCollection.insertOne(doc);
-            LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
-                    schedule.getAgentId());
+            insert(schedule, id);
             return id;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to create schedule", e);
         }
+    }
+
+    @Override
+    public boolean createScheduleIfAbsent(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
+        String id = schedule.getId();
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("createScheduleIfAbsent needs a schedule id");
+        }
+        try {
+            insert(schedule, id);
+            return true;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return false;
+            }
+            throw new IResourceStore.ResourceStoreException("Failed to create schedule " + id, e);
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to create schedule " + id, e);
+        }
+    }
+
+    private void insert(ScheduleConfiguration schedule, String id) throws IResourceStore.ResourceStoreException {
+        Instant now = Instant.now();
+        schedule.setCreatedAt(now);
+        schedule.setUpdatedAt(now);
+
+        Document doc = toDocument(schedule);
+        doc.put(ID, id);
+        doc.remove("id"); // use _id instead
+        // cronDescription is computed for the API response, not state. The `transient`
+        // marker does not stop Jackson (PROPAGATE_TRANSIENT_MARKER is off), so a PUT
+        // that echoed a GET body used to persist a stale description here.
+        doc.remove("cronDescription");
+        // Store every Instant field as an epoch-millis Long read straight from
+        // the getters — never trusting whatever numeric format the shared mapper
+        // produced (see writeScheduleInstants).
+        writeScheduleInstants(doc, schedule);
+        scheduleCollection.insertOne(doc);
+        LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
+                schedule.getAgentId());
     }
 
     @Override

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
@@ -124,6 +125,11 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
         snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         snapshot.setHitlApprovalContext(conversationMemory.getHitlApprovalContext());
+        // The continuation outbox record goes into the SAME document write as the step
+        // that decided it, so a crash after the commit cannot lose the decision. It is
+        // derived from the current step, never carried blindly: a later turn that did
+        // not continue clears it by being written.
+        snapshot.setPendingContinuation(ConversationContinuations.pendingOf(conversationMemory));
         return snapshot;
     }
 
@@ -189,6 +195,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.setHitlApprovalContext(snapshot.getHitlApprovalContext());
+        conversationMemory.setPendingContinuation(snapshot.getPendingContinuation());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
 

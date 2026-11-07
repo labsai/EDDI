@@ -927,7 +927,7 @@ class ConversationStepRunner {
                                 // outcome is part of the committed step) and armed only once
                                 // the store succeeded: a turn that is not committed — fenced,
                                 // conflicted, failed to store — never queues its successor.
-                                conversationService.decideContinuation(conversationMemory);
+                                conversationService.decideContinuation(conversationMemory, environment);
                                 storeConversationMemory(conversationMemory, environment);
                                 conversationService.armContinuation(conversationId, conversationMemory, environment);
                             }

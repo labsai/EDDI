@@ -765,7 +765,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             // A CONVERSATION_START turn may ask to continue itself (a job that starts
             // with the conversation): decided before the store, armed once the
             // descriptor exists.
-            decideContinuation(conversationMemory);
+            decideContinuation(conversationMemory, environment);
             var conversationId = storeConversationMemory(conversationMemory, environment);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -1199,12 +1199,12 @@ public class ConversationService implements IConversationService, UserErasurePar
      * {@link ConversationContinuations#decide}). The outcome is written to the
      * step, so it is stored with the turn. Never throws.
      */
-    void decideContinuation(IConversationMemory memory) {
+    void decideContinuation(IConversationMemory memory, Environment environment) {
         if (conversationContinuations == null) {
             return;
         }
         try {
-            conversationContinuations.decide(memory);
+            conversationContinuations.decide(memory, environment);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not decide the continuation of conversation %s: %s", sanitize(memory.getConversationId()),
                     e.getMessage());

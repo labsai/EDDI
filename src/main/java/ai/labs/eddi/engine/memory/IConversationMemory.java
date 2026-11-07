@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -176,6 +177,23 @@ public interface IConversationMemory extends Serializable {
     default void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
         // no-op by default
 
+    }
+
+    /**
+     * The continuation the current step decided on, as the outbox record stored
+     * with the turn (see {@link PendingContinuation}). Set by
+     * {@code ConversationContinuations.decide} and loaded from the stored
+     * conversation; the snapshot conversion keeps it only while the current step
+     * still carries the matching {@code continuation:next}, so it never outlives
+     * the step that decided.
+     */
+    default PendingContinuation getPendingContinuation() {
+        return null;
+    }
+
+    /** Set (or clear, with {@code null}) the pending continuation. */
+    default void setPendingContinuation(PendingContinuation pendingContinuation) {
+        // no-op by default
     }
 
     /**

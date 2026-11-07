@@ -10367,7 +10367,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_continuation_*` — turns an agent started itself with the reserved `CONTINUE_CONVERSATION` action. `scheduled` counts continuations armed after a committed turn, `run` the continuation turns that ran, `refused` the ones ignored or stopped, by reason: `disabled` (the agent sets no maxContinuations — usually a rule emitting the action on an agent that never opted in), `limit`, `cost_ceiling`, `not_settled`, `group_member`, `schedule_failed`, and at fire time `ended`, `awaiting_human`, `gone`, `restricted`, `undeployed` (retried), `interrupted`, `duplicate` (a re-delivered fire that found its turn already ran).",
+          "description": "`eddi_continuation_*` — turns an agent started itself with the reserved `CONTINUE_CONVERSATION` action. `scheduled` counts continuations armed after a committed turn, `run` the continuation turns that ran, `refused` the ones ignored or stopped, by reason: `disabled` (the agent sets no maxContinuations — usually a rule emitting the action on an agent that never opted in), `limit`, `cost_ceiling`, `not_settled`, `group_member`, `schedule_failed`, and at fire time `ended`, `awaiting_human`, `gone`, `restricted`, `undeployed` (retried), `interrupted`, `duplicate` (a re-delivered fire that found its turn already ran). `recovered` counts continuations a turn decided and committed but never armed (the node stopped in between), armed afterwards by the recovery sweep.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -10407,6 +10407,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "refused — {{reason}}"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_continuation_recovered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "recovered"
             }
           ],
           "fieldConfig": {

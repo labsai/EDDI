@@ -292,9 +292,29 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     @Override
     public String createSchedule(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
-        ensureSchema();
         String id = UUID.randomUUID().toString();
         schedule.setId(id);
+        insert(schedule, false);
+        return id;
+    }
+
+    @Override
+    public boolean createScheduleIfAbsent(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
+        if (schedule.getId() == null || schedule.getId().isBlank()) {
+            throw new IllegalArgumentException("createScheduleIfAbsent needs a schedule id");
+        }
+        return insert(schedule, true);
+    }
+
+    /**
+     * @param ifAbsent
+     *            {@code ON CONFLICT (id) DO NOTHING} — the row is written only when
+     *            no schedule carries the id yet
+     * @return whether the row was written
+     */
+    private boolean insert(ScheduleConfiguration schedule, boolean ifAbsent) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String id = schedule.getId();
         Instant now = Instant.now();
         schedule.setCreatedAt(now);
         schedule.setUpdatedAt(now);
@@ -310,6 +330,9 @@ public class PostgresScheduleStore implements IScheduleStore {
                     persistent_conversation_id, created_by, allow_self_scheduling, creator_teams, creator_admin)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
+        if (ifAbsent) {
+            sql = sql.stripTrailing() + " ON CONFLICT (id) DO NOTHING";
+        }
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
             ps.setString(2, schedule.getName());
@@ -342,10 +365,12 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setBoolean(24, schedule.isAllowSelfScheduling());
             ps.setString(25, serializeTeams(schedule.getCreatorTeams()));
             ps.setBoolean(26, schedule.isCreatorAdmin());
-            ps.executeUpdate();
+            if (ps.executeUpdate() == 0) {
+                return false;
+            }
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
-            return id;
+            return true;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to create schedule", e);
         }
