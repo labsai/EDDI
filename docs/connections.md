@@ -1072,3 +1072,4 @@ Three of those are worth knowing by name:
 - [httpcalls](httpcalls.md) — including `${caller:token}`, the same-origin special case
 - `mcpcalls` configurations — connecting to somebody else's MCP server, whose `apiKey` accepts a connection reference
 - [HITL](hitl.md) — approving a connection-backed call before it runs
+- [Google Workspace](google-workspace.md) — a worked `PER_USER` recipe: Gmail and Drive as LLM tools on each user's own account
