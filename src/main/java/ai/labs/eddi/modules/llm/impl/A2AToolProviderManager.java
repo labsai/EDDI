@@ -38,6 +38,8 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -102,7 +104,10 @@ public class A2AToolProviderManager {
      */
     private final ConnectionResolver connectionResolver;
 
-    /** Cached Agent Card data per URL to avoid re-fetching on every request. */
+    /**
+     * Cached Agent Card data per URL and credential, to avoid re-fetching on every
+     * request. See {@link #cardCacheKey}.
+     */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
 
     record CachedAgentInfo(Map<String, Object> agentCard, long timestamp) {
@@ -123,6 +128,13 @@ public class A2AToolProviderManager {
      * gigabytes of retained strings.
      */
     static final int MAX_NAME_PART_CHARS = 64;
+
+    /**
+     * Longest whole tool name. OpenAI, Anthropic and Gemini all refuse a function
+     * name over 64 characters, and one such name fails every request the agent
+     * makes, not just the call to that tool.
+     */
+    static final int MAX_TOOL_NAME_CHARS = 64;
 
     /** Most skills one agent card may turn into tools; the rest are dropped. */
     static final int MAX_SKILLS_PER_AGENT = 256;
@@ -278,8 +290,11 @@ public class A2AToolProviderManager {
                 // breaker. The breaker exists to stop hammering a flaky peer, and
                 // neither of these is healed by waiting — while opening it suppresses
                 // discovery for EVERY user because one of them has no grant, and tells
-                // the operator the peer is unreachable when it is fine.
-                LOGGER.warnf("A2A agent at %s could not be given a usable credential: %s", config.getUrl(), e.getMessage());
+                // the operator the peer is unreachable when it is fine. The line names
+                // no cause of its own - this branch also takes a card naming an
+                // endpoint on another origin, which is no credential problem - and
+                // leaves that to the exception's message.
+                LOGGER.warnf("A2A agent at %s skipped: %s", config.getUrl(), e.getMessage());
             } catch (Exception e) {
                 recordFailure(config.getUrl());
                 LOGGER.warnf("Failed to discover tools from A2A agent at %s: %s", config.getUrl(), e.getMessage());
@@ -333,7 +348,7 @@ public class A2AToolProviderManager {
         List<Map<String, Object>> skills = (List<Map<String, Object>>) agentCard.get("skills");
         if (skills == null || skills.isEmpty()) {
             // Single default tool for the entire agent
-            String toolName = sanitizeToolName(agentName);
+            String toolName = toolName(agentName);
             if (claimedByAnotherPeer(toolName, executors)) {
                 warnClaimed(agentName, 1);
                 return;
@@ -381,7 +396,7 @@ public class A2AToolProviderManager {
                 }
             }
 
-            String toolName = sanitizeToolName(agentName + "_" + skillId);
+            String toolName = toolName(agentName, skillId);
             // A repeated skill id would produce the same tool name: the later copy
             // would silently replace the executor while both specs reached the model
             // — and, charged before the replacement, eat the per-agent schema budget
@@ -451,11 +466,56 @@ public class A2AToolProviderManager {
      * fit with a short hash of the WHOLE value, so distinct long ids stay distinct.
      */
     static String distinctNamePart(String part) {
-        if (part == null || part.length() <= MAX_NAME_PART_CHARS) {
-            return part;
+        return part == null ? null : fitWithHash(part, MAX_NAME_PART_CHARS);
+    }
+
+    /**
+     * {@code value} unchanged when it fits {@code maxChars}, otherwise cut to fit
+     * with a short hash of the WHOLE value, so two long values sharing a prefix
+     * stay two values.
+     */
+    private static String fitWithHash(String value, int maxChars) {
+        if (value.length() <= maxChars) {
+            return value;
         }
-        String suffix = "_" + Integer.toHexString(part.hashCode());
-        return part.substring(0, MAX_NAME_PART_CHARS - suffix.length()) + suffix;
+        String suffix = "_" + Integer.toHexString(value.hashCode());
+        return value.substring(0, maxChars - suffix.length()) + suffix;
+    }
+
+    /**
+     * The A2A tool-name policy, and the only place a tool name is made: each part
+     * in the provider alphabet and never empty, joined, and the whole cut to
+     * {@link #MAX_TOOL_NAME_CHARS} with a hash of the uncut name.
+     * <p>
+     * The parts are bounded on their own ({@link #MAX_NAME_PART_CHARS}) for memory,
+     * but two of them joined were up to 129 characters, which every provider
+     * refuses — so a long configured agent name next to a long skill id failed
+     * every request of the agent that listed the peer.
+     */
+    private String toolName(String agentName, String skillId) {
+        return fitWithHash(namePart(agentName, "a2a") + "_" + namePart(skillId, "skill"), MAX_TOOL_NAME_CHARS);
+    }
+
+    /**
+     * The tool name of an agent whose card lists no skills: the agent part alone,
+     * under the same policy.
+     */
+    private String toolName(String agentName) {
+        return fitWithHash(namePart(agentName, "a2a"), MAX_TOOL_NAME_CHARS);
+    }
+
+    /**
+     * One part of a tool name, sanitized and never empty. A part that sanitizing
+     * empties — a name written in a script other than Latin — becomes
+     * {@code fallback} plus a hash of the original, so the tool is not lost to a
+     * blank name, and two such agents do not collide on one.
+     */
+    private String namePart(String raw, String fallback) {
+        if (isNullOrEmpty(raw)) {
+            return fallback;
+        }
+        String sanitized = sanitizeToolName(raw);
+        return sanitized.isEmpty() ? fallback + "_" + Integer.toHexString(raw.hashCode()) : sanitized;
     }
 
     /** {@code part}, cut to {@link #MAX_NAME_PART_CHARS}; null stays null. */
@@ -547,7 +607,8 @@ public class A2AToolProviderManager {
     private Map<String, Object> fetchAgentCard(String agentUrl, A2AAgentConfig config) throws Exception {
 
         // Check cache (5 min TTL)
-        CachedAgentInfo cached = agentCache.get(agentUrl);
+        String cacheKey = cardCacheKey(agentUrl, config.getApiKey());
+        CachedAgentInfo cached = agentCache.get(cacheKey);
         if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < 300_000) {
             return cached.agentCard();
         }
@@ -563,8 +624,35 @@ public class A2AToolProviderManager {
             return null;
         }
 
-        agentCache.put(agentUrl, new CachedAgentInfo(card, System.currentTimeMillis()));
+        agentCache.put(cacheKey, new CachedAgentInfo(card, System.currentTimeMillis()));
         return card;
+    }
+
+    /**
+     * Cache key for an Agent Card: the URL, plus a digest of the configured
+     * credential when there is one.
+     * <p>
+     * Keyed on the URL alone, a card fetched with one config's credential — an
+     * authenticated card, listing skills the peer shows only to that caller — was
+     * served for five minutes to every other config naming the same URL with
+     * another credential or none, and its skills became their tools.
+     * {@code McpToolProviderManager.cacheKey} draws the same line for MCP clients,
+     * and for the same reasons the credential is taken UNRESOLVED and digested: two
+     * configs naming one vault reference share a card, and a literal key never
+     * becomes a map key. An unauthenticated fetch keeps the bare URL as its key.
+     */
+    private static String cardCacheKey(String agentUrl, String apiKey) {
+        if (isNullOrEmpty(apiKey)) {
+            return agentUrl;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(apiKey.getBytes(StandardCharsets.UTF_8));
+            return agentUrl + "|" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is mandated by the platform; if it is truly absent, isolate by
+            // identity so distinct credentials still cannot share a card.
+            return agentUrl + "|" + System.identityHashCode(apiKey);
+        }
     }
 
     /**

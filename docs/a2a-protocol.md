@@ -372,11 +372,14 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
 3. **Endpoint:** the configured `url`. A card is authored by the peer and is not allowed to redirect the call (or change what a HITL approval fingerprint pins); only when `url` names the card document itself is the card's interface URL used — and then only if it is on the same origin (scheme, host, port) as the card, because the configured credential is sent to that endpoint. A card naming another origin is refused. The URL is validated like any other target.
 4. **Mapping:** Each skill becomes a `ToolSpecification` with a `message` parameter
 5. **Execution:** When the LLM calls the tool, one send is made in the peer's dialect. The result is read in any of the three shapes. A task that did not complete reaches the model as such — `A2A agent task failed: …`, `… needs more input: …`, `… is still working …` — never as an answer.
-6. **Caching:** Agent Cards are cached for 5 minutes to avoid redundant fetches
+6. **Caching:** Agent Cards are cached for 5 minutes to avoid redundant fetches, per `url` and `apiKey`: a card fetched with one credential — which may list skills the peer shows only to that caller — is never served to a config with another credential or none. Configs naming the same `apiKey` reference share a card.
 
 ### Tool Naming
 
-Tools are named `{agentName}_{skillId}`, sanitized to `[a-z0-9_]`. Example: `support_agent_order_tracking`.
+Tools are named `{agentName}_{skillId}`, sanitized to `[a-z0-9_]`. Example: `support_agent_order_tracking`. A card without skills gives one tool named `{agentName}`.
+
+- **At most 64 characters**, the limit OpenAI, Anthropic and Gemini put on a tool name. A longer name is cut and ends in a short hash of the whole name, so two long skill ids that share a prefix stay two tools.
+- **Never empty.** A name that sanitizing leaves empty — one written in a script other than Latin, such as `検索エージェント` — becomes `a2a_<hash>` (a skill id: `skill_<hash>`), so two such agents get different tool names. Set an ASCII `name` on the agent config to choose a readable one.
 
 ---
 
