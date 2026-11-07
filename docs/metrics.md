@@ -1282,6 +1282,23 @@ GET    /llm/tools/costs/tool/{toolName}
 POST   /llm/tools/costs/reset
 ```
 
+The history endpoint reads the conversation's stored tool-loop trace and answers
+`{"toolCalls": [...], "hasErrors": bool}`. Each call carries `toolName`,
+`callId`, `arguments`, `result`, `success` and `error`. `success` is false for a
+result the tool-outcome classifier (the one the repeat guard uses) reads as a
+failure, such as a non-2xx `httpCode`, an `{"error": ...}` object or an `Error:`
+string; for a call refused before it ran (argument schema, budget, quota,
+repeat guard, call cap, not-yet-activated LAZY tool, a gated call a human
+rejected or the resume refused); and for a result the tool-result guardrail
+blocked. `error` says why: the trace's own error code or message, the
+refusal's trace type (such as `hitl_rejected`), or the result's outcome
+(`failed_retryable`, `failed_terminal`, `not_executed`). Two kinds of call are
+not listed, because the trace cannot identify them: a call a
+`toolCallGuardrails` entry refused, and an approved call replayed from the
+HITL journal. The trace records no per-call timing, cost or cache hits, so the
+history does not report them; a conversation's tool spend comes from
+`/llm/tools/costs/conversation/{conversationId}`.
+
 > The pre-v6 prefix `/langchain/tools` still answers, because
 > `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility
 > shim for existing clients, not a second spelling to write in new code — it can
