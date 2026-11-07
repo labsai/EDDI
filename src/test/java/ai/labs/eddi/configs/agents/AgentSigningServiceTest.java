@@ -764,9 +764,10 @@ class AgentSigningServiceTest {
     }
 
     /**
-     * Provisions a signing key the way an operator does: an Ed25519 keypair whose
-     * PKCS#8 private key goes into the vault, Base64-encoded, under
-     * {@code agent-signing-key:{agentId}}. Writing it again replaces the key.
+     * Writes a signing key into the vault in the one shape this service reads: an
+     * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
+     * {@code agent-signing-key:{agentId}}. Nothing in EDDI writes one, so the test
+     * stands in for whatever provisions it. Writing it again replaces the key.
      *
      * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
      */

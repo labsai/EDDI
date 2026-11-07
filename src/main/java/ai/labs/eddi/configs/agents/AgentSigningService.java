@@ -160,7 +160,7 @@ public class AgentSigningService {
             signCounter.increment();
             return Base64.getEncoder().encodeToString(signatureBytes);
         } catch (PrivateKeyLoadException e) {
-            // Unwrap typed exception from computeIfAbsent — preserves
+            // Unwrap the typed exception from loadPrivateKey — preserves the
             // original cause type (SecretNotFound, InvalidKeySpec, etc.)
             Throwable cause = e.getCause();
             if (cause instanceof ISecretProvider.SecretNotFoundException) {
@@ -549,8 +549,8 @@ public class AgentSigningService {
     }
 
     /**
-     * Typed unchecked exception for the cache loader lambda. Preserves the original
-     * cause type (SecretNotFoundException, InvalidKeySpecException,
+     * Typed unchecked exception thrown by {@link #loadPrivateKey}. Preserves the
+     * original cause type (SecretNotFoundException, InvalidKeySpecException,
      * IllegalArgumentException from bad Base64, etc.) so the unwrapping logic in
      * {@link #sign} can produce precise diagnostic messages.
      */

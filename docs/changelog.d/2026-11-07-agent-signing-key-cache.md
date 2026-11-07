@@ -26,6 +26,13 @@
   provisionable means bringing key generation back behind an admin operation.
 - [`configuration-reference.md`](../configuration-reference.md) `eddi.audit.agent-signing-enabled`:
   the 60 s re-check now covers a replaced or removed key, not only a missing one.
+- Comments that named the deleted methods now say what is true: `RestAgentStore.validateSecurityFlags`,
+  `RestAgentStoreTest`, and `planning/manager-ui-handoff.md`, whose proposed "Generate Keypair" button
+  now notes that it needs an admin endpoint first.
+- **A vault outage now reaches signing after 60 s.** A loaded key used to outlive any vault failure;
+  now, once it expires, a vault that cannot answer makes signing fail, so inter-agent messages go out
+  unsigned (WARN) and audit entries carry no agent signature until the vault answers again. Nothing
+  else changes: a vault error is never cached, and the vault shares the configuration database.
 
 ### Design decisions
 
@@ -50,4 +57,6 @@ provision keys by writing the vault entry directly, which is all the service rea
 
 **Files:** [`AgentSigningService.java`](../../src/main/java/ai/labs/eddi/configs/agents/AgentSigningService.java),
 [`AgentSigningServiceTest.java`](../../src/test/java/ai/labs/eddi/configs/agents/AgentSigningServiceTest.java),
-[`architecture.md`](../architecture.md), [`configuration-reference.md`](../configuration-reference.md)
+[`architecture.md`](../architecture.md), [`configuration-reference.md`](../configuration-reference.md),
+[`RestAgentStore.java`](../../src/main/java/ai/labs/eddi/configs/agents/rest/RestAgentStore.java),
+[`manager-ui-handoff.md`](../../planning/manager-ui-handoff.md)
