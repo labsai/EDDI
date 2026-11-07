@@ -19,8 +19,13 @@ export type AuditEntryStatus =
   | "INVALID"
   | "UNSIGNED"
   | "SIGNING_DISABLED"
-  /** A key this deployment recorded as having signed entries, but no longer holds. */
-  | "UNKNOWN_KEY";
+  /**
+   * A key this deployment recorded as having signed entries, but no longer holds;
+   * or an agent signature whose agent version no longer exists.
+   */
+  | "UNKNOWN_KEY"
+  /** The HMAC matches, but the agent's signature on the entry does not verify. */
+  | "AGENT_SIGNATURE_INVALID";
 
 /** Continuity of the per-conversation sequence chain. */
 export type AuditChainStatus = "INTACT" | "BROKEN" | "INCOMPLETE" | "UNAVAILABLE" | "NOT_APPLICABLE";

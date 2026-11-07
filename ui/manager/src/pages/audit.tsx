@@ -265,7 +265,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
         )}
 
         {/* Verification outcome for an entry the backend could not prove. */}
-        {problem === "INVALID" && (
+        {(problem === "INVALID" || problem === "AGENT_SIGNATURE_INVALID") && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
             data-testid="entry-verify-invalid"
@@ -274,7 +274,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
             {t("audit.verify.entryInvalid", "Signature does not match")}
           </span>
         )}
-        {problem !== undefined && problem !== "INVALID" && (
+        {problem !== undefined && problem !== "INVALID" && problem !== "AGENT_SIGNATURE_INVALID" && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[11px] font-medium text-warn-600 dark:text-warn-400"
             data-testid="entry-verify-unproven"

@@ -99,6 +99,31 @@ describe("audit integrity banner", () => {
     expect(screen.getAllByTestId("entry-verify-invalid")).toHaveLength(1);
   });
 
+  it("marks an entry whose agent signature does not verify as not matching, and the trail as tampered", async () => {
+    serveVerification(
+      report({
+        valid: 3,
+        invalid: 1,
+        problems: [
+          {
+            entryId: "audit-2",
+            conversationId: "conv1",
+            sequence: 1,
+            timestamp: "2026-09-26T10:00:00Z",
+            status: "AGENT_SIGNATURE_INVALID",
+            hmacVersion: "v5",
+          },
+        ],
+      }),
+    );
+    await searchConversation();
+    const banner = await verdictShown();
+    expect(banner.dataset.verdict).toBe("tampered");
+    const entry = screen.getByTestId("audit-entry-audit-2");
+    expect(within(entry).getByTestId("entry-verify-invalid")).toBeInTheDocument();
+    expect(within(entry).queryByTestId("entry-verify-unproven")).not.toBeInTheDocument();
+  });
+
   it("reports a broken chain — a deleted entry leaves no signature to fail", async () => {
     serveVerification(report({ chainStatus: "BROKEN", missingSequences: [2] }));
     await searchConversation();
