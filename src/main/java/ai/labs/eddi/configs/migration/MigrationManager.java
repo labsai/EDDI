@@ -75,7 +75,6 @@ public class MigrationManager implements IMigrationManager {
     private final MigrationLogStore migrationLogStore;
     private final Boolean skipConversationMemories;
     private final boolean backupBeforeWrite;
-    private boolean isCurrentlyRunning = false;
 
     /**
      * Convenience constructor keeping the pre-migration backup enabled.
@@ -121,34 +120,36 @@ public class MigrationManager implements IMigrationManager {
      * every collection (conversation memories are the bulk of the data), and the
      * sweep runs before agents deploy. The overall confirmation is written once
      * every collection has its own.
+     * <p>
+     * {@code synchronized} is the whole concurrency guard: a second caller waits,
+     * then finds the confirmation and only runs its callback. Every call runs its
+     * callback. A running flag used to sit here as well; only a call made from
+     * inside the callback could ever see it set, and that call was skipped without
+     * its own callback ever running.
      */
     @Override
     public synchronized void startMigrationIfFirstTimeRun(IMigrationFinished migrationFinished) {
-        if (!this.isCurrentlyRunning) {
-            this.isCurrentlyRunning = true;
-            try {
-                if (isMigrationNeeded()) {
-                    boolean complete = runCollection(COLLECTION_PROPERTYSETTER, migratePropertySetter(), propertySetterCollection,
-                            propertySetterCollectionHistory);
-                    complete &= runCollection(COLLECTION_HTTPCALLS, migrateApiCalls(), httpCallsCollection, httpCallsCollectionHistory);
-                    complete &= runCollection(COLLECTION_OUTPUTS, migrateOutput(), outputCollection, outputCollectionHistory);
-                    if (!skipConversationMemories) {
-                        complete &= runCollection(COLLECTION_CONVERSATION_MEMORY, migrateConversationMemory(),
-                                conversationMemoryCollection, null);
-                    }
-
-                    if (complete) {
-                        migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
-                    } else {
-                        LOGGER.error("The legacy document migration did not complete - see the errors above. The collections "
-                                + "that failed are NOT recorded as done and are swept again on the next start; documents that "
-                                + "could not be migrated stay in the old format until then.");
-                    }
+        try {
+            if (isMigrationNeeded()) {
+                boolean complete = runCollection(COLLECTION_PROPERTYSETTER, migratePropertySetter(), propertySetterCollection,
+                        propertySetterCollectionHistory);
+                complete &= runCollection(COLLECTION_HTTPCALLS, migrateApiCalls(), httpCallsCollection, httpCallsCollectionHistory);
+                complete &= runCollection(COLLECTION_OUTPUTS, migrateOutput(), outputCollection, outputCollectionHistory);
+                if (!skipConversationMemories) {
+                    complete &= runCollection(COLLECTION_CONVERSATION_MEMORY, migrateConversationMemory(),
+                            conversationMemoryCollection, null);
                 }
-            } finally {
-                migrationFinished.onComplete();
-                this.isCurrentlyRunning = false;
+
+                if (complete) {
+                    migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_CONFIRMATION));
+                } else {
+                    LOGGER.error("The legacy document migration did not complete - see the errors above. The collections "
+                            + "that failed are NOT recorded as done and are swept again on the next start; documents that "
+                            + "could not be migrated stay in the old format until then.");
+                }
             }
+        } finally {
+            migrationFinished.onComplete();
         }
     }
 

@@ -270,6 +270,27 @@ Applies only if you run more than one node.
   (settings, model prices, team budgets, approval analytics) are created on first use and ignored
   by older nodes.
 
+### Slack channels still declared on an agent
+
+Applies only if a deployed agent still carries the deprecated `channels` list
+([Slack integration](slack-integration.md)). The startup migration that turns those connectors into
+channel integrations runs once more on the first 6.7 start, because the configs it created before
+were never listed: Slack kept routing through the legacy connector, and the integrations did not
+appear in the Manager, the REST listing or `list_channel_integrations`. After this start each
+channel has one integration, owned like the agent it routes to by default (its visibility narrowed
+to `space` unless the agent is `private`), and Slack routes through it: the default target is the
+first agent by id (or, if that agent's connector sets a `groupId`, that group), and every other
+agent sharing the channel is reached through its trigger keyword, the slug of its name. An agent
+whose name slugs to the reserved `help` gets no trigger; give it another one. The configs the
+earlier run created stay in the database unreferenced; nothing reads them. A channel that already
+has an integration is left alone.
+
+If the default agent has no descriptor, the integration is unowned, and under the default `shared`
+legacy policy other editors can read its configuration (literal Slack credentials are redacted for
+non-admins). Set `eddi.workspaces.legacy-visibility=admin-only` to restrict it; explicit grants still
+apply. If a descriptor write or the descriptor listing fails, the migration stays incomplete and
+startup continues: check the migration log, fix the cause and restart to retry.
+
 ### New opt-in features
 
 None of these changes behaviour until configured; each has its own page.
