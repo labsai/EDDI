@@ -11,6 +11,7 @@ import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegratio
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier.Reason;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore.MailboxState;
+import ai.labs.eddi.integrations.email.ledger.LedgerRetry;
 import ai.labs.eddi.integrations.email.transport.ImapMailTransport;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.integrations.email.transport.MailTransport.MailboxMessage;
@@ -66,8 +67,6 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class EmailMailboxPoller {
 
     private static final Logger LOGGER = Logger.getLogger(EmailMailboxPoller.class);
-
-    static final Duration MAX_BACKOFF = Duration.ofHours(1);
 
     /**
      * Slack on the "older than the integration" rule: {@code INTERNALDATE} has
@@ -336,11 +335,12 @@ public class EmailMailboxPoller {
         return new PollReport(true, reason);
     }
 
-    /** {@code pollSeconds × 2^(failures-1)}, capped at {@link #MAX_BACKOFF}. */
+    /**
+     * {@code pollSeconds × 2^(failures-1)}, capped at
+     * {@link LedgerRetry#MAX_BACKOFF}.
+     */
     static Duration backoff(int pollSeconds, int failures) {
-        int doublings = Math.min(Math.max(0, failures - 1), 20);
-        Duration delay = Duration.ofSeconds(Math.max(1, pollSeconds)).multipliedBy(1L << doublings);
-        return delay.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : delay;
+        return LedgerRetry.backoff(Duration.ofSeconds(Math.max(1, pollSeconds)), failures);
     }
 
     private static String truncate(String value) {
