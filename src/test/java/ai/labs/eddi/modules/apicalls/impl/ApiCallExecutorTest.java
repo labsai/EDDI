@@ -542,11 +542,11 @@ class ApiCallExecutorTest {
     void resolve_withEmptyPropertyInstructions_isNotPinned() throws Exception {
         // The fail-open this closes. The old predicate used isNullOrEmpty, so an
         // empty list read as "absent" and the call was PINNED — while
-        // PrePostUtils guards on != null and therefore still re-runs
-        // memoryItemConverter.convert, discarding the model arguments merged in
-        // for this call. Gate time and resume time both skip that (both go
-        // through resolve), so they agreed with each other and the guard passed
-        // while execute() sent a request with every {arg} rendered empty.
+        // PrePostUtils guards on != null and therefore runs the pre-request step
+        // anyway. Gate time and resume time both skip that step (both go through
+        // resolve), so they agree with each other however the step changes the
+        // request — it used to render every {arg} empty — and the guard passed
+        // on a comparison that was never sound.
         ApiCall call = createSimpleApiCall("empty-instructions-call", false);
         var preRequest = new HttpPreRequest();
         preRequest.setPropertyInstructions(new ArrayList<>());

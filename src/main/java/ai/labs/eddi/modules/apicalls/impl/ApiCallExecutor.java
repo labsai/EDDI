@@ -985,10 +985,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * <li><b>An empty-but-present {@code propertyInstructions} list.</b>
      * {@code isNullOrEmpty} treated it as absent, but
      * {@code PrePostUtils#executePreRequestPropertyInstructions} guards on
-     * {@code != null} — so it still re-runs {@code memoryItemConverter.convert},
-     * discarding the model arguments merged in for this call. Every {@code {arg}}
-     * then renders empty at execution and non-empty in the preview. Hence
-     * {@code != null}, matching the code that actually runs.</li>
+     * {@code != null}, so the pre-request step runs in {@code execute} and never in
+     * {@code resolve}. Its instructions exist to change the properties the request
+     * templates, so the request sent can differ from the one previewed. (It also
+     * used to rebuild the template data from memory, dropping the model arguments,
+     * which made even an empty list diverge.) Hence {@code != null}, the predicate
+     * of the code that actually runs.</li>
      * <li><b>{@code fireAndForget} with {@code preRequest.batchRequests}.</b>
      * {@code execute} routes to {@code executeFireAndForgetCalls}, which calls
      * {@code buildRequest} once PER iteration object — N distinct requests, none of
