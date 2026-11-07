@@ -1017,8 +1017,10 @@ public class EmailInboundProcessor {
      * One audit entry per refused mail: integration, reason category, ledger row,
      * Message-ID and the sender's domain plus its {@link GdprPseudonymizer}
      * pseudonym — never the address itself (the audit ledger is write-once) and
-     * never content. The pseudonym is keyed, so a reader of the ledger cannot
-     * confirm a sender by hashing a list of candidate addresses; it is the token
+     * never content. The pseudonym is keyed (or salted per deployment), so a reader
+     * of the ledger cannot confirm a sender by hashing a list of candidate
+     * addresses — unless the deployment has neither a key nor a salt, where
+     * {@link GdprPseudonymizer} falls back to an unsalted hash. It is the token
      * HITL notifications, replies and GDPR erasure write for that address.
      */
     private void audit(IntegrationContext ctx, LedgerEntry row, String reason, String sender) {

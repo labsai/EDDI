@@ -321,7 +321,8 @@ cost); an unpriced model counts as zero.
   row, Message-ID, and the sender only as `senderDomain` plus `senderPseudonym` — the audit ledger is write-once. The
   pseudonym is the GDPR token [HITL notifications](hitl.md#email-notifications) use — keyed with the audit ledger's key,
   or salted per deployment when the ledger has none — so it cannot be confirmed by hashing a list of candidate
-  addresses, as the plain SHA-256 written before could.
+  addresses, as the plain SHA-256 written before could. Only a deployment with neither a key nor a place to keep the
+  salt falls back to an unsalted hash, and then that guarantee does not hold.
 - The mailbox host is a processor of the mail: [compliance-data-flow.md](compliance-data-flow.md#other-outbound-recipients).
 
 ## The message ledger

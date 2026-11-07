@@ -858,10 +858,12 @@ public class EmailReplySender {
     }
 
     /**
-     * The recipient as {@link GdprPseudonymizer} names it: keyed, so a reader of
-     * the audit ledger or the logs cannot confirm an address by hashing a list of
-     * candidates, as an unkeyed hash beside its domain would allow. The same token
-     * HITL notifications and GDPR erasure write for that address.
+     * The recipient as {@link GdprPseudonymizer} names it: keyed (or salted per
+     * deployment), so a reader of the audit ledger or the logs cannot confirm an
+     * address by hashing a list of candidates, as an unkeyed hash beside its domain
+     * would allow — unless the deployment has neither a key nor a salt, where the
+     * pseudonymizer falls back to an unsalted hash. The same token HITL
+     * notifications and GDPR erasure write for that address.
      */
     private String recipientPseudonym(String recipient) {
         return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));

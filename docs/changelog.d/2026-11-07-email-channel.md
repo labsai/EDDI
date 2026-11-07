@@ -10,7 +10,9 @@
   that domain could hash them and tell whose mail it was. Both entries now carry `senderPseudonym` /
   `recipientPseudonym` from `GdprPseudonymizer` — the keyed token HITL notifications (`email.notify`) already wrote
   under that name — and the bounce-suppression log line names the address the same way. The suppression list keeps
-  its SHA-256: it is a lookup key, not audit output. Entries written before this change keep their `*Hash` field.
+  its SHA-256: it is a lookup key, not audit output. Entries written before this change keep their `*Hash` field. The
+  token is keyed with the audit ledger's key, or salted per deployment; only a deployment with neither falls back to
+  an unsalted hash.
 - **`EmailInboundProcessor` takes every collaborator through its constructor.** The reply sender and the audit ledger
   were field-injected and documented as "null in tests, and then no reply is ever attempted"; production code branched
   on `replies != null` three times, so a construction site that forgot them silently turned conversation-mode replies,
