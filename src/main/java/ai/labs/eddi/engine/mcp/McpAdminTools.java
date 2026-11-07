@@ -1202,8 +1202,9 @@ public class McpAdminTools {
         try {
             // Read through REST for the name in the result: the fire log does not carry it.
             var schedule = scheduleStore.readSchedule(scheduleId);
-            // REST claims the schedule on the poller's terms, fires it within the manual
-            // deadline and records the outcome, after every refusal above.
+            // REST runs its refusals (HITL timeout, continuation, the EDIT gates, owner
+            // and manage checks), then claims the schedule on the poller's terms, fires
+            // it within the manual deadline and records the outcome.
             Response response = scheduleStore.fireNow(scheduleId);
             if (response.getStatus() != Response.Status.OK.getStatusCode() || !(response.getEntity() instanceof ScheduleFireLog fireLog)) {
                 return responseJson(jsonSerialization, response);
