@@ -510,13 +510,6 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     }
 
     /**
-     * The second direction of the sweep, cluster mode only: an agent this node
-     * serves whose record is no longer {@code deployed} — undeployed or deleted on
-     * another node — is undeployed here as well. Runs only on a list the store
-     * actually returned (an exception means "no information", never "undeploy
-     * everything"), and only after the agent was missing in two consecutive sweeps.
-     */
-    /**
      * Every deployment this node has seen a record of — only those can lose one.
      */
     private final Set<String> everRecorded = ConcurrentHashMap.newKeySet();
@@ -539,6 +532,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    /**
+     * The second direction of the sweep, cluster mode only: an agent this node
+     * serves whose record is no longer {@code deployed} — undeployed or deleted on
+     * another node — is undeployed here as well. Runs only on a list the store
+     * actually returned (an exception means "no information", never "undeploy
+     * everything"), and only after the agent was missing in consecutive sweeps at
+     * least five seconds apart.
+     */
     private void reconcileUndeployed(List<DeploymentInfo> meantToBeDeployed) {
         Set<String> wanted = new HashSet<>();
         for (DeploymentInfo info : meantToBeDeployed) {
@@ -1491,7 +1492,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     /**
      * True when {@code date} is at least {@code days} days in the past.
      * <p>
-     * This was written against {@link Period}, which normalizes into
+     * This was written against {@code java.time.Period}, which normalizes into
      * years/months/days — and the check only ever looked at the years and days
      * components, never the months. For a 35-day-old date and a 30-day limit,
      * {@code Period.between(now, date)} is {@code P-1M-4D}, so the test read

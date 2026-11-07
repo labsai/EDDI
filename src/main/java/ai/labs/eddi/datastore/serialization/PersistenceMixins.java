@@ -30,6 +30,11 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
  * level as if it were part of the resource, and every subsequent reader would
  * be told they hold whatever the last writer happened to hold.
  *
+ * <p>
+ * {@code DocumentDescriptor.ownerName} is dropped for the same reason: it is a
+ * display name resolved per request from the user directory, never part of the
+ * resource.
+ *
  * @author ginccc
  */
 public final class PersistenceMixins {

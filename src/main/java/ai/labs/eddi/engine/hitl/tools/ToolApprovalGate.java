@@ -19,7 +19,8 @@ import java.util.Map;
  * allowed calls.
  * <p>
  * Precedence: (P1) exempt always beats requireApproval; (P2) any pattern match
- * suffices; (P3) empty/absent requireApproval = gate fully inactive. Each call
+ * suffices; (P3) empty/absent requireApproval = gate inactive (unless an
+ * earned-autonomy suspension is in force, see {@link SuspendedGate}). Each call
  * is tested against the forms in {@link #addressesOf} —
  * {@code source.method:path}, then {@code source:name}, then the bare dispatch
  * name — fail-safe: a tool with an unknown source still matches bare-name

@@ -43,8 +43,8 @@ package ai.labs.eddi.modules.llm.tools;
  *            null in practice
  * @param canonicalName
  *            the configuration-facing slug; falls back to {@code dispatchName}
- *            when the tool has no slug (http/mcp/a2a/dynamic tools, where the
- *            two names are the same thing)
+ *            when the tool has no slug (http/mcp/a2a tools, where the two names
+ *            are the same thing)
  * @param priceOverride
  *            operator-supplied per-call price in USD from {@code toolPricing},
  *            or {@code null} to use the built-in default price

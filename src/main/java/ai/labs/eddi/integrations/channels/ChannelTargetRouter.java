@@ -45,10 +45,10 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * <p>
  * Platform-agnostic: signing-secret aggregation and target resolution are keyed
  * by {@code channelType} so multiple platform adapters can coexist. Currently
- * {@code slack} and {@code webhook} are registered/validated (see
- * {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
- * Platform-specific adapters provide their own webhook and event-handler
- * classes.
+ * {@code slack}, {@code webhook} and {@code email} are registered/validated
+ * (see {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}); only
+ * Slack also has legacy {@code ChannelConnector} entries. Platform-specific
+ * adapters provide their own webhook and event-handler classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
  * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
@@ -231,8 +231,10 @@ public class ChannelTargetRouter {
      * platform channel ID isn't explicitly configured (e.g., Slack DMs use dynamic
      * D-prefixed IDs unique to each user-bot pair).
      * <p>
-     * Returns the default target from the first available integration of the given
-     * channel type, or {@code null} if no integrations exist.
+     * Resolves against the first available integration of the given channel type
+     * (arbitrary map order; the trigger syntax of {@link #resolveFromIntegration}
+     * applies), falling back to the first legacy Slack connector. Returns
+     * {@code null} if no integrations exist or the message is blank or "help".
      */
     public ResolvedTarget resolveDefaultForDm(String channelType, String messageText) {
         refreshIfNeeded();

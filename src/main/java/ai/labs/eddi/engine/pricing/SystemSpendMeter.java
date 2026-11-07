@@ -212,7 +212,7 @@ public class SystemSpendMeter {
     private synchronized void restorePending(List<Pending> batch) {
         // oldest first; once over the cap the oldest are dropped (their tenant charge
         // is lost,
-        // which the warning above and the docs state)
+        // which the warning below states)
         for (Pending entry : batch) {
             pending.addLast(entry);
         }

@@ -24,7 +24,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * Converts EDDI conversation memory into a langchain4j ChatMessage list.
  * <p>
  * Handles system message prepending, prompt replacement, log size limits, and
- * multi-modal content types (text, pdf, audio, video).
+ * multi-modal content types (text, image, pdf, audio, video).
  * <p>
  * Supports two windowing modes:
  * <ul>
@@ -155,15 +155,19 @@ class ConversationHistoryBuilder {
      * Algorithm:
      * <ol>
      * <li>Generate ALL conversation messages (no step-count limit)</li>
-     * <li>Reserve token budget for anchored steps (first N)</li>
-     * <li>Fill remaining budget from most recent steps backward</li>
+     * <li>Reserve token budget for anchored steps (first N, never including the
+     * current turn; the newest anchors are dropped first if anchors plus the
+     * current turn would exceed the budget)</li>
+     * <li>Fill remaining budget from most recent steps backward; the current turn
+     * is always included, even over budget</li>
      * <li>If a gap exists between anchored and recent, insert a marker</li>
      * <li>Assemble: system + anchored + gap marker + recent + current</li>
      * </ol>
      * <p>
      * The gap marker text is:
-     * {@code [... turns X-Y omitted from context — the full conversation is
-     * preserved and can be recalled if needed ...]}
+     * {@code [... N earlier messages omitted from context — the full conversation
+     * is preserved and can be recalled if needed ...]}, added as a
+     * {@link SystemMessage}.
      *
      * @param memory
      *            conversation memory to read history from
@@ -503,7 +507,7 @@ class ConversationHistoryBuilder {
 
     /**
      * Convert an EDDI ConversationPart into a langchain4j ChatMessage. Supports
-     * multi-modal content (text, pdf, audio, video) for user messages.
+     * multi-modal content (text, image, pdf, audio, video) for user messages.
      */
     ChatMessage convertMessage(ConversationLog.ConversationPart eddiMessage) {
         return switch (eddiMessage.getRole().toLowerCase()) {

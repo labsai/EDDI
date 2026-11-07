@@ -256,7 +256,7 @@ AI says: {memory.current.output}
 Request → Load snapshot from datastore → Execute lifecycle → Save snapshot to datastore
 ```
 
-What *is* cached is the conversation **state** (`READY`, `IN_PROGRESS`, …): `ConversationService` keeps it in a Caffeine cache named `conversationState` with a 30-second TTL, so clients polling `GET /agents/{conversationId}/status` during a running turn do not hit the database on every poll. The cache is local to each instance, and the TTL bounds how stale an entry written elsewhere can be.
+What *is* cached is the conversation **state** (`READY`, `IN_PROGRESS`, …): `ConversationService` keeps it in a Caffeine cache named `conversationState` with a 30-second TTL, so clients polling `GET /agents/{conversationId}/status` during a running turn do not hit the database on every poll. The cache is local to each instance; in a NATS cluster a node that changes a conversation's state tells the others to drop their copy, and the TTL bounds how stale an entry can be in any case.
 
 ### Stored Document Structure
 

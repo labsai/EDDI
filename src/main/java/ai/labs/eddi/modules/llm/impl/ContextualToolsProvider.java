@@ -45,6 +45,9 @@ import java.util.Collections;
  * {@code addUserMemoryToolIfEnabled} /
  * {@code addConversationRecallToolIfEnabled} /
  * {@code addReadAttachmentToolIfEnabled} as a pure move — no behavior change.
+ * {@link #contribute} emits only the first two; {@code readAttachment} is
+ * assembled by {@link AttachmentToolsProvider}, which delegates the
+ * construction back here.
  * <p>
  * Grouped into one provider rather than three because they share a single
  * defining property: each is enabled by what the <em>conversation</em>
@@ -175,20 +178,6 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     /**
-     * Says out loud that an agent asked for persistent memory and this task will
-     * not give it any.
-     * <p>
-     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
-     * configuration files — the agent's {@code enableMemoryTools}, its
-     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
-     * failing any part produced no output at all. An agent designer who enabled
-     * memory and got none had nothing to read: no error, no log line, and a model
-     * that cheerfully claimed to have saved things it had not. The conflict is
-     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
-     * a task-level statement that this task gets no built-in capability, and user
-     * memory is a cross-conversation write), but it must be visible.
-     */
-    /**
      * Whether the memory-misconfiguration warning should be emitted for this agent.
      * <p>
      * A missing agent id maps to a stable fallback key rather than bypassing
@@ -203,6 +192,20 @@ class ContextualToolsProvider implements ToolSourceProvider {
         return MEMORY_MISCONFIGURATION_WARNED.add(agentId != null ? agentId : "<no-agent-id>");
     }
 
+    /**
+     * Says out loud that an agent asked for persistent memory and this task will
+     * not give it any.
+     * <p>
+     * Attaching {@code UserMemoryTool} is a three-way conjunction across two
+     * configuration files — the agent's {@code enableMemoryTools}, its
+     * {@code userMemoryConfig}, and this task's {@code enableBuiltInTools} — and
+     * failing any part produced no output at all. An agent designer who enabled
+     * memory and got none had nothing to read: no error, no log line, and a model
+     * that cheerfully claimed to have saved things it had not. The conflict is
+     * resolved the restrictive way on purpose ({@code enableBuiltInTools: false} is
+     * a task-level statement that this task gets no built-in capability, and user
+     * memory is a cross-conversation write), but it must be visible.
+     */
     private void warnIfMemoryEnabledButBuiltInsAreOff(ToolAssemblyContext ctx) {
         if (!ctx.memory().isMemoryToolsEnabled() || ctx.memory().getUserMemoryConfig() == null || userMemoryStore == null) {
             return;

@@ -31,13 +31,14 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  * execution modes, so a builder-level {@code responseFormat} travels into
  * requests that must not carry it — that is exactly what produced the Gemini
  * {@code "Function calling with a response mime type: 'application/json' is
- * unsupported"} 400 (see {@code docs/changelog.md}, 2026-04-02). Keeping the
- * decision on the request keeps it correct for every mode the same cached model
- * is used in.
+ * unsupported"} 400 (see {@code docs/changelog/2026-04.md}, 2026-04-02).
+ * Keeping the decision on the request keeps it correct for every mode the same
+ * cached model is used in.
  * <p>
  * The built-in matrix is derived from what the langchain4j 1.18.0 provider
- * bindings actually do with a schemaless {@code ResponseFormat.JSON} taken from
- * {@code ChatRequest#responseFormat()}:
+ * bindings did when this table was last checked (1.18.0; {@code pom.xml} pins a
+ * newer release, so re-check on upgrade) with a schemaless
+ * {@code ResponseFormat.JSON} taken from {@code ChatRequest#responseFormat()}:
  * <table border="1">
  * <caption>Request-level schemaless JSON support</caption>
  * <tr>
@@ -111,6 +112,61 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  * built-in table does not know about yet, and it bypasses the with-tools guard
  * as well.
  *
+ * <h2>Native schema enforcement</h2>
+ * <table border="1">
+ * <caption>Request-level JSON-schema support (langchain4j 1.20.2 when last
+ * checked)</caption>
+ * <tr>
+ * <th>provider</th>
+ * <th>native schema</th>
+ * <th>evidence</th>
+ * </tr>
+ * <tr>
+ * <td>openai</td>
+ * <td>yes</td>
+ * <td>{@code toOpenAiResponseFormat} → {@code json_schema}. {@code strict} is a
+ * <em>model</em>-level builder flag in the binding, so it is not sent: EDDI
+ * never bakes a response format into a cached model. The schema is a strong
+ * hint, and EDDI's own validation is the gate</td>
+ * </tr>
+ * <tr>
+ * <td>azure-openai</td>
+ * <td>yes</td>
+ * <td>{@code toAzureOpenAiResponseFormat} maps the request's
+ * {@code jsonSchema}</td>
+ * </tr>
+ * <tr>
+ * <td>mistral</td>
+ * <td>yes</td>
+ * <td>{@code toMistralAiResponseFormat} → {@code fromSchema}</td>
+ * </tr>
+ * <tr>
+ * <td>gemini</td>
+ * <td>yes</td>
+ * <td>request {@code responseFormat} with a schema → {@code responseSchema}.
+ * Still subject to the no-JSON-with-tools rule above</td>
+ * </tr>
+ * <tr>
+ * <td>gemini-vertex</td>
+ * <td><strong>no</strong></td>
+ * <td>the Vertex binding takes its schema from the model builder only</td>
+ * </tr>
+ * <tr>
+ * <td>openai-compatible</td>
+ * <td><strong>no</strong></td>
+ * <td>native {@code json_schema} support varies by server and version; an
+ * endpoint gets schemaless JSON when it declares {@code jsonMode}. A
+ * {@code jsonSchema} flag belongs with the structured-output work, not
+ * here</td>
+ * </tr>
+ * <tr>
+ * <td>everything else</td>
+ * <td><strong>no</strong></td>
+ * <td>schemaless JSON where the matrix allows it; the prompt block carries the
+ * schema</td>
+ * </tr>
+ * </table>
+ *
  * @param requested
  *            whether the task asked for structured output at all (i.e.
  *            {@code convertToObject=true})
@@ -131,64 +187,6 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  *            its own parameters — the task's, or for a cascade step the
  *            <em>step's</em>; {@code null} for every other type, which is
  *            decided by the matrix above
- *
- *            <h2>Native schema enforcement</h2>
- *            <table border="1">
- *            <caption>Request-level JSON-schema support (langchain4j
- *            1.20.2)</caption>
- *            <tr>
- *            <th>provider</th>
- *            <th>native schema</th>
- *            <th>evidence</th>
- *            </tr>
- *            <tr>
- *            <td>openai</td>
- *            <td>yes</td>
- *            <td>{@code toOpenAiResponseFormat} → {@code json_schema}.
- *            {@code strict} is a <em>model</em>-level builder flag in the
- *            binding, so it is not sent: EDDI never bakes a response format
- *            into a cached model. The schema is a strong hint, and EDDI's own
- *            validation is the gate</td>
- *            </tr>
- *            <tr>
- *            <td>azure-openai</td>
- *            <td>yes</td>
- *            <td>{@code toAzureOpenAiResponseFormat} maps the request's
- *            {@code jsonSchema}</td>
- *            </tr>
- *            <tr>
- *            <td>mistral</td>
- *            <td>yes</td>
- *            <td>{@code toMistralAiResponseFormat} → {@code fromSchema}</td>
- *            </tr>
- *            <tr>
- *            <td>gemini</td>
- *            <td>yes</td>
- *            <td>request {@code responseFormat} with a schema →
- *            {@code responseSchema}. Still subject to the no-JSON-with-tools
- *            rule above</td>
- *            </tr>
- *            <tr>
- *            <td>gemini-vertex</td>
- *            <td><strong>no</strong></td>
- *            <td>the Vertex binding takes its schema from the model builder
- *            only</td>
- *            </tr>
- *            <tr>
- *            <td>openai-compatible</td>
- *            <td><strong>no</strong></td>
- *            <td>native {@code json_schema} support varies by server and
- *            version; an endpoint gets schemaless JSON when it declares
- *            {@code jsonMode}. A {@code jsonSchema} flag belongs with the
- *            structured-output work, not here</td>
- *            </tr>
- *            <tr>
- *            <td>everything else</td>
- *            <td><strong>no</strong></td>
- *            <td>schemaless JSON where the matrix allows it; the prompt block
- *            carries the schema</td>
- *            </tr>
- *            </table>
  *
  * @since 6.1.0
  */

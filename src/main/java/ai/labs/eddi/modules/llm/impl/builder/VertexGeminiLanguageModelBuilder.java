@@ -118,15 +118,15 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * {@code functionCall} echoed back on the follow-up request. The {@code gemini}
      * provider now does that; this one cannot, and not through any EDDI setting:
      * <ul>
-     * <li>{@code langchain4j-vertex-ai-gemini:1.20.0-beta30} does not model the
-     * field — no {@code thought}, {@code thinking} or {@code signature} anywhere in
-     * it, and {@code VertexAiGeminiChatModel} builds responses with
+     * <li>{@code langchain4j-vertex-ai-gemini:1.23.0-beta33} does not model the
+     * field — no {@code thought} or {@code thinking} anywhere in it, and
+     * {@code VertexAiGeminiChatModel} builds responses with
      * {@code AiMessage.from(...)}, which has no attributes channel.</li>
-     * <li>The transport cannot carry it: that module pins
-     * {@code com.google.cloud:google-cloud-vertexai:1.27.0}, and the generated
-     * {@code com.google.cloud.vertexai.api.Part} it uses — from the transitive
-     * {@code com.google.api.grpc:proto-google-cloud-vertexai-v1:1.27.0} — has no
-     * {@code thought_signature} field.</li>
+     * <li>Its {@code ContentsMapper} and {@code PartsMapper} never read or write it
+     * either, although the generated {@code com.google.cloud.vertexai.api.Part} of
+     * the {@code google-cloud-vertexai:1.48.0} transport that module pins now has a
+     * {@code thought_signature} field. Carrying it needs an upstream change in the
+     * module, not an EDDI setting.</li>
      * </ul>
      * So the build only warns, naming the alternative. A warning rather than a
      * failure: a Gemini 3.x agent without tools works here.
@@ -140,8 +140,8 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (isGemini3OrLater(modelId)) {
             LOGGER.warnf("gemini-vertex model '%s' is Gemini 3.x or later, which cannot use tools on this provider: "
                     + "Gemini 3.x requires the thoughtSignature it attaches to each functionCall echoed back on the "
-                    + "follow-up request, and neither langchain4j's vertex-ai-gemini module nor the Vertex AI Part "
-                    + "protobuf it depends on can carry that field. Tool calls will fail with "
+                    + "follow-up request, and langchain4j's vertex-ai-gemini module does not carry that field. "
+                    + "Tool calls will fail with "
                     + "'400 INVALID_ARGUMENT — Function call is missing a thought_signature'. Use the 'gemini' "
                     + "provider for Gemini 3.x with tools; 'gemini-vertex' supports Gemini 2.x. "
                     + "See https://ai.google.dev/gemini-api/docs/thought-signatures", sanitize(modelId));

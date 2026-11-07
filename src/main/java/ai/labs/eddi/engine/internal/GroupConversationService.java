@@ -105,9 +105,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Phase-based orchestrator for multi-agent group conversations. Supports 6
- * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE,
- * TASK_FORCE) plus fully custom phase definitions.
+ * Phase-based orchestrator for multi-agent group conversations. Supports 7
+ * preset discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI,
+ * DEBATE, TASK_FORCE, NEGOTIATION) plus fully custom phase definitions
+ * ({@code CUSTOM}).
  * <p>
  * Agents participate through their normal pipelines via
  * {@link IConversationService#say}. The orchestrator constructs phase-specific
@@ -2258,10 +2259,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2295,6 +2292,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
@@ -2677,9 +2678,8 @@ public class GroupConversationService implements IGroupConversationService, User
             throws IResourceStore.ResourceStoreException, GroupDiscussionException {
 
         // F6: a root discussion of a team with no budget left is refused before
-        // anything
-        // is created. A nested child is never gated: its parent already paid for the
-        // slot.
+        // anything is created. A nested child is never gated: its parent already paid
+        // for the slot.
         if (depth == 0 && teamBudgetService != null) {
             teamBudgetService.admit(groupId, TeamBudgetService.Surface.DISCUSSION);
         }
@@ -2924,7 +2924,9 @@ public class GroupConversationService implements IGroupConversationService, User
      * GDPR erasure: cancels, immediately, every discussion running on this node for
      * {@code userId}. Deleting a running discussion's document did not stop it —
      * its next phase wrote the document back — so the cascade signals first. A
-     * discussion on another node is not reachable from here; it is stopped by its
+     * discussion on another node is not signalled by this sweep (in cluster mode
+     * the erasing node asks that node over {@code IClusterRpc.GDPR_STOP}, which
+     * ends in {@link #stopInFlightWorkByHash}); failing that, it is stopped by its
      * next conditional write ({@link RunningDiscussionWrites}) finding the document
      * gone rather than recreating it.
      */

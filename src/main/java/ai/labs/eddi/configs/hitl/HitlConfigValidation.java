@@ -26,7 +26,9 @@ import org.jboss.logging.Logger;
  * save time with an actionable message instead of silently degrading to
  * wait-forever at runtime (project rule: actionable errors, not silent
  * failures). The policy/granularity fields are enum-typed and validated by
- * Jackson at deserialization; only the ISO-8601 duration needs checking here.
+ * Jackson at deserialization; this class checks everything Jackson cannot: the
+ * ISO-8601 approval durations, tool-approval patterns and rules, notify
+ * recipients, and the nested oversight, review and approval-context blocks.
  */
 public final class HitlConfigValidation {
 
@@ -305,8 +307,8 @@ public final class HitlConfigValidation {
     /**
      * WARN (never a 400): agent-level AUTO_APPROVE does not apply to tool approvals
      * unless the toolApprovals block sets its own timeoutPolicy — tool pauses
-     * otherwise WAIT_INDEFINITELY (see Task 10 effective-policy rule). v1 has no
-     * warnings channel on the store response, so this is a log only.
+     * otherwise WAIT_INDEFINITELY (an inherited AUTO_APPROVE is demoted). The store
+     * response has no warnings channel for this, so it is a log only.
      */
     private static void warnIfToolApprovalsInheritsAutoApprove(AgentConfiguration.HitlConfig hitlConfig) {
         ToolApprovalsConfig cfg = hitlConfig.getToolApprovals();

@@ -97,26 +97,31 @@ Brittle, hard to maintain, requires code changes for new routing rules!
 ```json
 // Orchestration Rule: Route based on category
 {
-  "behaviorRules": [
+  "behaviorGroups": [
     {
-      "name": "Route to Billing Agent",
-      "conditions": [
+      "name": "Routing",
+      "behaviorRules": [
         {
-          "type": "inputmatcher",
-          "configs": { "expressions": "category(billing)" }
-        }
-      ],
-      "actions": ["route_to_billing"]
-    },
-    {
-      "name": "Route to Technical Agent",
-      "conditions": [
+          "name": "Route to Billing Agent",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": { "expressions": "category(billing)" }
+            }
+          ],
+          "actions": ["route_to_billing"]
+        },
         {
-          "type": "inputmatcher",
-          "configs": { "expressions": "category(technical)" }
+          "name": "Route to Technical Agent",
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": { "expressions": "category(technical)" }
+            }
+          ],
+          "actions": ["route_to_technical"]
         }
-      ],
-      "actions": ["route_to_technical"]
+      ]
     }
   ]
 }
@@ -271,6 +276,8 @@ Location: eddi://ai.labs.dictionary/dictionarystore/dictionaries/DICT_ID?version
 - `expressions`: Classification/routing information (can have multiple, comma-separated)
 - `frequency`: Usage frequency (0 = common, higher = less common)
 - `phrases`: Multi-word expressions treated as single units
+- `regExs` (optional): a list of `{"regEx": "...", "expressions": "..."}` entries. A single input token that matches the regular expression yields its expressions; patterns are only tried for a token no word or phrase of the dictionary matched
+- An entry without `expressions` gets one generated from its word, phrase or pattern
 
 > **Upgrade note — `lang` now gates the dictionary.** In earlier releases `lang` was recorded but never evaluated: every dictionary was consulted for every turn. From v6.x on, a dictionary whose `lang` is set is only consulted when it matches the conversation's language — on the direct lookup **and** on the corrections path (Levenshtein, phonetic, merged terms), so a mismatched dictionary can no longer sneak back in through a typo correction.
 >
@@ -395,6 +402,8 @@ Location: eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | `maxCandidates` | `5`     | Upper bound on how many correction candidates one token may produce. Every candidate becomes another branch in the parser's match matrix, so raising this multiplies the search space. |
 
 Candidates are sorted by edit distance first, so the closest matches survive the cap. A missing, non-numeric or non-positive value falls back to the default.
+
+The Levenshtein and phonetic corrections also accept `lookupIfKnown` (default `false`): when `"true"`, a token is corrected even if a dictionary already knows it. Write it as a JSON **string** — the value is read as a string.
 
 > **Corrections respect the dictionary language too.** A dictionary whose `lang` does not match the conversation language is skipped by the corrections exactly as it is skipped by the direct lookup — otherwise a foreign-language word would come back as a "correction" at distance 0 for every unknown token.
 

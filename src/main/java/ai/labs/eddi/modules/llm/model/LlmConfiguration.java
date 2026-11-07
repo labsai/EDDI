@@ -56,7 +56,7 @@ import java.util.Map;
  * "systemMessage": "You are helpful"
  * },
  * "enableBuiltInTools": true,
- * "tools": ["eddi://ai.labs.apicalls/weather?version=1"],
+ * "builtInToolsWhitelist": ["calculator", "websearch"],
  * "maxBudgetPerConversation": 1.0
  * }
  * ]
@@ -278,7 +278,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Zero-infrastructure RAG: name of an httpCall in the workflow to execute
          * before the LLM call. The httpCall's response is injected as context into the
-         * system message. This is Phase 8c-0 (quick-win, no vector store needed).
+         * system message. Needs no vector store.
          */
         private String httpCallRag;
 
@@ -427,9 +427,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Limits for the agent-operations tools ({@code read_team_scorecard},
-         * {@code propose_team_budget_change}, {@code schedule_followup}). The tools
-         * themselves are off unless named in {@code builtInToolsWhitelist}; this only
-         * tunes their caps. See {@link AgentOpsConfig}.
+         * {@code propose_team_budget_raise}, {@code propose_team_budget_transfer},
+         * {@code schedule_followup}). The tools themselves are off unless their keys
+         * ({@code team_scorecard}, {@code propose_team_budget},
+         * {@code schedule_followup}) are named in {@code builtInToolsWhitelist}; this
+         * only tunes their caps. See {@link AgentOpsConfig}.
          *
          * @since 6.7.0
          */
@@ -1579,16 +1581,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <p>
      * Supported actions per policy:
      * <ul>
-     * <li>{@code "ignore"} — do nothing (default for most signals)</li>
+     * <li>{@code "ignore"} — do nothing (the default of {@link #onRefusal},
+     * {@link #onInvalidJson} and {@link #onSchemaMismatch})</li>
      * <li>{@code "warn"} — log a warning, store metadata, continue</li>
      * <li>{@code "fallback"} — substitute a static fallback message</li>
      * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
      * error digest)</li>
      * <li>{@code "retry"} — only for {@link #onEmpty}, {@link #onTruncation},
-     * {@link #onContentFilter}, {@link #onInvalidJson} and
-     * {@link #onContextTooLong}: re-ask the same model (see {@link #maxRetries}),
-     * then, once the re-asks are spent, escalate to the next cascade step and
-     * finally apply {@link #fallbackAction}</li>
+     * {@link #onContentFilter}, {@link #onInvalidJson}, {@link #onSchemaMismatch}
+     * and {@link #onContextTooLong}: re-ask the same model (see
+     * {@link #maxRetries}), then, once the re-asks are spent, escalate to the next
+     * cascade step and finally apply {@link #fallbackAction}</li>
      * </ul>
      *
      * @since 6.0.0
@@ -2438,7 +2441,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Cascade strategy: "cascade" (sequential escalation, default) or "parallel"
-         * (concurrent, future)
+         * (reserved: currently runs sequentially, with a deploy-time warning)
          */
         private String strategy = "cascade";
 
@@ -2821,7 +2824,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Phrases indicating refusal (scored {@code refusalScore}). */
         private List<String> refusalPhrases;
 
-        /** Responses shorter than this many characters score {@code shortScore}. */
+        /**
+         * Responses shorter than this many characters score {@code shortScore}. Default
+         * 20.
+         */
         private Integer shortLengthThreshold;
 
         /** Score assigned to very short responses. Default 0.3. */

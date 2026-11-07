@@ -9,13 +9,18 @@ import java.util.Map;
 /**
  * Callback interface for streaming conversation events via SSE.
  * <p>
- * Two layers of events are supported:
+ * The events supported:
  * <ul>
  * <li><strong>Workflow step events</strong> —
  * {@link #onTaskStart}/{@link #onTaskComplete} emitted by
  * {@code LifecycleManager} around each task execution</li>
  * <li><strong>LLM token events</strong> — {@link #onToken} emitted by
  * {@code LlmTask} during streaming chat completion</li>
+ * <li><strong>Optional events</strong> (no-op by default) — tool calls and
+ * results, cascade steps and escalations, LLM retries, guardrail triggers and
+ * task failures</li>
+ * <li><strong>Terminal events</strong> — {@link #onComplete} or
+ * {@link #onError}</li>
  * </ul>
  * <p>
  * When no streaming is requested (standard {@code say} endpoint), no sink is

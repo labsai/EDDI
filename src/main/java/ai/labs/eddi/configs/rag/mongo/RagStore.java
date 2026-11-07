@@ -18,7 +18,9 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * MongoDB-backed store for RAG (Knowledge Base) configurations.
+ * Store for RAG (Knowledge Base) configurations. Database-agnostic: it runs on
+ * MongoDB or PostgreSQL through {@link IResourceStorageFactory}; the
+ * {@code mongo} package name is historical.
  */
 @ApplicationScoped
 public class RagStore extends AbstractResourceStore<RagConfiguration> implements IRagStore {

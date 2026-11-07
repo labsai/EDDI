@@ -12,7 +12,7 @@ import java.util.Objects;
 
 /**
  * Tracks tool calls made during agent execution for debugging, logging, and
- * analytics. Phase 4: Enhanced with metrics, caching, and cost tracking.
+ * analytics, with per-tool metrics, cache hit counts and cost.
  */
 public class ToolExecutionTrace {
 
@@ -32,7 +32,7 @@ public class ToolExecutionTrace {
     private boolean hasErrors;
 
     /**
-     * Total cost of all tool calls (in credits/dollars)
+     * Total cost of all tool calls, in USD
      */
     private double totalCost;
 
@@ -227,6 +227,7 @@ public class ToolExecutionTrace {
         private double totalCost;
         private int cacheHits;
 
+        /** Successful calls as a percentage (0-100) of all calls; 0 with no calls. */
         public double getSuccessRate() {
             return totalCalls > 0 ? (double) successfulCalls / totalCalls * 100 : 0;
         }
@@ -235,6 +236,7 @@ public class ToolExecutionTrace {
             return totalCalls > 0 ? (double) totalExecutionTimeMs / totalCalls : 0;
         }
 
+        /** Cache hits as a percentage (0-100) of all calls; 0 with no calls. */
         public double getCacheHitRate() {
             return totalCalls > 0 ? (double) cacheHits / totalCalls * 100 : 0;
         }

@@ -162,8 +162,9 @@ final class ScrubbedSecrets {
 
     /**
      * Whether this source object sends its requests to a different place than its
-     * target counterpart: a field naming a destination ({@code targetServerUrl},
-     * {@code baseUrl}, {@code url}, {@code endpoint}, {@code host}, or a
+     * target counterpart: a field naming a destination (any key ending in
+     * {@code url} such as {@code targetServerUrl} or {@code baseUrl}, or
+     * {@code uri}, {@code endpoint}, {@code host}, {@code hostname}, or a
      * {@code path} that is an absolute URL on either side) whose origin differs.
      * <p>
      * A literal credential the target holds was authorised for the target's

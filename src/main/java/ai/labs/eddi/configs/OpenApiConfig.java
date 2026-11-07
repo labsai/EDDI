@@ -57,7 +57,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         // ── Integrations ────────────────────────────────────────────────
         @Tag(name = "Integrations / A2A Protocol", description = "Agent-to-Agent protocol endpoints"),
         @Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery"),
-        @Tag(name = "Integrations / Channels", description = "Channel integration configuration (Slack, Teams, etc.)"),
+        @Tag(name = "Integrations / Channels", description = "Channel integration configuration (Slack, webhook, email)"),
         @Tag(name = "Integrations / Slack Webhook", description = "Slack Events API webhook receiver"),
         // ── Knowledge ───────────────────────────────────────────────────
         @Tag(name = "Knowledge / RAG Ingestion", description = "RAG document ingestion and indexing"),

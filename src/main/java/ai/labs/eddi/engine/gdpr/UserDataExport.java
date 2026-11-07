@@ -33,7 +33,8 @@ import java.util.Map;
  * @param auditEntries
  *            processing records from the audit ledger (capped at 10,000)
  * @param attachments
- *            attachment metadata for the exported conversations
+ *            attachment metadata for the exported conversations and group
+ *            discussions (and the member conversations those created)
  * @param totalConversations
  *            how many conversations the user has — <em>not</em> necessarily
  *            {@code conversations.size()}, see {@code conversationsTruncated}

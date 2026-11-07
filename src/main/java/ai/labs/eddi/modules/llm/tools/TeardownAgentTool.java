@@ -25,8 +25,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for tearing down dynamically created agents. Constructed
- * per-invocation by {@code AgentOrchestrator} with the factory, agent store,
- * and the lists of created/retained agent IDs from the group conversation.
+ * per-invocation by {@code DynamicAgentToolsProvider} with the factory, agent
+ * store, and the lists of created/retained agent IDs from the group
+ * conversation.
  *
  * <p>
  * Only agents that were created during the current discussion can be torn down
@@ -47,7 +48,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class TeardownAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(TeardownAgentTool.class);

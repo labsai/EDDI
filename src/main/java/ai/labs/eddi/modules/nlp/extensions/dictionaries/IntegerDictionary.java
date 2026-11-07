@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
+ * Recognises an all-digit token and emits an {@code integer} expression.
+ *
  * @author ginccc
  */
 public class IntegerDictionary implements IDictionary {

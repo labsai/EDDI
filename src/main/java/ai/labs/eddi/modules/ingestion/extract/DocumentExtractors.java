@@ -31,9 +31,10 @@ import java.util.Set;
 public class DocumentExtractors {
 
     /**
-     * File name endings the upload endpoint accepts, mapped to what that ending
-     * claims the file is. The claim is only used for the text formats, which have
-     * no signature to read — everything else is identified from its content.
+     * File name endings with a known type, mapped to what that ending claims the
+     * file is. The claim is only used for the text formats, which have no signature
+     * to read — everything else is identified from its content. An ending not
+     * listed is not refused: readable text under it is taken as {@code text/plain}.
      */
     private static final Map<String, String> MIME_BY_EXTENSION = mimeByExtension();
 
@@ -66,7 +67,7 @@ public class DocumentExtractors {
         this.extractors = List.copyOf(extractors);
     }
 
-    /** The extensions the Manager offers and the endpoint accepts, with the dot. */
+    /** The file name endings with a known type, with the dot. */
     public static Set<String> supportedExtensions() {
         return MIME_BY_EXTENSION.keySet();
     }
@@ -91,10 +92,9 @@ public class DocumentExtractors {
             throw new UnreadableDocumentException("This file is empty.");
         }
         // Asked first, and only for a name that claims a text format. Magic-byte
-        // detection is a prefix match on short signatures: a Markdown file that
-        // happens to begin "BM" is an image by that rule, and one containing the
-        // characters "%PDF-" anywhere in its first kilobyte is a PDF. Content that
-        // is plainly text, under a name that says which text format it is, is that
+        // detection works from short signatures: a Markdown file that mentions
+        // "%PDF-" in its first kilobyte is a PDF by that rule. Content that is
+        // plainly text, under a name that says which text format it is, is that
         // format — and a real binary carries NUL bytes, so it never qualifies.
         String claimed = MIME_BY_EXTENSION.get(extensionOf(fileName));
         if (claimed != null && TEXT_MIMES.contains(claimed) && !looksBinary(content)) {

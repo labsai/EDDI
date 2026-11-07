@@ -24,8 +24,10 @@ for anything this page does not cover.
 - **Base URL.** The examples use `EDDI=http://localhost:7070`.
 - **Authentication.** With OIDC enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`),
   send `Authorization: Bearer <access token>`. The conversation endpoints accept
-  the roles `eddi-admin`, `eddi-editor` and `eddi-user`; the approval endpoints
-  also accept `eddi-approver`. There is no role hierarchy — a role is accepted
+  the roles `eddi-admin`, `eddi-editor` and `eddi-user`; `cancel`, `resume`,
+  `resume/stream`, `approval-status` and `pending-approvals` also accept
+  `eddi-approver`, and the conversation store's reads also accept `eddi-approver`
+  and `eddi-viewer`. There is no role hierarchy — a role is accepted
   only where it is listed. A non-admin can only touch conversations they own (the
   `userId` the conversation was started for). See [Security](security.md).
 - **Two ids.** A conversation is *started* on the agent
@@ -60,7 +62,7 @@ for anything this page does not cover.
 | `GET /conversationstore/conversations/simple/{conversationId}` | Read a conversation (same shape as `GET /agents/{id}`) | `200` |
 | `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory. The `audit:*` step data (the compiled system prompt above all; `audit:token_usage` stays) is withheld unless the caller has `VIEW` on the agent — the same rule `approval-status?detail=full` and MCP `read_audit_trail` apply | `200` |
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
-| `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
+| `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor; optional `agentVersion`) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |
 | `POST /conversationstore/conversations/end-inactive` | End conversations idle for `inactiveForDays` (admin; optional `agentId`, `dryRun`) | `200` |
 
@@ -443,16 +445,20 @@ and `toolDecisions` for per-tool-call gates. `?detail=full` on
 ## Resetting a stuck conversation
 
 `PATCH /agents/{conversationId}/state?state=READY` (admin only) moves a
-conversation in `ERROR` or `EXECUTION_INTERRUPTED` back to `READY`. `READY` is
-the only accepted target:
+conversation in `ERROR` or `EXECUTION_INTERRUPTED` back to `READY`. The
+endpoint refuses only `IN_PROGRESS` and `ENDED`, so it also resets an
+`AWAITING_HUMAN` conversation — prefer `cancel` for a pause. `READY` is
+the only accepted target, and the default when `state` is omitted:
 
 | Situation | Response |
 | --- | --- |
-| Conversation in `ERROR` or `EXECUTION_INTERRUPTED` | `200 {"message":"State reset from ERROR to READY"}` |
+| Conversation in `ERROR` or `EXECUTION_INTERRUPTED` (or `AWAITING_HUMAN`) | `200 {"message":"State reset from ERROR to READY"}` |
 | Conversation already `READY` | `200 {"message":"Conversation already in READY state"}` |
 | Any other `state` value | `400 {"error":"Only READY is supported as target state"}` |
 | Conversation `IN_PROGRESS` | `409 {"error":"Cannot reset while conversation is IN_PROGRESS"}` |
 | Conversation `ENDED` | `409 {"error":"Cannot reset an ENDED conversation"}` |
+| The state changed between the read and the reset | `409 {"error":"Conversation state changed while resetting it — read it again and retry"}` |
+| Unknown conversation id | `404` |
 
 ## The conversation store
 
@@ -483,7 +489,7 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
 
 | Parameter | Meaning |
 | --- | --- |
-| `index`, `limit` | Page number and page size (default `0`, `20`). Page until a page comes back empty. `index × limit` above 10,000 is refused with `400` — narrow the listing with a filter instead |
+| `index`, `limit` | Page number and page size (default `0`, `20`). Page until a page comes back empty. A negative `index`, a `limit` above `eddi.rest.listing.max-limit` (default 1,000) or `index × limit` above 10,000 is refused with `400` — narrow the listing with a filter instead |
 | `agentId`, `agentVersion` | Only this agent (version) |
 | `conversationState` | Only conversations in this state |
 | `conversationId` | One conversation |
@@ -498,8 +504,8 @@ Results are newest first. A non-admin sees only their own conversations.
 | `GET …/{conversationId}` | The stored conversation memory document, every step and key |
 | `DELETE …/{conversationId}` | `204`. `?deletePermanently=true` removes the document instead of marking it deleted |
 | `DELETE …/?deleteOlderThanDays=N` | Admin only: permanently delete every **ended** conversation older than `N` days (`N ≥ 1`) |
-| `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent, `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
-| `POST …/end` | Admin or editor: end the listed conversations. The body is a JSON array of objects of which only `conversationId` is read, so the `active` list can be sent back as it is; an array of plain id strings is refused with `400`. `?endReason=agent-version-retired` is the one accepted reason. The response lists the `ended`, `skipped` and `failed` ids |
+| `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent (`?agentVersion=` restricts it to one version), `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
+| `POST …/end` | Admin or editor: end the listed conversations. The body is a JSON array of objects of which only `conversationId` is read, so the `active` list can be sent back as it is; an array of plain id strings is refused with `400`. `?endReason=agent-version-retired` is the one accepted reason. The response lists the `ended`, `skipped` and `failed` ids, with status `500` if any failed |
 
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.

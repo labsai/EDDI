@@ -42,7 +42,10 @@ import java.util.function.UnaryOperator;
  * </ol>
  * <p>
  * The summary is incremental and self-correcting: if a summarization call
- * fails, the next turn will catch up by summarizing a larger batch.
+ * fails, the boundary stays put and the next turn retries from it. Each update
+ * covers at most {@code maxTurnsPerUpdate} new turns and keeps the whole
+ * request within {@code maxCharsPerUpdate} characters, so a backlog is worked
+ * off over several turns.
  *
  * @author ginccc
  * @since 6.0.0
@@ -292,7 +295,7 @@ public class ConversationSummarizer {
         props.put(PROP_RUNNING_SUMMARY, new Property(PROP_RUNNING_SUMMARY, summary, Scope.conversation));
         props.put(PROP_SUMMARY_THROUGH_STEP, new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
 
-        LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers steps 1-%d, summary length=%d chars",
+        LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers the first %d steps, summary length=%d chars",
                 sanitize(memory.getConversationId()), summarizeThroughStep, summary.length());
         return usage;
     }

@@ -15,6 +15,11 @@ import java.time.Duration;
  * describe far more content than they occupy. A 5 MB spreadsheet can declare a
  * million rows, and a 1 MB archive can decompress to gigabytes.
  *
+ * <p>
+ * {@link #defaults()} is 200,000 characters, 500 parts, 5,000 rows, 64 columns,
+ * 64 MiB uncompressed and 60 seconds. A non-positive value (or a null or
+ * non-positive duration) given to the constructor falls back to that default.
+ *
  * @param maxCharacters
  *            characters of Markdown to produce before stopping
  * @param maxParts

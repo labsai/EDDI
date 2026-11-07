@@ -473,7 +473,7 @@ public interface IIngestionStateStore {
              * has been released. Kept as a row, never shown: the row carries the claim's
              * generation, which the next claim must count past, or the document rows
              * stamped by this claim would outrank the run that follows it and fence it out
-             * of every write. {@link #listRuns} skips it.
+             * of every write. {@link IIngestionStateStore#listRuns} skips it.
              */
             MAINTENANCE;
 

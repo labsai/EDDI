@@ -112,7 +112,8 @@ public interface IRestWorkspaces {
                        + "not accepted here.")
     @APIResponse(responseCode = "200", description = "Stored; the effective settings are returned.")
     @APIResponse(responseCode = "400", description = "A value is malformed; the message names the field.")
-    @APIResponse(responseCode = "409", description = "A field is pinned by a property and the request would change it.")
+    @APIResponse(responseCode = "409",
+                 description = "A field is pinned by a property and the request would change it, or the settings are fixed on this deployment and cannot be changed at runtime.")
     WorkspaceSettingsView updateSettings(WorkspaceSettingsView.Update update);
 
     /**

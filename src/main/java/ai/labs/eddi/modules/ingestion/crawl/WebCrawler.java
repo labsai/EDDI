@@ -424,8 +424,8 @@ public class WebCrawler {
                 continue;
             }
             // The bound applies to the URL that will be fetched: canonicalizing drops
-            // tracking
-            // parameters, so a short canonical id must not let an oversized href through.
+            // tracking parameters, so a short canonical id must not let an oversized
+            // href through.
             if (CrawlUrls.stripFragment(href).length() > MAX_LINK_LENGTH) {
                 continue;
             }
@@ -559,8 +559,8 @@ public class WebCrawler {
                     counters.discoveryIncomplete = true;
                     break;
                 }
-                // Bounded as fetched, before canonicalization drops tracking parameters (see
-                // enqueueLinks)
+                // Bounded as fetched, before canonicalization drops tracking parameters
+                // (see enqueueLinks).
                 if (url == null || CrawlUrls.stripFragment(url).length() > MAX_LINK_LENGTH) {
                     continue;
                 }
@@ -741,8 +741,7 @@ public class WebCrawler {
 
     /**
      * What one sitemap lists: pages, or — for a sitemap index — further sitemaps.
-     */
-    /**
+     *
      * @param complete
      *            false when this sitemap may list more than was read — it was cut
      *            at a cap, or could not be read for a reason that says nothing
@@ -1114,7 +1113,10 @@ public class WebCrawler {
 
     /** Why a crawl stopped. */
     public enum StopReason {
-        /** The queue emptied — the whole scope was covered. */
+        /**
+         * The queue emptied — the whole scope was covered. Also the reason reported for
+         * an unusable seed URL (see {@link CrawlSummary#coveredWholeSource()}).
+         */
         COMPLETED, PAGE_LIMIT, FETCH_LIMIT, BYTE_LIMIT, TIME_LIMIT, CANCELLED
     }
 

@@ -744,7 +744,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         }
         // Checking getPhases() alone made this inert for exactly the configs that
         // need it: a preset-style group stores NO phases, the engine expands the
-        // preset at discussion time, and every one of the six presets ends in a
+        // preset at discussion time, and every one of the seven presets ends in a
         // participants="MODERATOR" phase. Mirror
         // GroupConversationService.resolvePhases.
         return resolvedPhases(groupConfiguration).stream()

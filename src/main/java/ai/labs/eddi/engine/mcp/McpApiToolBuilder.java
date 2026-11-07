@@ -38,7 +38,9 @@ import java.util.stream.Collectors;
  * Orders").
  *
  * <p>
- * This is a stateless utility used by {@link McpSetupTools#createApIAgent}.
+ * This is a stateless utility used by {@link McpSetupTools#createApIAgent}
+ * (through {@code AgentSetupService}), by {@code ApiAgentSyncService} and by
+ * the endpoint discovery of {@code RestApiCallsStore}.
  * </p>
  *
  * @author ginccc
@@ -643,7 +645,7 @@ public final class McpApiToolBuilder {
             var body = bodyMapping.body();
             // The body template's variables must be declared as tool parameters,
             // or the model has no documented way to fill them: the tool schema is
-            // built from getParameters() alone (AgentOrchestrator), and with
+            // built from getParameters() alone (HttpCallToolsProvider), and with
             // strict-rendering off an undeclared variable renders as empty. The
             // request would go out structurally valid and semantically empty.
             //
@@ -1071,8 +1073,8 @@ public final class McpApiToolBuilder {
 
     /**
      * The top-level template namespaces a generated call is rendered against. Kept
-     * in step with {@code HttpCallToolsProvider.RESERVED_TEMPLATE_KEYS} (package
-     * private there), which drops a tool argument colliding with one of them.
+     * in step with {@code HttpCallToolsProvider.RESERVED_TEMPLATE_KEYS} (private
+     * there), which drops a tool argument colliding with one of them.
      */
     static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of("context", "properties", "memory", "snippets", "vars", "userInfo",
             "conversationInfo", "conversationLog");
@@ -1103,13 +1105,6 @@ public final class McpApiToolBuilder {
         return method.toLowerCase() + "_" + cleaned.toLowerCase();
     }
 
-    /**
-     * Build a JSON body template from a schema. Produces a Qute-templated JSON body
-     * where each property is a template variable.
-     * <p>
-     * Note: Only handles flat schemas (direct properties). Nested objects and
-     * arrays fall back to a single {@code {requestBody}} template variable.
-     */
     /**
      * A request-body template together with the tool parameters the model must
      * supply to fill it.
@@ -1169,6 +1164,12 @@ public final class McpApiToolBuilder {
         return new BodyTemplate(template.template(), described);
     }
 
+    /**
+     * Build the JSON body template for a schema: always the single
+     * {@value #WHOLE_BODY_VARIABLE} variable carrying the whole body, described by
+     * {@link #describeBodySchema}, never one variable per property (see the comment
+     * in the body for why).
+     */
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {
         if (schema == null) {
             // A declared body with no schema still needs a variable, or the model has
@@ -1180,7 +1181,7 @@ public final class McpApiToolBuilder {
         // One variable carrying the whole body, always — never a per-property
         // template. Decomposing looks more helpful and is worse in three ways:
         //
-        // 1. Every variable becomes a REQUIRED tool parameter (AgentOrchestrator
+        // 1. Every variable becomes a REQUIRED tool parameter (HttpCallToolsProvider
         // builds the schema from ApiCall.parameters and marks all of them
         // required, and a Map<String,String> has nowhere to record optionality),
         // so a PATCH of one field forces the model to restate every other —
@@ -1199,13 +1200,6 @@ public final class McpApiToolBuilder {
         return new BodyTemplate("{" + WHOLE_BODY_VARIABLE + "}", Map.of(WHOLE_BODY_VARIABLE, describeBodySchema(schema)));
     }
 
-    /**
-     * A one-line description of the body shape, for the tool parameter.
-     * <p>
-     * This is the model's only clue about what to write, so it names the properties
-     * and marks which are required. Types are included because the model must
-     * produce real JSON — an integer field unquoted, a string field quoted.
-     */
     /**
      * Appends the schema's allowed values and default to a parameter description,
      * when it declares them. See the call site for why this is the model's only
@@ -1229,6 +1223,13 @@ public final class McpApiToolBuilder {
         return sb.toString();
     }
 
+    /**
+     * A one-line description of the body shape, for the tool parameter.
+     * <p>
+     * This is the model's only clue about what to write, so it names the properties
+     * and marks which are required. Types are included because the model must
+     * produce real JSON — an integer field unquoted, a string field quoted.
+     */
     private static String describeBodySchema(Schema<?> schema) {
         // Name the container the schema actually declares. Saying "a single JSON
         // object" for a top-level array makes the model wrap the payload in braces,

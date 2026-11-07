@@ -77,8 +77,10 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * single conversation.
  * <p>
  * An explicit key is never second-guessed: a new chat produces a new chat key,
- * which is a new intent, which is a new conversation. Nothing is ever ended to
- * make room — a superseded conversation is abandoned, not destroyed.
+ * which is a new intent, which is a new conversation. A new chat never ends the
+ * conversation it supersedes — that one is abandoned, not destroyed. Only the
+ * optional step rollover ({@code eddi.openai-compat.max-conversation-steps})
+ * ends an idle conversation, once it is full.
  *
  * @since 6.1.0
  */
@@ -839,7 +841,7 @@ public class OpenAiConversationBridge {
         long start = System.nanoTime();
         AtomicBoolean anyToken = new AtomicBoolean();
         AtomicReference<String> outcomeTag = new AtomicReference<>("ok");
-        // sayStreaming hands the turn to the ConversationCoordinator and returns
+        // sayStreaming hands the turn to the IConversationCoordinator and returns
         // immediately; every handler callback fires later, on another thread. So
         // the terminator cannot be written when sayStreaming returns — the caller
         // would close the response while tokens were still arriving, and the

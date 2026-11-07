@@ -15,7 +15,7 @@ Properties are the glue that connects the pipeline's processing steps with persi
 A property has:
 
 - **Name** (key): The identifier used to access the property (e.g., `preferred_language`, `company_name`)
-- **Value**: Can be a `String`, `Integer`, `Float`, `Map`, `List`, or `Boolean`
+- **Value**: Can be a `String`, `Integer`, `Long`, `Float`, `Double`, `Map`, `List`, or `Boolean`
 - **Scope**: How long the property lives
 - **Visibility** (v6): Who can see the property
 
@@ -233,10 +233,14 @@ LifecycleManager runs pipeline
 
 ### 3. Conversation Teardown
 
+This runs at the end of **every turn** that completes, not only when the conversation ends.
+
 ```
 Conversation.postConversationLifecycleTasks()
   └─→ storePropertiesPermanently()
-      └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+      └─→ longTerm properties that changed this turn (or whose write an earlier,
+          paused or failed turn still owes) saved via IUserMemoryStore.upsert();
+          unchanged ones are not rewritten
       └─→ Visibility applied at persistence boundary:
           - Explicit visibility on property → used as-is
           - No visibility set → defaults to agent's defaultVisibility (or `global`)

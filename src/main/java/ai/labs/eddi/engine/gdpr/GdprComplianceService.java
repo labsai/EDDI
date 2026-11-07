@@ -402,32 +402,42 @@ public class GdprComplianceService {
      * <p>
      * Order of operations:
      * <ol>
-     * <li>Signal the user's in-flight turns and group discussions on this node to
-     * stop (see {@link UserErasureParticipant})</li>
+     * <li>Make this node's audit ledger write the user's pseudonym from here on,
+     * then signal the user's in-flight turns and group discussions to stop (see
+     * {@link UserErasureParticipant}) — on every other node too in cluster
+     * mode</li>
      * <li>Delete all persistent user memories</li>
-     * <li>Delete all binary attachments for user conversations</li>
+     * <li>Delete all binary attachments for user conversations and group
+     * discussions, and purge the conversations' dead letters</li>
      * <li>Delete all HITL tool execution journal entries for user
      * conversations</li>
      * <li>Delete all conversation descriptors</li>
      * <li>Delete all conversation memory checkpoints</li>
-     * <li>Delete all conversation memory snapshots</li>
+     * <li>Delete the vault slots holding the user's {@code scope: "secret"}
+     * property values</li>
+     * <li>Delete all conversation memory snapshots (kept, and the step reported as
+     * failed, while any earlier per-conversation step is incomplete)</li>
      * <li>Delete all managed conversation mappings (and invalidate their
      * cache)</li>
      * <li>Delete all group conversation transcripts</li>
      * <li>Delete all shared artifacts owned by the user</li>
      * <li>Delete all schedules owned by the user</li>
-     * <li>Delete all OAuth connection grants of the user</li>
+     * <li>Invalidate pending OAuth authorization flows, then delete all OAuth
+     * connection grants of the user</li>
      * <li>Re-sweep user memories written while the cascade ran</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Redact the content of the user's audit ledger entries and pseudonymize
      * their user id (content is kept under
-     * {@code eddi.audit.erasure-mode=pseudonymize})</li>
+     * {@code eddi.audit.erasure-mode=pseudonymize}), then pseudonymize any rows
+     * left under the raw id</li>
+     * <li>Run every registered {@link IGdprParticipant}, in {@code order()}</li>
      * </ol>
      * <p>
-     * Conversation IDs are resolved once before step 2 and reused across steps 2–4.
-     * The journal, descriptor and checkpoint deletions run <em>before</em> the
-     * conversation snapshots are deleted because they reference conversation IDs
-     * that the bulk delete removes.
+     * Conversation IDs are resolved once, before the first deletion, and reused by
+     * every per-conversation step. The attachment, journal, descriptor and
+     * checkpoint deletions run <em>before</em> the conversation snapshots are
+     * deleted because they are found through the conversation IDs that the bulk
+     * delete removes.
      *
      * @param userId
      *            the user to erase
@@ -446,7 +456,7 @@ public class GdprComplianceService {
         // 0a. From here on this node's audit ledger writes the user's pseudonym, not
         // their id. Work cancelled below can still flush audit entries while it
         // unwinds, and entries may already be queued; both would otherwise land after
-        // step 14 has pseudonymised the stored rows, carrying the raw id.
+        // step 7a/7b has pseudonymised the stored rows, carrying the raw id.
         try {
             auditLedgerService.markUserErased(userId);
         } catch (Exception e) {
@@ -541,8 +551,8 @@ public class GdprComplianceService {
         // 2. Delete attachments for all user conversations
         long attachmentsDeleted = 0;
 
-        // Resolve conversation IDs once — needed by steps 2, 3, 4a, and 4b.
-        // Must happen BEFORE the bulk snapshot delete (step 4b) which removes
+        // Resolve conversation IDs once — needed by steps 2 to 4b.
+        // Must happen BEFORE the bulk snapshot delete (step 4c) which removes
         // the documents that getConversationIdsByUserId queries.
         List<String> conversationIds = List.of();
         boolean conversationLookupFailed = false;
@@ -642,7 +652,7 @@ public class GdprComplianceService {
         }
 
         // 3. Delete HITL tool execution journal entries for user conversations.
-        // Must run BEFORE the conversations themselves are deleted (step 4b), since
+        // Must run BEFORE the conversations themselves are deleted (step 4c), since
         // the journal entries reference conversation ids.
         long journalEntriesDeleted = 0;
         for (String convId : conversationIds) {
@@ -1131,8 +1141,9 @@ public class GdprComplianceService {
         // 2. Conversation snapshots (lightweight export)
         var conversations = new ArrayList<UserDataExport.ConversationExportEntry>();
         // Each snapshot is a full document load and the whole bundle is assembled in
-        // memory on the request thread, so the same cap that already bounds the audit
-        // entries bounds these. A user with thousands of conversations otherwise held
+        // memory on the request thread, so a cap, like the one that already bounds the
+        // audit
+        // entries, bounds these. A user with thousands of conversations otherwise held
         // a JAX-RS worker for minutes and produced a response measured in hundreds of
         // megabytes.
         // Residue, deliberately not fixed here: *which* conversations survive the cap
@@ -1644,7 +1655,8 @@ public class GdprComplianceService {
             // restriction from restrictProcessing or from a concurrent reader).
             // Erring toward "restricted" for at most one TTL is the safe direction
             // for an Art. 18 legal control — an unrestrictProcessing that loses this
-            // race delays a release by 30s, while the other direction processes data
+            // race delays a release by up to one TTL, while the other direction processes
+            // data
             // that must not be processed.
             if (restricted) {
                 publishRestriction(userId, true);

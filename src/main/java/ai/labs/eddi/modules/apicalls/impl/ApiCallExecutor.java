@@ -496,9 +496,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
                     // so that ordering survives serialization.
                     //
-                    // The tool result is truncated from the FRONT
-                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
-                    // so whatever serializes first is what survives. With a plain
+                    // The tool result is kept from the FRONT (ToolResponseTruncator's
+                    // `truncate` strategy cuts `result.substring(0, maxChars)`; the
+                    // default `headTail` keeps the start and the end and drops the
+                    // middle), so whatever serializes first is what survives. With a plain
                     // HashMap "headers" hashed ahead of "body" on both the success and
                     // the error path regardless of insertion order — so a per-tool
                     // limit, or the always-on tool-context budget, would spend the
@@ -1247,13 +1248,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Cut an over-long response body down to the configured cap before it is
-     * written to conversation memory. The cap is a byte budget applied to the
-     * character count, which is a conservative approximation for multi-byte
-     * content.
-     */
-    // Package-private for unit testing.
-    /**
      * An application/json success body, redacted and capped.
      * <p>
      * The whole body is parsed and scrubbed as a tree FIRST — from the unredacted
@@ -1291,6 +1285,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * Cut an over-long response body down to the configured cap before it is
+     * written to conversation memory. The cap is a byte budget applied to the
+     * character count, which is a conservative approximation for multi-byte
+     * content.
+     */
+    // Package-private for unit testing.
     static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
         if (responseBody == null || responseBody.length() <= maxResponseSize) {
             return responseBody;
@@ -1353,6 +1354,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
+     * The plaintexts substituted into one request (the set every redaction reads)
+     * plus the references they came from, which the destination check needs after
+     * the target URL is known.
+     */
+    static final class ResolvedSecrets extends HashSet<String> {
+        private final Set<String> vaultReferences = new LinkedHashSet<>();
+
+        Set<String> vaultReferences() {
+            return vaultReferences;
+        }
+    }
+
+    /**
      * A request ready to send, together with the names of the headers a connection
      * filled.
      * <p>
@@ -1370,21 +1384,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * @param connectionOwnedHeaders
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
+     * @param resolvedSecrets
+     *            the secret plaintexts substituted into this request, which every
+     *            redaction of its debug record, errors and response masks
      */
-    /**
-     * The plaintexts substituted into one request (the set every redaction reads)
-     * plus the references they came from, which the destination check needs after
-     * the target URL is known.
-     */
-    static final class ResolvedSecrets extends HashSet<String> {
-        private final Set<String> vaultReferences = new LinkedHashSet<>();
-
-        Set<String> vaultReferences() {
-            return vaultReferences;
-        }
+    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
-    record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
     }
 
     /**
@@ -1397,10 +1405,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
-    private static String stringOf(Object value) {
-        return value == null ? null : value.toString();
-    }
-
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
@@ -2013,6 +2017,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "plain header, or give it a name the connection does not claim.");
     }
 
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     /**
      * Bytes that may appear un-encoded in a substituted path value: RFC 3986
      * "unreserved", minus {@code .} — everything else is percent-encoded, including
@@ -2025,9 +2032,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
-    /** What a substituted value may keep when it lands in a URL's host:port. */
-    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
-
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -2237,7 +2241,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /**
      * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
-     * the bound exists and why exceeding it passes the value through.
+     * the bound exists and why a map or list past it is replaced by an empty one.
      */
     static final int MAX_PATH_VIEW_DEPTH = 10;
 

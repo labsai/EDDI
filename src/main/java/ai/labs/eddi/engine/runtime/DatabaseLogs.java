@@ -24,8 +24,8 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * MongoDB implementation of {@link IDatabaseLogs}. Annotated
- * {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IDatabaseLogs}; {@code DataStoreProducers}
+ * picks it or the PostgreSQL one by {@code eddi.datastore.type}.
  *
  * @author ginccc
  */

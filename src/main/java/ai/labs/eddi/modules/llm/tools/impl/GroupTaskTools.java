@@ -206,12 +206,6 @@ public class GroupTaskTools {
     }
 
     /**
-     * The in-memory instance the discussion loop is holding, or {@code null} once
-     * it has been unregistered. Writing to a copy loaded from the store would be
-     * overwritten by the loop's next whole-document write, so "not live" has to
-     * mean "refuse", not "write somewhere else".
-     */
-    /**
      * Names the roles and members that exist, so a failed match gets a usable
      * retry.
      */
@@ -226,6 +220,12 @@ public class GroupTaskTools {
         return names.isBlank() ? "This team has no members to assign to." : "Members: %s.".formatted(names);
     }
 
+    /**
+     * The in-memory instance the discussion loop is holding, or {@code null} once
+     * it has been unregistered. Writing to a copy loaded from the store would be
+     * overwritten by the loop's next whole-document write, so "not live" has to
+     * mean "refuse", not "write somewhere else".
+     */
     private GroupConversation liveDiscussion() {
         return registry.get(groupConversationId).orElse(null);
     }

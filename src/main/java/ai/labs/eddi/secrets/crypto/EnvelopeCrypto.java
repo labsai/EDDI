@@ -223,7 +223,8 @@ public final class EnvelopeCrypto {
      * @param keyString
      *            the passphrase / master key string
      * @param salt
-     *            per-deployment random salt (should be at least 16 bytes)
+     *            per-deployment random salt (should be at least 16 bytes; fewer
+     *            than 8 is rejected with a {@link CryptoException})
      * @return derived 32-byte AES-256 key
      */
     public static byte[] deriveKeyFromString(String keyString, byte[] salt) {

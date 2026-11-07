@@ -27,8 +27,8 @@ import java.util.function.UnaryOperator;
  * <ul>
  * <li><b>eddi-v1</b> — {@code X-Eddi-Signature: t=<unix>,v1=<hex>} where the
  * MAC covers {@code t + "." + body}. The timestamp must be within five minutes.
- * Several {@code v1=} entries are allowed (secret rotation); any match
- * passes.</li>
+ * Several {@code v1=} entries (at most eight) are allowed for secret rotation;
+ * any match passes. Exactly one {@code t=} entry is required.</li>
  * <li><b>github</b> — {@code X-Hub-Signature-256: sha256=<hex>} over the body.
  * GitHub signs no timestamp, so replay protection rests on the delivery-id
  * deduplication.</li>

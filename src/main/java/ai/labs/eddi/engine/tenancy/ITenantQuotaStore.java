@@ -23,8 +23,9 @@ import java.util.List;
  * <strong>Cluster safety:</strong> In-memory implementations achieve atomicity
  * via Java synchronization. DB-backed implementations MUST use storage-level
  * atomicity (e.g., {@code UPDATE ... WHERE count < limit RETURNING count} in
- * PostgreSQL, or {@code findAndModify} with conditional update in MongoDB).
- * Java-level synchronization is NOT sufficient for multi-instance deployments.
+ * PostgreSQL, or {@code findOneAndUpdate} with a conditional filter in
+ * MongoDB). Java-level synchronization is NOT sufficient for multi-instance
+ * deployments.
  */
 public interface ITenantQuotaStore {
 
@@ -207,8 +208,10 @@ public interface ITenantQuotaStore {
     /**
      * Get a point-in-time snapshot of usage counters for a tenant.
      * <p>
-     * <strong>Side effect:</strong> resets any expired time windows before reading,
-     * so the returned snapshot reflects current-window values only.
+     * <strong>Window handling:</strong> the counter of an expired time window reads
+     * as zero, so the returned snapshot reflects current-window values only. The
+     * in-memory store also resets the expired windows in place; the MongoDB and
+     * PostgreSQL stores leave the stored row untouched (a read must not write).
      *
      * @param tenantId
      *            tenant identifier
@@ -221,8 +224,9 @@ public interface ITenantQuotaStore {
      * Get the current monthly cost for a tenant without allocating a full
      * {@link UsageSnapshot}. Intended for hot-path pre-call budget checks.
      * <p>
-     * <strong>Side effect:</strong> resets expired windows (including the monthly
-     * cost if a month boundary has passed).
+     * <strong>Window handling:</strong> a monthly cost from an earlier month reads
+     * as {@code 0.0}. The in-memory store also resets expired windows in place; the
+     * MongoDB and PostgreSQL stores do not write on a read.
      * <p>
      * Like {@link #getQuota}, this cannot report an outage in its return value —
      * {@code 0.0} reads as "nothing spent" and lets every call through — so a store

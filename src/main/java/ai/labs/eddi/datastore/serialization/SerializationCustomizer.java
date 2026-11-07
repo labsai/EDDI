@@ -69,7 +69,8 @@ public class SerializationCustomizer implements ObjectMapperCustomizer {
         // MUST stay false, and there is no REST-only place to flip it:
         // this static is the shared recipe behind the CDI mapper, the
         // @PersistenceMapper mapper and the Postgres JSONB mapper, and customize()
-        // below is applied by PersistenceModule to the MongoDB BSON mapper as well.
+        // above, which delegates here, is applied by PersistenceModule to the MongoDB
+        // BSON mapper as well.
         // Enabling it anywhere in this class makes stored documents fail to LOAD the
         // moment a field is removed — LlmConfigurationRagLegacyFieldsTest and
         // LlmConfigurationParallelExecutionLegacyFieldsTest are the tripwires.

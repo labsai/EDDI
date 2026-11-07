@@ -40,9 +40,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Tells an email integration's owners, once per UTC day and reason, that it
- * stopped taking mail on a limit: the daily cost budget, the per-sender limit
- * or a tenant quota (email plan §13). The mail itself stays in the mailbox for
- * a later poll — nothing goes back to any sender.
+ * stopped taking mail on a limit (the daily cost budget, the per-sender limit
+ * or a tenant quota; email plan §13), or that a turn was lost or a reply was
+ * held back (see {@link Reason}). Mail held back by a limit stays in the
+ * mailbox for a later poll — nothing goes back to any sender.
  * <p>
  * <b>What "the owners" are, and how they hear it.</b> Always: one WARN log line
  * (integration id and reason only) and the {@code eddi.email.inbound} outcome

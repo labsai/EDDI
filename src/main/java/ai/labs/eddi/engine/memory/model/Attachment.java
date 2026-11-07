@@ -20,8 +20,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * reference. Behavior rules match on {@code mimeType}, {@code sizeBytes}, and
  * {@code metadata} — never on raw bytes.
  * <p>
- * Attachments inherit the conversation's TTL and are cleaned up automatically
- * when the conversation expires.
+ * Attachments share the conversation's lifetime: they are deleted with it
+ * (explicit deletion, the retention purge and GDPR erasure).
  *
  * @since 6.0.0
  */

@@ -36,8 +36,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * deleted or no longer a digest rule are released to the inbox. The release on
  * save misses what a replica with a stale rule cache creates afterwards.</li>
  * <li><b>Digests</b>: for each enabled rule with a digest, once its oldest held
- * event is older than the interval, one digest event lists the held ones and is
- * delivered.</li>
+ * event is older than the interval, one digest event per originating agent
+ * lists the held ones and is delivered.</li>
  * <li><b>Retention</b>: delete events past
  * {@code eddi.alerts.event-retention}.</li>
  * </ol>

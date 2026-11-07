@@ -35,7 +35,7 @@ import java.util.Optional;
  * columns that queries filter on ({@code enabled}, {@code all_agents},
  * {@code agent_ids}) and the audit columns are kept beside it.
  *
- * @since 6.6.0
+ * @since 6.7.0
  */
 @ApplicationScoped
 @DefaultBean

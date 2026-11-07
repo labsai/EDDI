@@ -111,7 +111,7 @@ public final class QuoteStripper {
 
     /**
      * A subject that marks the message as a forward: Fwd, FW, WG, TR, RV, I, Enc,
-     * VS.
+     * VB.
      */
     private static final Pattern FORWARD_SUBJECT = Pattern.compile("^\\s*(fwd?|wg|tr|rv|i|enc|vb)\\s*:", Pattern.CASE_INSENSITIVE);
 

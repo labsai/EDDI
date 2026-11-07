@@ -538,7 +538,7 @@ public class McpHitlTools {
      */
     @Tool(name = "approve_group_phase",
           description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
-                  + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
+                  + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovalsJson is an optional JSON object mapping "
                   + "task-id to APPROVED/REJECTED. Returns the resumed group conversation to its owner or an admin, "
                   + "and only the resulting state to an approver-only caller. The decision is attributed "
                   + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
@@ -546,7 +546,7 @@ public class McpHitlTools {
                   + "with errorCode PAUSE_CHANGED. Optional (groups with hitlConfig.review.allowResultEdits): "
                   + "taskDecisionsJson decides tasks with an edited result "
                   + "({\"<taskId>\":{\"verdict\":\"APPROVED\",\"editedResult\":\"...\",\"reasonCode\":\"SCOPE\"}}, "
-                  + "instead of taskApprovals); editedAnswer replaces a SYNTHESIS phase's output; reasonCode explains a "
+                  + "instead of taskApprovalsJson); editedAnswer replaces a SYNTHESIS phase's output; reasonCode explains a "
                   + "rejection or an edit.")
     @SuppressWarnings("unchecked")
     public String approveGroupPhase(

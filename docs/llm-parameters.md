@@ -89,11 +89,11 @@ fields) and `customHeaders` on the providers that offer them.
 Model-specific behaviour:
 
 - `temperature` — **Rejected** on models matching `^(o\d|gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro|gpt-6-astra|gpt-6\.1-sol)`: This reasoning model rejects sampling settings such as temperature and topP.
-- `temperature` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)`: This model accepts sampling settings only while reasoningEffort is none (its default).
-- `temperature` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d)|gpt-6)`: This model accepts sampling settings only when reasoningEffort is set to none.
+- `temperature` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)` unless `reasoningEffort` is `none` (or not set): This model accepts sampling settings only while reasoningEffort is none (its default).
+- `temperature` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d)|gpt-6)` unless `reasoningEffort` is `none`: This model accepts sampling settings only when reasoningEffort is set to none.
 - `topP` — **Rejected** on models matching `^(o\d|gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro|gpt-6-astra|gpt-6\.1-sol)`: This reasoning model rejects sampling settings such as temperature and topP.
-- `topP` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)`: This model accepts sampling settings only while reasoningEffort is none (its default).
-- `topP` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d)|gpt-6)`: This model accepts sampling settings only when reasoningEffort is set to none.
+- `topP` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)` unless `reasoningEffort` is `none` (or not set): This model accepts sampling settings only while reasoningEffort is none (its default).
+- `topP` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d)|gpt-6)` unless `reasoningEffort` is `none`: This model accepts sampling settings only when reasoningEffort is set to none.
 - `frequencyPenalty` — **Rejected** on models matching `^(o\d|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject frequencyPenalty.
 - `presencePenalty` — **Rejected** on models matching `^(o\d|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject presencePenalty.
 - `logitBias` — **Rejected** on models matching `^(o\d|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject logitBias.
@@ -109,10 +109,10 @@ Model-specific behaviour:
 Model-specific behaviour:
 
 - `reasoningEffort` — **Rejected** on models matching `^(gpt-4o|gpt-4\.1|o1-mini)`: This model has no reasoning effort setting.
-- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro|gpt-6-astra|gpt-6\.1-sol)`: This model does not support reasoningEffort none.
-- `reasoningEffort` — **Rejected** on models matching `^(gpt-5\.\d|gpt-6)`: reasoningEffort minimal exists only on the original gpt-5 models.
-- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.1(?!\d)(?!-codex-max))`: This model does not support reasoningEffort xhigh.
-- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.[1-5](?!\d))`: reasoningEffort max needs gpt-5.6 or gpt-6.
+- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro|gpt-6-astra|gpt-6\.1-sol)` when `reasoningEffort` is `none`: This model does not support reasoningEffort none.
+- `reasoningEffort` — **Rejected** on models matching `^(gpt-5\.\d|gpt-6)` when `reasoningEffort` is `minimal`: reasoningEffort minimal exists only on the original gpt-5 models.
+- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.1(?!\d)(?!-codex-max))` when `reasoningEffort` is `xhigh`: This model does not support reasoningEffort xhigh.
+- `reasoningEffort` — **Rejected** on models matching `^(gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.[1-5](?!\d))` when `reasoningEffort` is `max`: reasoningEffort max needs gpt-5.6 or gpt-6.
 
 ### Output
 
@@ -134,7 +134,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -182,13 +182,13 @@ Model-specific behaviour:
 
 Model-specific behaviour:
 
-- `temperature` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: This Claude model accepts only the default temperature of 1.
-- `temperature` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\d{8})?$`: Temperature cannot be changed while thinking is on.
-- `topP` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: This Claude model rejects temperature and topP sent together.
-- `topP` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: This Claude model accepts only the default topP of 0.99.
-- `topP` — **Rejected** on models matching `^claude-(sonnet-4-5|haiku-4-5)(-\d{8})?$`: Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.
+- `temperature` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$` unless `temperature` is `1`: This Claude model accepts only the default temperature of 1.
+- `temperature` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\d{8})?$` when `thinkingType` is `enabled` or `adaptive` and unless `temperature` is `1`: Temperature cannot be changed while thinking is on.
+- `topP` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$` when `temperature` is set: This Claude model rejects temperature and topP sent together.
+- `topP` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$` unless `topP` is `0.99`: This Claude model accepts only the default topP of 0.99.
+- `topP` — **Rejected** on models matching `^claude-(sonnet-4-5|haiku-4-5)(-\d{8})?$` when `temperature` is set: Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.
 - `topK` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: This Claude model rejects topK.
-- `topK` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\d{8})?$`: topK cannot be used while thinking is on.
+- `topK` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\d{8})?$` when `thinkingType` is `enabled` or `adaptive`: topK cannot be used while thinking is on.
 
 ### Reasoning and thinking
 
@@ -203,17 +203,17 @@ Model-specific behaviour:
 
 Model-specific behaviour:
 
-- `thinkingType` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: Thinking mode enabled (with a fixed budget) is not supported on this model; use adaptive.
-- `thinkingType` — **Rejected** on models matching `^claude-(opus-4-5|haiku-4-5|sonnet-4-5|opus-4-1|opus-4|sonnet-4)(-\d{8})?$`: Adaptive thinking is not supported on this model; use enabled with a budget.
-- `thinkingType` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-5-5|sonnet-5-5)(-\d{8})?$`: This model always thinks; disabled is not accepted.
-- `thinkingType` — **Rejected** on models matching `^claude-(opus-5|haiku-5-5)(-\d{8})?$`: Thinking can be disabled on this model only at effort high or lower.
-- `thinkingType` — **Rejected** on models matching `^claude-(?!sonnet-5-5(-\d{8})?$)`: between_tools exists only on Claude Sonnet 5.5.
-- `thinkingType` — **Rejected** on models matching `^claude-sonnet-5-5(-\d{8})?$`: between_tools cannot be combined with effort xhigh or max.
+- `thinkingType` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$` when `thinkingType` is `enabled`: Thinking mode enabled (with a fixed budget) is not supported on this model; use adaptive.
+- `thinkingType` — **Rejected** on models matching `^claude-(opus-4-5|haiku-4-5|sonnet-4-5|opus-4-1|opus-4|sonnet-4)(-\d{8})?$` when `thinkingType` is `adaptive`: Adaptive thinking is not supported on this model; use enabled with a budget.
+- `thinkingType` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-5-5|sonnet-5-5)(-\d{8})?$` when `thinkingType` is `disabled`: This model always thinks; disabled is not accepted.
+- `thinkingType` — **Rejected** on models matching `^claude-(opus-5|haiku-5-5)(-\d{8})?$` when `effort` is `xhigh` or `max` and unless `thinkingType` is `adaptive` or `enabled` or `between_tools` (or not set): Thinking can be disabled on this model only at effort high or lower.
+- `thinkingType` — **Rejected** on models matching `^claude-(?!sonnet-5-5(-\d{8})?$)` when `thinkingType` is `between_tools`: between_tools exists only on Claude Sonnet 5.5.
+- `thinkingType` — **Rejected** on models matching `^claude-sonnet-5-5(-\d{8})?$` when `effort` is `xhigh` or `max` and unless `thinkingType` is `adaptive` or `enabled` or `disabled` (or not set): between_tools cannot be combined with effort xhigh or max.
 - `thinkingBudgetTokens` — **Rejected** on models matching `^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\d{8})?$`: A fixed thinking budget is not supported on this model; use effort.
-- `thinkingDisplay` — **Rejected** on models matching `^claude-`: thinkingDisplay cannot be combined with thinking disabled or between_tools.
+- `thinkingDisplay` — **Rejected** on models matching `^claude-` when `thinkingType` is `disabled` or `between_tools`: thinkingDisplay cannot be combined with thinking disabled or between_tools.
 - `effort` — **Rejected** on models matching `^claude-(sonnet-4-5|haiku-4-5)(-\d{8})?$`: This model has no effort setting.
-- `effort` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|mythos-preview)(-\d{8})?$`: Effort xhigh is not supported on this model.
-- `effort` — **Rejected** on models matching `^claude-opus-4-5(-\d{8})?$`: Effort max is not supported on Claude Opus 4.5.
+- `effort` — **Rejected** on models matching `^claude-(opus-4-6|sonnet-4-6|opus-4-5|mythos-preview)(-\d{8})?$` when `effort` is `xhigh`: Effort xhigh is not supported on this model.
+- `effort` — **Rejected** on models matching `^claude-opus-4-5(-\d{8})?$` when `effort` is `max`: Effort max is not supported on Claude Opus 4.5.
 
 ### Output
 
@@ -226,7 +226,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `disableParallelToolUse` | boolean | default `False` | Allow at most one tool call per step. |
+| `disableParallelToolUse` | boolean | default `false` | Allow at most one tool call per step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -284,13 +284,13 @@ Model-specific behaviour:
 | --- | --- | --- | --- |
 | `thinkingLevel` | enum | `minimal` / `low` / `medium` / `high` | How hard Gemini 3 and later models think before answering. |
 | `thinkingBudget` | int | -1–32768 | Token budget for thinking on Gemini 2.5 models; -1 lets the model decide and 0 turns thinking off where allowed. |
-| `returnThinking` | boolean | default `True` | Keep the model's reasoning text from the response instead of discarding it. |
-| `sendThinking` | boolean | default `True` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
+| `returnThinking` | boolean | default `true` | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean | default `true` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 
 Model-specific behaviour:
 
 - `thinkingLevel` — **Rejected** on models matching `^(models/)?gemini-2\.5-`: Gemini 2.5 models take thinkingBudget, not thinkingLevel.
-- `thinkingLevel` — **Rejected** on models matching `^(models/)?gemini-([4-9][-.]|3\.8-flash)`: This model does not support thinking level minimal.
+- `thinkingLevel` — **Rejected** on models matching `^(models/)?gemini-([4-9][-.]|3\.8-flash)` when `thinkingLevel` is `minimal`: This model does not support thinking level minimal.
 
 ### Output
 
@@ -400,11 +400,11 @@ Model-specific behaviour:
 Model-specific behaviour:
 
 - `temperature` — **Rejected** on models matching `^(o\d|codex-mini|gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro)`: This Azure reasoning model rejects sampling settings such as temperature and topP.
-- `temperature` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)`: This Azure model accepts sampling settings only while reasoningEffort is none (its default).
-- `temperature` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d))`: This Azure model accepts sampling settings only when reasoningEffort is set to none.
+- `temperature` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)` unless `reasoningEffort` is `none` (or not set): This Azure model accepts sampling settings only while reasoningEffort is none (its default).
+- `temperature` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d))` unless `reasoningEffort` is `none`: This Azure model accepts sampling settings only when reasoningEffort is set to none.
 - `topP` — **Rejected** on models matching `^(o\d|codex-mini|gpt-5(-mini|-nano|-pro)?(-\d{4}-\d{2}-\d{2})?$|gpt-5\.5-pro)`: This Azure reasoning model rejects sampling settings such as temperature and topP.
-- `topP` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)`: This Azure model accepts sampling settings only while reasoningEffort is none (its default).
-- `topP` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d))`: This Azure model accepts sampling settings only when reasoningEffort is set to none.
+- `topP` — **Rejected** on models matching `^gpt-5\.[1-4](?!\d)` unless `reasoningEffort` is `none` (or not set): This Azure model accepts sampling settings only while reasoningEffort is none (its default).
+- `topP` — **Rejected** on models matching `^(gpt-5\.[5-9](?!\d))` unless `reasoningEffort` is `none`: This Azure model accepts sampling settings only when reasoningEffort is set to none.
 - `frequencyPenalty` — **Rejected** on models matching `^(o\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\.1)`: Azure reasoning models reject frequencyPenalty.
 - `presencePenalty` — **Rejected** on models matching `^(o\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\.1)`: Azure reasoning models reject presencePenalty.
 - `logitBias` — **Rejected** on models matching `^(o\d|codex|gpt-5(?!.*chat)|gpt-6)`: Azure reasoning models reject logitBias.
@@ -418,8 +418,8 @@ Model-specific behaviour:
 Model-specific behaviour:
 
 - `reasoningEffort` — **Rejected** on models matching `^(gpt-4|o1-mini)`: This model has no reasoning effort setting.
-- `reasoningEffort` — **Rejected** on models matching `^gpt-5(-mini|-nano|-pro|-codex)?$`: reasoningEffort none needs gpt-5.1 or later.
-- `reasoningEffort` — **Rejected** on models matching `^(gpt-5\.\d|gpt-6|gpt-5-codex|gpt-5-pro)`: reasoningEffort minimal exists only on gpt-5, gpt-5-mini and gpt-5-nano.
+- `reasoningEffort` — **Rejected** on models matching `^gpt-5(-mini|-nano|-pro|-codex)?$` when `reasoningEffort` is `none`: reasoningEffort none needs gpt-5.1 or later.
+- `reasoningEffort` — **Rejected** on models matching `^(gpt-5\.\d|gpt-6|gpt-5-codex|gpt-5-pro)` when `reasoningEffort` is `minimal`: reasoningEffort minimal exists only on gpt-5, gpt-5-mini and gpt-5-nano.
 
 ### Output
 
@@ -485,7 +485,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `safePrompt` | boolean | default `False` | Add Mistral's safety instructions in front of the conversation. |
+| `safePrompt` | boolean | default `false` | Add Mistral's safety instructions in front of the conversation. |
 
 ### Advanced
 
@@ -519,7 +519,7 @@ Model-specific behaviour:
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
 | `think` | boolean |  | Turn reasoning on or off for thinking models; leave empty to let the model decide. |
-| `returnThinking` | boolean | default `False` | Keep the model's reasoning text from the response instead of discarding it. |
+| `returnThinking` | boolean | default `false` | Keep the model's reasoning text from the response instead of discarding it. |
 
 ### Output
 
@@ -547,10 +547,10 @@ Model-specific behaviour:
 
 Model-specific behaviour:
 
-- `temperature` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)`: This Claude model accepts only the default temperature of 1.
-- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)`: This Claude model rejects temperature and topP sent together.
-- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)`: This Claude model accepts only the default topP of 0.99.
-- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(sonnet-4-5|haiku-4-5)`: Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.
+- `temperature` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)` unless `temperature` is `1`: This Claude model accepts only the default temperature of 1.
+- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)` when `temperature` is set: This Claude model rejects temperature and topP sent together.
+- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)` unless `topP` is `0.99`: This Claude model accepts only the default topP of 0.99.
+- `topP` — **Rejected** on models matching `^((global|us|eu|jp|au|apac)\.)?anthropic\.claude-(sonnet-4-5|haiku-4-5)` when `temperature` is set: Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.
 
 ### Reasoning and thinking
 
@@ -698,9 +698,9 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 Model-specific behaviour:
 
 - `frequencyPenalty` — **Rejected** on models matching `^(grok-4\.(7|6|5)($|-)|grok-4\.20-0309-reasoning$)`: xAI reasoning models reject frequencyPenalty.
-- `frequencyPenalty` — **Rejected** on models matching `^grok-4\.3($|-)`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject frequencyPenalty.
+- `frequencyPenalty` — **Rejected** on models matching `^grok-4\.3($|-)` unless `reasoningEffort` is `none`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject frequencyPenalty.
 - `presencePenalty` — **Rejected** on models matching `^(grok-4\.(7|6|5)($|-)|grok-4\.20-0309-reasoning$)`: xAI reasoning models reject presencePenalty.
-- `presencePenalty` — **Rejected** on models matching `^grok-4\.3($|-)`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject presencePenalty.
+- `presencePenalty` — **Rejected** on models matching `^grok-4\.3($|-)` unless `reasoningEffort` is `none`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject presencePenalty.
 - `logitBias` — **No effect** on models matching `^grok-`: The xAI API does not support logitBias.
 
 ### Reasoning and thinking
@@ -725,13 +725,13 @@ Model-specific behaviour:
 Model-specific behaviour:
 
 - `stopSequences` — **Rejected** on models matching `^(grok-4\.(7|6|5)($|-)|grok-4\.20-0309-reasoning$)`: xAI reasoning models reject stop sequences.
-- `stopSequences` — **Rejected** on models matching `^grok-4\.3($|-)`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject stop sequences.
+- `stopSequences` — **Rejected** on models matching `^grok-4\.3($|-)` unless `reasoningEffort` is `none`: xAI grok-4.3 while it reasons (reasoningEffort other than none) reject stop sequences.
 
 ### Tools
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -784,8 +784,8 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 
 Model-specific behaviour:
 
-- `temperature` — **No effect** on models matching `^deepseek-`: DeepSeek ignores temperature in thinking mode (the default).
-- `topP` — **No effect** on models matching `^deepseek-`: DeepSeek ignores topP when thinking is disabled.
+- `temperature` — **No effect** on models matching `^deepseek-` unless `thinkingType` is `disabled`: DeepSeek ignores temperature in thinking mode (the default).
+- `topP` — **No effect** on models matching `^deepseek-` when `thinkingType` is `disabled`: DeepSeek ignores topP when thinking is disabled.
 - `frequencyPenalty` — **No effect** on models matching `^deepseek-`: DeepSeek no longer supports frequencyPenalty.
 - `presencePenalty` — **No effect** on models matching `^deepseek-`: DeepSeek no longer supports presencePenalty.
 
@@ -794,8 +794,8 @@ Model-specific behaviour:
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
 | `reasoningEffort` | enum | `none` / `low` / `high` / `max`; default `high` | How much the model thinks; none turns thinking off. |
-| `returnThinking` | boolean | default `True` | Keep the model's reasoning text from the response instead of discarding it. |
-| `sendThinking` | boolean | default `True` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
+| `returnThinking` | boolean | default `true` | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean | default `true` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 | `thinkingType` → `thinking.type` | enum | `enabled` / `disabled`; default `enabled` | Turn thinking mode on or off; it is on by default. |
 
 ### Output
@@ -813,7 +813,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -866,26 +866,26 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 
 Model-specific behaviour:
 
-- `temperature` — **Rejected** on models matching `^kimi-(k3|k2\.7-code)`: This Kimi model accepts only temperature 1.
-- `temperature` — **Rejected** on models matching `^kimi-k2\.6$`: kimi-k2.6 accepts only temperature 0.6 when thinking is disabled.
-- `temperature` — **Rejected** on models matching `^kimi-k2\.6$`: kimi-k2.6 accepts only temperature 1 while thinking.
-- `topP` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)`: Kimi accepts only topP 0.95.
-- `frequencyPenalty` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)`: Kimi accepts only frequencyPenalty 0.
-- `presencePenalty` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)`: Kimi accepts only presencePenalty 0.
+- `temperature` — **Rejected** on models matching `^kimi-(k3|k2\.7-code)` unless `temperature` is `1`: This Kimi model accepts only temperature 1.
+- `temperature` — **Rejected** on models matching `^kimi-k2\.6$` when `thinkingType` is `disabled` and unless `temperature` is `0.6`: kimi-k2.6 accepts only temperature 0.6 when thinking is disabled.
+- `temperature` — **Rejected** on models matching `^kimi-k2\.6$` when `thinkingType` is `enabled` (or not set) and unless `temperature` is `1`: kimi-k2.6 accepts only temperature 1 while thinking.
+- `topP` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)` unless `topP` is `0.95`: Kimi accepts only topP 0.95.
+- `frequencyPenalty` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)` unless `frequencyPenalty` is `0`: Kimi accepts only frequencyPenalty 0.
+- `presencePenalty` — **Rejected** on models matching `^kimi-(k3|k2\.6|k2\.7-code)` unless `presencePenalty` is `0`: Kimi accepts only presencePenalty 0.
 
 ### Reasoning and thinking
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
 | `reasoningEffort` | enum | `low` / `high` / `max` | How much kimi-k3 thinks; the kimi-k2 models use thinking instead. |
-| `returnThinking` | boolean | default `True` | Keep the model's reasoning text from the response instead of discarding it. |
-| `sendThinking` | boolean | default `True` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
+| `returnThinking` | boolean | default `true` | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean | default `true` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 | `thinkingType` → `thinking.type` | enum | `enabled` / `disabled` | Turn thinking on or off on kimi-k2.6; kimi-k3 and kimi-k2.7-code always think. |
 
 Model-specific behaviour:
 
 - `thinkingType` — **Rejected** on models matching `^kimi-k3`: kimi-k3 does not take a thinking setting.
-- `thinkingType` — **Rejected** on models matching `^kimi-k2\.7-code`: kimi-k2.7-code always thinks; disabled is not accepted.
+- `thinkingType` — **Rejected** on models matching `^kimi-k2\.7-code` when `thinkingType` is `disabled`: kimi-k2.7-code always thinks; disabled is not accepted.
 
 ### Output
 
@@ -902,7 +902,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -962,7 +962,7 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 | `reasoningEffort` | enum | `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` | How much qwen3.8 models think; none turns thinking off. |
 | `returnThinking` | boolean |  | Keep the model's reasoning text from the response instead of discarding it. |
 | `sendThinking` | boolean |  | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
-| `enableThinking` → `enable_thinking` | boolean | default `True` | Turn the model's thinking on or off; it is on by default. |
+| `enableThinking` → `enable_thinking` | boolean | default `true` | Turn the model's thinking on or off; it is on by default. |
 | `thinkingBudget` → `thinking_budget` | int | 1– | Most tokens the model may spend thinking; do not combine with reasoningEffort. |
 | `preserveThinking` → `preserve_thinking` | boolean |  | Let the model read its reasoning from earlier turns; that reasoning is billed as input. |
 
@@ -981,9 +981,9 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
-| `enableSearch` → `enable_search` | boolean | default `False` | Let the model search the web; this can use more tokens. |
+| `enableSearch` → `enable_search` | boolean | default `false` | Let the model search the web; this can use more tokens. |
 
 ### Caching
 
@@ -1032,28 +1032,28 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 | `presencePenalty` | double | -2–2 | Positive values encourage the model to move on to new topics. |
 | `seed` | int |  | Ask for repeatable answers to identical requests; best effort only. |
 | `logitBias` | json |  | Make specific tokens more or less likely, as a JSON object of token id to a bias between -100 and 100. |
-| `doSample` → `do_sample` | boolean | default `True` | Turn random sampling off to always pick the most likely word; temperature and topP then have no effect. |
+| `doSample` → `do_sample` | boolean | default `true` | Turn random sampling off to always pick the most likely word; temperature and topP then have no effect. |
 
 Model-specific behaviour:
 
-- `temperature` — **No effect** on models matching `^glm-`: Temperature has no effect while doSample is false.
-- `topP` — **No effect** on models matching `^glm-`: topP has no effect while doSample is false.
+- `temperature` — **No effect** on models matching `^glm-` when `doSample` is `false`: Temperature has no effect while doSample is false.
+- `topP` — **No effect** on models matching `^glm-` when `doSample` is `false`: topP has no effect while doSample is false.
 
 ### Reasoning and thinking
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
 | `reasoningEffort` | enum | `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` | How much GLM-5.2 and GLM-5.3 think while thinking is on. |
-| `returnThinking` | boolean | default `True` | Keep the model's reasoning text from the response instead of discarding it. |
-| `sendThinking` | boolean | default `True` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
+| `returnThinking` | boolean | default `true` | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean | default `true` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 | `thinkingType` → `thinking.type` | enum | `enabled` / `disabled`; default `enabled` | Turn thinking on or off (GLM-4.6 and later); it is on by default. |
-| `clearThinking` → `thinking.clear_thinking` | boolean | default `True` | Set to false to keep earlier reasoning in context; it must then be sent back unchanged. |
+| `clearThinking` → `thinking.clear_thinking` | boolean | default `true` | Set to false to keep earlier reasoning in context; it must then be sent back unchanged. |
 
 Model-specific behaviour:
 
 - `reasoningEffort` — **No effect** on models matching `^glm-(4\.\d+|5|5\.1)$`: This GLM model has no reasoning effort setting.
-- `reasoningEffort` — **No effect** on models matching `^glm-`: reasoningEffort has no effect while thinking is disabled.
-- `thinkingType` — **No effect** on models matching `^glm-5\.3(-flash)?$`: glm-5.3 and glm-5.3-flash always think; disabled is ignored.
+- `reasoningEffort` — **No effect** on models matching `^glm-` when `thinkingType` is `disabled`: reasoningEffort has no effect while thinking is disabled.
+- `thinkingType` — **No effect** on models matching `^glm-5\.3(-flash)?$` when `thinkingType` is `disabled`: glm-5.3 and glm-5.3-flash always think; disabled is ignored.
 
 ### Output
 
@@ -1074,7 +1074,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -1136,16 +1136,16 @@ Model-specific behaviour:
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
 | `reasoningEffort` | enum | `low` / `medium` / `high` / `xhigh` / `max` | How much MiniMax-M3.1-Flash-Preview thinks. |
-| `returnThinking` | boolean | default `True` | Keep the model's reasoning text from the response instead of discarding it. |
-| `sendThinking` | boolean | default `True` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
-| `reasoningSplit` → `reasoning_split` | boolean | default `True` | Return the model's reasoning in its own field instead of inside the answer text. |
+| `returnThinking` | boolean | default `true` | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean | default `true` | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
+| `reasoningSplit` → `reasoning_split` | boolean | default `true` | Return the model's reasoning in its own field instead of inside the answer text. |
 | `thinkingType` → `thinking.type` | enum | `adaptive` / `disabled` | Leave empty to let the model think; disabled skips thinking on MiniMax-M3. |
 
 Model-specific behaviour:
 
-- `reasoningEffort` — **Rejected** on models matching `^MiniMax-M3\.1-Flash-Preview$`: MiniMax-M3.1-Flash-Preview rejects reasoningEffort none.
-- `thinkingType` — **Rejected** on models matching `^MiniMax-M3\.1-Flash-Preview$`: MiniMax-M3.1-Flash-Preview always thinks.
-- `thinkingType` — **No effect** on models matching `^MiniMax-M2`: MiniMax M2 models ignore a disabled thinking setting.
+- `reasoningEffort` — **Rejected** on models matching `^MiniMax-M3\.1-Flash-Preview$` when `reasoningEffort` is `none`: MiniMax-M3.1-Flash-Preview rejects reasoningEffort none.
+- `thinkingType` — **Rejected** on models matching `^MiniMax-M3\.1-Flash-Preview$` when `thinkingType` is `disabled`: MiniMax-M3.1-Flash-Preview always thinks.
+- `thinkingType` — **No effect** on models matching `^MiniMax-M2` when `thinkingType` is `disabled`: MiniMax M2 models ignore a disabled thinking setting.
 
 ### Output
 
@@ -1162,7 +1162,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 ### Caching
@@ -1236,7 +1236,7 @@ Model-specific behaviour:
 | `sendThinking` | boolean |  | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 | `reasoningMaxTokens` → `reasoning.max_tokens` | int | 1024– | Token budget for reasoning on models that take one; use this or reasoningEffort, not both. |
 | `reasoningEnabled` → `reasoning.enabled` | boolean |  | Turn reasoning on or off; true means medium effort. |
-| `reasoningExclude` → `reasoning.exclude` | boolean | default `False` | The model still reasons (and is billed for it) but the reasoning is left out of the response. |
+| `reasoningExclude` → `reasoning.exclude` | boolean | default `false` | The model still reasons (and is billed for it) but the reasoning is left out of the response. |
 
 ### Output
 
@@ -1253,7 +1253,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow the model to call several tools in one step. |
+| `parallelToolCalls` | boolean | default `true` | Allow the model to call several tools in one step. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 | `plugins` → `plugins` | json |  | OpenRouter plugins such as web search, as a JSON array like [{"id":"web"}]. |
 
@@ -1282,8 +1282,8 @@ Model-specific behaviour:
 | `providerOrder` → `provider.order` | stringList |  | Provider names to try in this order. |
 | `providerOnly` → `provider.only` | stringList |  | Route only to these providers. |
 | `providerIgnore` → `provider.ignore` | stringList |  | Never route to these providers. |
-| `providerAllowFallbacks` → `provider.allow_fallbacks` | boolean | default `True` | Let OpenRouter use other providers when the preferred ones fail. |
-| `providerRequireParameters` → `provider.require_parameters` | boolean | default `False` | Use only providers that support every setting in the request, instead of silently ignoring unsupported ones. |
+| `providerAllowFallbacks` → `provider.allow_fallbacks` | boolean | default `true` | Let OpenRouter use other providers when the preferred ones fail. |
+| `providerRequireParameters` → `provider.require_parameters` | boolean | default `false` | Use only providers that support every setting in the request, instead of silently ignoring unsupported ones. |
 | `providerSort` → `provider.sort` | enum | `price` / `throughput` / `latency` | Prefer the cheapest, fastest or lowest-latency provider. |
 
 ### Advanced
@@ -1328,14 +1328,14 @@ Model-specific behaviour:
 | `returnThinking` | boolean |  | Keep the model's reasoning text from the response instead of discarding it. |
 | `sendThinking` | boolean |  | Send earlier reasoning back to the model on the next request, which some providers require during tool use. |
 | `reasoningFormat` → `reasoning_format` | enum | `parsed` / `raw` / `hidden` | Return reasoning in its own field (parsed), inside the text (raw) or not at all (hidden). |
-| `includeReasoning` → `include_reasoning` | boolean | default `True` | Return the gpt-oss model's reasoning with the answer. |
+| `includeReasoning` → `include_reasoning` | boolean | default `true` | Return the gpt-oss model's reasoning with the answer. |
 
 Model-specific behaviour:
 
-- `reasoningEffort` — **Rejected** on models matching `^openai/gpt-oss-(20b|120b)$`: gpt-oss accepts only low, medium or high.
-- `reasoningEffort` — **Rejected** on models matching `^qwen/qwen3\.8-27b$`: qwen3.8-27b accepts only none, default, low, medium or high.
+- `reasoningEffort` — **Rejected** on models matching `^openai/gpt-oss-(20b|120b)$` unless `reasoningEffort` is `low` or `medium` or `high`: gpt-oss accepts only low, medium or high.
+- `reasoningEffort` — **Rejected** on models matching `^qwen/qwen3\.8-27b$` unless `reasoningEffort` is `none` or `default` or `low` or `medium` or `high`: qwen3.8-27b accepts only none, default, low, medium or high.
 - `reasoningFormat` — **Rejected** on models matching `^openai/gpt-oss`: gpt-oss models take includeReasoning instead of reasoningFormat.
-- `includeReasoning` — **Rejected** on models matching `^(?!openai/gpt-oss)`: includeReasoning cannot be combined with reasoningFormat (gpt-oss models take includeReasoning only, so reasoningFormat is the one dropped there).
+- `includeReasoning` — **Rejected** on models matching `^(?!openai/gpt-oss)` when `reasoningFormat` is set: includeReasoning cannot be combined with reasoningFormat (gpt-oss models take includeReasoning only, so reasoningFormat is the one dropped there).
 - `includeReasoning` — **Rejected** on models matching `^(?!openai/gpt-oss)`: includeReasoning works only with gpt-oss models; use reasoningFormat.
 
 ### Output
@@ -1353,7 +1353,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `parallelToolCalls` | boolean | default `True` | Allow several tool calls in one step; gpt-oss models do not support it. |
+| `parallelToolCalls` | boolean | default `true` | Allow several tool calls in one step; gpt-oss models do not support it. |
 | `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
 
 Model-specific behaviour:
@@ -1406,9 +1406,9 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `jsonMode` | boolean | default `False` | Turn on if the server accepts response_format json_object; JSON agents then get API-level JSON on requests without tools. |
-| `jsonModeWithTools` | boolean | default `False` | Turn on if the server also accepts response_format together with tool definitions in one request. |
-| `vision` | boolean | default `False` | Turn on if the served model accepts images; image attachments are then sent to it whatever its name. |
+| `jsonMode` | boolean | default `false` | Turn on if the server accepts response_format json_object; JSON agents then get API-level JSON on requests without tools. |
+| `jsonModeWithTools` | boolean | default `false` | Turn on if the server also accepts response_format together with tool definitions in one request. |
+| `vision` | boolean | default `false` | Turn on if the served model accepts images; image attachments are then sent to it whatever its name. |
 
 ### Sampling
 

@@ -862,9 +862,10 @@ public class DreamService {
 
     /**
      * Transient-failure signatures in an exception message — throttling, timeouts
-     * and server-side 5xx, which resolve on their own. Mirrors
-     * {@code CascadingModelExecutor.isRetryableError} /
-     * {@code AgentExecutionHelper} (both private to their modules).
+     * and server-side 5xx, which resolve on their own. A deliberately simpler,
+     * message-only counterpart of {@code RetryConfiguration.isRetryableError}
+     * (which classifies through {@code LlmFailureClassifier} and is what
+     * {@code CascadingModelExecutor} uses).
      */
     private static final Pattern TRANSIENT_LLM_FAILURE = Pattern.compile(
             "timeout|timed out|rate limit|too many requests|429|50[234]|529|overloaded|temporarily unavailable",
@@ -1212,13 +1213,16 @@ public class DreamService {
         return result;
     }
 
-    /**
-     * Parse the LLM consolidation response into structured entries. Handles
-     * markdown fences ({@code ```json ... ```}) and extracts the JSON array.
-     */
+    /** One key/value pair of the model's consolidation answer. */
     record ConsolidatedEntry(String key, String value) {
     }
 
+    /**
+     * Parse the LLM consolidation response into structured entries. Handles
+     * markdown fences ({@code ```json ... ```}) and extracts the JSON array;
+     * anything unparseable yields an empty list, which the caller treats as "keep
+     * the originals".
+     */
     List<ConsolidatedEntry> parseConsolidatedEntries(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
             return List.of();

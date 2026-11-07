@@ -252,12 +252,6 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
-    /**
      * Sums {@code audit:cost} over every step of the conversation. The value is per
      * step — {@code LlmTask} accumulates it on the current step, and each new step
      * starts without one — so the conversation's spend is the sum, never any single
@@ -346,6 +340,12 @@ public class ConversationMemoryUtilities {
         return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -609,8 +609,13 @@ public class ConversationMemoryUtilities {
         return newSnapshot;
     }
 
+    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
+    private static final String CONTEXT_OUTPUT_KEY = "context";
+    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
+
     /**
-     * Read-time masking of a turn the client sent with {@code secretInput}.
+     * Whether an output belongs to a secret turn. The projections use this to apply
+     * read-time masking of a turn the client sent with {@code secretInput}.
      * Conversation scrubs such a turn when it ends, but turns stored before that
      * scrub existed still hold the raw {@code input:initial} and the parser's
      * normalized copy in {@code input} / {@code input:normalized}. Every secret
@@ -623,9 +628,6 @@ public class ConversationMemoryUtilities {
      * Conversation properties and their step mirrors are left as they are. The
      * stored document itself is not changed.
      */
-    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
-    private static final String CONTEXT_OUTPUT_KEY = "context";
-    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
 
     static boolean isSecretTurnOutput(Map<String, Object> conversationOutput) {
         return conversationOutput != null && conversationOutput.get(CONTEXT_OUTPUT_KEY) instanceof Map<?, ?> context

@@ -37,14 +37,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MongoDB-backed tenant quota store. Uses {@code findOneAndModify} for atomic
+ * MongoDB-backed tenant quota store. Uses {@code findOneAndUpdate} for atomic
  * counter operations — safe for multi-instance deployments.
  * <p>
  * Collections:
  * <ul>
  * <li>{@code tenant_quotas} — quota configuration (limits, enabled flag)</li>
- * <li>{@code tenant_usage} — rolling usage counters (daily conversations,
- * per-minute API calls, monthly cost)</li>
+ * <li>{@code tenant_usage} — usage counters in wall-clock-aligned windows
+ * (daily conversations, per-minute API calls, monthly cost)</li>
  * </ul>
  * <p>
  * <strong>Document identity:</strong> {@code tenant_usage} holds exactly ONE

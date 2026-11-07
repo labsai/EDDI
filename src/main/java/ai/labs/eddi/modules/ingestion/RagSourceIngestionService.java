@@ -565,13 +565,13 @@ public class RagSourceIngestionService {
      *
      * <p>
      * It used to run the crawl on the scheduler's thread. The scheduler waits at
-     * most its lease (five minutes by default) for a fire and then cancels it with
-     * an interrupt, while a crawl's default budget is ten: every scheduled crawl of
-     * any size was interrupted mid-run, stopped as {@code CANCELLED}, and never
-     * reconciled a deletion — and an interrupt landing in a database call left its
-     * run {@code RUNNING} until it was reaped. A run owns its time budget and its
-     * one-per-source claim already; the fire only has to start it. Its outcome is
-     * in the source's run history, like a manual run's.
+     * most {@code eddi.schedule.fire-timeout} (five minutes by default) for a fire
+     * and then cancels it with an interrupt, while a crawl's default budget is ten:
+     * every scheduled crawl of any size was interrupted mid-run, stopped as
+     * {@code CANCELLED}, and never reconciled a deletion — and an interrupt landing
+     * in a database call left its run {@code RUNNING} until it was reaped. A run
+     * owns its time budget and its one-per-source claim already; the fire only has
+     * to start it. Its outcome is in the source's run history, like a manual run's.
      *
      * @return {@code STARTED}, or {@code ALREADY_RUNNING} when a run holds the
      *         source, or {@code FAILED}/{@code SKIPPED} when there is nothing to

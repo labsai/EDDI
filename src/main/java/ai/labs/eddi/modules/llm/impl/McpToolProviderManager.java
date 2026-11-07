@@ -101,9 +101,8 @@ public class McpToolProviderManager {
     VaultHostAllowlist vaultHostAllowlist;
 
     /**
-     * Resolves a {@code ${connection:name}} apiKey per request. Injected as an
-     * {@code Instance} because this manager is also constructed directly by two
-     * back-compat constructors that have no container to resolve a bean from.
+     * Resolves a {@code ${connection:name}} apiKey per request. Null in the
+     * back-compat constructors, which have no container to resolve a bean from.
      */
     private final ConnectionResolver connectionResolver;
     private final long toolCacheTtlMillis;
@@ -986,19 +985,6 @@ public class McpToolProviderManager {
     private final Set<String> deprecatedTransportWarned = ConcurrentHashMap.newKeySet();
 
     /**
-     * Validate an MCP server URL before it is used for an outbound request.
-     * <p>
-     * Finding A10: the MCP client performed no URL validation at all, while
-     * {@code GET /mcpcallsstore/mcpcalls/discover-tools?url=...} echoes the
-     * response body back to the caller — a full SSRF read primitive. Mirrors
-     * {@link A2AToolProviderManager}: private/loopback/link-local/cloud-metadata
-     * targets are rejected when {@code eddi.security.ssrf-protection.enabled} is
-     * on, and a non-http(s) scheme or unparseable URL is always rejected.
-     *
-     * @throws IllegalArgumentException
-     *             if the URL is unusable or targets an internal address
-     */
-    /**
      * Refuse a credential the deployment cannot resolve.
      * <p>
      * A {@code ${caller:...}} key needs caller-identity forwarding switched on.
@@ -1068,6 +1054,21 @@ public class McpToolProviderManager {
         vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(apiKey)), config.getUrl(), "MCP server '" + serverName + "'");
     }
 
+    /**
+     * Validate an MCP server URL before it is used for an outbound request.
+     * <p>
+     * Finding A10: the MCP client performed no URL validation at all, while the
+     * {@code discover-tools} endpoint of the mcpcalls store
+     * ({@code /mcpcallsstore/mcpcalls/discover-tools}) echoes the response body
+     * back to the caller — a full SSRF read primitive. Mirrors
+     * {@link A2AToolProviderManager}: private/loopback/link-local/cloud-metadata
+     * targets are rejected when {@code eddi.security.ssrf-protection.enabled} is
+     * on, and a non-http(s) scheme, an unparseable URL or the cloud instance
+     * metadata service is rejected whatever the setting.
+     *
+     * @throws IllegalArgumentException
+     *             if the URL is unusable or targets an internal address
+     */
     void validateServerUrl(String url) {
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");

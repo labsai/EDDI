@@ -297,7 +297,7 @@ class CascadingModelExecutor {
      *            the time left for the whole turn, combined with each step's own
      *            timeout when deciding whether a re-ask still fits. This is the
      *            hook the turn deadline (R1) feeds; pass
-     *            {@link FormatRetryRunner.RemainingBudget#UNBOUNDED} until then
+     *            {@link FormatRetryRunner.RemainingBudget#UNBOUNDED} for no bound
      */
     CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
                           LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
@@ -1439,11 +1439,6 @@ class CascadingModelExecutor {
     }
 
     /**
-     * Execute a step in agent mode (with tool-calling loop). The structured_output
-     * wrapper is never used here — {@code evaluationStrategy} has already been
-     * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
-     */
-    /**
      * What a {@code judge_model} grades a step's answer against: the user's latest
      * request as the step's model saw it, and the cascade's acceptance criterion.
      */
@@ -1452,6 +1447,11 @@ class CascadingModelExecutor {
         return ConfidenceEvaluator.JudgeRequest.of(messages, cascade != null ? cascade.getAcceptanceCriterion() : null);
     }
 
+    /**
+     * Execute a step in agent mode (with tool-calling loop). The structured_output
+     * wrapper is never used here — {@code evaluationStrategy} has already been
+     * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
+     */
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,

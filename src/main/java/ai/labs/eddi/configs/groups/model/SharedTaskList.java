@@ -19,7 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Runtime task list for task-oriented group conversations. Embedded in
- * {@link GroupConversation} — not a separate collection.
+ * {@link GroupConversation} — not a separate collection. The same type is also
+ * the standing backlog of a {@link GroupWorkspace}.
  * <p>
  * Tracks tasks from planning through execution to verification, with
  * dependency-aware queries and validated status transitions.

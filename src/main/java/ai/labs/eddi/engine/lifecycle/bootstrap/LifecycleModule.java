@@ -12,6 +12,13 @@ import jakarta.inject.Provider;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Owns the registry of lifecycle task providers, keyed by step type id and
+ * produced under the {@link LifecycleExtensions} qualifier. Each area's
+ * bootstrap module (for example {@code ApiCallsModule}) puts its task's
+ * provider into the map in a {@code @PostConstruct}; a workflow step type that
+ * no module registered cannot be deployed.
+ */
 @Startup(1000)
 @ApplicationScoped
 public class LifecycleModule {

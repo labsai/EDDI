@@ -20,10 +20,11 @@ import java.util.Set;
  * <p>
  * This class judges a candidate key and returns the reason it is weak, if any.
  * It does not decide what to do about it — {@code VaultSecretProvider} fails
- * startup in production ({@link io.quarkus.runtime.LaunchMode#NORMAL}) and only
- * warns in development and test, mirroring
- * {@link ai.labs.eddi.engine.security.AuthStartupGuard}. Pure and
- * package-visible so the decision is assertable without booting a container.
+ * startup (and refuses a weak new key in {@code rotate-kek}) in production
+ * ({@link io.quarkus.runtime.LaunchMode#NORMAL}) and only warns in development
+ * and test, mirroring {@link ai.labs.eddi.engine.security.AuthStartupGuard}.
+ * Pure and package-visible so the decision is assertable without booting a
+ * container.
  *
  * @since 6.5.0
  */

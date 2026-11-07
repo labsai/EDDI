@@ -30,8 +30,11 @@ import java.util.Optional;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Web search tool that integrates with search APIs. Supports Google Custom
- * Search, DuckDuckGo, and other search providers.
+ * Web search tool that integrates with search APIs. Web and news searches use
+ * Google Custom Search when {@code eddi.tools.websearch.provider=google} and
+ * both the API key and the {@code cx} are configured, and otherwise the
+ * DuckDuckGo Instant Answer API (the default; no key). Wikipedia searches use
+ * the Wikipedia API.
  * <p>
  * Uses Jackson {@link ObjectMapper} for safe, correct JSON parsing of all
  * search API responses.
@@ -81,7 +84,7 @@ public class WebSearchTool {
             if ("google".equalsIgnoreCase(searchProvider) && googleApiKey.isPresent() && googleCx.isPresent()) {
                 results = searchWithGoogle(query, maxResults);
             } else {
-                // Fallback to DuckDuckGo HTML scraping (no API key required)
+                // Default and fallback: the DuckDuckGo Instant Answer API (no API key)
                 results = searchWithDuckDuckGo(query, maxResults);
             }
 

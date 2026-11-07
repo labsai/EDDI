@@ -1131,7 +1131,8 @@ public class RestGroupConversation implements IRestGroupConversation {
      * "we recorded an empty answer" rather than "there was nobody to record". The
      * audit writer already renders a null decider as {@code "unknown"}, so this
      * routes the unauthenticated case onto that same, honest value. The
-     * client-supplied value is still discarded either way.
+     * client-supplied value is still discarded either way. The decision's channel
+     * is likewise set server-side, from the {@code X-EDDI-Client} header.
      */
     private void setDecidedByFromIdentity(GroupApprovalRequest request) {
         if (request.getDecision() == null) {

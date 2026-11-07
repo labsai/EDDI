@@ -18,7 +18,7 @@ import java.util.Optional;
  */
 public interface IConnectionGrantStore {
 
-    /** The newest grant for this triple, or empty. */
+    /** The grant for this triple (the key is unique), or empty. */
     Optional<ConnectionGrant> find(String tenantId, String connectionName, String principal);
 
     /** Creates or replaces a grant. Bumps {@code version} and {@code updatedAt}. */
@@ -162,7 +162,10 @@ public interface IConnectionGrantStore {
      */
     boolean updateSealedTokens(ConnectionGrant grant, long expectedVersion);
 
-    /** Counts by status, for the {@code connection.grant.status} gauge. */
+    /**
+     * Counts the tenant's grants in one status. No production code calls this yet;
+     * no grant-status gauge is registered.
+     */
     long countByStatus(String tenantId, ConnectionGrant.Status status);
 
     /**

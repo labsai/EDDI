@@ -30,8 +30,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Brings an existing deployed agent into a running discussion (I7).
  * <p>
  * Capability <em>discovery</em> already shipped —
- * {@code FindAgentsByCapability} lets a member find the specialist it needs —
- * but there was no way to act on the answer:
+ * {@code FindAgentsByCapabilityTool} lets a member find the specialist it needs
+ * — but there was no way to act on the answer:
  * {@code GroupConversation.addDynamicMember} had no production caller and
  * {@code maxRecruitedAgentsPerDiscussion} was read nowhere, so a discovered
  * agent could be named in prose and never speak. This closes that loop.

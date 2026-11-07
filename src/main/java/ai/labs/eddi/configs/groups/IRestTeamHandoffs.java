@@ -60,7 +60,7 @@ public interface IRestTeamHandoffs {
 
     @POST
     @Path("/handoffs/{handoffId}/decline")
-    @Operation(description = "Decline a pending handoff. The same handoff is not accepted again for 30 days. Needs EDIT on the group.")
+    @Operation(description = "Decline a pending handoff. The same handoff is not filed again within the decline-memory window (eddi.groups.handoff.decline-memory, 30 days by default). Needs EDIT on the group.")
     Response declineHandoff(@PathParam("groupId") String groupId, @PathParam("handoffId") String handoffId, DeclineRequest request);
 
     @DELETE

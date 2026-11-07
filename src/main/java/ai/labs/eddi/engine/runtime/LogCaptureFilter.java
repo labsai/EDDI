@@ -18,7 +18,7 @@ import java.util.logging.LogRecord;
 
 /**
  * Quarkus-native logging filter that intercepts every log record in the JBoss
- * LogManager workflow and captures it into the {@link BoundedLogStore} ring
+ * LogManager pipeline and captures it into the {@link BoundedLogStore} ring
  * buffer.
  *
  * <p>
@@ -73,9 +73,9 @@ import java.util.logging.LogRecord;
  * Configured in {@code application.properties}:
  * </p>
  *
- * <pre>
- * quarkus.log.console.filter = eddi - log - capture
- * </pre>
+ * <p>
+ * {@code quarkus.log.console.filter=eddi-log-capture}
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0

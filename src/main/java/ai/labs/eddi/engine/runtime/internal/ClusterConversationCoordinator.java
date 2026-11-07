@@ -317,9 +317,10 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
 
     /**
      * The lease did not come (another node kept it past the timeout, NATS is down
-     * with {@code degraded.turns=reject}, or this node is shutting down). The task
-     * never ran and its input was never consumed: discard it — its hook answers the
-     * caller — and move on to the next queued task. Not a dead letter.
+     * with {@code eddi.cluster.degraded.turns=reject}, or this node is shutting
+     * down). The task never ran and its input was never consumed: discard it — its
+     * hook answers the caller — and move on to the next queued task. Not a dead
+     * letter.
      */
     private void leaseNotObtained(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable, Throwable cause) {
         LOGGER.warnf("Turn of conversation %s not run: %s", sanitize(conversationId), cause.getMessage());
@@ -452,8 +453,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     /**
      * Moves the dead letters this node had to keep locally while NATS was
      * unreachable into the shared stream, so every node lists them and they survive
-     * this node's restart. Runs on every (re)connect; stops at the first failure
-     * and tries the rest on the next one.
+     * this node's restart. Runs on every (re)connect and, while any local entry is
+     * left, every {@value #LOCAL_FORWARD_SECONDS} seconds; stops at the first
+     * failure and tries the rest on the next run.
      *
      * @return how many entries were forwarded
      */

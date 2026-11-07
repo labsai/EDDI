@@ -101,8 +101,8 @@ class ArtifactToolsProvider implements ToolSourceProvider {
 
     /**
      * The group config, or {@code null} if it cannot be read — a store failure
-     * withholds the write tools (fail-closed), logged so the operator sees why they
-     * vanished.
+     * withholds the artifact tools (fail-closed), logged so the operator sees why
+     * they vanished.
      */
     private AgentGroupConfiguration resolveGroup(String groupId) {
         if (groupId == null) {

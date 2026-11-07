@@ -23,13 +23,15 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.UnaryOperator;
 
 /**
- * The default {@link IA2ATaskStore}: two {@code ICacheFactory} caches, bounded
- * and node-local on a single node. In cluster mode
- * ({@code eddi.messaging.type=nats}) {@code CacheFactory} backs both with
- * JetStream KV buckets ({@code A2A_TASKS}, {@code A2A_CONTEXTS}), so a task
- * issued on one node is found on every other; the records travel as JSON. A
- * miss is not an error — the handler falls back to the conversation store for
- * the tasks it issued itself.
+ * The default {@link IA2ATaskStore}: four {@code ICacheFactory} caches (tasks,
+ * contexts, the erasure marker and a per-principal id index), bounded and
+ * node-local on a single node. In cluster mode
+ * ({@code eddi.messaging.type=nats}) {@code CacheFactory} backs all four with
+ * JetStream KV buckets ({@code A2A_TASKS}, {@code A2A_CONTEXTS},
+ * {@code A2A_ERASING}, {@code A2A_INDEX}), so a task issued on one node is
+ * found on every other; the records travel as JSON. A miss is not an error —
+ * the handler falls back to the conversation store for the tasks it issued
+ * itself.
  */
 @ApplicationScoped
 public class CachedA2ATaskStore implements IA2ATaskStore {

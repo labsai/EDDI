@@ -196,7 +196,8 @@ class ConversationStepRunner {
 
             /**
              * Why the turn failed, added to its dead letter: {@code reason}
-             * ({@code lease-lost} or {@code fenced}) and the fencing tokens involved.
+             * ({@code lease-lost}, {@code fenced} or {@code conflict}) and the fencing
+             * tokens involved.
              */
             private volatile Map<String, Object> failure;
 
@@ -467,13 +468,12 @@ class ConversationStepRunner {
         // Fence first (cluster mode, A3): before this turn reads anything of the
         // conversation — its state, its revision, a reloaded snapshot, the recorded
         // Idempotency-Keys — the document is told this lease has started. A holder
-        // whose
-        // lease expired earlier can still be writing until then; raised afterwards, its
-        // append could land between this turn's read and its run, and this turn would
-        // run without that step and overwrite its properties, or run a duplicate
-        // Idempotency-Key a second time. A turn that cannot raise the fence, or whose
-        // lease is already gone, does not run: it is answered busy (409 + Retry-After)
-        // and its input is not consumed.
+        // whose lease expired earlier can still be writing until then; raised
+        // afterwards, its append could land between this turn's read and its run, and
+        // this turn would run without that step and overwrite its properties, or run a
+        // duplicate Idempotency-Key a second time. A turn that cannot raise the fence,
+        // or whose lease is already gone, does not run: it is answered busy (409 +
+        // Retry-After) and its input is not consumed.
         if (lease != null && lease.fence() != null && !fenceRaised(conversationId, lease)) {
             conversationService.contextLogger.setLoggingContext(loggingContext);
             submittedMemory.setConversationState(ConversationState.IN_PROGRESS);
@@ -590,9 +590,9 @@ class ConversationStepRunner {
                 conversationMemory.setLeaseLostCheck(lease::isLost);
                 final IConversationMemory leasedMemory = conversationMemory;
                 // Abandoned through the same seam as a watchdog timeout (abandonTurn), but
-                // aimed at THIS turn's
-                // memory rather than looked up by conversation id: the lease callback can
-                // fire late, and by then the id may name a newer turn of the conversation.
+                // aimed at THIS turn's memory rather than looked up by conversation id: the
+                // lease callback can fire late, and by then the id may name a newer turn of
+                // the conversation.
                 // The lease-lost mark goes first so the completion callback, which reads it
                 // once it sees the flag, never settles this turn as a plain cancel.
                 lease.onLost(() -> {
@@ -1086,9 +1086,8 @@ class ConversationStepRunner {
      */
     private boolean discardLeaseLostTurn(String conversationId, IConversationMemory conversationMemory) {
         // Either the lease manager's lost-callback marked it, or the lease reads as
-        // lost
-        // on the turn's own memory (it can be lost before the callback arrives — see
-        // IConversationMemory#setLeaseLostCheck).
+        // lost on the turn's own memory (it can be lost before the callback arrives —
+        // see IConversationMemory#setLeaseLostCheck).
         boolean marked = leaseLostConversations.remove(conversationId);
         if (!marked && !conversationMemory.isLeaseLost()) {
             return false;
@@ -1331,8 +1330,7 @@ class ConversationStepRunner {
 
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
         // Not over an ENDED conversation, for the reason given in awaitTurn: ERROR is
-        // not
-        // terminal either, and a blind write resurrected a conversation ended
+        // not terminal either, and a blind write resurrected a conversation ended
         // meanwhile.
         ConversationState currentState;
         try {
@@ -1478,8 +1476,7 @@ class ConversationStepRunner {
         // document now holds when this memory mirrors it, or UNKNOWN after a merged
         // append (the document then also holds another turn's steps, and the store left
         // the revision on the loaded value so a second write from this memory is
-        // refused
-        // rather than allowed to erase them).
+        // refused rather than allowed to erase them).
         conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
         return conversationId;
     }

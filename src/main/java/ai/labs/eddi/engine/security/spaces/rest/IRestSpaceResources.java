@@ -164,7 +164,8 @@ public interface IRestSpaceResources {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Set a variable in a space")
     @APIResponse(responseCode = "200", description = "Stored.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403", description = "The caller is not a member of the space, or the value holds a vault or connection reference "
+            + "and the caller is not an eddi-admin.")
     Response storeVariable(@QueryParam("space") String space, @PathParam("key") String key, VariableWrite body);
 
     @DELETE

@@ -33,12 +33,14 @@ import java.util.concurrent.TimeUnit;
  * console can show a lost node instead of silently dropping its card.
  * <p>
  * <b>Nodes.</b> Presence is compared every presence interval. A record that
- * disappeared while still fresh was deleted by a clean shutdown
- * ({@code node.left}); one that expired had stopped being written — the node
- * was killed, crashed or cut off from NATS ({@code node.lost}). A record whose
- * heartbeat is more than two intervals old is {@code node.stale}. Every node
- * makes the same observations; their deterministic ids let the activity stream
- * keep one of each.
+ * vanished and has a leave marker for its boot was removed by a clean shutdown
+ * ({@code node.left}); one that vanished without a marker had stopped being
+ * written and expired — the node was killed, crashed or cut off from NATS
+ * ({@code node.lost}). For about two intervals after this node's own NATS
+ * connection returns nothing is judged lost. A record whose heartbeat is more
+ * than two intervals old is {@code node.stale}. Every node makes the same
+ * observations; their deterministic ids let the activity stream keep one of
+ * each.
  * <p>
  * <b>Degraded mode</b> on and off is this node's own observation, polled every
  * two seconds. Lease takeovers and dead letters come from listeners on the

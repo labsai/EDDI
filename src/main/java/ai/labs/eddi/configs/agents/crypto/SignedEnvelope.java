@@ -88,8 +88,9 @@ public record SignedEnvelope(
     /**
      * Get the canonical form of this envelope for signing/verification.
      * <p>
-     * The canonical form includes all fields except {@code signature} and
-     * {@code keyVersion} to prevent circular dependency.
+     * The canonical form omits the {@code signature} (null) and pins
+     * {@code keyVersion} to 0, so the signed bytes do not depend on the signature
+     * they produce.
      *
      * @return canonical JSON string
      * @throws JsonProcessingException

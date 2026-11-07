@@ -142,7 +142,8 @@ public class VaultGrantChecker {
     /**
      * Convenience overload that reads the agent configuration itself, so callers on
      * the deployment path need only the id and version. A configuration that cannot
-     * be read yields no violations — see the class contract on uncertainty.
+     * be read yields no violations — see
+     * {@link #findUngrantedReferences(AgentConfiguration, String)} on uncertainty.
      */
     public List<String> findUngrantedReferences(String agentId, Integer agentVersion) {
         try {

@@ -23,6 +23,16 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Creates and registers the named caches. Every cache is a size-bounded
+ * Caffeine cache wrapped in {@link CacheImpl}: {@link #getCache(String)} has no
+ * default expiry, {@link #getCache(String, Duration)} expires entries a TTL
+ * after their last write, and either kind honours a per-entry lifespan. A
+ * {@code null} cache name selects the cache {@code local}. In cluster mode
+ * ({@code eddi.messaging.type=nats}) a few caches are wrapped to be shared
+ * ({@link #SHARED_BUCKETS}) or to announce their changes to the other nodes
+ * ({@link #INVALIDATED}); every other cache stays node-local.
+ */
 @ApplicationScoped
 public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Announcer {
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
@@ -36,7 +46,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack event de-duplication, channel thread locks.
+     * paginated tool responses, Slack and webhook event de-duplication, channel
+     * thread locks.
      */
     static final Map<String, String> SHARED_BUCKETS = Map.of(
             "nonce-replay-protection", "NONCES",

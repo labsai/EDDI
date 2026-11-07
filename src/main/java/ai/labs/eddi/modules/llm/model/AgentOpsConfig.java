@@ -7,7 +7,8 @@ package ai.labs.eddi.modules.llm.model;
 import java.util.List;
 
 /**
- * Limits for the three agent-operations tools — {@code read_team_scorecard},
+ * Limits for the three groups of agent-operations tools —
+ * {@code read_team_scorecard},
  * {@code propose_team_budget_raise}/{@code propose_team_budget_transfer} and
  * {@code schedule_followup}. Which of the tools an agent gets is decided by its
  * {@code builtInToolsWhitelist}: each is <b>off unless its slug is named

@@ -23,12 +23,14 @@ import java.util.regex.Pattern;
  * the LLM to retrieve the original verbatim text of specific turns from the
  * summarized section, enabling detailed recall on demand.
  * <p>
- * Constructed per-invocation by {@code AgentOrchestrator} — NOT a CDI bean.
+ * Constructed per-invocation by {@code ContextualToolsProvider} — NOT a CDI
+ * bean.
  *
  * @author ginccc
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by ContextualToolsProvider — must NOT be a CDI
+        // bean
 public class ConversationRecallTool {
 
     private static final Logger LOGGER = Logger.getLogger(ConversationRecallTool.class);

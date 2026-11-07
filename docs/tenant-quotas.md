@@ -213,8 +213,8 @@ All five operations sit under `/administration/quotas` and require the `eddi-adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/administration/quotas` | List every configured tenant quota |
-| `GET` | `/administration/quotas/{tenantId}` | Read one tenant's quota |
-| `PUT` | `/administration/quotas/{tenantId}` | Create or replace one tenant's quota |
+| `GET` | `/administration/quotas/{tenantId}` | Read one tenant's quota (`404` when the tenant has no row) |
+| `PUT` | `/administration/quotas/{tenantId}` | Create or replace one tenant's quota; the path's `tenantId` wins over the body's |
 | `GET` | `/administration/quotas/{tenantId}/usage` | Read the tenant's current counters |
 | `POST` | `/administration/quotas/{tenantId}/usage/reset` | Zero the tenant's counters |
 
@@ -264,9 +264,12 @@ pick it up within the 5-second cache TTL.
   "monthlyCostUsd": 0.0,
   "minuteWindowStart": "2026-09-07T14:32:00Z",
   "dayStart": "2026-09-07T00:00:00Z",
-  "costMonth": "2026-09"
+  "costMonth": "2026-09",
+  "reservedUsd": 0.0
 }
 ```
+
+`reservedUsd` is the budget held for running turns by the [hard ceiling](#hard-ceiling-cost-reservation-opt-in); it is `0` while that mode is off.
 
 Counters from an expired window read as zero rather than as their stale value, so a `conversationsToday`
 of `0` on a tenant that was busy yesterday is correct, not a lost write.

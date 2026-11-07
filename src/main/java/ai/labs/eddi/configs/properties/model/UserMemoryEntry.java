@@ -31,9 +31,10 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");
 
     /**
-     * Creates an entry from a {@link Property} with user memory metadata. Used when
-     * flushing longTerm properties with non-null visibility to the usermemories
-     * collection.
+     * Creates an entry from a {@link Property} with user memory metadata. The
+     * property's own visibility wins; {@code defaultVisibility} applies only when
+     * it has none. The entry carries no group ids, so a {@code group} entry built
+     * here is not readable through group overlap — use the overload below for that.
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId,
                                                Visibility defaultVisibility) {

@@ -15,6 +15,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
+ * Recognises an ordinal number such as {@code 3rd} or {@code 3.} (see
+ * {@code LanguageUtilities#extractOrdinalValue}) and emits an
+ * {@code ordinal_number} expression carrying the number.
+ *
  * @author ginccc
  */
 public class OrdinalNumbersDictionary implements IDictionary {

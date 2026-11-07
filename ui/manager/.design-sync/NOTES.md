@@ -2,7 +2,7 @@
 
 EDDI-Manager is an **application**, not a published component library. The synced
 "design system" is the presentational surface: `src/components/ui/` + `src/components/shared/`
-+ the app chrome from `src/components/layout/` (29 components). Synced via the
++ the app chrome from `src/components/layout/` (32 components — `componentSrcMap` in `config.json` is the list). Synced via the
 **package shape with a dedicated re-export entry**.
 Claude Design project: `408b967f-5a31-4a9f-85f7-f8794639218b` ("Design System").
 
@@ -47,12 +47,12 @@ regardless.
 
 - **No library `dist/`.** `npm run build` produces an *app* bundle. So `cfg.entry`
   points at `.design-sync/ds-entry.tsx`, a hand-authored file that re-exports exactly
-  the 29 scoped components (+ the preview provider). The converter esbuilds from it, so
+  the 32 scoped components (+ the preview provider). The converter esbuilds from it, so
   only this surface + its deps land in `_ds_bundle.js` — not Monaco/editors/etc.
   **To add/remove a synced component: edit ds-entry.tsx, `cfg.componentSrcMap`,
   `cfg.dtsPropsFor` (see the prop-contracts section below) and a preview in
   `previews/` — all four, or the component ships broken in some dimension.**
-- `componentSrcMap` pins all 29 src paths because there is no shipped `.d.ts`.
+- `componentSrcMap` pins all 32 src paths because there is no shipped `.d.ts`.
 - `cfg.tsconfig = tsconfig.ds-bundle.json` so esbuild resolves the `@/*` alias — and, via
   one exact entry ahead of the wildcard, swaps the operator drawer for a stub. See the
   boxed warning above before editing that file.
@@ -112,7 +112,7 @@ falls back to `[key: string]: unknown`. That is not a warning — validate exits
 invisible unless you read the emitted `.d.ts`.
 
 The first sync shipped all 21 components with that empty contract. `cfg.dtsPropsFor` now
-carries a hand-written body for **all 29**, transcribed from each component's real props
+carries a hand-written body for **all 32**, transcribed from each component's real props
 interface. Consequences:
 
 - **Adding a component means adding its `dtsPropsFor` entry too** — alongside
@@ -147,8 +147,8 @@ Neither is a design-sync bug; both only became visible because `Sidebar` entered
   `ds-entry.tsx` now defines it at bundle init (covers designs, not just preview cards).
   The value is a static string and **will drift from package.json**.
 - **`/logo_eddi.png` was an absolute `public/` path**, which the DS bundle cannot ship — the
-  expanded sidebar rendered a broken image. The asset moved to `src/assets/` and both
-  sidebars import it: at 2 KB it is under Vite's 4 KB `assetsInlineLimit`, so the app inlines
+  expanded sidebar rendered a broken image. The asset moved to `src/assets/`; `layout/brand-logo.tsx` imports it, and the sidebars
+  render it through `BrandWordmark` / `BrandIcon`: at 2 KB it is under Vite's 4 KB `assetsInlineLimit`, so the app inlines
   it (same pixels, one fewer request) and esbuild's `.png: dataurl` loader inlines it for the
   bundle. **Do not move it back to `public/`.**
 

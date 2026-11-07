@@ -18,8 +18,8 @@ import java.util.List;
  * Prepends identity masking rules to the system prompt. When enabled, masking
  * rules are injected regardless of counterweight settings.
  * <p>
- * The audit ledger records {@code identityMaskingActive=true} for every
- * conversation turn this runs (handled by the caller in {@code LlmTask}).
+ * {@code LlmTask} calls this on every turn of a task, before the counterweight;
+ * {@code eddi.identity.masking.applied} counts each time rules are prepended.
  *
  * @since 6.0.0
  */

@@ -354,8 +354,9 @@ public class GlobalVariableResolver {
     }
 
     /**
-     * Invalidate the local cache for all tenants. Called by the REST store on
-     * writes. Also notifies all registered invalidation listeners.
+     * Invalidate the cache for all tenants on this node and, in cluster mode,
+     * announce the change so the other nodes drop theirs too. Called by the REST
+     * store on writes. Also notifies all registered invalidation listeners.
      */
     public void invalidateCache() {
         invalidateLocal();

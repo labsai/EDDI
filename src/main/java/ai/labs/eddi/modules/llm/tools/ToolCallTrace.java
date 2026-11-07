@@ -10,8 +10,8 @@ import io.opentelemetry.context.Scope;
 
 /**
  * Trace-only facts about one LLM tool call that {@link ToolExecutionService}
- * cannot know by itself: which of the seven tool sources the tool came from,
- * and the id the model gave the call.
+ * cannot know by itself: which tool source the tool came from, and the id the
+ * model gave the call.
  *
  * <p>
  * They travel in the OpenTelemetry {@link Context} rather than as two more
@@ -35,8 +35,8 @@ import io.opentelemetry.context.Scope;
  *
  * @param source
  *            the tool's source ({@code builtin}, {@code http}, {@code mcp},
- *            {@code a2a}, {@code dynamic}, {@code memory}, {@code recall}), or
- *            null when unknown
+ *            {@code a2a}, {@code dynamic}, {@code team}, {@code memory},
+ *            {@code recall}), or null when unknown
  * @param callId
  *            the model-assigned tool call id, or null when the provider gave
  *            none

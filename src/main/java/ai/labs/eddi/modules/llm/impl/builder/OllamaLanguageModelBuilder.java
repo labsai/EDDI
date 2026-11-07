@@ -172,8 +172,8 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     /**
      * Streaming twin of
-     * {@link #applyTo(OllamaChatModel.OllamaChatModelBuilder, Map)}; keep
-     * identical.
+     * {@link #applyTo(OllamaChatModel.OllamaChatModelBuilder, Map, OutboundTargetPolicy)};
+     * keep identical.
      */
     private static void applyTo(OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder, Map<String, String> parameters,
                                 OutboundTargetPolicy targetPolicy) {

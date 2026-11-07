@@ -15,9 +15,10 @@ import java.util.regex.Pattern;
  * anything in it may be acted on.
  * <p>
  * A 401 from an MCP server is an <em>auth challenge</em>, not a discovery
- * failure. Treating the two alike is why an authenticated server currently
- * trips the circuit breaker after three attempts and then reports "server down"
- * — an operator debugging that has no signal pointing at credentials at all.
+ * failure. Treating the two alike let an authenticated server trip the circuit
+ * breaker after three attempts and then report "server down" — an operator
+ * debugging that had no signal pointing at credentials at all. Callers now
+ * route a 401/403 through {@link #isAuthChallenge(int)} instead.
  *
  * <h3>Everything here is attacker-influenced input</h3> The
  * {@code resource_metadata} URL arrives in a header from the very server we are

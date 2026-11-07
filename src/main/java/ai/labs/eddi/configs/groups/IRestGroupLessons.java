@@ -46,7 +46,7 @@ public interface IRestGroupLessons {
     }
 
     @GET
-    @Operation(description = "The team's own retro lessons, newest first.")
+    @Operation(description = "The team's own retro lessons, newest first. limit defaults to 100 and is capped at 500.")
     Response list(@PathParam("groupId") String groupId, @QueryParam("limit") Integer limit);
 
     @GET
@@ -57,7 +57,7 @@ public interface IRestGroupLessons {
 
     @GET
     @Path("/history")
-    @Operation(description = "Lessons consolidation removed (merged or retired), with their text, reason and cited outcomes; newest first.")
+    @Operation(description = "Lessons consolidation removed (merged or retired), with their text, reason and cited outcomes; newest first. limit defaults to 100 and is capped at 500.")
     Response history(@PathParam("groupId") String groupId, @QueryParam("limit") Integer limit);
 
     @GET

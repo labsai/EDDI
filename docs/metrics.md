@@ -6,13 +6,13 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 E.D.D.I ships three dashboards that the Kubernetes monitoring component and
 `docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
-`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 36 panels, NATS cluster mode; see
 [Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 240 panels, 28 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -87,7 +87,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
-`Conversation Ratings` · `Alerts`
+`Model Pricing` · `Team Budgets` · `Conversation Ratings` · `Alerts`
 
 ---
 
@@ -489,7 +489,7 @@ eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
 backlog: work is arriving faster than it drains. Both coordinators register the
-same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+same seven meters (from their shared base class); `dead_letters > 0` means a turn failed and is waiting for an
 operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
 
 `dead_lettered_total` counts turns that failed after they had started (alert
@@ -1242,7 +1242,7 @@ They cover availability (`EddiDown`, `EddiMetricsAbsent`, `EddiRestartLoop`),
 the 5xx ratio, the coordinator backlog and dead letters, pipeline task errors,
 executor saturation, LLM error ratio and p95 latency, the tool failure ratio, the
 vault, the Platform Operator gate and canary, audit drops, queue fill and chain
-collisions, quota-store failures, schedule and NATS dead letters, and heap after
+collisions, quota-store failures, schedule dead letters, and heap after
 GC. Every rule has a runbook in
 [monitoring-guide.md → Alert runbooks](monitoring/monitoring-guide.md#alert-runbooks),
 linked from its `runbook_url` annotation; `promtool test rules` cases in

@@ -16,10 +16,17 @@ import java.util.Map;
  *            the conversation properties the rules name (all of them on a cache
  *            miss), as plain values
  * @param outputText
- *            the turn's output text, at most {@link #MAX_OUTPUT_CHARS};
- *            {@code null} when no rule reads {@code output.json}
+ *            the turn's output text; {@code null} when no rule reads
+ *            {@code output.json}, or when it is longer than
+ *            {@link #MAX_OUTPUT_CHARS}
  * @param actions
  *            the turn's actions; {@code null} when no rule reads them
+ * @param userId
+ *            the conversation owner, kept only to record with a stored value
+ *            for GDPR erasure; never shown or sent; may be {@code null}
+ * @param capturedAt
+ *            when the turn was copied, compared with an erasure fence; may be
+ *            {@code null}
  */
 public record TurnSnapshot(String conversationId, String agentId, Integer agentVersion, Map<String, Object> properties, String outputText,
         List<String> actions, String userId, Instant capturedAt) {
