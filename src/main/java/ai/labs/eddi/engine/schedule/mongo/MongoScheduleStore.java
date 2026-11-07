@@ -572,6 +572,12 @@ public class MongoScheduleStore implements IScheduleStore {
      * A CLAIMED row's lease has run out: {@code claimedAt <= dbNow - lease}. The
      * one definition {@link #findDueSchedules} and the claim share — they MUST
      * agree, else expired CLAIMED rows are returned every poll but never re-fired.
+     * <p>
+     * {@code $expr} orders a null or missing {@code claimedAt} below every number,
+     * so a CLAIMED row without one counts as expired and is reclaimed rather than
+     * left stuck. Every claim writes the field; such a row comes only from
+     * {@link #createSchedule}, which stores the caller's {@code fireStatus} as
+     * given (PostgreSQL's always inserts PENDING, so it never holds one).
      */
     private static Bson leaseExpired(Duration lease) {
         return and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()),

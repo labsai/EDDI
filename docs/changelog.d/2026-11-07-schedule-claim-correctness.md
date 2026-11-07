@@ -68,6 +68,12 @@ on that instance, it does not duplicate a fire.
   fires. An existing CLAIMED row written by an older version carries an
   application-clock `claimedAt`; after the upgrade its lease is judged against
   the database clock, which differs from it only by the skew this fix exists for.
+- MongoDB: a CLAIMED schedule with no `claimedAt` now counts as an expired
+  lease and is reclaimed (recorded as a failed attempt and retried), where it
+  used to stay CLAIMED and never fire. No claim produces such a row, but
+  `createSchedule` stores the caller's `fireStatus` as given, so a REST create
+  that sends `"fireStatus": "CLAIMED"` could. PostgreSQL always inserts
+  PENDING, so it never holds one.
 
 ```decision-log
 | 2026-11-07 | Schedule leases are written and judged on the database's clock; the poller's claim re-checks nextFire <= now, manual fires use tryClaimAnyTime | Two paths to a duplicate fire: a row re-armed between a poll's read and its claim, and claimedAt compared across instances' clocks | A poller-only due-checked claim beside the old one (leaves the unsafe call as the default); clock_timestamp() (changes during the statement) |
