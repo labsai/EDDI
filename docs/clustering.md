@@ -214,7 +214,10 @@ replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2
 `A2A_CONTEXTS`, `DEPLOYMENTS` (the `autoDeploy=false` deployments and their undeploy tombstones), `ERASED` (the GDPR erasure marker of a conversation: written before its dead letters are purged, and checked by a node that forwards a dead letter it kept locally; it expires after `eddi.cluster.erasure-marker-ttl`, `P7D`), `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
 principal's writes on every node), `A2A_INDEX` (per principal, the task and context ids it
 holds — how a GDPR sweep or export on one node reaches records another node wrote, since
-bucket keys are hashed and cannot be enumerated by principal), `TOOL_PAGES`, `DEDUP` and
+bucket keys are hashed and cannot be enumerated by principal; split into 16 entries per
+principal of at most 625 task and 625 context ids each, about 330 KB at the 256-character
+id limit, so no entry nears the NATS payload limit of 1 MB that would keep it on the writing
+node only), `TOOL_PAGES`, `DEDUP` and
 `CHANNEL`; object store: `ARCHIVES`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
 `eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
@@ -506,7 +509,12 @@ hand. None of them is part of the normal build or a required check.
   node's A2A task store reads before it writes, and the erasing node sweeps `A2A_TASKS` and
   `A2A_CONTEXTS` several steps later, through the per-principal `A2A_INDEX` so records other
   nodes wrote are reached (the index is kept with a revision-checked compare-and-set on the
-  bucket, so concurrent writers on any nodes all land their ids). One gap remains, and it is
+  bucket, so concurrent writers on any nodes all land their ids). The sweep counts what it
+  removed from the buckets, so the `a2aTasks` entry of the erasure result includes records
+  other nodes wrote. It also reads and removes the single per-principal index entry that
+  releases before the 16-entry split kept, so during a rolling upgrade an erasure on an
+  upgraded node reaches what the older nodes wrote; one run on an older node reads only that
+  single entry, and misses what upgraded nodes wrote. One gap remains, and it is
   narrow: on the erasing node the check and the write are serialised against the sweep; on
   another node they are not, so a write that read the marker as absent an instant before it
   was set and whose `put` reaches the bucket only after the sweep survives, until the 24 h

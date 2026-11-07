@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -35,7 +36,9 @@ import java.util.concurrent.TimeUnit;
  * unreachable. {@code putIfAbsent} is a KV {@code create}, i.e. atomic across
  * the cluster. <b>Bulk operations</b> ({@code size}, iteration, {@code clear})
  * see the node-local view only: the shared bucket cannot enumerate original
- * keys.
+ * keys. The views ({@code keySet}, {@code values}, {@code entrySet}) are
+ * read-only (see {@link ICache}): a removal through one changed the node-local
+ * copy and never reached the bucket.
  * <p>
  * <b>Degraded</b>: with {@code failClosed} (replay nonces under the default
  * {@code eddi.cluster.degraded.nonces=reject}) a write throws
@@ -84,8 +87,12 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
      */
     private final Set<String> localOnly = ConcurrentHashMap.newKeySet();
 
+    /** What the views read: the node-local copy, never changed through them. */
+    private final Map<K, V> readOnlyLocal;
+
     public SharedKvCache(ICache<K, V> local, ISharedKv shared, boolean failClosed) {
         this.local = local;
+        this.readOnlyLocal = Collections.unmodifiableMap(local);
         this.shared = shared;
         this.failClosed = failClosed;
     }
@@ -169,6 +176,12 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         return get(key) != null;
     }
 
+    /**
+     * Always answers null: the bucket's {@code put} does not report the value it
+     * replaced, and reading it first would add a round trip to every write. A
+     * caller that needs the previous value uses {@link #replace(Object, Object)} or
+     * {@link #putIfAbsent(Object, Object)}.
+     */
     @Override
     public V put(K key, V value) {
         local.put(key, value);
@@ -204,16 +217,27 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         }
     }
 
+    /**
+     * Answers with the value the shared bucket held, or the node-local copy when
+     * the bucket held none (a value only this node has, or NATS unreachable). The
+     * bucket's value is read before the delete because the mirror alone was wrong
+     * on every node but the writer: one that never wrote the key deleted it from
+     * the bucket and answered null — and the GDPR erasure counts A2A records by
+     * that answer.
+     */
     @Override
     public V remove(Object key) {
         V previous = local.remove(key);
         localOnly.remove(key(key));
         try {
+            Optional<ISharedKv.Versioned> stored = shared.get(key(key));
             shared.delete(key(key));
+            V removed = stored.map(versioned -> decode(versioned.value())).orElse(null);
+            return removed != null ? removed : previous;
         } catch (ClusterUnavailableException e) {
             degraded(e);
+            return previous;
         }
-        return previous;
     }
 
     @Override
@@ -365,16 +389,16 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
 
     @Override
     public Set<K> keySet() {
-        return local.keySet();
+        return readOnlyLocal.keySet();
     }
 
     @Override
     public Collection<V> values() {
-        return local.values();
+        return readOnlyLocal.values();
     }
 
     @Override
     public Set<Entry<K, V>> entrySet() {
-        return local.entrySet();
+        return readOnlyLocal.entrySet();
     }
 }
