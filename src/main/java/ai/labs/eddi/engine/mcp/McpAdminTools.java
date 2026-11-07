@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.engine.schedule.rest.RestScheduleStore;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -32,20 +31,15 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.DeploymentFailure;
-import ai.labs.eddi.engine.continuation.ConversationContinuations;
-import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
-import ai.labs.eddi.engine.runtime.internal.CronDescriber;
-import ai.labs.eddi.engine.runtime.internal.CronParser;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
@@ -60,12 +54,11 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
-import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
@@ -88,6 +81,9 @@ public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
 
+    /** The page {@code list_schedules} asks REST for. */
+    private static final int SCHEDULE_LIST_LIMIT = 100;
+
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
     private final AgentCascadeService cascadeService;
@@ -102,24 +98,21 @@ public class McpAdminTools {
      * a success.
      */
     private final StrictConfigurationParser configParser;
-    private final IScheduleStore scheduleStore;
-    private final ScheduleFireExecutor scheduleFireExecutor;
-    private final SchedulePollerService schedulePollerService;
+
+    /**
+     * The in-process REST schedule resource, the same bean
+     * {@code /schedulestore/schedules} serves. Its checks read the request's
+     * {@link SecurityIdentity} — the MCP caller — so the schedule tools validate,
+     * gate, stamp and fire exactly as REST does, instead of keeping a copy of that
+     * logic that drifts.
+     */
+    private final IRestScheduleStore scheduleStore;
     private final SecurityIdentity identity;
     private final boolean authEnabled;
 
-    /**
-     * The scheduler's floor, the one {@code RestScheduleStore} enforces on REST
-     * creation: a recurring schedule firing more often than this is a loop of agent
-     * turns the deployment did not budget for.
-     */
-    @ConfigProperty(name = "eddi.schedule.min-interval-seconds", defaultValue = "60")
-    long minScheduleIntervalSeconds = 60;
-
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
-            StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
-            SchedulePollerService schedulePollerService, SecurityIdentity identity,
+            StrictConfigurationParser configParser, IRestScheduleStore scheduleStore, SecurityIdentity identity,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled, AgentCascadeService cascadeService) {
         this.cascadeService = cascadeService;
         this.restInterfaceFactory = restInterfaceFactory;
@@ -127,8 +120,6 @@ public class McpAdminTools {
         this.jsonSerialization = jsonSerialization;
         this.configParser = configParser;
         this.scheduleStore = scheduleStore;
-        this.scheduleFireExecutor = scheduleFireExecutor;
-        this.schedulePollerService = schedulePollerService;
         this.identity = identity;
         this.authEnabled = authEnabled;
     }
@@ -1011,12 +1002,19 @@ public class McpAdminTools {
     }
 
     // ── Schedule Management ───────────────────────────────────────────────
+    //
+    // Thin adapters over the in-process IRestScheduleStore: every check, default,
+    // creator stamp and the claim/fire/release flow of a manual fire is REST's.
+    // These methods only turn arguments into a request and a Response into a
+    // tool result.
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
             + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
+            + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
+            + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
-                                 @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON, or HEARTBEAT when only heartbeatIntervalSeconds is given)",
+                                 @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON; HEARTBEAT whenever heartbeatIntervalSeconds is given)",
                                           required = false) String triggerType,
                                  @ToolArg(description = "5-field cron expression, e.g. '0 9 * * MON-FRI' (optional; required for CRON)",
                                           required = false) String cron,
@@ -1025,8 +1023,8 @@ public class McpAdminTools {
                                  @ToolArg(description = "Message text to send to the Agent on each fire (optional; required for CRON, defaults to 'heartbeat' for HEARTBEAT)",
                                           required = false) String message,
                                  @ToolArg(description = "Human-readable name for this schedule (required)") String name,
-                                 @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: UTC)", required = false,
-                                          defaultValue = "UTC") String timeZone,
+                                 @ToolArg(description = "IANA time zone, e.g. 'Europe/Vienna' (default: the server's eddi.schedule.default-timezone, UTC unless an operator changed it)",
+                                          required = false) String timeZone,
                                  @ToolArg(description = "Conversation strategy: 'new' or 'persistent' (default: 'new' for CRON, 'persistent' for HEARTBEAT)",
                                           required = false) String conversationStrategy,
                                  @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')", required = false,
@@ -1038,108 +1036,65 @@ public class McpAdminTools {
             return errorJson("agentId is required");
         if (name == null || name.isBlank())
             return errorJson("name is required");
+        TriggerType type = null;
+        if (triggerType != null && !triggerType.isBlank()) {
+            try {
+                type = TriggerType.valueOf(triggerType.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                return errorJson("triggerType must be 'CRON' or 'HEARTBEAT', got: " + triggerType, "invalid_schedule", null);
+            }
+        }
         try {
-            // Determine trigger type
-            ScheduleConfiguration.TriggerType type = ScheduleConfiguration.TriggerType.CRON;
-            if (triggerType != null && !triggerType.isBlank()) {
-                type = ScheduleConfiguration.TriggerType.valueOf(triggerType.toUpperCase());
-            } else if (heartbeatIntervalSeconds != null) {
-                type = ScheduleConfiguration.TriggerType.HEARTBEAT;
-            }
-
-            // Validate based on type
-            if (type == ScheduleConfiguration.TriggerType.CRON) {
-                if (cron == null || cron.isBlank())
-                    return errorJson("cron expression is required for CRON triggers");
-                if (message == null || message.isBlank())
-                    return errorJson("message is required for CRON triggers");
-                CronParser.validate(cron);
-                long cronInterval = CronParser.computeMinIntervalSeconds(cron,
-                        ZoneId.of(timeZone != null && !timeZone.isBlank() ? timeZone : "UTC"));
-                if (cronInterval < minScheduleIntervalSeconds) {
-                    return errorJson("Cron interval (" + cronInterval + "s) is below the minimum allowed (" + minScheduleIntervalSeconds
-                            + "s); use a less frequent schedule, or have an operator lower eddi.schedule.min-interval-seconds");
-                }
-            } else {
-                if (heartbeatIntervalSeconds == null || heartbeatIntervalSeconds <= 0) {
-                    return errorJson("heartbeatIntervalSeconds is required and must be > 0 for HEARTBEAT triggers");
-                }
-                if (heartbeatIntervalSeconds < minScheduleIntervalSeconds) {
-                    return errorJson("Heartbeat interval (" + heartbeatIntervalSeconds + "s) is below the minimum allowed ("
-                            + minScheduleIntervalSeconds + "s); use a longer interval, or have an operator lower eddi.schedule.min-interval-seconds");
-                }
-            }
-
+            // As sent: every default (time zone, strategy, environment, userId, the
+            // heartbeat message) and nextFire are REST's to apply, as on any POST.
             var schedule = new ScheduleConfiguration();
             schedule.setName(name);
             schedule.setAgentId(agentId);
-            schedule.setTriggerType(type);
+            if (type != null) {
+                schedule.setTriggerType(type);
+            }
             schedule.setCronExpression(cron);
             schedule.setHeartbeatIntervalSeconds(heartbeatIntervalSeconds);
-            schedule.setMessage(
-                    message != null && !message.isBlank() ? message : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "heartbeat" : null));
-            schedule.setEnvironment(environment != null && !environment.isBlank() ? environment : "production");
-            schedule.setConversationStrategy(conversationStrategy != null && !conversationStrategy.isBlank()
-                    ? conversationStrategy
-                    : (type == ScheduleConfiguration.TriggerType.HEARTBEAT ? "persistent" : "new"));
-            schedule.setTimeZone(timeZone != null && !timeZone.isBlank() ? timeZone : "UTC");
-            schedule.setUserId(userId != null && !userId.isBlank() ? userId : "system:scheduler");
-            schedule.setFireStatus(ScheduleConfiguration.FireStatus.PENDING);
-            schedule.setEnabled(true);
+            schedule.setMessage(message);
+            schedule.setTimeZone(timeZone);
+            schedule.setConversationStrategy(conversationStrategy);
+            schedule.setUserId(userId);
+            schedule.setEnvironment(environment);
 
-            // Compute initial nextFire
-            Instant nextFire;
-            String description;
-            if (type == ScheduleConfiguration.TriggerType.HEARTBEAT) {
-                long sec = heartbeatIntervalSeconds != null ? heartbeatIntervalSeconds : 300L;
-                nextFire = Instant.now().plusSeconds(sec);
-                description = sec < 60
-                        ? "Every " + sec + " seconds"
-                        : sec < 3600 ? "Every " + (sec / 60) + " minutes" : "Every " + (sec / 3600) + " hours";
-            } else {
-                ZoneId zone = ZoneId.of(schedule.getTimeZone());
-                nextFire = CronParser.computeNextFire(cron, Instant.now(), zone);
-                description = CronDescriber.describe(cron);
+            Response response = scheduleStore.createSchedule(schedule);
+            if (response.getStatus() != Response.Status.CREATED.getStatusCode()
+                    || !(response.getEntity() instanceof ScheduleConfiguration created)) {
+                return responseJson(jsonSerialization, response);
             }
-            schedule.setNextFire(nextFire);
-
-            String id = scheduleStore.createSchedule(schedule);
-
             var result = new LinkedHashMap<String, Object>();
-            result.put("scheduleId", id);
-            result.put("name", name);
-            result.put("triggerType", type.name());
-            result.put("agentId", agentId);
-            if (cron != null)
-                result.put("cronExpression", cron);
-            if (heartbeatIntervalSeconds != null)
-                result.put("heartbeatIntervalSeconds", heartbeatIntervalSeconds);
-            result.put("description", description);
-            result.put("timeZone", schedule.getTimeZone());
-            result.put("nextFire", nextFire.toString());
-            result.put("conversationStrategy", schedule.getConversationStrategy());
-            result.put("environment", schedule.getEnvironment());
+            result.put("scheduleId", created.getId());
+            result.put("name", created.getName());
+            result.put("triggerType", created.getTriggerType().name());
+            result.put("agentId", created.getAgentId());
+            if (created.getCronExpression() != null)
+                result.put("cronExpression", created.getCronExpression());
+            if (created.getHeartbeatIntervalSeconds() != null)
+                result.put("heartbeatIntervalSeconds", created.getHeartbeatIntervalSeconds());
+            result.put("description", created.getCronDescription());
+            result.put("timeZone", created.getTimeZone());
+            result.put("nextFire", created.getNextFire() != null ? created.getNextFire().toString() : null);
+            result.put("conversationStrategy", created.getConversationStrategy());
+            result.put("environment", created.getEnvironment());
             return resultJson("schedule_created", result);
-        } catch (IllegalArgumentException e) {
-            return errorJson("Invalid schedule", e);
         } catch (Exception e) {
             return toolFailure(LOGGER, "create_schedule", "Failed to create schedule", e);
         }
     }
 
-    @Tool(name = "list_schedules", description = "List all scheduled Agent triggers. "
-            + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fire count. " + "Optionally filter by agentId.")
+    @Tool(name = "list_schedules", description = "List scheduled Agent triggers, newest first, up to " + SCHEDULE_LIST_LIMIT + ". "
+            + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fire count; "
+            + "truncated=true when the limit was reached (filter by agentId to see the rest). Optionally filter by agentId.")
     public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {
-            List<ScheduleConfiguration> schedules;
-            if (agentId != null && !agentId.isBlank()) {
-                schedules = scheduleStore.readSchedulesByAgentId(agentId);
-            } else {
-                schedules = scheduleStore.readAllSchedules(100);
-            }
+            String agentFilter = agentId != null && !agentId.isBlank() ? agentId : null;
+            List<ScheduleConfiguration> schedules = scheduleStore.readAllSchedules(agentFilter, SCHEDULE_LIST_LIMIT, 0);
 
-            // Build enriched response
             var items = new ArrayList<Map<String, Object>>();
             for (var s : schedules) {
                 var item = new LinkedHashMap<String, Object>();
@@ -1149,10 +1104,12 @@ public class McpAdminTools {
                 item.put("agentId", s.getAgentId());
                 if (s.getCronExpression() != null) {
                     item.put("cronExpression", s.getCronExpression());
-                    item.put("cronDescription", CronDescriber.describe(s.getCronExpression()));
                 }
                 if (s.getHeartbeatIntervalSeconds() != null) {
                     item.put("heartbeatIntervalSeconds", s.getHeartbeatIntervalSeconds());
+                }
+                if (s.getCronDescription() != null) {
+                    item.put("cronDescription", s.getCronDescription());
                 }
                 item.put("enabled", s.isEnabled());
                 item.put("fireStatus", s.getFireStatus() != null ? s.getFireStatus().name() : null);
@@ -1165,6 +1122,8 @@ public class McpAdminTools {
 
             var result = new LinkedHashMap<String, Object>();
             result.put("count", items.size());
+            // REST's paging rule: only a full page may have more behind it.
+            result.put("truncated", items.size() >= SCHEDULE_LIST_LIMIT);
             result.put("schedules", items);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
@@ -1189,10 +1148,12 @@ public class McpAdminTools {
             result.put("agentId", schedule.getAgentId());
             if (schedule.getCronExpression() != null) {
                 result.put("cronExpression", schedule.getCronExpression());
-                result.put("cronDescription", CronDescriber.describe(schedule.getCronExpression()));
             }
             if (schedule.getHeartbeatIntervalSeconds() != null) {
                 result.put("heartbeatIntervalSeconds", schedule.getHeartbeatIntervalSeconds());
+            }
+            if (schedule.getCronDescription() != null) {
+                result.put("cronDescription", schedule.getCronDescription());
             }
             result.put("timeZone", schedule.getTimeZone());
             result.put("message", schedule.getMessage());
@@ -1217,12 +1178,12 @@ public class McpAdminTools {
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
-            // The alerts-maintenance schedule is the server's own; REST refuses this too.
-            if (RestScheduleStore.isSystemSchedule(scheduleStore.readSchedule(scheduleId))) {
-                return errorJson("This schedule is managed by the server (alert retries, digests and retention) and cannot be deleted.",
-                        RestScheduleStore.SYSTEM_SCHEDULE, null);
+            // REST refuses the server's own schedules (SYSTEM_SCHEDULE), a HITL timeout
+            // to a non-admin, and another user's schedule.
+            Response response = scheduleStore.deleteSchedule(scheduleId);
+            if (!isSuccess(response)) {
+                return responseJson(jsonSerialization, response);
             }
-            scheduleStore.deleteSchedule(scheduleId);
             return resultJson("schedule_deleted", Map.of("scheduleId", scheduleId));
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_schedule", "Failed to delete schedule", e);
@@ -1230,83 +1191,22 @@ public class McpAdminTools {
     }
 
     @Tool(name = "fire_schedule_now", description = "Manually trigger a schedule fire immediately. "
-            + "Useful for testing or one-off executions. Returns the fire result with conversation ID.")
+            + "Useful for testing or one-off executions. Refused exactly as POST /schedulestore/schedules/{id}/fire refuses: "
+            + "a HITL approval timeout or a conversation's continuation never (CONFLICT), a schedule that cannot be claimed "
+            + "right now (CONFLICT, with its state), and an ingestion, email-poll, team-cadence or lesson schedule without EDIT "
+            + "on what it drives (FORBIDDEN). A fire past its bound answers TIMEOUT. Returns the fire result with conversation ID.")
     public String fireScheduleNow(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
+            // Read through REST for the name in the result: the fire log does not carry it.
             var schedule = scheduleStore.readSchedule(scheduleId);
-            // A HITL approval timeout fires the configured AUTO_APPROVE/AUTO_REJECT/
-            // ABORT decision with a system actor and no owner/admin/approver check, so
-            // REST refuses to fire one for EVERYONE. This tool must refuse too, or it
-            // is simply the same bypass with a different front door.
-            if (HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
-                return errorJson("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
-                        + "Resolve the pending approval via the conversation's resume or cancel endpoint.");
-            }
-            if (ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
-                return errorJson("This schedule is the next turn of a self-continuing conversation and cannot be fired manually. "
-                        + "It runs on its own; end or cancel the conversation to stop it.");
-            }
-            // Claim it on the poller's own terms first, and release the claim in the
-            // finally. Firing unclaimed raced the poller — with
-            // conversationStrategy=persistent both pushed a turn into the SAME
-            // conversation — and skipping recordManualFireOutcome meant the fire never
-            // reached the retry/backoff/one-shot state machine at all: a failure here
-            // did not increment failCount, and a success did not re-arm the schedule.
-            if (!schedulePollerService.claimForManualFire(schedule)) {
-                return errorJson("Schedule " + scheduleId + " is not in a claimable state (fireStatus="
-                        + schedule.getFireStatus() + ", enabled=" + schedule.isEnabled()
-                        + "); it may be disabled, firing already, dead-lettered, or still in retry backoff.");
-            }
-            ScheduleFireLog fireLog = null;
-            boolean abandoned = false;
-            try {
-                // The attempt this actually is, not a constant 1 — a manual retry of a
-                // schedule on its third failure logged as "attempt 1" and hid the history.
-                // Bounded exactly like REST's POST /{id}/fire: unbounded, a long run
-                // outlived its claim's lease and the poller started it a second time.
-                String instanceId = schedulePollerService.getInstanceId();
-                int attemptNumber = schedule.getFailCount() + 1;
-                fireLog = SchedulePollerService.runWithinDeadline(() -> scheduleFireExecutor.fire(schedule, instanceId, attemptNumber),
-                        schedulePollerService.manualFireDeadline());
-            } catch (SchedulePollerService.FireAbandonedException e) {
-                // Not released: a worker that ignores the interrupt is still acting; the lease
-                // expiry
-                // counts it as a failed attempt.
-                abandoned = true;
-                LOGGER.warn("MCP fire_schedule_now abandoned the fire of " + scheduleId + ": " + e.getMessage());
-            } finally {
-                // Always release the claim, whatever happened: a manual fire that left
-                // the row CLAIMED would block the poller until the lease expired. A null
-                // fireLog (the executor threw) is recorded as a failure, which is what it
-                // is.
-                //
-                // Park the interrupt across that write, exactly as
-                // RestScheduleStore.fireNow and SchedulePollerService.fireClaimedSchedule
-                // do. ScheduleFireExecutor re-asserts a consumed interrupt before
-                // returning, so on the interrupted path (shutdown, a cancelled tool
-                // invocation) this block would otherwise run with the flag set — and the
-                // synchronous Mongo driver throws MongoInterruptedException on connection
-                // checkout. recordManualFireOutcome swallows that, so the claim would
-                // never be released and failCount never incremented, leaving the schedule
-                // CLAIMED until its lease expires. The flag is re-asserted immediately
-                // afterwards so the cancellation signal still reaches the caller.
-                boolean wasInterrupted = Thread.interrupted();
-                try {
-                    if (!abandoned) {
-                        schedulePollerService.recordManualFireOutcome(schedule, fireLog);
-                    }
-                } finally {
-                    if (wasInterrupted) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-            }
-            if (abandoned) {
-                return errorJson("The fire did not finish within its bound and was interrupted; it may still be running. The schedule stays "
-                        + "claimed until its lease expires, then counts as a failed attempt.");
+            // REST claims the schedule on the poller's terms, fires it within the manual
+            // deadline and records the outcome, after every refusal above.
+            Response response = scheduleStore.fireNow(scheduleId);
+            if (response.getStatus() != Response.Status.OK.getStatusCode() || !(response.getEntity() instanceof ScheduleFireLog fireLog)) {
+                return responseJson(jsonSerialization, response);
             }
 
             var result = new LinkedHashMap<String, Object>();
@@ -1334,12 +1234,19 @@ public class McpAdminTools {
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
-            scheduleStore.requeueDeadLetter(scheduleId);
+            Response response = scheduleStore.retryDeadLetter(scheduleId);
+            if (!isSuccess(response)) {
+                return responseJson(jsonSerialization, response);
+            }
             return resultJson("schedule_requeued",
                     Map.of("scheduleId", scheduleId, "status", "PENDING", "message", "Schedule requeued for next poll cycle"));
         } catch (Exception e) {
             return toolFailure(LOGGER, "retry_failed_schedule", "Failed to retry schedule", e);
         }
+    }
+
+    private static boolean isSuccess(Response response) {
+        return response != null && response.getStatusInfo().getFamily() == Response.Status.Family.SUCCESSFUL;
     }
 
     // ==================== Channel Integration Tools ====================
