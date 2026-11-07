@@ -57,7 +57,7 @@ class ApiCallExecutorAgentCallMarkerTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));

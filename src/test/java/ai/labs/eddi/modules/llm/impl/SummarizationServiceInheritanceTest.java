@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.eq;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -44,7 +46,7 @@ class SummarizationServiceInheritanceTest {
         ChatModel model = mock(ChatModel.class);
         when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("a summary")).build());
-        when(registry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         service = new SummarizationService(registry, new SimpleMeterRegistry());
         service.initMetrics();
@@ -53,7 +55,7 @@ class SummarizationServiceInheritanceTest {
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedParams() throws Exception {
         ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(registry).getOrCreate(anyString(), captor.capture());
+        verify(registry).getOrCreate(anyString(), captor.capture(), any());
         return captor.getValue();
     }
 
@@ -65,7 +67,7 @@ class SummarizationServiceInheritanceTest {
                 "baseUrl", "https://llm.internal/v1",
                 "modelName", "gpt-4o"));
 
-        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams);
+        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams, SecretAccess.outsideAgentGrants("test"));
 
         Map<String, String> params = capturedParams();
         assertEquals("sk-parent-key", params.get("apiKey"), "without the key the summarizer can never authenticate");
@@ -77,7 +79,7 @@ class SummarizationServiceInheritanceTest {
     void overridesModelName() throws Exception {
         Map<String, String> parentParams = new HashMap<>(Map.of("apiKey", "k", "modelName", "gpt-4o"));
 
-        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams);
+        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("gpt-4o-mini", capturedParams().get("modelName"));
     }
@@ -87,7 +89,7 @@ class SummarizationServiceInheritanceTest {
     void stripsResponseFormat() throws Exception {
         Map<String, String> parentParams = new HashMap<>(Map.of("apiKey", "k", "responseFormat", "json"));
 
-        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams);
+        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams, SecretAccess.outsideAgentGrants("test"));
 
         assertFalse(capturedParams().containsKey("responseFormat"));
     }
@@ -97,7 +99,7 @@ class SummarizationServiceInheritanceTest {
     void doesNotMutateCallerMap() throws Exception {
         Map<String, String> parentParams = new HashMap<>(Map.of("apiKey", "k", "modelName", "gpt-4o"));
 
-        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams);
+        service.summarize("content", "instructions", "openai", "gpt-4o-mini", parentParams, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("gpt-4o", parentParams.get("modelName"), "the parent task's params must survive intact");
     }
@@ -110,7 +112,8 @@ class SummarizationServiceInheritanceTest {
     @Test
     @DisplayName("the model goes under the key the provider's builder reads — model for Ollama")
     void ollamaGetsTheModelKey() throws Exception {
-        service.summarize("content", "instructions", "ollama", "qwen2.5:3b", new HashMap<>(Map.of("baseUrl", "http://localhost:11434")));
+        service.summarize("content", "instructions", "ollama", "qwen2.5:3b", new HashMap<>(Map.of("baseUrl", "http://localhost:11434")),
+                SecretAccess.outsideAgentGrants("test"));
 
         Map<String, String> params = capturedParams();
         assertEquals("qwen2.5:3b", params.get("model"));
@@ -132,7 +135,8 @@ class SummarizationServiceInheritanceTest {
     @Test
     @DisplayName("no summarizer model given — the inherited model is kept, not overwritten with null")
     void blankModelKeepsTheInheritedOne() throws Exception {
-        service.summarize("content", "instructions", "ollama", null, new HashMap<>(Map.of("model", "llama3.2")));
+        service.summarize("content", "instructions", "ollama", null, new HashMap<>(Map.of("model", "llama3.2")),
+                SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("llama3.2", capturedParams().get("model"));
     }
@@ -140,7 +144,7 @@ class SummarizationServiceInheritanceTest {
     @Test
     @DisplayName("the legacy 4-arg call still works and passes only the model name")
     void legacyCallPassesModelNameOnly() throws Exception {
-        service.summarize("content", "instructions", "openai", "gpt-4o-mini");
+        service.summarize("content", "instructions", "openai", "gpt-4o-mini", SecretAccess.outsideAgentGrants("test"));
 
         Map<String, String> params = capturedParams();
         assertEquals("gpt-4o-mini", params.get("modelName"));

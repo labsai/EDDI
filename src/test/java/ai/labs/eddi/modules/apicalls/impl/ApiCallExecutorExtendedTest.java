@@ -51,7 +51,7 @@ class ApiCallExecutorExtendedTest {
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         CallerIdentityContext callerIdentityContext = mock(CallerIdentityContext.class);
         // Pass-through: these tests exercise no ${caller:...} references.

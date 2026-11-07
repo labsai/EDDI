@@ -124,12 +124,12 @@ class CascadingModelExecutorDeadlineTest {
         });
         ChatModel second = modelAnswering(() -> "a fine and detailed answer from the second model");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(first);
-        when(registry.getOrCreate(eq("gemini"), anyMap())).thenReturn(second);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(first);
+        when(registry.getOrCreate(eq("gemini"), anyMap(), any())).thenReturn(second);
 
         var result = run(registry, twoStepCascade(), memory(deadline), Map.of("apiKey", "k"));
 
-        verify(registry, never()).getOrCreate(eq("gemini"), anyMap());
+        verify(registry, never()).getOrCreate(eq("gemini"), anyMap(), any());
         verify(second, never()).chat(anyList());
         assertEquals(0, result.stepUsed(), "the best answer so far is served instead of starting a step that cannot finish");
         assertEquals(1.0, meters.counter("eddi.llm.turn.deadline.exceeded", "stage", "cascade").count(), "the stop is counted");
@@ -143,8 +143,8 @@ class CascadingModelExecutorDeadlineTest {
         ChatModel first = modelAnswering(() -> "");
         ChatModel second = modelAnswering(() -> "a fine and detailed answer from the second model");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(first);
-        when(registry.getOrCreate(eq("gemini"), anyMap())).thenReturn(second);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(first);
+        when(registry.getOrCreate(eq("gemini"), anyMap(), any())).thenReturn(second);
 
         var result = run(registry, twoStepCascade(), memory(deadline), Map.of("apiKey", "k"));
 
@@ -163,7 +163,7 @@ class CascadingModelExecutorDeadlineTest {
             return "late";
         });
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(hanging);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(hanging);
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
         cascade.setSteps(List.of(step("openai", 0.5, 30_000)));
@@ -188,8 +188,8 @@ class CascadingModelExecutorDeadlineTest {
         ChatModel first = modelAnswering(() -> "");
         ChatModel second = modelAnswering(() -> "a fine and detailed answer from the second model");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(first);
-        when(registry.getOrCreate(eq("gemini"), anyMap())).thenReturn(second);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(first);
+        when(registry.getOrCreate(eq("gemini"), anyMap(), any())).thenReturn(second);
 
         var result = run(registry, twoStepCascade(), memory(null), Map.of("apiKey", "k"));
 
@@ -204,7 +204,7 @@ class CascadingModelExecutorDeadlineTest {
     void modelTimeoutIsClampedToTheStep() throws Exception {
         ChatModel model = modelAnswering(() -> "a fine and detailed answer from the model");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(model);
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
         cascade.setSteps(List.of(step("openai", 0.0, 25_000)));
@@ -214,7 +214,7 @@ class CascadingModelExecutorDeadlineTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> params = ArgumentCaptor.forClass(Map.class);
-        verify(registry).getOrCreate(eq("openai"), params.capture());
+        verify(registry).getOrCreate(eq("openai"), params.capture(), any());
         assertEquals("25000", params.getValue().get("timeout"));
         assertEquals("120000", base.get("timeout"), "the task's own map is not modified");
     }
@@ -224,7 +224,7 @@ class CascadingModelExecutorDeadlineTest {
     void shorterModelTimeoutIsUntouched() throws Exception {
         ChatModel model = modelAnswering(() -> "a fine and detailed answer from the model");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(model);
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
         cascade.setSteps(List.of(step("openai", 0.0, 25_000)));
@@ -233,7 +233,7 @@ class CascadingModelExecutorDeadlineTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> params = ArgumentCaptor.forClass(Map.class);
-        verify(registry).getOrCreate(eq("openai"), params.capture());
+        verify(registry).getOrCreate(eq("openai"), params.capture(), any());
         assertEquals("20000", params.getValue().get("timeout"));
     }
 

@@ -86,7 +86,7 @@ class ChannelTargetRouterWebhookTest {
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(descriptor));
         when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
-        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret-0123456789");
+        when(secretResolver.resolveValue(eq("${vault:hook-secret}"), any())).thenReturn("plain-secret-0123456789");
 
         var found = router.getWebhookIntegration(WEBHOOK_ID);
 
@@ -146,7 +146,7 @@ class ChannelTargetRouterWebhookTest {
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(descriptor));
         when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
-        when(secretResolver.resolveValue(anyString())).thenReturn(resolved);
+        when(secretResolver.resolveValue(anyString(), any())).thenReturn(resolved);
         var found = router.getWebhookIntegration(WEBHOOK_ID);
         assertTrue(found.isPresent());
         return found.get().getPlatformConfig().get("signingSecret");
@@ -247,13 +247,13 @@ class ChannelTargetRouterWebhookTest {
         var config = webhook(target("default"));
         config.setPlatformConfig(Map.of("signingSecret", "${vault:hook-secret}", "inputTemplate", "leak ${vault:restricted}"));
         storeIntegration(config);
-        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret-0123456789");
-        when(secretResolver.resolveValue("leak ${vault:restricted}")).thenReturn("leak PLAINTEXT");
+        when(secretResolver.resolveValue(eq("${vault:hook-secret}"), any())).thenReturn("plain-secret-0123456789");
+        when(secretResolver.resolveValue(eq("leak ${vault:restricted}"), any())).thenReturn("leak PLAINTEXT");
 
         var found = router.getWebhookIntegration(WEBHOOK_ID).orElseThrow();
 
         assertEquals("leak ${vault:restricted}", found.getPlatformConfig().get("inputTemplate"));
-        verify(secretResolver, never()).resolveValue("leak ${vault:restricted}");
+        verify(secretResolver, never()).resolveValue(eq("leak ${vault:restricted}"), any());
     }
 
     @Test
@@ -261,7 +261,7 @@ class ChannelTargetRouterWebhookTest {
         var config = slack(Map.of("channelId", "C1", "signingSecret", "${vault:slack-signing}", "botToken", "${vault:slack-bot}"));
         storeIntegration(config);
         // Vault unavailable or key missing: the resolver passes the reference through.
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertTrue(router.getSigningSecrets("slack").isEmpty());
         var found = router.getIntegration("slack", "C1").orElseThrow();
@@ -274,13 +274,13 @@ class ChannelTargetRouterWebhookTest {
     void slackBotTokenWhoseSecretMayNotGoToSlackIsDropped() throws Exception {
         var config = slack(Map.of("channelId", "C1", "signingSecret", "${vault:slack-signing}", "botToken", "${vault:restricted-token}"));
         storeIntegration(config);
-        when(secretResolver.resolveValue("${vault:slack-signing}")).thenReturn("signing-plain");
-        when(secretResolver.resolveValue("${vault:restricted-token}")).thenReturn("xoxb-plain");
+        when(secretResolver.resolveValue(eq("${vault:slack-signing}"), any())).thenReturn("signing-plain");
+        when(secretResolver.resolveValue(eq("${vault:restricted-token}"), any())).thenReturn("xoxb-plain");
         doThrow(new VaultHostAllowlist.HostNotAllowedException("not allowed")).when(vaultHostAllowlist)
                 .requireAllowed(eq(List.of("${vault:restricted-token}")), eq("https://slack.com/api/"), anyString());
 
         assertNull(router.getBotToken("slack", "C1"));
-        verify(secretResolver, never()).resolveValue("${vault:restricted-token}");
+        verify(secretResolver, never()).resolveValue(eq("${vault:restricted-token}"), any());
         assertEquals(Set.of("signing-plain"), router.getSigningSecrets("slack"));
     }
 
@@ -294,14 +294,14 @@ class ChannelTargetRouterWebhookTest {
                 .requireAllowed(eq(List.of("${vault:open-part}", "${vault:restricted-part}")), eq("https://slack.com/api/"), anyString());
 
         assertNull(router.getBotToken("slack", "C1"));
-        verify(secretResolver, never()).resolveValue("${vault:open-part}${vault:restricted-part}");
+        verify(secretResolver, never()).resolveValue(eq("${vault:open-part}${vault:restricted-part}"), any());
     }
 
     @Test
     void slackBotTokenAllowedToGoToSlackIsResolved() throws Exception {
         var config = slack(Map.of("channelId", "C1", "botToken", "${vault:token}"));
         storeIntegration(config);
-        when(secretResolver.resolveValue("${vault:token}")).thenReturn("xoxb-plain");
+        when(secretResolver.resolveValue(eq("${vault:token}"), any())).thenReturn("xoxb-plain");
 
         assertEquals("xoxb-plain", router.getBotToken("slack", "C1"));
         verify(vaultHostAllowlist).requireAllowed(eq(List.of("${vault:token}")), eq("https://slack.com/api/"), anyString());

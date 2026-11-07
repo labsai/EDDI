@@ -167,6 +167,7 @@ public class RestSecretStore implements IRestSecretStore {
 
         try {
             var ref = new SecretReference(tenantId, keyName);
+            String createWarning = null;
 
             // Check if exists (for correct HTTP status)
             boolean exists;
@@ -189,12 +190,10 @@ public class RestSecretStore implements IRestSecretStore {
                     // than left to a persistence default.
                     allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
                 }
-                // Agents deployed while this secret was absent were never checked against
-                // its grant; this is that check.
-                String refusal = grantImpactAnalyzer.refusalToCreate(ref, allowedAgents, grantEnforcement);
-                if (refusal != null) {
-                    return Response.status(Response.Status.CONFLICT).entity(Map.of("error", refusal)).build();
-                }
+                // Advisory: the resolver refuses an agent the grant leaves out whatever
+                // this finds, so the creation goes ahead and the answer says who will be
+                // refused.
+                createWarning = grantImpactAnalyzer.warningOnCreate(ref, allowedAgents, grantEnforcement);
             }
 
             secretProvider.store(ref, body.value(), body.description(), allowedAgents, allowedHosts);
@@ -205,7 +204,13 @@ public class RestSecretStore implements IRestSecretStore {
             // resolution).
             secretResolver.invalidateCache(ref);
 
-            var responseRef = Map.of("reference", ref.toReferenceString(), "tenantId", tenantId, "keyName", keyName);
+            var responseRef = new LinkedHashMap<String, Object>();
+            responseRef.put("reference", ref.toReferenceString());
+            responseRef.put("tenantId", tenantId);
+            responseRef.put("keyName", keyName);
+            if (createWarning != null) {
+                responseRef.put("warning", createWarning);
+            }
 
             if (exists) {
                 return Response.ok(responseRef).build();
@@ -306,17 +311,14 @@ public class RestSecretStore implements IRestSecretStore {
                         secretResolver.invalidateCache(ref);
                     }
                 }
-                // For the agent grant alone, deliberately NOT invalidating the
-                // SecretResolver cache.
-                //
-                // storeSecret has to, because the plaintext behind the cached entry may
-                // have changed. Here it cannot have: the value is untouched, so every
-                // cached entry is still correct. And the cache plays no part in the
-                // grant decision — VaultGrantChecker calls
-                // ISecretProvider.getMetadata, which reads persistence directly on
-                // every call, so the new grant is in force for the very next
-                // deployment either way. Invalidating would only force a needless
-                // decrypt for every agent already using the key.
+                // The agent grant is checked at every resolution against a cached copy
+                // of the grant (#1179), so the new one must reach every node's cache
+                // now: a narrowed grant that waited for the TTL would leave a removed
+                // agent resolving the secret for minutes, and a widened one would keep
+                // refusing the agent just added. invalidateCache reaches the cluster.
+                if (!hostsWritten) {
+                    secretResolver.invalidateCache(ref);
+                }
             }
 
             return Response.ok(grantResponse(ref, before, after, impact, dryRun)).build();
@@ -442,12 +444,13 @@ public class RestSecretStore implements IRestSecretStore {
         response.put("agentsLosingAccess", losingAccess);
         // Said in the payload, not only in the docs: the list covers every recorded
         // deployment in the shared database plus this node's runtime registry. An
-        // autoDeploy=false deployment made on another node is unrecorded, and is seen
-        // here once that node's announcement has deployed it on this one too.
+        // autoDeploy=false deployment made on another node is unrecorded, and one that
+        // comes up on another node after the scan is not in it either. Advisory only:
+        // the grant itself is enforced whenever a secret is resolved, for every agent,
+        // whether this list names it or not.
         response.put("agentsLosingAccessScope", "cluster");
-        // False when an environment could not be listed. A caller must be able to
-        // tell "nothing breaks" from "could not tell", or it will read the empty
-        // list as the former and narrow the grant on that basis.
+        // False when a source could not be read. True means every source was read, not
+        // that every deployment in the cluster was seen (see above).
         response.put("agentsLosingAccessComplete", impact.complete());
         // One key, both reasons: an incomplete scan and a named casualty can be true
         // at once, and a second put() would have silently dropped whichever came
@@ -455,8 +458,8 @@ public class RestSecretStore implements IRestSecretStore {
         var warnings = new ArrayList<String>();
         if (!losingAccess.isEmpty()) {
             warnings.add(losingAccess.size() + " deployed agent(s) reference this secret and are not on the new grant list. "
-                    + "They keep running — the grant is checked when an agent is deployed, not when a secret is resolved — but under "
-                    + "eddi.vault.grant-enforcement=enforce their next deployment will be REFUSED. Add them to allowedAgents, or "
+                    + "Under eddi.vault.grant-enforcement=enforce they are refused the secret from now on — the grant is checked "
+                    + "whenever a secret is resolved — and their next deployment is refused too. Add them to allowedAgents, or "
                     + "remove the reference from their configuration first.");
         }
         if (!impact.complete()) {

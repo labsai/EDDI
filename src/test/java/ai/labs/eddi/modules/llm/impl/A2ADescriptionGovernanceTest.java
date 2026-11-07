@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -100,7 +101,7 @@ class A2ADescriptionGovernanceTest {
         var config = new A2AAgentConfig();
         config.setUrl(AGENT_URL);
 
-        var result = manager.discoverTools(List.of(config));
+        var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(2, result.toolSpecs().size(), result.toolSpecs().toString());
         assertTrue(result.toolSpecs().get(0).description().startsWith("first"), result.toolSpecs().get(0).description());
@@ -117,7 +118,7 @@ class A2ADescriptionGovernanceTest {
         var config = new A2AAgentConfig();
         config.setUrl(AGENT_URL);
 
-        var result = manager.discoverTools(List.of(config));
+        var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(A2AToolProviderManager.MAX_SKILLS_PER_AGENT, result.toolSpecs().size());
         for (var spec : result.toolSpecs()) {
@@ -136,7 +137,7 @@ class A2ADescriptionGovernanceTest {
         var second = new A2AAgentConfig();
         second.setUrl(otherUrl);
 
-        var result = manager.discoverTools(List.of(first, second));
+        var result = manager.discoverTools(List.of(first, second), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(1, result.toolSpecs().size(), result.toolSpecs().toString());
         assertEquals("first peer", result.toolSpecs().get(0).description());
@@ -166,7 +167,7 @@ class A2ADescriptionGovernanceTest {
         var config = new A2AAgentConfig();
         config.setUrl(AGENT_URL);
 
-        var result = manager.discoverTools(List.of(config));
+        var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(1, result.toolSpecs().size(), "exactly one tool is expected for these cards");
         return result.toolSpecs().get(0);

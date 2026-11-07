@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +45,7 @@ class CredentialReferenceResolverVaultBackedTest {
         secretResolver = mock(SecretResolver.class);
         globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         resolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
     }
 
@@ -54,9 +57,10 @@ class CredentialReferenceResolverVaultBackedTest {
         @DisplayName("a variable holding a vault reference resolves")
         void variableHoldingAVaultReferenceResolves() {
             when(globalVariableResolver.resolveValue("${vars:client-secret}")).thenReturn("${vault:google-secret}");
-            when(secretResolver.resolveValue("${vault:google-secret}")).thenReturn(PLAINTEXT_SECRET);
+            when(secretResolver.resolveValue(eq("${vault:google-secret}"), any())).thenReturn(PLAINTEXT_SECRET);
 
-            assertEquals(PLAINTEXT_SECRET, resolver.resolveVaultBacked("${vars:client-secret}", "google", "client secret"));
+            assertEquals(PLAINTEXT_SECRET,
+                    resolver.resolveVaultBacked("${vars:client-secret}", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -65,27 +69,30 @@ class CredentialReferenceResolverVaultBackedTest {
             when(globalVariableResolver.resolveValue("${vars:client-secret}")).thenReturn(PLAINTEXT_SECRET);
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver.resolveVaultBacked("${vars:client-secret}", "google", "client secret"));
+                    () -> resolver.resolveVaultBacked("${vars:client-secret}", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
             assertTrue(error.getMessage().contains("${vars:client-secret}"), error.getMessage());
             assertTrue(error.getMessage().contains("google"), error.getMessage());
             assertFalse(error.getMessage().contains(PLAINTEXT_SECRET), "the refusal must not quote the credential: " + error.getMessage());
-            verify(secretResolver, never()).resolveValue(PLAINTEXT_SECRET);
+            verify(secretResolver, never()).resolveValue(eq(PLAINTEXT_SECRET), any());
         }
 
         @Test
         @DisplayName("a direct vault reference, a legacy spelling, and a missing variable behave as before")
         void directReferencesAndMissingVariables() {
-            when(secretResolver.resolveValue("${vault:k}")).thenReturn("v");
-            assertEquals("v", resolver.resolveVaultBacked("${vault:k}", "google", "client secret"));
-            when(secretResolver.resolveValue("${eddivault:k}")).thenReturn("v");
-            assertEquals("v", resolver.resolveVaultBacked("${eddivault:k}", "google", "client secret"));
+            when(secretResolver.resolveValue(eq("${vault:k}"), any())).thenReturn("v");
+            assertEquals("v", resolver.resolveVaultBacked("${vault:k}", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
+            when(secretResolver.resolveValue(eq("${eddivault:k}"), any())).thenReturn("v");
+            assertEquals("v", resolver.resolveVaultBacked("${eddivault:k}", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
             // Unresolved: GlobalVariableResolver leaves it in place, which is not a vault
             // reference.
-            assertThrows(ConnectionException.class, () -> resolver.resolveVaultBacked("${vars:missing}", "google", "client secret"));
-            assertThrows(ConnectionException.class, () -> resolver.resolveVaultBacked(null, "google", "client secret"));
-            assertThrows(ConnectionException.class, () -> resolver.resolveVaultBacked("literal-secret", "google", "client secret"));
+            assertThrows(ConnectionException.class,
+                    () -> resolver.resolveVaultBacked("${vars:missing}", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
+            assertThrows(ConnectionException.class,
+                    () -> resolver.resolveVaultBacked(null, "google", "client secret", SecretAccess.outsideAgentGrants("test")));
+            assertThrows(ConnectionException.class,
+                    () -> resolver.resolveVaultBacked("literal-secret", "google", "client secret", SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -152,12 +159,13 @@ class CredentialReferenceResolverVaultBackedTest {
         @DisplayName("a variable may expand to a vault reference or to scaffolding around one")
         void referenceOrScaffoldingPasses() {
             when(globalVariableResolver.resolveValue("${vars:scheme} ${vault:k}")).thenReturn("Bearer ${vault:k}");
-            when(secretResolver.resolveValue("Bearer ${vault:k}")).thenReturn("Bearer live");
-            assertEquals("Bearer live", resolver.resolveRequired("${vars:scheme} ${vault:k}", "jira", "credential"));
+            when(secretResolver.resolveValue(eq("Bearer ${vault:k}"), any())).thenReturn("Bearer live");
+            assertEquals("Bearer live",
+                    resolver.resolveRequired("${vars:scheme} ${vault:k}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
 
             when(globalVariableResolver.resolveValue("${vars:ref}")).thenReturn("${vault:k}");
-            when(secretResolver.resolveValue("${vault:k}")).thenReturn("live");
-            assertEquals("live", resolver.resolveRequired("${vars:ref}", "jira", "credential"));
+            when(secretResolver.resolveValue(eq("${vault:k}"), any())).thenReturn("live");
+            assertEquals("live", resolver.resolveRequired("${vars:ref}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -165,11 +173,12 @@ class CredentialReferenceResolverVaultBackedTest {
         void plaintextExpansionRefused() {
             when(globalVariableResolver.resolveValue("Bearer ${vars:token}")).thenReturn("Bearer " + PLAINTEXT_SECRET);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver.resolveRequired("Bearer ${vars:token}", "jira", "credential"));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver.resolveRequired("Bearer ${vars:token}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
             assertFalse(error.getMessage().contains(PLAINTEXT_SECRET), error.getMessage());
-            verify(secretResolver, never()).resolveValue("Bearer " + PLAINTEXT_SECRET);
+            verify(secretResolver, never()).resolveValue(eq("Bearer " + PLAINTEXT_SECRET), any());
         }
     }
 }

@@ -672,7 +672,7 @@ class AgentOrchestratorExtendedTest {
 
             // A2A tools return empty specs → overall should return null
             doReturn(new A2AToolProviderManager.A2AToolsResult(List.of(), Map.of()))
-                    .when(a2aToolProviderManager).discoverTools(any());
+                    .when(a2aToolProviderManager).discoverTools(any(), any());
 
             when(mockMemory.getAgentId()).thenReturn(null);
             when(mockMemory.getAgentVersion()).thenReturn(null);
@@ -681,7 +681,7 @@ class AgentOrchestratorExtendedTest {
                     mock(ChatModel.class), "sys", List.of(UserMessage.from("hi")),
                     task, mockMemory);
 
-            verify(a2aToolProviderManager).discoverTools(any());
+            verify(a2aToolProviderManager).discoverTools(any(), any());
             assertNull(result, "Should return null when A2A discovery returns empty specs");
         }
 
@@ -705,7 +705,7 @@ class AgentOrchestratorExtendedTest {
             doReturn(new A2AToolProviderManager.A2AToolsResult(
                     List.of(a2aSpec),
                     Map.of("remote_skill", (req, memId) -> "result from A2A")))
-                    .when(a2aToolProviderManager).discoverTools(any());
+                    .when(a2aToolProviderManager).discoverTools(any(), any());
 
             when(mockMemory.getAgentId()).thenReturn(null);
             when(mockMemory.getAgentVersion()).thenReturn(null);

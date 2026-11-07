@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -66,7 +67,7 @@ class EmbeddingStoreFactoryInMemoryTest {
     @BeforeEach
     void setUp() {
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         factory = offlineFactory(100);
     }
 
@@ -83,7 +84,7 @@ class EmbeddingStoreFactoryInMemoryTest {
                                                 int maxInMemorySegments, Ticker ticker) {
         return new EmbeddingStoreFactory(variables, secrets, maxInMemorySegments, ticker) {
             @Override
-            EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config) {
+            EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config, SecretAccess access) {
                 return new InMemoryEmbeddingStore<>();
             }
         };
@@ -133,14 +134,14 @@ class EmbeddingStoreFactoryInMemoryTest {
             var secretListener = ArgumentCaptor.forClass(Consumer.class);
             factory.registerInvalidation();
             verify(secretResolver).registerInvalidationListener(secretListener.capture());
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 3);
 
             @SuppressWarnings("unchecked")
             Consumer<SecretReference> listener = secretListener.getValue();
             listener.accept(new SecretReference("default", "openai"));
 
-            var after = factory.getOrCreate(KB_ID, inMemory());
+            var after = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             assertSame(store, after, "an in-memory store holds no credential; rotating one must not rebuild it");
             assertEquals(3, countOf(after));
         }
@@ -151,24 +152,24 @@ class EmbeddingStoreFactoryInMemoryTest {
             var variableListener = ArgumentCaptor.forClass(Runnable.class);
             factory.registerInvalidation();
             verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 2);
 
             variableListener.getValue().run();
 
-            assertSame(store, factory.getOrCreate(KB_ID, inMemory()));
+            assertSame(store, factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test")));
             assertEquals(2, countOf(store));
         }
 
         @Test
         @DisplayName("an hour without a query does not empty it")
         void survivesPastTheClientCacheTtl() {
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 4);
 
             advance(Duration.ofHours(1));
 
-            var after = factory.getOrCreate(KB_ID, inMemory());
+            var after = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             assertSame(store, after);
             assertEquals(4, countOf(after));
         }
@@ -176,27 +177,27 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("more knowledge bases than the client cache holds do not push it out")
         void survivesMoreKnowledgeBasesThanTheClientCacheHolds() {
-            var first = factory.getOrCreate(KB_ID, inMemory());
+            var first = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(first, 1);
             for (int i = 0; i < EmbeddingStoreFactory.MAX_STORES + 10; i++) {
-                factory.getOrCreate("kb-" + i, inMemory());
+                factory.getOrCreate("kb-" + i, inMemory(), SecretAccess.outsideAgentGrants("test"));
             }
 
-            assertSame(first, factory.getOrCreate(KB_ID, inMemory()));
+            assertSame(first, factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test")));
             assertEquals(1, countOf(first));
         }
 
         @Test
         @DisplayName("a new version with the same embedding configuration keeps the data")
         void newVersionWithSameEmbeddingKeepsTheData() {
-            var store = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            var store = factory.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 2);
             var nextVersion = inMemory();
             nextVersion.setChunkSize(256);
             nextVersion.setMaxResults(9);
 
             assertFalse(factory.dropSupersededInMemoryStore(KB_ID, inMemory(), nextVersion));
-            assertSame(store, factory.getOrCreateForIngestion(KB_ID, nextVersion));
+            assertSame(store, factory.getOrCreateForIngestion(KB_ID, nextVersion, SecretAccess.outsideAgentGrants("test")));
             assertEquals(2, countOf(store));
         }
     }
@@ -208,19 +209,19 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("past the idle TTL the client is rebuilt")
         void evictedAfterTheTtl() {
-            var before = factory.getOrCreate(KB_ID, elasticsearch());
+            var before = factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test"));
 
             advance(Duration.ofMinutes(31));
 
-            assertNotSame(before, factory.getOrCreate(KB_ID, elasticsearch()));
+            assertNotSame(before, factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("within the TTL the client is reused")
         void reusedWithinTheTtl() {
-            var before = factory.getOrCreate(KB_ID, elasticsearch());
+            var before = factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test"));
             advance(Duration.ofMinutes(29));
-            assertSame(before, factory.getOrCreate(KB_ID, elasticsearch()));
+            assertSame(before, factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -229,13 +230,13 @@ class EmbeddingStoreFactoryInMemoryTest {
             var secretListener = ArgumentCaptor.forClass(Consumer.class);
             factory.registerInvalidation();
             verify(secretResolver).registerInvalidationListener(secretListener.capture());
-            var before = factory.getOrCreate(KB_ID, elasticsearch());
+            var before = factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test"));
 
             @SuppressWarnings("unchecked")
             Consumer<SecretReference> listener = secretListener.getValue();
             listener.accept(new SecretReference("default", "es-password"));
 
-            assertNotSame(before, factory.getOrCreate(KB_ID, elasticsearch()));
+            assertNotSame(before, factory.getOrCreate(KB_ID, elasticsearch(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -253,12 +254,12 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("deleting the knowledge base drops it and its documents")
         void droppedOnDelete() {
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 3);
 
             assertTrue(factory.dropInMemoryStore(KB_ID, inMemory()));
 
-            var after = factory.getOrCreate(KB_ID, inMemory());
+            var after = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             assertNotSame(store, after);
             assertEquals(0, countOf(after));
             assertEquals(0, factory.inMemorySegmentCount(), "a dropped store no longer counts against the cap");
@@ -267,10 +268,10 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("deleting an external knowledge base touches no in-memory store of the same name")
         void externalDeleteLeavesInMemoryAlone() {
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
 
             assertFalse(factory.dropInMemoryStore(KB_ID, elasticsearch()));
-            assertSame(store, factory.getOrCreate(KB_ID, inMemory()));
+            assertSame(store, factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -283,34 +284,34 @@ class EmbeddingStoreFactoryInMemoryTest {
             remodelled.setEmbeddingParameters(Map.of("model", "text-embedding-3-large"));
 
             for (RagConfiguration updated : List.of(renamed, moved, remodelled)) {
-                var store = factory.getOrCreate(KB_ID, inMemory());
+                var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
                 assertTrue(factory.dropSupersededInMemoryStore(KB_ID, inMemory(), updated), updated.getStoreType());
-                assertNotSame(store, factory.getOrCreate(KB_ID, inMemory()));
+                assertNotSame(store, factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test")));
             }
         }
 
         @Test
         @DisplayName("a rotated embedding API key is not a new model")
         void credentialChangeKeepsTheStore() {
-            var store = factory.getOrCreate(KB_ID, inMemory());
+            var store = factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             var rotated = inMemory();
             rotated.setEmbeddingParameters(Map.of("model", "text-embedding-3-small", "apiKey", "${vault:openai-2}"));
 
             assertFalse(factory.dropSupersededInMemoryStore(KB_ID, inMemory(), rotated));
-            assertSame(store, factory.getOrCreateForIngestion(KB_ID, rotated));
+            assertSame(store, factory.getOrCreateForIngestion(KB_ID, rotated, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("a write under another embedding model replaces the store; a read does not")
         void onlyAWriteReplacesOnModelChange() {
-            var store = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            var store = factory.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 2);
             var remodelled = inMemory();
             remodelled.setEmbeddingParameters(Map.of("model", "text-embedding-3-large"));
 
-            assertSame(store, factory.getOrCreate(KB_ID, remodelled),
+            assertSame(store, factory.getOrCreate(KB_ID, remodelled, SecretAccess.outsideAgentGrants("test")),
                     "retrieval by a version still pinned to the old model must not wipe the store");
-            var written = factory.getOrCreateForIngestion(KB_ID, remodelled);
+            var written = factory.getOrCreateForIngestion(KB_ID, remodelled, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(store, written, "vectors of two models must not be mixed in one store");
             assertEquals(0, countOf(written));
         }
@@ -339,10 +340,10 @@ class EmbeddingStoreFactoryInMemoryTest {
         @DisplayName("two knowledge bases with the same name have separate stores")
         void sameNameDoesNotShare() {
             for (RagConfiguration config : List.of(inMemory(), idLayout())) {
-                var mine = factory.getOrCreateForIngestion(KB_ID, config);
+                var mine = factory.getOrCreateForIngestion(KB_ID, config, SecretAccess.outsideAgentGrants("test"));
                 addSegments(mine, 2);
 
-                var theirs = factory.getOrCreate(OTHER_ID, config);
+                var theirs = factory.getOrCreate(OTHER_ID, config, SecretAccess.outsideAgentGrants("test"));
 
                 assertNotSame(mine, theirs, String.valueOf(config.getStoreNamespace()));
                 assertEquals(0, countOf(theirs));
@@ -352,51 +353,53 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("deleting one knowledge base cannot empty a namesake's store")
         void deletingOneKeepsTheNamesake() {
-            var mine = factory.getOrCreateForIngestion(KB_ID, idLayout());
-            var theirs = factory.getOrCreateForIngestion(OTHER_ID, idLayout());
+            var mine = factory.getOrCreateForIngestion(KB_ID, idLayout(), SecretAccess.outsideAgentGrants("test"));
+            var theirs = factory.getOrCreateForIngestion(OTHER_ID, idLayout(), SecretAccess.outsideAgentGrants("test"));
             addSegments(theirs, 3);
 
             assertTrue(factory.dropInMemoryStore(KB_ID, idLayout()));
 
-            assertNotSame(mine, factory.getOrCreate(KB_ID, idLayout()));
-            assertSame(theirs, factory.getOrCreate(OTHER_ID, idLayout()));
+            assertNotSame(mine, factory.getOrCreate(KB_ID, idLayout(), SecretAccess.outsideAgentGrants("test")));
+            assertSame(theirs, factory.getOrCreate(OTHER_ID, idLayout(), SecretAccess.outsideAgentGrants("test")));
             assertEquals(3, countOf(theirs));
         }
 
         @Test
         @DisplayName("a rename in the id layout keeps the store; in the name layout it moves it")
         void renameKeepsTheStoreOnlyInTheIdLayout() {
-            var store = factory.getOrCreateForIngestion(KB_ID, idLayout());
+            var store = factory.getOrCreateForIngestion(KB_ID, idLayout(), SecretAccess.outsideAgentGrants("test"));
             var renamed = idLayout();
             renamed.setName("renamed-docs");
 
             assertFalse(factory.dropSupersededInMemoryStore(KB_ID, idLayout(), renamed));
-            assertSame(store, factory.getOrCreate(KB_ID, renamed));
+            assertSame(store, factory.getOrCreate(KB_ID, renamed, SecretAccess.outsideAgentGrants("test")));
 
-            var legacy = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            var legacy = factory.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             var legacyRenamed = inMemory();
             legacyRenamed.setName("renamed-docs");
-            assertNotSame(legacy, factory.getOrCreate(KB_ID, legacyRenamed), "the name layout keys on the name");
+            assertNotSame(legacy, factory.getOrCreate(KB_ID, legacyRenamed, SecretAccess.outsideAgentGrants("test")),
+                    "the name layout keys on the name");
             assertTrue(factory.dropSupersededInMemoryStore(KB_ID, inMemory(), legacyRenamed));
         }
 
         @Test
         @DisplayName("switching to storeNamespace id moves the knowledge base and drops the old store")
         void namespaceSwitchDropsTheOldStore() {
-            var legacy = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            var legacy = factory.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(legacy, 1);
 
             assertTrue(factory.dropSupersededInMemoryStore(KB_ID, inMemory(), idLayout()));
 
-            assertNotSame(legacy, factory.getOrCreate(KB_ID, inMemory()));
+            assertNotSame(legacy, factory.getOrCreate(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test")));
             assertEquals(0, factory.inMemorySegmentCount());
         }
 
         @Test
         @DisplayName("a store needs an id")
         void requiresAnId() {
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(" ", inMemory()));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreateForIngestion(null, inMemory()));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(" ", inMemory(), SecretAccess.outsideAgentGrants("test")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreateForIngestion(null, inMemory(), SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -432,7 +435,7 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("a new endpoint drops the old in-memory store on update")
         void endpointChangeDropsTheStore() {
-            factory.getOrCreateForIngestion(KB_ID, withParameters(Map.of("model", "m-1")));
+            factory.getOrCreateForIngestion(KB_ID, withParameters(Map.of("model", "m-1")), SecretAccess.outsideAgentGrants("test"));
 
             assertTrue(factory.dropSupersededInMemoryStore(KB_ID, withParameters(Map.of("model", "m-1")),
                     withParameters(Map.of("model", "m-1", "baseUrl", "http://llm.internal:8080/v1"))));
@@ -443,12 +446,12 @@ class EmbeddingStoreFactoryInMemoryTest {
         void resolvedModelChangeReplacesTheStore() {
             var viaVariable = withParameters(Map.of("model", "${vars:embedding-model}"));
             when(globalVariableResolver.resolveAll(any())).thenReturn(Map.of("model", "text-embedding-3-small"));
-            var store = factory.getOrCreateForIngestion(KB_ID, viaVariable);
+            var store = factory.getOrCreateForIngestion(KB_ID, viaVariable, SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 1);
 
             // The configured text is unchanged; the variable now names another model.
             when(globalVariableResolver.resolveAll(any())).thenReturn(Map.of("model", "text-embedding-3-large"));
-            var written = factory.getOrCreateForIngestion(KB_ID, viaVariable);
+            var written = factory.getOrCreateForIngestion(KB_ID, viaVariable, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(store, written, "vectors of the old model must not be mixed with the new one's");
             assertTrue(EmbeddingStoreFactory.isRetired(store));
@@ -501,9 +504,9 @@ class EmbeddingStoreFactoryInMemoryTest {
         @DisplayName("a write past the cap fails with an actionable error and stores nothing")
         void refusesPastTheCap() {
             var capped = offlineFactory(5);
-            var one = capped.getOrCreateForIngestion(KB_ID, inMemory());
+            var one = capped.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(one, 3);
-            var other = capped.getOrCreateForIngestion("other-kb", inMemory());
+            var other = capped.getOrCreateForIngestion("other-kb", inMemory(), SecretAccess.outsideAgentGrants("test"));
 
             List<Embedding> embeddings = List.of(Embedding.from(new float[]{0.1f, 0.2f}), Embedding.from(new float[]{0.2f, 0.1f}),
                     Embedding.from(new float[]{0.3f, 0.1f}));
@@ -524,7 +527,7 @@ class EmbeddingStoreFactoryInMemoryTest {
         @DisplayName("removing segments makes room again")
         void removalFreesCapacity() {
             var capped = offlineFactory(2);
-            var store = capped.getOrCreateForIngestion(KB_ID, inMemory());
+            var store = capped.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(store, 2);
             assertThrows(InMemoryStoreFullException.class, () -> addSegments(store, 1));
 
@@ -539,13 +542,13 @@ class EmbeddingStoreFactoryInMemoryTest {
         void replacedStoreHeldByARunRefusesWrites() {
             var capped = offlineFactory(5);
             // A run takes the store, as the ingestion Collector does at its start.
-            var heldByRun = capped.getOrCreateForIngestion(KB_ID, inMemory());
+            var heldByRun = capped.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(heldByRun, 2);
 
             // The model changes mid-run: the next write replaces the store.
             var remodelled = inMemory();
             remodelled.setEmbeddingParameters(Map.of("model", "text-embedding-3-large"));
-            var current = capped.getOrCreateForIngestion(KB_ID, remodelled);
+            var current = capped.getOrCreateForIngestion(KB_ID, remodelled, SecretAccess.outsideAgentGrants("test"));
             addSegments(current, 5);
             assertEquals(5, capped.inMemorySegmentCount(), "the replacement may use the whole cap");
 
@@ -558,7 +561,7 @@ class EmbeddingStoreFactoryInMemoryTest {
         @Test
         @DisplayName("a dropped store refuses writes from a run that still holds it")
         void droppedStoreHeldByARunRefusesWrites() {
-            var heldByRun = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            var heldByRun = factory.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
             addSegments(heldByRun, 1);
 
             assertTrue(factory.dropInMemoryStore(KB_ID, inMemory()));
@@ -571,7 +574,7 @@ class EmbeddingStoreFactoryInMemoryTest {
         @DisplayName("zero disables the cap")
         void zeroDisablesTheCap() {
             var uncapped = offlineFactory(0);
-            var store = uncapped.getOrCreateForIngestion(KB_ID, inMemory());
+            var store = uncapped.getOrCreateForIngestion(KB_ID, inMemory(), SecretAccess.outsideAgentGrants("test"));
 
             addSegments(store, 250);
 

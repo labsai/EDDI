@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
@@ -50,7 +51,7 @@ class EmbeddingStoreFactoryBranchTest {
         GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
         SecretResolver sr = mock(SecretResolver.class);
         when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(sr.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(sr.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingStoreFactory(gvr, sr);
     }
 
@@ -70,7 +71,7 @@ class EmbeddingStoreFactoryBranchTest {
 
             // Elasticsearch store construction doesn't connect eagerly, so this
             // should succeed without a live server
-            var store = factory.getOrCreate("kb-es-apikey", config);
+            var store = factory.getOrCreate("kb-es-apikey", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
 
@@ -85,7 +86,7 @@ class EmbeddingStoreFactoryBranchTest {
             params.put("password", "secret");
             config.setStoreParameters(params);
 
-            var store = factory.getOrCreate("kb-es-user", config);
+            var store = factory.getOrCreate("kb-es-user", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
 
@@ -97,7 +98,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreType("elasticsearch");
             config.setStoreParameters(Map.of());
 
-            var store = factory.getOrCreate("kb-es-noauth", config);
+            var store = factory.getOrCreate("kb-es-noauth", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
 
@@ -109,7 +110,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreType("elasticsearch");
             config.setStoreParameters(Map.of("userName", "elastic"));
 
-            var store = factory.getOrCreate("kb-es-useronly", config);
+            var store = factory.getOrCreate("kb-es-useronly", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
     }
@@ -132,7 +133,7 @@ class EmbeddingStoreFactoryBranchTest {
 
             // Qdrant store build doesn't connect eagerly in the builder
             try {
-                factory.getOrCreate("kb-qdrant-apikey", config);
+                factory.getOrCreate("kb-qdrant-apikey", config, SecretAccess.outsideAgentGrants("test"));
             } catch (Exception e) {
                 // Connection error expected — but should NOT be IllegalArgumentException
                 assertFalse(e instanceof IllegalArgumentException,
@@ -149,7 +150,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreParameters(Map.of("useTls", "true"));
 
             try {
-                factory.getOrCreate("kb-qdrant-tls", config);
+                factory.getOrCreate("kb-qdrant-tls", config, SecretAccess.outsideAgentGrants("test"));
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "Should not fail on parameter parsing, got: " + e.getMessage());
@@ -165,7 +166,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreParameters(Map.of("host", "localhost", "port", "6335"));
 
             try {
-                factory.getOrCreate("kb-qdrant-custom", config);
+                factory.getOrCreate("kb-qdrant-custom", config, SecretAccess.outsideAgentGrants("test"));
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "Should not fail on parameter parsing, got: " + e.getMessage());
@@ -192,7 +193,7 @@ class EmbeddingStoreFactoryBranchTest {
             // When apiVersion is blank, getOrDefault returns the blank string,
             // then parseChromaApiVersion sees blank → defaults to V2
             try {
-                factory.getOrCreate("kb-chroma-blank", config);
+                factory.getOrCreate("kb-chroma-blank", config, SecretAccess.outsideAgentGrants("test"));
             } catch (IllegalArgumentException e) {
                 fail("Blank apiVersion should default to V2, got: " + e.getMessage());
             } catch (Exception e) {
@@ -211,7 +212,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreParameters(Map.of("apiVersion", "V1"));
 
             try {
-                factory.getOrCreate("kb-chroma-v1", config);
+                factory.getOrCreate("kb-chroma-v1", config, SecretAccess.outsideAgentGrants("test"));
             } catch (IllegalArgumentException e) {
                 fail("V1 should be a valid ChromaApiVersion, got: " + e.getMessage());
             } catch (Exception e) {
@@ -242,8 +243,8 @@ class EmbeddingStoreFactoryBranchTest {
             config2.setStoreType("elasticsearch");
             config2.setStoreParameters(Map.of("extraKey", "value2"));
 
-            var store1 = factory.getOrCreate("kb-same", config1);
-            var store2 = factory.getOrCreate("kb-same", config2);
+            var store1 = factory.getOrCreate("kb-same", config1, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb-same", config2, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(store1, store2,
                     "Different storeParameters should produce different cache keys");
@@ -270,7 +271,7 @@ class EmbeddingStoreFactoryBranchTest {
             // Will fail connecting, but should not throw IllegalArgumentException for
             // parsing
             try {
-                factory.getOrCreate("kb-null-port", config);
+                factory.getOrCreate("kb-null-port", config, SecretAccess.outsideAgentGrants("test"));
             } catch (Exception e) {
                 assertFalse(e instanceof IllegalArgumentException,
                         "null port should use default, got: " + e.getMessage());
@@ -288,7 +289,7 @@ class EmbeddingStoreFactoryBranchTest {
             GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
             SecretResolver sr = mock(SecretResolver.class);
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-            when(sr.resolveSecrets(any())).thenAnswer(inv -> {
+            when(sr.resolveSecrets(any(), any())).thenAnswer(inv -> {
                 Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
                 resolved.replaceAll((k, v) -> "${vault:victim}".equals(v) ? "s3cr3t-plaintext" : v);
                 return resolved;
@@ -301,7 +302,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreParameters(Map.of("password", "p", "port", "${vault:victim}"));
 
             var e = assertThrows(IllegalArgumentException.class,
-                    () -> redactingFactory.getOrCreate("kb-port-redaction", config));
+                    () -> redactingFactory.getOrCreate("kb-port-redaction", config, SecretAccess.outsideAgentGrants("test")));
             for (Throwable t = e; t != null; t = t.getCause()) {
                 assertFalse(String.valueOf(t.getMessage()).contains("s3cr3t-plaintext"), t.getMessage());
             }
@@ -314,7 +315,7 @@ class EmbeddingStoreFactoryBranchTest {
             GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
             SecretResolver sr = mock(SecretResolver.class);
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-            when(sr.resolveSecrets(any())).thenAnswer(inv -> {
+            when(sr.resolveSecrets(any(), any())).thenAnswer(inv -> {
                 Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
                 resolved.replaceAll((k, v) -> "${vault:victim}".equals(v) ? "s3cr3t-plaintext" : v);
                 return resolved;
@@ -327,7 +328,7 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreParameters(Map.of("apiVersion", "${vault:victim}"));
 
             var e = assertThrows(IllegalArgumentException.class,
-                    () -> redactingFactory.getOrCreate("kb-chroma-redaction", config));
+                    () -> redactingFactory.getOrCreate("kb-chroma-redaction", config, SecretAccess.outsideAgentGrants("test")));
             for (Throwable t = e; t != null; t = t.getCause()) {
                 assertFalse(String.valueOf(t.getMessage()).contains("s3cr3t-plaintext"), t.getMessage());
             }
@@ -343,7 +344,7 @@ class EmbeddingStoreFactoryBranchTest {
             GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
             SecretResolver sr = mock(SecretResolver.class);
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-            when(sr.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(sr.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
             return new EmbeddingStoreFactory(gvr, sr, policy);
         }
 
@@ -358,7 +359,8 @@ class EmbeddingStoreFactoryBranchTest {
             config.setStoreType("mongodb-atlas");
             config.setStoreParameters(Map.of("connectionString", "mongodb://203.0.113.10:27017/?proxyHost=169.254.169.254&proxyPort=1080"));
 
-            var e = assertThrows(IllegalArgumentException.class, () -> guarded(policy).getOrCreate("kb-mongo-proxy", config));
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> guarded(policy).getOrCreate("kb-mongo-proxy", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("mongodb-atlas"), e.getMessage());
             verify(policy).validateHost("203.0.113.10:27017");
         }
@@ -390,7 +392,8 @@ class EmbeddingStoreFactoryBranchTest {
                 config.setStoreType("chroma");
                 config.setStoreParameters(Map.of("baseUrl", "http://127.0.0.1:" + server.getAddress().getPort()));
 
-                assertThrows(RuntimeException.class, () -> guarded(policy).getOrCreate("kb-chroma-rebind", config));
+                assertThrows(RuntimeException.class,
+                        () -> guarded(policy).getOrCreate("kb-chroma-rebind", config, SecretAccess.outsideAgentGrants("test")));
                 assertTrue(checks.get() > 1, "the transport checked the request URL");
                 assertEquals(0, requests.get(), "nothing reached the endpoint");
             } finally {

@@ -57,7 +57,7 @@ class CascadingModelExecutorErrorPathTest {
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             ChatModel slow = sleepingModel(500);
-            when(registry.getOrCreate(eq("only"), anyMap())).thenReturn(slow);
+            when(registry.getOrCreate(eq("only"), anyMap(), any())).thenReturn(slow);
 
             var executor = executor(registry);
 
@@ -78,8 +78,8 @@ class CascadingModelExecutorErrorPathTest {
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             ChatModel hedging = modelReturning("I'm not sure, I don't know.");
             ChatModel slow = sleepingModel(500);
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(hedging);
-            when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(slow);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(hedging);
+            when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(slow);
 
             var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
@@ -97,8 +97,8 @@ class CascadingModelExecutorErrorPathTest {
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             ChatModel slow = sleepingModel(500);
             ChatModel good = modelReturning("A confident, complete answer.");
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(slow);
-            when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(slow);
+            when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(good);
 
             var sink = mock(ConversationEventSink.class);
             var executor = executor(registry);
@@ -126,8 +126,8 @@ class CascadingModelExecutorErrorPathTest {
 
             ChatModel good = modelReturning("A confident, complete answer.");
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failing);
-            when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(failing);
+            when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(good);
 
             var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
@@ -148,8 +148,8 @@ class CascadingModelExecutorErrorPathTest {
 
             ChatModel good = modelReturning("A confident, complete answer.");
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failing);
-            when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(good);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(failing);
+            when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(good);
 
             var executor = executor(registry);
             var result = executor.execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), mock(IConversationMemory.class),
@@ -173,8 +173,8 @@ class CascadingModelExecutorErrorPathTest {
             when(failingExpensive.chat(anyList())).thenThrow(new RuntimeException("expensive exploded"));
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(failingCheap);
-            when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(failingExpensive);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(failingCheap);
+            when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(failingExpensive);
 
             var executor = executor(registry);
 
@@ -202,7 +202,7 @@ class CascadingModelExecutorErrorPathTest {
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             ChatModel legacy = modelReturning("legacy answer");
-            when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(legacy);
+            when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(legacy);
 
             // isAgentMode() is derived — enabling built-in tools is what makes this an
             // agent task.

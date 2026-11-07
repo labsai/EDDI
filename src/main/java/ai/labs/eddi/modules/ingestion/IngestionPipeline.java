@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
+import ai.labs.eddi.modules.rag.RagIngestionService;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -379,7 +380,7 @@ public class IngestionPipeline {
             // store the run writes to. A later lookup could return a newer, empty store
             // if the knowledge base were dropped or remodelled meanwhile, and every
             // document would then pass as "unchanged" against the old store's state.
-            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             current = EmbeddingStoreFactory.fingerprintOf(collector.store);
         } else {
             current = embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);
@@ -600,7 +601,7 @@ public class IngestionPipeline {
         // unchanged over vectors that were never deleted.
         stateStore.markTombstoned(sourceKey, List.of(documentId));
         try {
-            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION)
                     .removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                             .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)));
             return ForgetOutcome.REMOVED;
@@ -650,7 +651,7 @@ public class IngestionPipeline {
     public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = stateKey(ragConfigId, source);
         try {
-            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION)
                     .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey));
             stateStore.purgeSource(sourceKey);
             return true;
@@ -1051,7 +1052,7 @@ public class IngestionPipeline {
             if (store == null) {
                 // For writing: an in-memory store built under another embedding
                 // configuration is replaced rather than mixed with this run's vectors.
-                store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+                store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return store;
         }
@@ -1060,7 +1061,7 @@ public class IngestionPipeline {
             if (model == null) {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
-                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT);
+                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return model;
         }

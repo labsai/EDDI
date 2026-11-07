@@ -161,7 +161,7 @@ class LlmTaskStreamingDowngradeTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         @SuppressWarnings("unchecked")
         IData<String> inputData = mock(IData.class);

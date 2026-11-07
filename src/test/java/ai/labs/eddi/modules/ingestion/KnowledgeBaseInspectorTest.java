@@ -54,11 +54,11 @@ class KnowledgeBaseInspectorTest {
         vectorStore = new InMemoryEmbeddingStore<>();
 
         EmbeddingStoreFactory storeFactory = mock(EmbeddingStoreFactory.class);
-        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(vectorStore);
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenReturn(vectorStore);
         EmbeddingModel model = mock(EmbeddingModel.class);
         when(model.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{1f, 0f})));
         EmbeddingModelFactory modelFactory = mock(EmbeddingModelFactory.class);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class))).thenReturn(model);
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any())).thenReturn(model);
 
         inspector = new KnowledgeBaseInspector(stateStore, fileStore, storeFactory, modelFactory);
     }

@@ -94,7 +94,7 @@ class ToolLoopRunnerArgumentSchemaTest {
         setField(service, "meterRegistry", new SimpleMeterRegistry());
         service.init();
         ToolResponseTruncator truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         gate = spy(new ToolApprovalGate());
         runner = new ToolLoopRunner(service, truncator, null, null, gate, new ToolApprovalGateSupport(new ChatTranscriptCodec()), null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));

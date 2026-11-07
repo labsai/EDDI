@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -70,7 +71,7 @@ class ChatModelRegistryAllowedHostsTest {
             }
         });
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> {
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> {
             Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
             resolved.replaceAll((k, v) -> v != null && v.contains("${vault:") ? "resolved" : v);
             return resolved;
@@ -86,8 +87,8 @@ class ChatModelRegistryAllowedHostsTest {
     void baseUrlIsChecked() throws Exception {
         Map<String, String> params = Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://attacker.example/v1", "modelName", "gpt-x");
 
-        assertNotNull(registry.getOrCreate("openai", params));
-        assertNotNull(registry.getOrCreateStreaming("openai", params));
+        assertNotNull(registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test")));
+        assertNotNull(registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test")));
 
         verify(allowlist, times(2)).requireAllowed(argThatHoldsReference(), eq("https://attacker.example/v1"), eq("LLM provider 'openai'"));
     }
@@ -103,7 +104,7 @@ class ChatModelRegistryAllowedHostsTest {
         Map<String, String> params = Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://api.openai.com/v1", "endpoint",
                 "https://attacker.example/v1");
 
-        registry.getOrCreate("openai", params);
+        registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
         verify(allowlist).requireAllowed(anyMap(), eq("https://api.openai.com/v1"), eq("LLM provider 'openai'"));
         verify(allowlist).requireAllowed(anyMap(), eq("https://attacker.example/v1"), eq("LLM provider 'openai'"));
@@ -116,13 +117,13 @@ class ChatModelRegistryAllowedHostsTest {
                 anyString());
 
         assertThrows(VaultHostAllowlist.HostNotAllowedException.class, () -> registry.getOrCreate("openai",
-                Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://attacker.example/v1")));
+                Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://attacker.example/v1"), SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     @DisplayName("without an endpoint parameter the provider's own default is used, which an editor cannot choose — nothing to check")
     void noEndpointNothingToCheck() throws Exception {
-        assertNotNull(registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}")));
+        assertNotNull(registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}"), SecretAccess.outsideAgentGrants("test")));
 
         verify(allowlist, never()).requireAllowed(anyMap(), anyString(), anyString());
     }
@@ -130,7 +131,8 @@ class ChatModelRegistryAllowedHostsTest {
     @Test
     @DisplayName("Vertex's apiEndpoint is an endpoint key like any other")
     void vertexApiEndpointIsChecked() throws Exception {
-        registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "apiEndpoint", "attacker.example:443"));
+        registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "apiEndpoint", "attacker.example:443"),
+                SecretAccess.outsideAgentGrants("test"));
 
         verify(allowlist).requireAllowed(anyMap(), eq("attacker.example:443"), eq("LLM provider 'openai'"));
     }
@@ -156,7 +158,7 @@ class ChatModelRegistryAllowedHostsTest {
             }
         });
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         var regional = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, allowlist);
@@ -164,8 +166,8 @@ class ChatModelRegistryAllowedHostsTest {
                 eq("https://eu.vendor.example/v1"), anyString());
 
         assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
-                () -> regional.getOrCreate("regional", Map.of("apiKey", "${vault:k}", "region", "eu")));
-        verify(secretResolver, never()).resolveSecrets(any());
+                () -> regional.getOrCreate("regional", Map.of("apiKey", "${vault:k}", "region", "eu"), SecretAccess.outsideAgentGrants("test")));
+        verify(secretResolver, never()).resolveSecrets(any(), any());
     }
 
     @Test
@@ -190,7 +192,7 @@ class ChatModelRegistryAllowedHostsTest {
             }
         });
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         var regional = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, allowlist);
@@ -198,8 +200,8 @@ class ChatModelRegistryAllowedHostsTest {
                 eq("https://eu.vendor.example/v1"), anyString());
 
         assertThrows(VaultHostAllowlist.HostNotAllowedException.class, () -> regional.getOrCreate("regional",
-                Map.of("apiKey", "${vault:k}", "endpoint", "https://us.vendor.example/v1", "region", "eu")));
+                Map.of("apiKey", "${vault:k}", "endpoint", "https://us.vendor.example/v1", "region", "eu"), SecretAccess.outsideAgentGrants("test")));
         verify(allowlist).requireAllowed(anyMap(), eq("https://us.vendor.example/v1"), anyString());
-        verify(secretResolver, never()).resolveSecrets(any());
+        verify(secretResolver, never()).resolveSecrets(any(), any());
     }
 }

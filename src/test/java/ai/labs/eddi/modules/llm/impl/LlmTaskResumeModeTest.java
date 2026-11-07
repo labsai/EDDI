@@ -151,7 +151,7 @@ class LlmTaskResumeModeTest {
         when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(resumeDecision);
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
     }
 
     // ============================================================
@@ -393,7 +393,7 @@ class LlmTaskResumeModeTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         // A non-null agent result keeps the standard branch (no legacy fallback).
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))

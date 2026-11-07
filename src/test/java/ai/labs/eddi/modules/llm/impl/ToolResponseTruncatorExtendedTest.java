@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import dev.langchain4j.data.message.AiMessage;
@@ -284,7 +285,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setSummarizerModel("gpt-4o-mini");
 
             ChatModel mockModel = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(eq("openai"), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(mockModel);
 
             ChatResponse mockResponse = mock(ChatResponse.class);
             AiMessage mockMessage = mock(AiMessage.class);
@@ -318,14 +319,14 @@ class ToolResponseTruncatorExtendedTest {
             // Capture the params passed to ChatModelRegistry
             when(chatModelRegistry.getOrCreate(eq("openai"), argThat(params -> "sk-test-key".equals(params.get("apiKey")) &&
                     "gpt-4o-mini".equals(params.get("modelName")) &&
-                    "https://api.openai.com".equals(params.get("baseUrl"))))).thenReturn(mockModel);
+                    "https://api.openai.com".equals(params.get("baseUrl"))), any())).thenReturn(mockModel);
 
             String result = truncator.truncateIfNeeded("tool1", "A".repeat(500), limits, TASK_TYPE, TASK_PARAMS);
 
             // Verify the model was created with correct inherited params
             verify(chatModelRegistry).getOrCreate(eq("openai"), argThat(params -> "sk-test-key".equals(params.get("apiKey")) &&
                     "gpt-4o-mini".equals(params.get("modelName")) &&
-                    "https://api.openai.com".equals(params.get("baseUrl"))));
+                    "https://api.openai.com".equals(params.get("baseUrl"))), any());
             assertTrue(result.contains("[SUMMARY"));
         }
 
@@ -347,13 +348,13 @@ class ToolResponseTruncatorExtendedTest {
             when(mockResponse.aiMessage()).thenReturn(mockMessage);
             when(mockMessage.text()).thenReturn("Summary");
             when(mockModel.chat(any(ChatRequest.class))).thenReturn(mockResponse);
-            when(chatModelRegistry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(mockModel);
 
             truncator.truncateIfNeeded("tool1", "A".repeat(500), limits, "anthropic", anthropicParams);
 
             // Verify modelName was overridden to the summarizer model
             verify(chatModelRegistry).getOrCreate(eq("anthropic"), argThat(params -> "claude-haiku-4.6".equals(params.get("modelName")) &&
-                    "sk-ant-key".equals(params.get("apiKey"))));
+                    "sk-ant-key".equals(params.get("apiKey"))), any());
         }
 
         @Test
@@ -389,7 +390,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setTruncationStrategy("summarize");
             limits.setSummarizerModel("gpt-4o-mini");
 
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap()))
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any()))
                     .thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("unknown type"));
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(500), limits, TASK_TYPE, TASK_PARAMS);
@@ -405,7 +406,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setSummarizerModel("gpt-4o-mini");
 
             ChatModel mockModel = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
             when(mockModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("API timeout"));
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(500), limits, TASK_TYPE, TASK_PARAMS);
@@ -421,7 +422,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setSummarizerModel("gpt-4o-mini");
 
             ChatModel mockModel = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             ChatResponse mockResponse = mock(ChatResponse.class);
             AiMessage mockMessage = mock(AiMessage.class);
@@ -443,7 +444,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setSummarizerModel("gpt-4o-mini");
 
             ChatModel mockModel = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             ChatResponse mockResponse = mock(ChatResponse.class);
             AiMessage mockMessage = mock(AiMessage.class);
@@ -464,7 +465,7 @@ class ToolResponseTruncatorExtendedTest {
             limits.setSummarizerModel("gpt-4o-mini");
 
             ChatModel mockModel = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             ChatResponse mockResponse = mock(ChatResponse.class);
             AiMessage mockMessage = mock(AiMessage.class);
@@ -516,7 +517,7 @@ class ToolResponseTruncatorExtendedTest {
             when(mockResponse.aiMessage()).thenReturn(mockMessage);
             when(mockMessage.text()).thenReturn("Summary");
             when(mockModel.chat(any(ChatRequest.class))).thenReturn(mockResponse);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, mutableParams);
 
@@ -542,13 +543,13 @@ class ToolResponseTruncatorExtendedTest {
             when(mockResponse.aiMessage()).thenReturn(mockMessage);
             when(mockMessage.text()).thenReturn("Summary");
             when(mockModel.chat(any(ChatRequest.class))).thenReturn(mockResponse);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, jsonParams);
 
             // Verify responseFormat was stripped (not passed to model registry)
             verify(chatModelRegistry).getOrCreate(eq("openai"), argThat(params -> !params.containsKey("responseFormat") &&
-                    "gpt-4o-mini".equals(params.get("modelName"))));
+                    "gpt-4o-mini".equals(params.get("modelName"))), any());
         }
     }
 
@@ -606,7 +607,7 @@ class ToolResponseTruncatorExtendedTest {
             when(mockResponse.aiMessage()).thenReturn(mockMessage);
             when(mockMessage.text()).thenReturn("Summary");
             when(mockModel.chat(any(ChatRequest.class))).thenReturn(mockResponse);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(mockModel);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mockModel);
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.contains("[SUMMARY"));
@@ -667,7 +668,7 @@ class ToolResponseTruncatorExtendedTest {
             var spend = new RecordingSpend(false);
 
             String result = truncator.truncateIfNeeded(null, "testTool", "A".repeat(1000), summarizeLimits(), TASK_TYPE, new HashMap<>(TASK_PARAMS),
-                    spend);
+                    spend, SecretAccess.outsideAgentGrants("test"));
 
             assertTrue(result.contains("[TRUNCATED:"), result);
             verifyNoInteractions(chatModelRegistry);
@@ -678,12 +679,13 @@ class ToolResponseTruncatorExtendedTest {
         @DisplayName("an admitted summarizer call is charged its token usage")
         void admittedCallIsCharged() throws Exception {
             ChatModel model = mock(ChatModel.class);
-            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
             when(model.chat(any(ChatRequest.class))).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("short summary"))
                     .tokenUsage(new TokenUsage(4000, 50)).build());
             var spend = new RecordingSpend(true);
 
-            truncator.truncateIfNeeded(null, "testTool", "A".repeat(1000), summarizeLimits(), TASK_TYPE, new HashMap<>(TASK_PARAMS), spend);
+            truncator.truncateIfNeeded(null, "testTool", "A".repeat(1000), summarizeLimits(), TASK_TYPE, new HashMap<>(TASK_PARAMS), spend,
+                    SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(4000, spend.charged.get("inputTokens"));
             assertEquals(50, spend.charged.get("outputTokens"));

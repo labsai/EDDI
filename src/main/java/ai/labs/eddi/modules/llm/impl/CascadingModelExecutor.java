@@ -32,6 +32,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.exception.AuthenticationException;
 import dev.langchain4j.exception.ContentFilteredException;
@@ -616,7 +617,9 @@ class CascadingModelExecutor {
                 boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null && !RescueOptions.of(task).wraps()
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
-                StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
+                StreamingChatModel streamingModel = streamLiveCandidate
+                        ? registry.getOrCreateStreaming(modelType, mergedParams, LlmTask.secretAccessOf(memory))
+                        : null;
                 stepStreamedLive = streamingModel != null;
 
                 // A live stream is terminal and MUST NOT be cancelled mid-flight: cancelling
@@ -645,7 +648,8 @@ class CascadingModelExecutor {
                 // Built after the timeout is known because the model's cache key includes
                 // the (clamped) timeout.
                 ChatModel chatModel = registry.getOrCreate(modelType,
-                        streamingModel != null ? mergedParams : clampModelTimeout(mergedParams, stepTimeout, stepTrace));
+                        streamingModel != null ? mergedParams : clampModelTimeout(mergedParams, stepTimeout, stepTrace),
+                        LlmTask.secretAccessOf(memory));
 
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
@@ -1235,7 +1239,11 @@ class CascadingModelExecutor {
         Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects, memory, "Cascade judge");
         try {
             String type = globalVariableResolver.resolveValue(judgeConfig.getType());
-            return registry.getOrCreate(type, params != null ? params : new HashMap<>());
+            return registry.getOrCreate(type, params != null ? params : new HashMap<>(), LlmTask.secretAccessOf(memory));
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // Loud, like the credential reference above: a judge whose key the agent is
+            // not granted is a configuration error, not a reason to judge differently.
+            throw e;
         } catch (Exception e) {
             LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
             return null;

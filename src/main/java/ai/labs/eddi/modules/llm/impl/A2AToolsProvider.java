@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.secrets.SecretAccess;
 
 import java.util.List;
 import java.util.Map;
@@ -47,7 +48,7 @@ class A2AToolsProvider implements ToolSourceProvider {
         if (a2aAgents == null || a2aAgents.isEmpty()) {
             return ToolContribution.empty();
         }
-        var result = a2aToolProviderManager.discoverTools(a2aAgents);
+        var result = a2aToolProviderManager.discoverTools(a2aAgents, SecretAccess.agent(ctx.agentId()));
         // Resolvers, so a gated A2A call is pinnable. Passing Map.of() here — which
         // is what this did — is what left an approver looking at a tool name with no
         // peer URL and no fingerprint to re-check against.

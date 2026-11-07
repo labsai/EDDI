@@ -183,7 +183,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("invalid then valid: one re-ask, the parsed object is what the templates see, the recovery is noted on the step")
     void invalidThenValid() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(retryInvalidJson()));
 
@@ -201,7 +201,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("invalid on every attempt: the default fallbackAction serves the configured fallback")
     void exhaustedFallsBack() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again."))));
 
@@ -215,7 +215,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("a whitespace-only reply after the re-asks is out of recoveries: the fallback is served")
     void whitespaceReplyFallsBack() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("   ")).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again."))));
 
@@ -227,7 +227,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("fallbackAction error fails the turn, warn keeps the raw reply")
     void fallbackActionVariants() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         assertThrows(LifecycleException.class, () -> run(task(retryInvalidJson().andThen(v -> v.setFallbackAction("error")))));
 
@@ -240,8 +240,8 @@ class LlmTaskRecoveryPoliciesTest {
     void everyCascadeStepInvalidFallsBack() throws Exception {
         var first = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
         var second = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
-        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(first);
-        when(chatModelRegistry.getOrCreate(eq("anthropic"), any())).thenReturn(second);
+        when(chatModelRegistry.getOrCreate(eq("openai"), any(), any())).thenReturn(first);
+        when(chatModelRegistry.getOrCreate(eq("anthropic"), any(), any())).thenReturn(second);
         var task = task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again.")));
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
@@ -265,7 +265,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("without a retry action nothing changes: one call, the raw reply stored")
     void defaultsAreUntouched() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(v -> {
         }));
@@ -279,7 +279,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("onInvalidJson=warn records the validation note and does not re-ask")
     void warnDoesNotRetry() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(v -> v.setOnInvalidJson("warn")));
 
@@ -292,7 +292,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("'retry' on a policy that is not re-asked (refusal) is a warning, never a crash")
     void retryOnRefusalIsAWarning() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("I cannot help with that."));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task(v -> v.setOnRefusal("retry")));
 
@@ -307,7 +307,7 @@ class LlmTaskRecoveryPoliciesTest {
         when(memory.getEventSink()).thenReturn(sink);
         String broken = "{\"answer\": \"cut o";
         var model = FaultInjectingChatModel.script(Step.text(broken));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(v -> {
             v.setOnInvalidJson("wrap");
             v.setWrapField("answer");
@@ -316,7 +316,7 @@ class LlmTaskRecoveryPoliciesTest {
 
         run(task);
 
-        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any(), any());
         verify(sink, never()).onToken(broken);
     }
 
@@ -326,13 +326,13 @@ class LlmTaskRecoveryPoliciesTest {
         var sink = mock(ConversationEventSink.class);
         when(memory.getEventSink()).thenReturn(sink);
         var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(retryInvalidJson());
         task.getParameters().put("addToOutput", "true");
 
         run(task);
 
-        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any(), any());
         verify(sink).onLlmRetry("invalid_json", 1);
         verify(sink).onToken(VALID);
         verify(sink, never()).onToken(PROSE);
@@ -354,7 +354,7 @@ class LlmTaskRecoveryPoliciesTest {
         when(memory.getConversationOutputs()).thenReturn(outputs);
         var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")),
                 Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(v -> v.setOnContextTooLong("retry"));
         task.setConversationHistoryLimit(6);
 
@@ -378,7 +378,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("onSchemaMismatch retry: a blank required field is re-asked with the violation as the reason, then valid")
     void schemaMismatchRetriesThenValid() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}"), Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(shapeTask(v -> {
         }));
@@ -395,7 +395,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("onSchemaMismatch retry exhausted: the fallback is served")
     void schemaMismatchFallsBack() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}")).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(shapeTask(v -> v.setFallbackMessage("Please try again.")));
 
@@ -408,7 +408,7 @@ class LlmTaskRecoveryPoliciesTest {
     @DisplayName("onSchemaMismatch ignore: the parsed object is kept, no re-ask")
     void schemaMismatchIgnoreKeepsTheObject() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"answer\":\"\"}"));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(shapeTask(v -> v.setOnSchemaMismatch("ignore")));
 
@@ -433,7 +433,7 @@ class LlmTaskRecoveryPoliciesTest {
         when(memory.getConversationOutputs()).thenReturn(outputs);
         var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")),
                 Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(v -> v.setOnContextTooLong("retry"));
         task.setMaxContextTokens(2000);
         task.getParameters().put("modelName", "gpt-4o"); // a model jtokkit knows
@@ -453,7 +453,7 @@ class LlmTaskRecoveryPoliciesTest {
         var sink = mock(ConversationEventSink.class);
         when(memory.getEventSink()).thenReturn(sink);
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again.")));
         task.getParameters().put("addToOutput", "true");
 
@@ -470,7 +470,7 @@ class LlmTaskRecoveryPoliciesTest {
         var sink = mock(ConversationEventSink.class);
         when(memory.getEventSink()).thenReturn(sink);
         var model = FaultInjectingChatModel.script(Step.status(401)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(retryInvalidJson().andThen(v -> v.setFallbackMessage("Please try again.")));
         var onError = new LlmConfiguration.OnError();
         onError.setAction("fallback");
@@ -489,7 +489,7 @@ class LlmTaskRecoveryPoliciesTest {
         var call = ToolExecutionRequest.builder().id("c1").name("placeOrder").arguments("{\"item\":\"pizza\"}").build();
         List<ChatMessage> exchange = List.of(AiMessage.from(call), ToolExecutionResultMessage.from(call, "order #42 placed"));
         var model = FaultInjectingChatModel.script(Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         // the loop: runs the tool (once) and ends in an unusable final answer
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any())).thenAnswer(inv -> {
             toolRuns.incrementAndGet();
@@ -519,7 +519,7 @@ class LlmTaskRecoveryPoliciesTest {
     void noHistoryNothingToHalve() throws Exception {
         var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")))
                 .repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task(v -> v.setOnContextTooLong("retry"));
         task.setConversationHistoryLimit(0);
 
@@ -532,7 +532,7 @@ class LlmTaskRecoveryPoliciesTest {
     void contextTooLongWithoutPolicyFails() throws Exception {
         var model = FaultInjectingChatModel.script(Step.fail(new InvalidRequestException("This model's maximum context length is 8192 tokens")))
                 .repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         assertThrows(LifecycleException.class, () -> run(task(v -> {
         })));

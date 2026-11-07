@@ -101,7 +101,7 @@ class McpCallsTaskAgentTestMockTest {
 
         task.execute(memory, config());
 
-        verify(mcpToolProviderManager, never()).discoverTools(anyList());
+        verify(mcpToolProviderManager, never()).discoverTools(anyList(), any());
         verifyNoInteractions(toolExecutionService);
         verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(200), eq(false));
     }
@@ -114,7 +114,7 @@ class McpCallsTaskAgentTestMockTest {
 
         task.execute(memory, config());
 
-        verify(mcpToolProviderManager, never()).discoverTools(anyList());
+        verify(mcpToolProviderManager, never()).discoverTools(anyList(), any());
         verifyNoInteractions(toolExecutionService);
         assertEquals(ToolMockRegistry.Outcome.NOT_EXECUTED, session.calls().getFirst().outcome());
     }

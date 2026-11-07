@@ -173,7 +173,7 @@ class ChannelTargetRouterRefreshTest {
                 .thenReturn(config);
 
         // Secret resolver: pass through (or resolve vault refs)
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> {
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> {
             String val = inv.getArgument(0);
             if (val.startsWith("${eddivault:")) {
                 return "resolved-" + val.substring(12, val.length() - 1);
@@ -291,8 +291,8 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-legacy", "sign-legacy", null);
-            when(secretResolver.resolveValue("xoxb-legacy")).thenReturn("xoxb-legacy");
-            when(secretResolver.resolveValue("sign-legacy")).thenReturn("sign-legacy");
+            when(secretResolver.resolveValue(eq("xoxb-legacy"), any())).thenReturn("xoxb-legacy");
+            when(secretResolver.resolveValue(eq("sign-legacy"), any())).thenReturn("sign-legacy");
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
 
@@ -308,7 +308,7 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-leg", "sign-leg", "group-123");
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
 
@@ -357,8 +357,8 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-leg", "sign-legacy", null);
-            when(secretResolver.resolveValue("xoxb-leg")).thenReturn("xoxb-leg");
-            when(secretResolver.resolveValue("sign-legacy")).thenReturn("sign-legacy-resolved");
+            when(secretResolver.resolveValue(eq("xoxb-leg"), any())).thenReturn("xoxb-leg");
+            when(secretResolver.resolveValue(eq("sign-legacy"), any())).thenReturn("sign-legacy-resolved");
 
             Set<String> secrets = router.getSigningSecrets("slack");
 
@@ -468,8 +468,8 @@ class ChannelTargetRouterRefreshTest {
 
             // Legacy agent with a different secret on a different channel
             setupLegacyAgent(AGENT_ID, "C99LEGACY", "xoxb-leg", "legacy-secret", null);
-            when(secretResolver.resolveValue("xoxb-leg")).thenReturn("xoxb-leg");
-            when(secretResolver.resolveValue("legacy-secret")).thenReturn("legacy-secret");
+            when(secretResolver.resolveValue(eq("xoxb-leg"), any())).thenReturn("xoxb-leg");
+            when(secretResolver.resolveValue(eq("legacy-secret"), any())).thenReturn("legacy-secret");
 
             Set<String> secrets = router.getSigningSecrets("slack");
 
@@ -501,7 +501,7 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "token", "secret", null);
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
             assertTrue(router.hasAnyChannels("slack"));
         }
@@ -676,7 +676,7 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of(descriptor));
             when(channelStore.read(eq(CHANNEL_CONFIG_ID), eq(1))).thenReturn(config);
-            when(secretResolver.resolveValue(CHANNEL_ID)).thenReturn(CHANNEL_ID);
+            when(secretResolver.resolveValue(eq(CHANNEL_ID), any())).thenReturn(CHANNEL_ID);
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
 
@@ -689,9 +689,9 @@ class ChannelTargetRouterRefreshTest {
         void secretResolverFailure() throws Exception {
             setupNewStyleConfig(CHANNEL_ID, "xoxb-good", "sign-good");
             // Override: make resolver throw for one key
-            when(secretResolver.resolveValue("xoxb-good")).thenThrow(new RuntimeException("vault down"));
-            when(secretResolver.resolveValue("sign-good")).thenReturn("sign-resolved");
-            when(secretResolver.resolveValue(CHANNEL_ID)).thenReturn(CHANNEL_ID);
+            when(secretResolver.resolveValue(eq("xoxb-good"), any())).thenThrow(new RuntimeException("vault down"));
+            when(secretResolver.resolveValue(eq("sign-good"), any())).thenReturn("sign-resolved");
+            when(secretResolver.resolveValue(eq(CHANNEL_ID), any())).thenReturn(CHANNEL_ID);
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
 
@@ -792,7 +792,7 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-leg", "sign-leg", null);
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
             // Force refresh
             router.hasAnyChannels("slack");
@@ -947,7 +947,7 @@ class ChannelTargetRouterRefreshTest {
             when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production))
                     .thenReturn(List.of(status));
             when(agentStore.read(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
             ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
             assertNotNull(result);
@@ -977,7 +977,7 @@ class ChannelTargetRouterRefreshTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
             setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-legacy", "sign", null);
-            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
             String token = router.getBotToken("slack", CHANNEL_ID);
 

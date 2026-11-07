@@ -2342,7 +2342,7 @@
     "grantEmptyError": "Füge mindestens einen Agenten hinzu oder wähle „Alle Agenten“. Eine leere Liste ist nicht zulässig.",
     "grantCheckingImpact": "Deployte Agenten werden geprüft…",
     "grantLosingAccessTitle": "Deployte Agenten, die dieses Secret verwenden und den Zugriff verlieren würden ({{count}})",
-    "grantLosingAccessBody": "Sie laufen zunächst weiter — die Berechtigung wird beim Deployment eines Agenten geprüft, nicht bei der Verwendung des Secrets — aber ihr nächstes Deployment wird abgelehnt.",
+    "grantLosingAccessBody": "Sie verlieren den Zugriff sofort — die Berechtigung wird bei jeder Verwendung des Secrets geprüft, nicht nur beim Deployment eines Agenten — ihr nächster Durchlauf, der es braucht, schlägt fehl, ebenso ihr nächstes Deployment.",
     "grantAcknowledge": "Mir ist klar, dass diese Agenten nicht mehr deployt werden können, bis sie wieder hinzugefügt werden oder ihre Konfiguration dieses Secret nicht mehr verwendet.",
     "grantSaved": "Zugriff für „{{key}}“ aktualisiert",
     "grantImpactFailed": "Es konnte nicht geprüft werden, welche deployten Agenten dieses Secret verwenden – jeder von ihnen könnte den Zugriff verlieren.",

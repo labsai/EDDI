@@ -198,7 +198,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("tenant budget spent: the model is not called, the fallback is served without failing the turn, and the step says why")
     void spentTenantBudgetSkipsTheModel() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble()))
                 .thenReturn(QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
         var task = task();
@@ -219,7 +219,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("a quota store that cannot answer refuses the model call too (fail closed, like the tool-call gate)")
     void unavailableAccountingRefuses() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());
 
         run(task());
@@ -233,7 +233,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("within budget the model is called as before, and nothing is refused")
     void withinBudgetCallsTheModel() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task());
 
@@ -246,7 +246,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("strict pricing (REFUSE): an unpriced model is not called and the fallback says unpriced_model")
     void strictPricingRefusesAnUnpricedModel() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         ModelPriceCatalogs.publish(PriceCatalogSnapshot.EMPTY.withFloor(UnpricedPolicy.REFUSE));
         try {
             run(task());
@@ -263,7 +263,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("strict pricing (REFUSE): an explicitly priced task still calls its model")
     void strictPricingLetsAPricedModelThrough() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task();
         task.setInputPricePer1M(0.0);
         ModelPriceCatalogs.publish(PriceCatalogSnapshot.EMPTY.withFloor(UnpricedPolicy.REFUSE));
@@ -280,7 +280,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("audit:cost is recorded with the audit ledger OFF — it is what the tenant budget charges")
     void costIsRecordedWithoutTheAuditLedger() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         assertNull(memory.getAuditCollector(), "precondition: ledger off");
         var task = task();
         task.setInputPricePer1M(1.0);
@@ -296,7 +296,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("conversation ceiling reached: the model is not called and the tenant budget is not even asked")
     void conversationCeilingSkipsTheModel() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         when(memory.getConversationCostCeilingUsd()).thenReturn(OptionalDouble.of(0.10));
         IConversationMemory.IConversationStepStack steps = mock(IConversationMemory.IConversationStepStack.class);
         IData<Object> spent = mock(IData.class);
@@ -317,7 +317,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("no ceiling configured: the model is called and the conversation's cost is never summed")
     void noCeilingNeverWalksTheSteps() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         IConversationMemory.IConversationStepStack steps = mock(IConversationMemory.IConversationStepStack.class);
         when(memory.getAllSteps()).thenReturn(steps);
 
@@ -376,7 +376,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("a same-model re-ask is refused once the first attempt's own cost reaches the ceiling (it is not in audit:cost yet)")
     void reaskRefusedByTheCeiling() throws Exception {
         var model = new EmptyModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         // $0.001 recorded + the first attempt's $0.002 = $0.003 >= $0.0025
         conversation(0.0025, 0.001);
 
@@ -392,7 +392,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("within the ceiling the re-ask is sent as before")
     void reaskWithinTheCeiling() throws Exception {
         var model = new EmptyModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         conversation(1.00, 0.001);
 
         run(reaskingOnEmpty());
@@ -416,7 +416,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("a guardrail reprompt is refused once the answer's own cost reaches the ceiling: the answer is blocked, no second call")
     void repromptRefusedByTheCeiling() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         // the primary call passes ($0.001 < $0.0025); its $0.002 makes $0.003 before
         // the reprompt
         conversation(0.0025, 0.001);
@@ -432,7 +432,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("a guardrail reprompt is refused once the tenant budget is spent mid-turn")
     void repromptRefusedByTheTenantBudget() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         // allowed for the primary call, spent by the time the reprompt would start
         when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK,
                 QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
@@ -448,7 +448,7 @@ class LlmTaskSpendGateTest {
     @DisplayName("within the ceiling the reprompt is sent as before")
     void repromptWithinTheCeiling() throws Exception {
         var model = new CountingModel();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         conversation(1.00, 0.001);
 
         run(repromptingJsonTask());
@@ -466,7 +466,7 @@ class LlmTaskSpendGateTest {
     @Test
     @DisplayName("a tool loop that pauses: what it spent so far goes on the step's audit:cost and audit:token_usage")
     void pauseRecordsTheSpendSoFar() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(new CountingModel());
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenThrow(pauseWithSpend(new PendingToolCallBatch()));
 
@@ -482,7 +482,7 @@ class LlmTaskSpendGateTest {
     @Test
     @DisplayName("a resume that pauses again records its own segment once, not twice")
     void rePauseRecordsItsSegmentOnce() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(new CountingModel());
         var batch = new PendingToolCallBatch();
         batch.setLlmTaskId("taskA");
         batch.setLlmTaskIndex(0);
@@ -501,7 +501,7 @@ class LlmTaskSpendGateTest {
     @Test
     @DisplayName("a model phase that fails: what it spent before failing goes on the step's audit:cost and audit:token_usage")
     void failureRecordsTheSpendSoFar() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(new CountingModel());
         when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
                 .thenThrow(UnrecordedSpend.attach(new LifecycleException("round 7 failed"), Map.of("inputTokens", 2000), 0.02, 0.01));
 
@@ -517,7 +517,7 @@ class LlmTaskSpendGateTest {
     @Test
     @DisplayName("the rolling summary's call is priced and recorded like any other paid call")
     void summaryCallIsPriced() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(new CountingModel());
         var task = task();
         task.setInputPricePer1M(0.01);
         var summary = new LlmConfiguration.ConversationSummaryConfig();

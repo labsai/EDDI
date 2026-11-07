@@ -2384,7 +2384,7 @@
     "grantEmptyError": "Add at least one agent, or choose “All agents”. An empty list is not allowed.",
     "grantCheckingImpact": "Checking deployed agents…",
     "grantLosingAccessTitle": "Deployed agents that use this secret and would lose access ({{count}})",
-    "grantLosingAccessBody": "They keep running for now — the grant is checked when an agent is deployed, not when a secret is used — but their next deployment will be refused.",
+    "grantLosingAccessBody": "They lose access immediately — the grant is checked whenever a secret is used, not only when an agent is deployed — so their next turn that needs it fails, and so does their next deployment.",
     "grantAcknowledge": "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
     "grantSaved": "Access updated for “{{key}}”",
     "grantImpactFailed": "Could not check which deployed agents use this secret, so any of them may lose access.",

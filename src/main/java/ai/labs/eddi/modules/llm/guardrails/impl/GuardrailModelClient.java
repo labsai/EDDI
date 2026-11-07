@@ -18,6 +18,7 @@ import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
 import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.TextContent;
@@ -190,7 +191,9 @@ final class GuardrailModelClient {
         try {
             List<ChatMessage> messages = call.messages().get();
             Map<String, String> modelParameters = modelParameters(context, call.ownParameters(), call.defaultTimeoutMs());
-            ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters);
+            // The guardrail runs for the turn's agent: its model's key must be granted
+            // to it, like the task's own.
+            ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters, SecretAccess.agent(context.agentId()));
             providerTag = provider.trim();
             // strict pricing mode: an unpriced guardrail call is "could not decide", so
             // failMode applies

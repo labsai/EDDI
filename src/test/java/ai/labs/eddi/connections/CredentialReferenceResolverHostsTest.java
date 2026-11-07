@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
@@ -42,7 +43,7 @@ class CredentialReferenceResolverHostsTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenReturn("plaintext");
+        when(secretResolver.resolveValue(anyString(), any())).thenReturn("plaintext");
         allowlist = mock(VaultHostAllowlist.class);
         resolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
     }
@@ -54,10 +55,11 @@ class CredentialReferenceResolverHostsTest {
                 .requireAllowed(eq(Set.of("${vault:jira-token}")), eq("https://attacker.example/api"), anyString());
 
         var error = assertThrows(ConnectionException.class,
-                () -> resolver.resolveVaultBackedFor("${vault:jira-token}", "https://attacker.example/api", "jira", "client secret"));
+                () -> resolver.resolveVaultBackedFor("${vault:jira-token}", "https://attacker.example/api", "jira", "client secret",
+                        SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
-        verify(secretResolver, never()).resolveValue(anyString());
+        verify(secretResolver, never()).resolveValue(anyString(), any());
     }
 
     @Test
@@ -78,11 +80,11 @@ class CredentialReferenceResolverHostsTest {
         // between the allowlist check and the resolution.
         when(globalVariableResolver.resolveValue("${vars:cred}")).thenReturn("${vault:allowed-key}").thenReturn("${vault:other-key}");
 
-        resolver.resolveVaultBackedFor("${vars:cred}", "https://api.example.com", "jira", "client secret");
+        resolver.resolveVaultBackedFor("${vars:cred}", "https://api.example.com", "jira", "client secret", SecretAccess.outsideAgentGrants("test"));
 
         verify(allowlist).requireAllowed(eq(Set.of("${vault:allowed-key}")), eq("https://api.example.com"), anyString());
-        verify(secretResolver).resolveValue("${vault:allowed-key}");
-        verify(secretResolver, never()).resolveValue("${vault:other-key}");
+        verify(secretResolver).resolveValue(eq("${vault:allowed-key}"), any());
+        verify(secretResolver, never()).resolveValue(eq("${vault:other-key}"), any());
     }
 
     @Test
@@ -91,10 +93,10 @@ class CredentialReferenceResolverHostsTest {
         when(globalVariableResolver.resolveValue("Bearer ${vars:cred}")).thenReturn("Bearer ${vault:allowed-key}")
                 .thenReturn("Bearer ${vault:other-key}");
 
-        resolver.resolveRequiredFor("Bearer ${vars:cred}", "https://api.example.com", "jira", "credential");
+        resolver.resolveRequiredFor("Bearer ${vars:cred}", "https://api.example.com", "jira", "credential", SecretAccess.outsideAgentGrants("test"));
 
-        verify(secretResolver).resolveValue("Bearer ${vault:allowed-key}");
-        verify(secretResolver, never()).resolveValue("Bearer ${vault:other-key}");
+        verify(secretResolver).resolveValue(eq("Bearer ${vault:allowed-key}"), any());
+        verify(secretResolver, never()).resolveValue(eq("Bearer ${vault:other-key}"), any());
     }
 
     @Test

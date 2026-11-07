@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -46,6 +47,12 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  */
 @ApplicationScoped
 public class KnowledgeBaseInspector {
+
+    /**
+     * Inspection is not an agent; see
+     * {@code RagIngestionService.KNOWLEDGE_BASE_INGESTION}.
+     */
+    private static final SecretAccess INSPECTION = SecretAccess.withoutAgent("knowledge base inspection");
 
     private static final Logger LOGGER = Logger.getLogger(KnowledgeBaseInspector.class);
 
@@ -188,7 +195,7 @@ public class KnowledgeBaseInspector {
 
     private List<EmbeddingMatch<TextSegment>> search(String ragConfigId, RagConfiguration knowledgeBase, String text,
                                                      Filter narrowing, int maxResults, double minScore) {
-        Embedding queryVector = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY)
+        Embedding queryVector = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY, INSPECTION)
                 .embed(text).content();
         // Retrieval's own isolation, always: a knowledge base in the per-id layout
         // only ever sees the chunks tagged with its own id, even in a shared table.
@@ -202,7 +209,7 @@ public class KnowledgeBaseInspector {
                 .filter(filter)
                 .build();
         try {
-            return embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase).search(request).matches();
+            return embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, INSPECTION).search(request).matches();
         } catch (UnsupportedFeatureException e) {
             LOGGER.infof("The vector store of knowledge base %s cannot filter by metadata: %s",
                     LogSanitizer.sanitize(ragConfigId), e.getMessage());

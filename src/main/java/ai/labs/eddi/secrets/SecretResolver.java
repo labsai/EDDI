@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets;
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
+import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -18,6 +19,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
 import java.util.*;
@@ -34,16 +37,30 @@ import java.util.function.Consumer;
  * workflow. It is called <b>after</b> Qute template processing and
  * <b>before</b> the final API call (late-binding resolution).
  * <p>
- * <b>Access model:</b> the resolver does NOT check agent permissions; it
- * resolves any valid reference that exists in the vault. Which agents may use a
- * secret is governed by {@code SecretMetadata.allowedAgents} and checked when
- * the agent is deployed, by {@link VaultGrantGate}.
+ * <b>Access model:</b> every resolution names a {@link SecretAccess}, on whose
+ * behalf the value is handed out, and the secret's agent grant
+ * ({@code SecretMetadata.allowedAgents}) is checked against it here, on every
+ * resolution, before the cache is consulted. The deploy-time gate
+ * ({@link VaultGrantGate}) still runs and still reports a misconfiguration
+ * before an agent serves traffic; this check is what makes the grant hold on a
+ * cluster, where a deployment can pass the gate on one node after a grant was
+ * written on another, or be made with {@code autoDeploy=false} where no shared
+ * record names it (#1179). Follows {@code eddi.vault.grant-enforcement}:
+ * {@code enforce} refuses, {@code warn} logs once per secret and asker and
+ * resolves, {@code off} does not read the grant.
  * <p>
- * Includes a Caffeine cache with configurable TTL to avoid repeated
- * decryption/vault calls. Cache is invalidated on secret rotation via
- * {@link #invalidateCache(SecretReference)}. Failed resolutions (not-found,
- * provider errors) are <b>never cached</b> so that newly created secrets
- * resolve immediately.
+ * Includes two Caffeine caches with the same TTL: the plaintext, and the grant.
+ * Both are keyed on the secret alone. The grant is checked for the asking
+ * access on every resolution, so a value cached for one agent is never handed
+ * to another the grant leaves out. Both are invalidated by
+ * {@link #invalidateCache(SecretReference)}, which every value and grant write
+ * calls and which reaches the other nodes of a cluster. Failed resolutions
+ * (not-found, provider errors) are <b>never cached</b> so that newly created
+ * secrets resolve immediately.
+ * <p>
+ * Callers that keep a client built from resolved values in a cache of their own
+ * (models, embedding stores, MCP and A2A clients, connection credentials) call
+ * {@link #requireGranted} before their own lookup, for the same reason.
  *
  * @author ginccc
  * @since 6.0.0
@@ -64,7 +81,22 @@ public class SecretResolver {
     private final int cacheTtlMinutes;
     private final int cacheMaxSize;
 
+    private final VaultGrantGate.Mode grantEnforcement;
+
     private Cache<String, String> cache;
+
+    /**
+     * The grant of each secret, canonicalised ({@code ["*"]} for open). Separate
+     * from the plaintext so {@link #requireGranted} can answer a caller whose own
+     * cache holds the built client, without decrypting anything.
+     */
+    private Cache<String, List<String>> grantCache;
+
+    /**
+     * The {@code warn}-mode log lines already written, one per secret and asker, so
+     * a turn loop does not repeat the same line on every resolution.
+     */
+    private Cache<String, Boolean> grantWarnings;
 
     /**
      * Bumped by every invalidation, so a resolution that was in flight across one
@@ -94,25 +126,42 @@ public class SecretResolver {
     private Counter cacheHitCounter;
     private Counter cacheMissCounter;
     private Counter resolveErrorCounter;
+    private Counter grantRefusalCounter;
     private Timer resolveTimer;
 
     @Inject
     public SecretResolver(ISecretProvider secretProvider, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.vault.cache-ttl-minutes", defaultValue = "5") int cacheTtlMinutes,
-            @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize) {
+            @ConfigProperty(name = "eddi.vault.cache-max-size", defaultValue = "1000") int cacheMaxSize,
+            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME) String grantEnforcement) {
         this.secretProvider = secretProvider;
         this.meterRegistry = meterRegistry;
         this.cacheTtlMinutes = cacheTtlMinutes;
         this.cacheMaxSize = cacheMaxSize;
+        // Parsed here, strictly, as the deploy gate does: a typo must fail startup,
+        // not quietly turn the check off.
+        this.grantEnforcement = VaultGrantGate.Mode.parseStrict(grantEnforcement);
     }
 
+    /** With the shipped grant enforcement ({@code enforce}). */
+    public SecretResolver(ISecretProvider secretProvider, MeterRegistry meterRegistry, int cacheTtlMinutes, int cacheMaxSize) {
+        this(secretProvider, meterRegistry, cacheTtlMinutes, cacheMaxSize, VaultGrantGate.DEFAULT_MODE_NAME);
+    }
+
+    /**
+     * Builds the caches and metrics. Public so that the tests of a collaborator can
+     * build a real resolver, grant checks included, with {@code new}.
+     */
     @PostConstruct
-    void init() {
+    public void init() {
         this.cache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
+        this.grantCache = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(cacheTtlMinutes)).maximumSize(cacheMaxSize).build();
+        this.grantWarnings = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(cacheMaxSize).build();
 
         this.cacheHitCounter = meterRegistry.counter("eddi.vault.cache.hits");
         this.cacheMissCounter = meterRegistry.counter("eddi.vault.cache.misses");
         this.resolveErrorCounter = meterRegistry.counter("eddi.vault.resolve.errors");
+        this.grantRefusalCounter = meterRegistry.counter("eddi.vault.grant.refusals");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.time");
 
         if (clusterEvents != null) {
@@ -142,9 +191,14 @@ public class SecretResolver {
      *
      * @param params
      *            the parameter map (may contain ${vault:...} values)
+     * @param access
+     *            on whose behalf the values are resolved; see {@link SecretAccess}
      * @return a new map with vault references replaced by plaintext values
+     * @throws SecretNotGrantedException
+     *             when a referenced secret's grant does not admit {@code access}
+     *             (under {@code eddi.vault.grant-enforcement=enforce})
      */
-    public Map<String, String> resolveSecrets(Map<String, String> params) {
+    public Map<String, String> resolveSecrets(Map<String, String> params, SecretAccess access) {
         if (params == null || params.isEmpty()) {
             return params;
         }
@@ -154,7 +208,7 @@ public class SecretResolver {
         }
 
         var resolved = new HashMap<>(params);
-        resolved.replaceAll((key, value) -> resolveValue(value));
+        resolved.replaceAll((key, value) -> resolveValue(value, access));
         return resolved;
     }
 
@@ -224,9 +278,16 @@ public class SecretResolver {
      *
      * @param value
      *            the value that may contain ${vault:...} references
+     * @param access
+     *            on whose behalf the value is resolved; see {@link SecretAccess}.
+     *            {@code null} is read as an agent whose id is unknown, which fails
+     *            closed
      * @return the value with vault references replaced by plaintext
+     * @throws SecretNotGrantedException
+     *             when a referenced secret's grant does not admit {@code access}
+     *             (under {@code eddi.vault.grant-enforcement=enforce})
      */
-    public String resolveValue(String value) {
+    public String resolveValue(String value, SecretAccess access) {
         if (value == null || !SecretReference.isVaultReference(value)) {
             return value;
         }
@@ -235,14 +296,15 @@ public class SecretResolver {
             return value; // Passthrough
         }
 
-        return VAULT_REFERENCES.replaceAll(value, this::resolveReference);
+        SecretAccess asking = access != null ? access : SecretAccess.agent(null);
+        return VAULT_REFERENCES.replaceAll(value, match -> resolveReference(match, asking));
     }
 
     /**
      * The plaintext for one reference found by {@link #resolveValue}, or the
      * reference itself when it may not or cannot be resolved.
      */
-    private String resolveReference(ReferenceScanner.Match match) {
+    private String resolveReference(ReferenceScanner.Match match, SecretAccess access) {
         String fullMatch = match.text();
         SecretReference ref = SecretReference.of(match);
 
@@ -259,7 +321,17 @@ public class SecretResolver {
             return fullMatch;
         }
 
-        String cacheKey = ref.tenantId() + "/" + ref.keyName();
+        // The grant BEFORE the cache: the cache is keyed on the secret, not on who
+        // asks, so a value one agent put there must not reach another that the
+        // grant leaves out (#1179).
+        if (!grantAdmits(ref, access, null)) {
+            // Absent secret: left in place exactly as a failed resolution is.
+            LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
+            resolveErrorCounter.increment();
+            return fullMatch;
+        }
+
+        String cacheKey = cacheKey(ref);
 
         // Check cache first — only successful resolutions are cached
         String resolved = cache.getIfPresent(cacheKey);
@@ -285,6 +357,164 @@ public class SecretResolver {
             cache.invalidate(cacheKey);
         }
         return resolved;
+    }
+
+    /**
+     * Refuse {@code access} every vault reference in {@code references} whose grant
+     * does not admit it, without resolving anything.
+     * <p>
+     * For a caller that keeps a client built from resolved values in a cache of its
+     * own: a chat or embedding model, an embedding store, an MCP or A2A client, a
+     * connection's credential. Such a cache is keyed on the configuration, so a hit
+     * never reaches {@link #resolveValue} and would hand one agent a client built
+     * with a secret granted to another. Call this before that lookup.
+     * <p>
+     * A secret that does not exist is refused for an access the grant governs: it
+     * has no grant to read, and a cached client may still carry its old value. A
+     * reserved name is skipped; {@link #resolveValue} refuses it outright. With the
+     * vault not configured, or {@code eddi.vault.grant-enforcement=off}, this does
+     * nothing.
+     *
+     * @param references
+     *            the {@code ${vault:…}} strings, e.g. from
+     *            {@link VaultHostAllowlist#referencesIn}
+     * @param usedFor
+     *            what is being built, for the message (e.g. {@code "LLM provider
+     *            'openai'"})
+     * @throws SecretNotGrantedException
+     *             when one is refused
+     */
+    public void requireGranted(Iterable<String> references, SecretAccess access, String usedFor) {
+        if (references == null || grantEnforcement == VaultGrantGate.Mode.OFF || !secretProvider.isAvailable()) {
+            return;
+        }
+        SecretAccess asking = access != null ? access : SecretAccess.agent(null);
+        if (!asking.checksGrant()) {
+            return;
+        }
+        for (String reference : references) {
+            SecretReference ref;
+            try {
+                ref = SecretReference.parse(reference);
+            } catch (IllegalArgumentException e) {
+                continue; // Not a vault reference: nothing to check.
+            }
+            if (SecretReference.isReservedKeyName(ref.keyName())) {
+                continue;
+            }
+            if (!grantAdmits(ref, asking, usedFor)) {
+                grantRefusalCounter.increment();
+                throw new SecretNotGrantedException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
+                        + ", which does not exist (it may just have been deleted), so its grant cannot be checked for "
+                        + asking.describe() + " and it is refused.");
+            }
+        }
+    }
+
+    /**
+     * {@link #requireGranted(Iterable, SecretAccess, String)} for every vault
+     * reference in the values of {@code params}.
+     */
+    public void requireGranted(Map<String, String> params, SecretAccess access, String usedFor) {
+        if (params == null || params.isEmpty()) {
+            return;
+        }
+        requireGranted(VaultHostAllowlist.referencesIn(params.values()), access, usedFor);
+    }
+
+    /** The configured grant enforcement mode. */
+    public VaultGrantGate.Mode grantEnforcement() {
+        return grantEnforcement;
+    }
+
+    /**
+     * Whether {@code access} may have {@code ref}, by its grant.
+     *
+     * @return {@code false} only when the secret does not exist (the caller decides
+     *         what that means); {@code true} when admitted, when the mode or the
+     *         access does not check grants, or in {@code warn} mode after logging
+     * @throws SecretNotGrantedException
+     *             when refused under {@code enforce}, including when the grant
+     *             could not be read
+     */
+    private boolean grantAdmits(SecretReference ref, SecretAccess access, String usedFor) {
+        if (grantEnforcement == VaultGrantGate.Mode.OFF || !access.checksGrant()) {
+            return true;
+        }
+        List<String> grant;
+        try {
+            grant = grantOf(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            return false;
+        } catch (ISecretProvider.SecretProviderException | RuntimeException e) {
+            // Fail closed: a grant that cannot be read is not a grant that admits.
+            LOGGER.errorf("Could not read the grant of %s for %s: %s", sanitize(ref.toReferenceString()), sanitize(access.describe()),
+                    sanitize(e.getMessage()));
+            return refuse(ref, access, usedFor, "its grant could not be read");
+        }
+        if (access.permits(grant)) {
+            return true;
+        }
+        return refuse(ref, access, usedFor, "its grant (allowedAgents) does not include it");
+    }
+
+    /** Refuses under {@code enforce}; logs once and admits under {@code warn}. */
+    private boolean refuse(SecretReference ref, SecretAccess access, String usedFor, String why) {
+        String message = "Vault secret " + ref.toReferenceString() + " is not resolved for " + access.describe()
+                + (usedFor != null ? " (" + usedFor + ")" : "") + ": " + why + ". The grant is checked whenever a secret is resolved, "
+                + "not only when an agent is deployed. " + fixFor(ref, access);
+        if (grantEnforcement == VaultGrantGate.Mode.WARN) {
+            String warnedKey = cacheKey(ref) + "|" + access.kind() + "|" + access.agentId() + "|" + access.purpose();
+            if (grantWarnings.asMap().putIfAbsent(warnedKey, Boolean.TRUE) == null) {
+                LOGGER.warn(sanitize(message) + " Resolved anyway (eddi.vault.grant-enforcement=warn); set it to 'enforce' to refuse.");
+            }
+            return true;
+        }
+        grantRefusalCounter.increment();
+        LOGGER.warn(sanitize(message));
+        throw new SecretNotGrantedException(message);
+    }
+
+    private static String fixFor(SecretReference ref, SecretAccess access) {
+        if (access.kind() == SecretAccess.Kind.AGENT && access.agentId() != null) {
+            return "Fix (eddi-admin): " + VaultGrantGate.appendEndpoint(ref, access.agentId()) + ", or remove the reference.";
+        }
+        return "Only a secret granted to every agent (allowedAgents [\"*\"]) may be used here: widen its grant, or use another secret.";
+    }
+
+    /** The grant of {@code ref}, from the grant cache or the provider. */
+    private List<String> grantOf(SecretReference ref) throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
+        String key = cacheKey(ref);
+        List<String> grant = grantCache.getIfPresent(key);
+        if (grant != null) {
+            return grant;
+        }
+        long generationBefore = invalidations.get();
+        SecretMetadata metadata = secretProvider.getMetadata(ref);
+        if (metadata == null) {
+            throw new ISecretProvider.SecretProviderException("No metadata returned for " + ref.toReferenceString());
+        }
+        grant = SecretMetadata.canonicalGrant(metadata.allowedAgents());
+        grantCache.put(key, grant);
+        if (invalidations.get() != generationBefore) {
+            // A grant write raced this read; the same rule as resolveReference's.
+            grantCache.invalidate(key);
+        }
+        return grant;
+    }
+
+    private static String cacheKey(SecretReference ref) {
+        return ref.tenantId() + "/" + ref.keyName();
+    }
+
+    /**
+     * A secret's agent grant does not admit the access it was resolved for. Never
+     * carries a value: the message names the reference, the asker and the fix.
+     */
+    public static class SecretNotGrantedException extends IllegalStateException {
+        public SecretNotGrantedException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -326,9 +556,10 @@ public class SecretResolver {
      * re-published).
      */
     public void invalidateLocal(SecretReference reference) {
-        String cacheKey = reference.tenantId() + "/" + reference.keyName();
+        String cacheKey = cacheKey(reference);
         invalidations.incrementAndGet();
         cache.invalidate(cacheKey);
+        grantCache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
     }
@@ -347,6 +578,7 @@ public class SecretResolver {
     public void invalidateAllLocal() {
         invalidations.incrementAndGet();
         cache.invalidateAll();
+        grantCache.invalidateAll();
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);
     }

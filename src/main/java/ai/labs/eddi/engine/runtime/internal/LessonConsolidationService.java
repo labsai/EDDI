@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.hitl.oversight.OversightJson;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -264,7 +265,10 @@ public class LessonConsolidationService {
 
         SummarizationService.SummarizationResult llm;
         try {
-            llm = summarizationService.summarizeWithUsage(content, INSTRUCTIONS, config.llmProvider(), config.llmModel(), config.parameters());
+            // A group is not an agent: only a secret granted to every agent, the rule
+            // ServiceJudgeVaultGrants checked above, and the resolver checks again.
+            llm = summarizationService.summarizeWithUsage(content, INSTRUCTIONS, config.llmProvider(), config.llmModel(), config.parameters(),
+                    SecretAccess.withoutAgent("team lesson consolidation"));
         } catch (Exception e) {
             if (DreamService.isTransientLlmFailure(e)) {
                 // A provider blip must not dead-letter the schedule.

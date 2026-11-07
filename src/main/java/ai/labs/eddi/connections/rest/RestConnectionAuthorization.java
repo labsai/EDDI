@@ -22,6 +22,7 @@ import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.datastore.IResourceStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -632,10 +633,17 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return name;
     }
 
+    /**
+     * The authorization-code exchange a user starts from the Manager: no agent is
+     * involved, and the client secret goes only to the token endpoint. Agents meet
+     * the grant when they use the connection (see {@code ConnectionResolver}).
+     */
+    private static final SecretAccess TOKEN_ENDPOINT = SecretAccess.outsideAgentGrants("OAuth authorization of a connection");
+
     private String resolveClientSecret(ConnectionConfiguration connection) {
         // Checked against the token endpoint, where the client secret is sent.
         return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+                connection.getName(), "client secret", TOKEN_ENDPOINT);
     }
 
     /**

@@ -52,7 +52,7 @@ class CascadingModelExecutorTest {
     private static ChatModelRegistry mockRegistry(ChatModel model) {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         try {
-            doReturn(model).when(registry).getOrCreate(anyString(), anyMap());
+            doReturn(model).when(registry).getOrCreate(anyString(), anyMap(), any());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -258,8 +258,8 @@ class CascadingModelExecutorTest {
                     .when(expensiveModel).chat(anyList());
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap());
-            doReturn(expensiveModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
+            doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap(), any());
+            doReturn(expensiveModel).when(registry).getOrCreate(eq("anthropic"), anyMap(), any());
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",
@@ -348,8 +348,8 @@ class CascadingModelExecutorTest {
                     .when(goodModel).chat(anyList());
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            doReturn(failModel).when(registry).getOrCreate(eq("openai"), anyMap());
-            doReturn(goodModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
+            doReturn(failModel).when(registry).getOrCreate(eq("openai"), anyMap(), any());
+            doReturn(goodModel).when(registry).getOrCreate(eq("anthropic"), anyMap(), any());
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",
@@ -398,8 +398,8 @@ class CascadingModelExecutorTest {
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             try {
-                doReturn(failModel1).when(registry).getOrCreate(eq("openai"), anyMap());
-                doReturn(failModel2).when(registry).getOrCreate(eq("anthropic"), anyMap());
+                doReturn(failModel1).when(registry).getOrCreate(eq("openai"), anyMap(), any());
+                doReturn(failModel2).when(registry).getOrCreate(eq("anthropic"), anyMap(), any());
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -450,8 +450,8 @@ class CascadingModelExecutorTest {
                     .when(failModel).chat(anyList());
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap());
-            doReturn(failModel).when(registry).getOrCreate(eq("anthropic"), anyMap());
+            doReturn(cheapModel).when(registry).getOrCreate(eq("openai"), anyMap(), any());
+            doReturn(failModel).when(registry).getOrCreate(eq("anthropic"), anyMap(), any());
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",

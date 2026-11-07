@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -40,7 +41,7 @@ class EmbeddingStoreFactoryTest {
     void setUp() {
         openMocks(this);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingStoreFactory(globalVariableResolver, secretResolver);
     }
 
@@ -131,7 +132,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store = factory.getOrCreate("testKb", config);
+            var store = factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
 
@@ -142,7 +143,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreNamespace("id");
             config.setStoreType("neo4j");
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -153,7 +154,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("host", "localhost"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -164,7 +165,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreType("mongodb-atlas");
             config.setStoreParameters(Map.of());
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -182,7 +183,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreType("pgvector");
             config.setStoreParameters(Map.of("password", "secret", "port", "not-a-number"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -198,7 +199,7 @@ class EmbeddingStoreFactoryTest {
 
             // This will fail trying to connect, but should not fail parameter parsing
             try {
-                factory.getOrCreate("testKb", config);
+                factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test"));
             } catch (Exception e) {
                 // Expected — can't connect to real PostgreSQL, but parsing succeeded
                 assertFalse(e instanceof IllegalArgumentException, "Should not be IllegalArgumentException for blank port");
@@ -220,7 +221,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreType("chroma");
             config.setStoreParameters(Map.of("apiVersion", "INVALID_VERSION"));
 
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -237,7 +238,7 @@ class EmbeddingStoreFactoryTest {
             var config = new RagConfiguration();
             config.setStoreNamespace("id");
             config.setStoreType("in-memory");
-            factory.getOrCreate("kb1", config);
+            factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
 
             assertDoesNotThrow(() -> factory.clearCache());
         }
@@ -259,7 +260,8 @@ class EmbeddingStoreFactoryTest {
             params.put("password", "   ");
             config.setStoreParameters(params);
 
-            var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("testKb", config));
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate("testKb", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("password"));
         }
     }
@@ -278,7 +280,7 @@ class EmbeddingStoreFactoryTest {
             config.setStoreType("in-memory");
             config.setStoreParameters(null);
 
-            var store = factory.getOrCreate("kb1", config);
+            var store = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
     }
@@ -296,8 +298,8 @@ class EmbeddingStoreFactoryTest {
             config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate("kb1", config);
-            var store2 = factory.getOrCreate("kb1", config);
+            var store1 = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
             assertSame(store1, store2);
         }
 
@@ -308,8 +310,8 @@ class EmbeddingStoreFactoryTest {
             config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate("kb1", config);
-            var store2 = factory.getOrCreate("kb2", config);
+            var store1 = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb2", config, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(store1, store2);
         }
     }
@@ -339,13 +341,13 @@ class EmbeddingStoreFactoryTest {
             // hold none and must survive this — see EmbeddingStoreFactoryInMemoryTest.
             var config = new RagConfiguration();
             config.setStoreType("elasticsearch");
-            var before = factory.getOrCreate("kb1", config);
+            var before = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
 
             @SuppressWarnings("unchecked")
             Consumer<SecretReference> listener = secretListener.getValue();
             listener.accept(new SecretReference("default", "pgvector-password"));
 
-            assertNotSame(before, factory.getOrCreate("kb1", config),
+            assertNotSame(before, factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test")),
                     "a rotated credential must produce a rebuilt store, not the cached one");
         }
 
@@ -360,11 +362,11 @@ class EmbeddingStoreFactoryTest {
 
             var config = new RagConfiguration();
             config.setStoreType("elasticsearch");
-            var before = factory.getOrCreate("kb1", config);
+            var before = factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test"));
 
             variableListener.getValue().run();
 
-            assertNotSame(before, factory.getOrCreate("kb1", config));
+            assertNotSame(before, factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test")));
         }
     }
 

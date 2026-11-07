@@ -169,7 +169,7 @@ class McpCallsTaskTest {
             mcpCall.setToolName("tool1");
             config.setMcpCalls(List.of(mcpCall));
 
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(null);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(null);
 
             assertDoesNotThrow(() -> task.execute(memory, config));
         }
@@ -193,7 +193,7 @@ class McpCallsTaskTest {
             var toolSpec = ToolSpecification.builder().name("tool1").build();
             var toolsResult = new McpToolProviderManager.McpToolsResult(
                     List.of(toolSpec), Map.of("tool1", mock(ToolExecutor.class)));
-            when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+            when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
 
             assertDoesNotThrow(() -> task.execute(memory, config));

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -154,22 +155,32 @@ public class EmbeddingModelFactory {
      *            {@link EmbeddingInputType#DOCUMENT} when ingesting,
      *            {@link EmbeddingInputType#QUERY} when retrieving
      *
+     * @param access
+     *            the agent (or other caller) the model is for. Checked against
+     *            every vault secret the embedding parameters name BEFORE the cache,
+     *            which is keyed on the configuration and so shared by every agent
+     *            using it (#1179)
      * @return a model for that role; for the providers that do not accept an input
      *         type this is the provider's model unchanged
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
      *
      * @see InputTypedEmbeddingModel
      */
-    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType) {
+    public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType, SecretAccess access) {
+        Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
+        secretResolver.requireGranted(globalVariableResolver.resolveAll(rawParams), access,
+                "embedding model '" + config.getEmbeddingProvider() + "'");
         // The role is part of the key: to an asymmetric provider the two roles are
         // two different models, and sharing one entry is precisely the defect.
         // A structural key, not a concatenated TreeMap.toString(): that rendering has
         // no unambiguous entry boundaries ({a='x, b=y'} looks like {a='x', b='y'}), so
         // two configurations could share one client — and its endpoint.
         var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), config.getEmbeddingParameters(), inputType);
-        return cache.get(cacheKey, k -> build(config, inputType));
+        return cache.get(cacheKey, k -> build(config, inputType, access));
     }
 
-    private EmbeddingModel build(RagConfiguration config, EmbeddingInputType inputType) {
+    private EmbeddingModel build(RagConfiguration config, EmbeddingInputType inputType, SecretAccess access) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(params);
@@ -201,7 +212,7 @@ public class EmbeddingModelFactory {
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
-        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params, access), "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
             LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,

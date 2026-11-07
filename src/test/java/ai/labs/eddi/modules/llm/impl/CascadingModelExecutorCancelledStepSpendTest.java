@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -113,7 +114,7 @@ class CascadingModelExecutorCancelledStepSpendTest {
             }
         };
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
         IConversationMemory memory = mock(IConversationMemory.class);
         lenient().when(memory.getConversationId()).thenReturn("conv-1");
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);

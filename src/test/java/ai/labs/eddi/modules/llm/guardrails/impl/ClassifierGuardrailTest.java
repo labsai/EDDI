@@ -103,7 +103,7 @@ class ClassifierGuardrailTest {
     }
 
     private StubModel install(StubModel model) throws Exception {
-        when(registry.getOrCreate(eq("ollama"), any())).thenReturn(model);
+        when(registry.getOrCreate(eq("ollama"), any(), any())).thenReturn(model);
         return model;
     }
 
@@ -327,7 +327,7 @@ class ClassifierGuardrailTest {
 
         @SuppressWarnings("unchecked")
         var captor = ArgumentCaptor.forClass(Map.class);
-        verify(registry).getOrCreate(eq("ollama"), captor.capture());
+        verify(registry).getOrCreate(eq("ollama"), captor.capture(), any());
         Map<String, String> sent = captor.getValue();
         assertEquals("shieldgemma:2b", sent.get("model"));
         assertEquals("http://classifier.guardrails.svc:11434", sent.get("baseUrl"));
@@ -356,7 +356,7 @@ class ClassifierGuardrailTest {
     @Test
     @DisplayName("an unsupported provider is unavailable")
     void unsupportedProvider() throws Exception {
-        when(registry.getOrCreate(eq("nope"), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
+        when(registry.getOrCreate(eq("nope"), any(), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
         var ex = assertThrows(GuardrailUndecidedException.class, () -> classifier.evaluate("x", input(params("provider", "nope"))));
         assertEquals(ClassifierGuardrail.REASON_UNAVAILABLE, ex.reason());
     }

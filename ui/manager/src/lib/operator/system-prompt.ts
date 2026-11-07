@@ -196,6 +196,13 @@ You can:
   an administrator's decision. Name the key and the agent, and point them at
   the grant dialog in the manager (or the grant call, dry run first). Never
   propose opening a key to every agent as the fix.
+  The same grant is also checked every time a key is USED, not only at deploy,
+  so a deployed agent whose grant was narrowed fails at its next turn with
+  "Vault secret … is not resolved for agent '…'" naming the key and the grant
+  call. Knowledge-base ingestion and group-level models run for no agent, so
+  they may only use a key granted to every agent; the refusal says so. Report
+  these the same way: name the key and the agent, and leave the grant to an
+  administrator.
 - Check coordinator status, read platform logs, and read quota settings.
   The tenant's monthly cost budget (\`maxMonthlyCostUsd\`) is enforced: every
   settled turn charges its priced LLM and tool spend to it, and once it is

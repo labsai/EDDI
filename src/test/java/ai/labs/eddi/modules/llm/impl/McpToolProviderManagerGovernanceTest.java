@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -160,7 +161,7 @@ class McpToolProviderManagerGovernanceTest {
             config.setTransport("stdio");
 
             for (int i = 0; i < 5; i++) {
-                var result = manager.discoverTools(List.of(config));
+                var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
                 assertTrue(result.toolSpecs().isEmpty(), "a server EDDI cannot speak to contributes no tools");
             }
 

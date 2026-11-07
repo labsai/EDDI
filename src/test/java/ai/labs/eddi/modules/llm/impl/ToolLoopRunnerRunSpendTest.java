@@ -76,7 +76,8 @@ class ToolLoopRunnerRunSpendTest {
                         nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
 
         task = new LlmConfiguration.Task();
         task.setId("spend-task");

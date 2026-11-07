@@ -49,8 +49,9 @@ class SecretResolverTest {
             return "new-value";
         });
 
-        assertEquals("old-value", resolver.resolveValue("${vault:rotating-key}"), "the in-flight read itself returns what it read");
-        assertEquals("new-value", resolver.resolveValue("${vault:rotating-key}"),
+        assertEquals("old-value", resolver.resolveValue("${vault:rotating-key}", SecretAccess.outsideAgentGrants("test")),
+                "the in-flight read itself returns what it read");
+        assertEquals("new-value", resolver.resolveValue("${vault:rotating-key}", SecretAccess.outsideAgentGrants("test")),
                 "the stale value must not have been cached for the whole TTL");
     }
 
@@ -59,7 +60,8 @@ class SecretResolverTest {
         var ref = new SecretReference("default", "missing-key");
         when(secretProvider.resolve(ref)).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:missing-key}", "modelName", "text-embedding-3-small"));
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:missing-key}", "modelName", "text-embedding-3-small"),
+                SecretAccess.outsideAgentGrants("test"));
         var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
                 () -> SecretResolver.requireResolved(resolved, "embedding model 'openai'"));
 
@@ -75,7 +77,7 @@ class SecretResolverTest {
         SecretResolver passthroughResolver = new SecretResolver(unavailable, meterRegistry, 5, 100);
         passthroughResolver.init();
 
-        var passedThrough = passthroughResolver.resolveSecrets(Map.of("apiKey", "${vault:anthropic-key}"));
+        var passedThrough = passthroughResolver.resolveSecrets(Map.of("apiKey", "${vault:anthropic-key}"), SecretAccess.outsideAgentGrants("test"));
 
         assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
                 () -> SecretResolver.requireResolved(passedThrough, "LLM provider 'anthropic'"));
@@ -86,7 +88,8 @@ class SecretResolverTest {
         var ref = new SecretReference("default", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-actual");
 
-        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:openaiKey}", "baseUrl", "https://api.openai.com"));
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:openaiKey}", "baseUrl", "https://api.openai.com"),
+                SecretAccess.outsideAgentGrants("test"));
 
         assertSame(resolved, SecretResolver.requireResolved(resolved, "LLM provider 'openai'"));
         assertNull(SecretResolver.requireResolved(null, "x"));
@@ -96,17 +99,17 @@ class SecretResolverTest {
     @Test
     void resolveValue_noVaultRef_passthrough() {
         String input = "just a plain string";
-        assertEquals(input, resolver.resolveValue(input));
+        assertEquals(input, resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     void resolveValue_null_returnsNull() {
-        assertNull(resolver.resolveValue(null));
+        assertNull(resolver.resolveValue(null, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     void resolveValue_empty_returnsEmpty() {
-        assertEquals("", resolver.resolveValue(""));
+        assertEquals("", resolver.resolveValue("", SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -115,7 +118,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(ref)).thenReturn("sk-actual-secret-key");
 
         String input = "Bearer ${vault:openaiKey}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("Bearer sk-actual-secret-key", result);
     }
@@ -126,7 +129,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(ref)).thenReturn("sk-tenant-key");
 
         String input = "Bearer ${vault:myTenant/openaiKey}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("Bearer sk-tenant-key", result);
     }
@@ -137,7 +140,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(new SecretReference("default", "key2"))).thenReturn("val2");
 
         String input = "${vault:key1}:${vault:key2}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("val1:val2", result);
     }
@@ -148,7 +151,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(new SecretReference("acme", "key2"))).thenReturn("val2");
 
         String input = "${vault:key1}:${vault:acme/key2}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("val1:val2", result);
     }
@@ -158,7 +161,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
         String input = "Bearer ${vault:missingKey}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         // When secret is not found, the reference should remain as-is
         assertEquals(input, result);
@@ -172,7 +175,7 @@ class SecretResolverTest {
         passthroughResolver.init();
 
         String input = "Bearer ${vault:key}";
-        assertEquals(input, passthroughResolver.resolveValue(input));
+        assertEquals(input, passthroughResolver.resolveValue(input, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -180,7 +183,7 @@ class SecretResolverTest {
         var ref = new SecretReference("default", "69c687.userApiKey");
         when(secretProvider.resolve(ref)).thenReturn("user-secret");
 
-        String result = resolver.resolveValue("${vault:69c687.userApiKey}");
+        String result = resolver.resolveValue("${vault:69c687.userApiKey}", SecretAccess.outsideAgentGrants("test"));
 
         assertEquals("user-secret", result);
     }
@@ -194,7 +197,7 @@ class SecretResolverTest {
         // to exfiltrate the private key: the reference is left literal, never resolved,
         // and the provider is never even consulted for it.
         String input = "Bearer ${vault:agent-signing-key:agentX}";
-        String result = resolver.resolveValue(input);
+        String result = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(input, result, "the reserved reference must remain literal, not be replaced with the key");
         verify(secretProvider, never()).resolve(any(SecretReference.class));
@@ -203,13 +206,13 @@ class SecretResolverTest {
     @Test
     void resolveValue_reservedSigningKey_fullForm_isNeverResolved() throws Exception {
         String input = "${vault:default/agent-signing-key:agentX:v2}";
-        assertEquals(input, resolver.resolveValue(input));
+        assertEquals(input, resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test")));
         verify(secretProvider, never()).resolve(any(SecretReference.class));
     }
 
     @Test
     void resolveValue_reservedSigningKey_failsClosedViaRequireResolved() {
-        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:agent-signing-key:agentX}"));
+        var resolved = resolver.resolveSecrets(Map.of("apiKey", "${vault:agent-signing-key:agentX}"), SecretAccess.outsideAgentGrants("test"));
         assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
                 () -> SecretResolver.requireResolved(resolved, "LLM provider 'x'"));
     }

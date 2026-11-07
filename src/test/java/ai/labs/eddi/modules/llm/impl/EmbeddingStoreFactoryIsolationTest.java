@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -42,26 +44,30 @@ class EmbeddingStoreFactoryIsolationTest {
     @Test
     @DisplayName("two knowledge bases with the same name get two stores — in either layout")
     void sameNameDifferentIds() {
-        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("same", "id")), factory.getOrCreate(BETA_ID, kb("same", "id")));
-        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("same", null)), factory.getOrCreate(BETA_ID, kb("same", null)));
+        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("same", "id"), SecretAccess.outsideAgentGrants("test")),
+                factory.getOrCreate(BETA_ID, kb("same", "id"), SecretAccess.outsideAgentGrants("test")));
+        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("same", null), SecretAccess.outsideAgentGrants("test")),
+                factory.getOrCreate(BETA_ID, kb("same", null), SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     @DisplayName("versions of one knowledge base share its store")
     void sameIdSameStore() {
-        assertSame(factory.getOrCreate(ALPHA_ID, kb("alpha", "id")), factory.getOrCreate(ALPHA_ID, kb("alpha", "id")));
+        assertSame(factory.getOrCreate(ALPHA_ID, kb("alpha", "id"), SecretAccess.outsideAgentGrants("test")),
+                factory.getOrCreate(ALPHA_ID, kb("alpha", "id"), SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     @DisplayName("switching layout is switching store")
     void layoutIsPartOfTheKey() {
-        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("alpha", null)), factory.getOrCreate(ALPHA_ID, kb("alpha", "id")));
+        assertNotSame(factory.getOrCreate(ALPHA_ID, kb("alpha", null), SecretAccess.outsideAgentGrants("test")),
+                factory.getOrCreate(ALPHA_ID, kb("alpha", "id"), SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     void noIdNoStore() {
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(null, kb("alpha", "id")));
-        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(" ", kb("alpha", null)));
+        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(null, kb("alpha", "id"), SecretAccess.outsideAgentGrants("test")));
+        assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(" ", kb("alpha", null), SecretAccess.outsideAgentGrants("test")));
     }
 
     private static RagConfiguration pg(String rawTable) {
@@ -141,12 +147,12 @@ class EmbeddingStoreFactoryIsolationTest {
         GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
         SecretResolver secrets = mock(SecretResolver.class);
         when(variables.resolveAll(anyMap())).thenAnswer(inv -> inv.getArgument(0));
-        when(secrets.resolveSecrets(anyMap())).thenAnswer(inv -> inv.getArgument(0));
+        when(secrets.resolveSecrets(anyMap(), any())).thenAnswer(inv -> inv.getArgument(0));
         var factory = new EmbeddingStoreFactory(variables, secrets);
         var config = kb("alpha", "id");
         config.setStoreType("pgvector");
         config.setStoreParameters(Map.of("host", "a.com,10.0.0.5", "password", "pw"));
-        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(ALPHA_ID, config));
+        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(ALPHA_ID, config, SecretAccess.outsideAgentGrants("test")));
         assertTrue(e.getMessage().contains("single hostname"), e.getMessage());
     }
 }

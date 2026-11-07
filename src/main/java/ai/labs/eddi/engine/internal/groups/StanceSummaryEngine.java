@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.MemberStance;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -240,7 +241,7 @@ public final class StanceSummaryEngine {
         }
         try {
             var result = summarizationService.summarizeWithUsage(content, STANCE_INSTRUCTIONS,
-                    config.llmProvider(), config.llmModel());
+                    config.llmProvider(), config.llmModel(), SecretAccess.withoutAgent("group stance summary"));
             String text = clean(result.summary(), maxChars);
             if (text == null) {
                 LOGGER.warnf("Group %s: stance summarization returned nothing for member %s — extracting instead",

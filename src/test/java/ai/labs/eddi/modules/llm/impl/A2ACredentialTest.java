@@ -54,7 +54,7 @@ class A2ACredentialTest {
         secretResolver = mock(SecretResolver.class);
         connectionResolver = mock(ConnectionResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
     }
 
     private A2AToolProviderManager manager() {
@@ -84,7 +84,7 @@ class A2ACredentialTest {
     @Test
     @DisplayName("a connection reference is resolved, not sent as literal text")
     void resolvesConnectionReference() {
-        when(connectionResolver.resolve(eq("${connection:salesforce}"), any(URI.class), eq(null)))
+        when(connectionResolver.resolve(eq("${connection:salesforce}"), any(URI.class), eq(null), any()))
                 .thenReturn(new ResolvedCredential("Authorization", "Bearer sf-access-token"));
         var builder = request();
 
@@ -96,7 +96,7 @@ class A2ACredentialTest {
     @Test
     @DisplayName("a connection may name its own header, not just Authorization")
     void honoursTheConnectionsHeaderName() {
-        when(connectionResolver.resolve(anyString(), any(URI.class), eq(null))).thenReturn(new ResolvedCredential("X-Api-Key", "abc123"));
+        when(connectionResolver.resolve(anyString(), any(URI.class), eq(null), any())).thenReturn(new ResolvedCredential("X-Api-Key", "abc123"));
         var builder = request();
 
         manager().applyCredential(builder, config("${connection:widget}"), AGENT_URL);
@@ -108,7 +108,7 @@ class A2ACredentialTest {
     @Test
     @DisplayName("a vault reference still takes the static path and is bearer-prefixed")
     void resolvesStaticKey() {
-        when(secretResolver.resolveValue("${vault:peer-key}")).thenReturn("static-token");
+        when(secretResolver.resolveValue(eq("${vault:peer-key}"), any())).thenReturn("static-token");
         var builder = request();
 
         manager().applyCredential(builder, config("${vault:peer-key}"), AGENT_URL);

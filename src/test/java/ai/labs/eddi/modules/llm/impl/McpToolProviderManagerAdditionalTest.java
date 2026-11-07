@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.invocation.InvocationContext;
@@ -340,7 +341,7 @@ class McpToolProviderManagerAdditionalTest {
             var config = new McpServerConfig();
             config.setUrl("http://unreachable-metrics-test:9999/mcp");
             config.setApiKey("super-secret-literal-key");
-            spied.discoverTools(List.of(config));
+            spied.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             var tagValues = registry.getMeters().stream().flatMap(m -> m.getId().getTags().stream())
                     .map(Tag::getValue).toList();
@@ -404,7 +405,7 @@ class McpToolProviderManagerAdditionalTest {
             config.setTimeoutMs(500L);
 
             // This will fail to connect but exercises the name==null branch
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -418,7 +419,7 @@ class McpToolProviderManagerAdditionalTest {
             config.setTransport("http");
             config.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
 
@@ -431,7 +432,7 @@ class McpToolProviderManagerAdditionalTest {
             config.setTransport("http");
             config.setTimeoutMs(null); // null timeout — triggers default branch
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }
@@ -453,13 +454,15 @@ class McpToolProviderManagerAdditionalTest {
             config.setApiKey("{{vault.my-key}}");
 
             doReturn("vault-resolved").when(globalVariableResolver).resolveValue("{{vault.my-key}}");
-            doReturn("final-key").when(secretResolver).resolveValue("vault-resolved");
+            doReturn("final-key").when(secretResolver).resolveValue(eq("vault-resolved"), any());
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
 
-            verify(globalVariableResolver).resolveValue("{{vault.my-key}}");
-            verify(secretResolver).resolveValue("vault-resolved");
+            // At least once: the agent-grant check expands it too, before the client cache
+            // (#1179).
+            verify(globalVariableResolver, atLeastOnce()).resolveValue("{{vault.my-key}}");
+            verify(secretResolver).resolveValue(eq("vault-resolved"), any());
         }
 
         @Test
@@ -472,7 +475,7 @@ class McpToolProviderManagerAdditionalTest {
             config.setTimeoutMs(500L);
             config.setApiKey(null);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
 
             verifyNoInteractions(globalVariableResolver);
@@ -489,7 +492,7 @@ class McpToolProviderManagerAdditionalTest {
             config.setTimeoutMs(500L);
             config.setApiKey("");
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
 
             verifyNoInteractions(globalVariableResolver);
@@ -516,7 +519,7 @@ class McpToolProviderManagerAdditionalTest {
             validConfig.setTransport("http");
             validConfig.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(emptyConfig, validConfig));
+            var result = manager.discoverTools(List.of(emptyConfig, validConfig), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
 
@@ -528,7 +531,7 @@ class McpToolProviderManagerAdditionalTest {
             var config2 = new McpServerConfig();
             config2.setUrl(null);
 
-            var result = manager.discoverTools(List.of(config1, config2));
+            var result = manager.discoverTools(List.of(config1, config2), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -608,7 +611,7 @@ class McpToolProviderManagerAdditionalTest {
                     McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
             seedToolCache(target, System.currentTimeMillis());
 
-            var result = target.discoverTools(List.of(config()));
+            var result = target.discoverTools(List.of(config()), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.toolSpecs().size(), "the cached tool list must be returned");
             assertEquals("cached_tool", result.toolSpecs().get(0).name());
@@ -623,7 +626,7 @@ class McpToolProviderManagerAdditionalTest {
             var target = sealedManager();
             seedToolCache(target, System.currentTimeMillis() - (2 * McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS));
 
-            var result = target.discoverTools(List.of(config()));
+            var result = target.discoverTools(List.of(config()), SecretAccess.outsideAgentGrants("test"));
 
             assertTrue(result.toolSpecs().isEmpty(),
                     "a stale entry must not be served; discovery re-contacted the (rejected) server instead");

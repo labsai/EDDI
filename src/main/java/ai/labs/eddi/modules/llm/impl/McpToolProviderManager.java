@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -375,9 +376,14 @@ public class McpToolProviderManager {
      *
      * @param mcpServers
      *            list of MCP server configurations
+     * @param access
+     *            the agent (or other caller) the tools are assembled for. Every
+     *            vault secret behind a server's apiKey must be granted to it; this
+     *            is checked before the tool and client caches, which are shared by
+     *            every agent using the same server configuration
      * @return combined tools from all reachable servers, plus per-server failures
      */
-    public McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
+    public McpToolsResult discoverTools(List<McpServerConfig> mcpServers, SecretAccess access) {
         if (mcpServers == null || mcpServers.isEmpty()) {
             return new McpToolsResult(List.of(), Map.of());
         }
@@ -425,6 +431,7 @@ public class McpToolProviderManager {
                 validateCallerBoundKey(serverConfig);
                 validateConnectionBoundKey(serverConfig);
                 validateSecretDestination(serverConfig);
+                validateSecretGrant(serverConfig, access);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -654,7 +661,7 @@ public class McpToolProviderManager {
      *             static-configuration rejections {@link #discoverTools} applies,
      *             so the caller reports them identically
      */
-    public McpResourceBridge resourceBridgeTools(McpServerConfig serverConfig) {
+    public McpResourceBridge resourceBridgeTools(McpServerConfig serverConfig, SecretAccess access) {
         String url = serverConfig.getUrl();
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");
@@ -664,6 +671,7 @@ public class McpToolProviderManager {
         validateCallerBoundKey(serverConfig);
         validateConnectionBoundKey(serverConfig);
         validateSecretDestination(serverConfig);
+        validateSecretGrant(serverConfig, access);
 
         String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
         String prefix = toolNamePrefix(serverName, url);
@@ -1060,6 +1068,52 @@ public class McpToolProviderManager {
         }
     }
 
+    /**
+     * Refuses a server whose apiKey names a vault secret, directly, through a
+     * {@code ${vars:…}} or behind a {@code ${connection:…}}, that is not granted to
+     * {@code access}.
+     * <p>
+     * Before the caches, like the URL check above: the tool cache and the client
+     * cache are keyed on the server configuration, not on the agent, so a client
+     * one agent built with its secret would otherwise serve every other agent whose
+     * configuration names the same server (#1179). Reported as a configuration
+     * error ({@code INVALID_CONFIGURATION}) and kept away from the circuit breaker,
+     * which would otherwise suppress the server for the agents that ARE granted.
+     * The session that follows resolves under {@link #MCP_SESSION}.
+     *
+     * @throws IllegalArgumentException
+     *             when refused
+     */
+    void validateSecretGrant(McpServerConfig config, SecretAccess access) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || CallerIdentityResolver.containsReference(apiKey)) {
+            return;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        try {
+            if (ConnectionResolver.containsReference(apiKey)) {
+                if (connectionResolver != null) {
+                    connectionResolver.requireGranted(apiKey, access);
+                }
+                return;
+            }
+            String expanded = globalVariableResolver.resolveValue(apiKey);
+            secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
+                    "MCP server '" + serverName + "'");
+        } catch (SecretResolver.SecretNotGrantedException | ConnectionException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * What a cached MCP session resolves its own credential as. The session is
+     * shared by every agent whose configuration names the server, so it has no
+     * agent of its own; the agent grant is read for the asking agent in
+     * {@link #validateSecretGrant}, on every tool assembly, before the session is
+     * handed out.
+     */
+    static final SecretAccess MCP_SESSION = SecretAccess.outsideAgentGrants("MCP client session (agent grant checked at tool assembly)");
+
     private void requireSecretsAllowedAt(String apiKey, McpServerConfig config) {
         if (vaultHostAllowlist == null || apiKey == null) {
             return;
@@ -1240,7 +1294,7 @@ public class McpToolProviderManager {
             // Checked again here, immediately before resolution, because a transport
             // is also built for a tool call on a client the discovery pass never saw.
             requireSecretsAllowedAt(apiKey, config);
-            apiKey = secretResolver.resolveValue(apiKey);
+            apiKey = secretResolver.resolveValue(apiKey, MCP_SESSION);
         }
 
         // StreamableHttpMcpTransport (recommended, replaces deprecated
@@ -1425,7 +1479,7 @@ public class McpToolProviderManager {
                 // Discovery. A PER_USER connection has nothing a shared, cached session
                 // may carry; a SERVICE one is the same credential for everybody, so
                 // withholding it only produced a 401 and an agent with no tools at all.
-                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()));
+                var discovery = connectionResolver.resolveForDiscovery(configuredKey, URI.create(config.getUrl()), MCP_SESSION);
                 if (discovery.isEmpty()) {
                     // The ACTUAL binding, not an assumed PER_USER: CALLER_SUPPLIED is
                     // withheld for the same reason, and a warning that names the wrong
@@ -1440,7 +1494,7 @@ public class McpToolProviderManager {
             }
             // No principal offered: the resolver reads the turn's bound one, which is
             // the only place a per-user decision can be taken from here.
-            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null);
+            var credential = connectionResolver.resolve(configuredKey, URI.create(config.getUrl()), null, MCP_SESSION);
             return Map.of(credential.headerName(), credential.headerValue());
         }
         if (!callerBound) {

@@ -21,7 +21,6 @@ import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
@@ -58,8 +57,8 @@ public class RestSpaceResources implements IRestSpaceResources {
     private final VaultGrantGate.Mode grantEnforcement;
 
     /**
-     * Checks a new secret's grant against the agents already deployed with a
-     * reference to it (see {@link VaultGrantImpactAnalyzer#refusalToCreate}). Field
+     * Warns about a new secret's grant leaving out agents already deployed with a
+     * reference to it (see {@link VaultGrantImpactAnalyzer#warningOnCreate}). Field
      * injected, as the REST layer's other optional collaborators are; null only in
      * tests that construct this class directly.
      */
@@ -102,6 +101,9 @@ public class RestSpaceResources implements IRestSpaceResources {
         }
     }
 
+    /** The header the other config endpoints carry their warnings in. */
+    static final String WARNINGS_HEADER = "X-Eddi-Warnings";
+
     @Override
     public Response storeSecret(String space, String keyName, SecretWrite body) {
         String tenant = tenantOf(space);
@@ -120,6 +122,7 @@ public class RestSpaceResources implements IRestSpaceResources {
             throw new BadRequestException(e.getMessage());
         }
         try {
+            String createWarning = null;
             boolean exists = exists(reference);
             if (!exists) {
                 try {
@@ -132,19 +135,22 @@ public class RestSpaceResources implements IRestSpaceResources {
                     // warn / off: the convenience those modes opted into, said here.
                     allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
                 }
-                // Agents deployed while this secret was absent were never checked against
-                // its grant; this is that check.
-                String refusal = grantImpactAnalyzer != null ? grantImpactAnalyzer.refusalToCreate(reference, allowedAgents, grantEnforcement) : null;
-                if (refusal != null) {
-                    throw new ClientErrorException(refusal, Response.Status.CONFLICT);
-                }
+                // Advisory, as on RestSecretStore: the resolver refuses an agent the grant
+                // leaves out whatever this finds.
+                createWarning = grantImpactAnalyzer != null ? grantImpactAnalyzer.warningOnCreate(reference, allowedAgents, grantEnforcement) : null;
             }
             secretProvider.store(reference, body.value(), body.description(), allowedAgents, allowedHosts);
             // A model built with the old key, or with the unresolved reference, is cached
             // downstream — the same reason RestSecretStore always invalidates.
             secretResolver.invalidateCache(reference);
             LOGGER.infof("Space secret stored: %s/%s by '%s'", sanitize(tenant), sanitize(keyName), sanitize(accessGuard.currentPrincipal()));
-            return Response.ok(toSecret(secretProvider.getMetadata(reference))).build();
+            var ok = Response.ok(toSecret(secretProvider.getMetadata(reference)));
+            if (createWarning != null) {
+                // One header line: the message is built from ids and references, never a
+                // value, and carries no line breaks.
+                ok.header(WARNINGS_HEADER, createWarning.replaceAll("[\\r\\n]+", " "));
+            }
+            return ok.build();
         } catch (ISecretProvider.SecretNotFoundException e) {
             // Stored a moment ago and gone already: a concurrent delete won. Say what
             // happened rather than claiming success.

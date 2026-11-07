@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -773,8 +774,12 @@ public class OutboundHttp {
         };
     }
 
+    private static final SecretAccess PROXY_CREDENTIALS = SecretAccess.outsideAgentGrants("outbound HTTP proxy credentials");
+
     private static UnaryOperator<String> secrets(Instance<SecretResolver> resolver) {
-        return value -> resolver.isResolvable() ? resolver.get().resolveValue(value) : value;
+        // Proxy credentials come from the deployment's own configuration
+        // (eddi.http.outbound.*), not from any agent: the agent grant does not apply.
+        return value -> resolver.isResolvable() ? resolver.get().resolveValue(value, PROXY_CREDENTIALS) : value;
     }
 
     /** More redirects than the policy allows. An {@link IOException}, as ever. */

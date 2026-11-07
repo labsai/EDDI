@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -54,7 +55,7 @@ class A2AToolProviderManagerBranchTest {
         @Test
         @DisplayName("null list returns empty result")
         void nullList() {
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -63,7 +64,7 @@ class A2AToolProviderManagerBranchTest {
         @Test
         @DisplayName("empty list returns empty result")
         void emptyList() {
-            var result = manager.discoverTools(List.of());
+            var result = manager.discoverTools(List.of(), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -83,7 +84,7 @@ class A2AToolProviderManagerBranchTest {
             var config = new A2AAgentConfig();
             config.setUrl(null);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -93,7 +94,7 @@ class A2AToolProviderManagerBranchTest {
             var config = new A2AAgentConfig();
             config.setUrl("");
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }
@@ -115,12 +116,12 @@ class A2AToolProviderManagerBranchTest {
             // Each call will fail because the URL is not real, triggering recordFailure
             // Run 3 times to reach threshold
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // After 3 failures, the 4th call should hit the circuit breaker
             // and skip discovery entirely (log: "Circuit breaker open")
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -145,7 +146,7 @@ class A2AToolProviderManagerBranchTest {
 
             // After cooldown, circuit should be removed (auto-reset)
             // The discoverTools call should try to discover (circuit resets)
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             // The circuit should have been removed
             assertFalse(breakers.containsKey(url));
@@ -169,7 +170,7 @@ class A2AToolProviderManagerBranchTest {
 
             // Circuit is NOT open because failures < threshold
             // Discovery will attempt and fail (URL not real), incrementing to 3
-            manager.discoverTools(List.of(config));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             // Now should be at 3 failures
             assertTrue(breakers.containsKey(url));

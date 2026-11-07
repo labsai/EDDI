@@ -12,6 +12,7 @@ import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -238,6 +239,26 @@ public class ChatModelRegistry {
     }
 
     /**
+     * Refuses {@code access} a model whose parameters name a vault secret it is not
+     * granted — directly, or through a {@code ${vars:…}} that expands to one. Runs
+     * before the cache lookup; see {@link #getOrCreate}. Parameters that carry no
+     * reference at all skip the variable expansion.
+     */
+    private void requireGranted(String type, Map<String, String> filteredParams, SecretAccess access) {
+        boolean mayReference = false;
+        for (String value : filteredParams.values()) {
+            if (value != null && value.contains("${")) {
+                mayReference = true;
+                break;
+            }
+        }
+        if (!mayReference) {
+            return;
+        }
+        secretResolver.requireGranted(globalVariableResolver.resolveAll(builderParams(filteredParams)), access, "LLM provider '" + type + "'");
+    }
+
+    /**
      * Cluster mode: evicts models built longer ago than
      * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
      * reaches every node within that bound even if its event was lost.
@@ -311,14 +332,26 @@ public class ChatModelRegistry {
      * <p>
      * A freshly built model is published to the cache only if no invalidation raced
      * the build — see {@link #publishIfCurrent}.
+     * <p>
+     * The cache is keyed on the unresolved parameters, so two agents whose
+     * configurations name the same key share one model, built with whichever asked
+     * first. {@code access} is therefore checked against every vault secret the
+     * parameters name BEFORE the lookup, on every call, hit or miss (#1179).
+     *
+     * @param access
+     *            the agent (or other caller) the model is for; see
+     *            {@link SecretAccess}
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
      */
-    public ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
+    public ChatModel getOrCreate(String type, Map<String, String> processedParams, SecretAccess access) throws UnsupportedLlmTaskException {
 
         var filteredParams = filterParams(processedParams);
         var timeoutMs = filteredParams.get(KEY_TIMEOUT);
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
+        requireGranted(type, filteredParams, access);
         var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
 
         ChatModel cached = modelCache.get(cacheKey);
@@ -343,7 +376,7 @@ public class ChatModelRegistry {
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
         requireSecretsAllowedAt(type, resolvedParams);
-        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
+        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams, access), "LLM provider '" + type + "'");
         resolvedParams = adaptToModel(type, resolvedParams);
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
@@ -369,13 +402,17 @@ public class ChatModelRegistry {
      * The lookup is a single {@code get} for the same reason as on the sync path —
      * a concurrent cache clear must never turn a hit into a {@code null} return,
      * which callers would mistake for "streaming unsupported".
+     * <p>
+     * {@code access} is checked before the lookup, as on the sync path.
      */
-    StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
+    StreamingChatModel getOrCreateStreaming(String type, Map<String, String> processedParams, SecretAccess access)
+            throws UnsupportedLlmTaskException {
 
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
         var filteredParams = filterParams(processedParams);
+        requireGranted(type, filteredParams, access);
         var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
 
         StreamingChatModel cached = streamingModelCache.get(cacheKey);
@@ -399,7 +436,8 @@ public class ChatModelRegistry {
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
             requireSecretsAllowedAt(type, resolvedParams);
-            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
+            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams, access),
+                    "LLM provider '" + type + "'");
             resolvedParams = adaptToModel(type, resolvedParams);
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);

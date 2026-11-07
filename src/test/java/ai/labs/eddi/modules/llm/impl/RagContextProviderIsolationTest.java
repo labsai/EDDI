@@ -79,9 +79,9 @@ class RagContextProviderIsolationTest {
 
         EmbeddingModel model = mock(EmbeddingModel.class);
         when(model.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{1f, 0f})));
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(model);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(model);
         // Both knowledge bases resolve to one physical store — a shared explicit table.
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(sharedStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(sharedStore);
 
         var step = new WorkflowConfiguration.WorkflowStep();
         step.setType(URI.create("eddi://ai.labs.rag"));
@@ -135,7 +135,7 @@ class RagContextProviderIsolationTest {
     @DisplayName("the store is asked for by the bound configuration's id, not by its name")
     void storeIsAddressedById() throws Exception {
         retrieve(alpha("id"));
-        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), any(RagConfiguration.class));
+        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), any(RagConfiguration.class), any());
     }
 
     @Test

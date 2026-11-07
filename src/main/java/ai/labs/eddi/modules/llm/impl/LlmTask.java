@@ -61,6 +61,7 @@ import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
 import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -869,7 +870,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // default fails the turn fast with the class that opened the circuit.
                 throw new LlmCircuitOpenException(circuitTicket.denial().message(circuitKey), circuitTicket.denial().failure());
             }
-            var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
+            var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams, secretAccessOf(memory));
             prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
             // === Multi-Model Cascade Branch ===
@@ -1040,7 +1041,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     // R5: a task that may re-ask its model is buffered, never streamed — the
                     // tokens of an attempt that is then retried cannot be taken back. The same
                     // holds for an output guardrail that can change the answer (WS4).
-                    var streamingModel = bufferOutput ? null : chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+                    var streamingModel = bufferOutput
+                            ? null
+                            : chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams, secretAccessOf(memory));
                     if (streamingModel != null) {
                         var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
                         responseContent = streamingResult.response();
@@ -2285,7 +2288,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             resolvedType = stepModel.modelType();
             processedParams = stepModel.params();
         }
-        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams, secretAccessOf(memory));
 
         // R12: the recovery policies a resumed turn shares with a live one. The model
         // phase below runs under the same onError guard, the final answer is re-asked
@@ -2330,7 +2333,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var resumeBridge = bufferOutput
                 ? null
                 : createToolLoopStreamingBridge(memory.getEventSink(),
-                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task,
+                        secretAccessOf(memory));
 
         // Spend gate: the same preflight as the live path, asked before the approved
         // tools run and before the first resumed model request. A conversation (or a
@@ -2779,7 +2783,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             resolvedType = stepModel.modelType();
             processedParams = stepModel.params();
         }
-        final var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+        final var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams, secretAccessOf(memory));
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
         var jsonPolicy = JsonResponseFormatPolicy.of(convertObject, resolvedType, task.getJsonResponseFormat(),
                 processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
@@ -3356,7 +3360,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // R5: a task that may re-ask its final answer buffers it (no streaming bridge).
         var toolLoopBridge = retryPolicy != null
                 ? null
-                : createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+                : createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task,
+                        secretAccessOf(memory));
         var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
                 new ArrayList<>(chatMessagesWithoutSystem), task,
                 memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
@@ -3676,6 +3681,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * step's circuit, keyed as the cascade keys it. Agent-mode steps re-ask their
      * final answer over their tool transcript.
      */
+    /**
+     * The agent this turn's models are built for: the conversation's. Every vault
+     * secret a model's parameters name must be granted to it, checked by
+     * {@link ChatModelRegistry} before its cache (see {@link SecretAccess}).
+     */
+    static SecretAccess secretAccessOf(IConversationMemory memory) {
+        return SecretAccess.agent(memory != null ? memory.getAgentId() : null);
+    }
+
     private Reprompter cascadeReprompter(LlmConfiguration.ModelCascadeConfig cascadeConfig, CascadingModelExecutor.CascadeResult cascadeResult,
                                          Task task, Map<String, String> processedParams, Map<String, Object> templateDataObjects,
                                          IConversationMemory memory, boolean jsonMode, String agentSystemMessage,
@@ -3700,7 +3714,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             var stepModel = cascadingModelExecutor.resolveStepModel(step, task, processedParams, templateDataObjects, memory, "Cascade step");
             ChatModel stepChat;
             try {
-                stepChat = chatModelRegistry.getOrCreate(stepModel.modelType(), stepModel.params());
+                stepChat = chatModelRegistry.getOrCreate(stepModel.modelType(), stepModel.params(), secretAccessOf(memory));
             } catch (ChatModelRegistry.UnsupportedLlmTaskException e) {
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
@@ -3736,12 +3750,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      */
     private ToolLoopStreamingChatModel createToolLoopStreamingBridge(ConversationEventSink eventSink, boolean addToOutputExplicitlyFalse,
                                                                      String resolvedType, Map<String, String> processedParams,
-                                                                     LlmConfiguration.Task task)
+                                                                     LlmConfiguration.Task task, SecretAccess access)
             throws ChatModelRegistry.UnsupportedLlmTaskException {
         if (!toolLoopStreamingEnabled || eventSink == null || addToOutputExplicitlyFalse) {
             return null;
         }
-        var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+        var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams, access);
         if (streamingModel == null) {
             return null;
         }

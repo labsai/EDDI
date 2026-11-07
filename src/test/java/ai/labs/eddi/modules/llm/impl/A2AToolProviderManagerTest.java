@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -42,7 +43,7 @@ class A2AToolProviderManagerTest {
         @Test
         @DisplayName("should return empty result for null config list")
         void nullConfig() {
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -51,7 +52,7 @@ class A2AToolProviderManagerTest {
         @Test
         @DisplayName("should return empty result for empty config list")
         void emptyConfig() {
-            var result = manager.discoverTools(List.of());
+            var result = manager.discoverTools(List.of(), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -61,7 +62,7 @@ class A2AToolProviderManagerTest {
         void skipNullUrl() {
             var config = new A2AAgentConfig();
             config.setUrl(null);
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -70,7 +71,7 @@ class A2AToolProviderManagerTest {
         void skipBlankUrl() {
             var config = new A2AAgentConfig();
             config.setUrl("  ");
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }
@@ -157,12 +158,12 @@ class A2AToolProviderManagerTest {
 
             // First 3 attempts will fail and record failures
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // The 4th attempt should skip due to circuit breaker
             // (no HTTP attempt, still returns empty)
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }

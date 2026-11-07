@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
+import ai.labs.eddi.secrets.SecretAccess;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -268,7 +269,7 @@ public class ConversationSummarizer {
         Map<String, Object> usage;
         try {
             var result = summarizationService.summarizeWithUsage(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
-                    inheritedParameters);
+                    inheritedParameters, SecretAccess.agent(memory.getAgentId()));
             summary = result.summary() != null ? result.summary() : "";
             usage = tokenUsage(result.inputTokens(), result.outputTokens());
             if (!usage.isEmpty()) {

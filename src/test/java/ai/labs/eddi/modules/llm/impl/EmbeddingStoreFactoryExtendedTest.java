@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -36,7 +37,7 @@ class EmbeddingStoreFactoryExtendedTest {
     @BeforeEach
     void setUp() {
         secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         factory = new EmbeddingStoreFactory(globalVariableResolver, secretResolver);
@@ -204,7 +205,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(Map.of("password", "secret", "dimension", "abc"));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb", config));
+                    () -> factory.getOrCreate("kb", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("dimension"),
                     "Error should mention the invalid param, got: " + ex.getMessage());
         }
@@ -225,7 +226,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(Map.of("apiVersion", "INVALID"));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb", config));
+                    () -> factory.getOrCreate("kb", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("storeParameters.apiVersion"),
                     "Error should name storeParameters.apiVersion, got: " + ex.getMessage());
         }
@@ -245,7 +246,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreType("in-memory");
             config.setStoreParameters(null);
 
-            var store = factory.getOrCreate("kb-null-params", config);
+            var store = factory.getOrCreate("kb-null-params", config, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(store);
         }
 
@@ -263,8 +264,8 @@ class EmbeddingStoreFactoryExtendedTest {
             config2.setStoreType("elasticsearch");
             config2.setStoreParameters(Map.of());
 
-            var store1 = factory.getOrCreate("kb1", config1);
-            var store2 = factory.getOrCreate("kb1", config2);
+            var store1 = factory.getOrCreate("kb1", config1, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb1", config2, SecretAccess.outsideAgentGrants("test"));
 
             // null and empty map produce different cache keys, so different store instances
             assertNotSame(store1, store2,
@@ -284,7 +285,7 @@ class EmbeddingStoreFactoryExtendedTest {
         var config = new RagConfiguration();
         config.setStoreNamespace("id");
         config.setStoreType("in-memory");
-        assertNotNull(factory.getOrCreate("kb", config));
+        assertNotNull(factory.getOrCreate("kb", config, SecretAccess.outsideAgentGrants("test")));
     }
 
     // ==================== Unsupported store type message ====================
@@ -297,7 +298,7 @@ class EmbeddingStoreFactoryExtendedTest {
         config.setStoreType("redis");
 
         var ex = assertThrows(IllegalArgumentException.class,
-                () -> factory.getOrCreate("kb", config));
+                () -> factory.getOrCreate("kb", config, SecretAccess.outsideAgentGrants("test")));
         assertTrue(ex.getMessage().contains("in-memory"));
         assertTrue(ex.getMessage().contains("pgvector"));
         assertTrue(ex.getMessage().contains("mongodb-atlas"));
@@ -321,7 +322,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(Map.of());
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb1", config));
+                    () -> factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("password"),
                     "Error should mention password, got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("pgvector"),
@@ -337,7 +338,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(Map.of("password", "   "));
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb1", config));
+                    () -> factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("password"),
                     "Error should mention password, got: " + ex.getMessage());
         }
@@ -359,7 +360,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(Map.of());
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb1", config));
+                    () -> factory.getOrCreate("kb1", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("connectionString"),
                     "Error should mention connectionString, got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("mongodb-atlas"),
@@ -390,7 +391,7 @@ class EmbeddingStoreFactoryExtendedTest {
             // with a connection exception, NOT an IllegalArgumentException
             // This proves the API version defaulting worked
             try {
-                factory.getOrCreate("kb-chroma-default", config);
+                factory.getOrCreate("kb-chroma-default", config, SecretAccess.outsideAgentGrants("test"));
             } catch (IllegalArgumentException e) {
                 fail("Should not throw IllegalArgumentException for default API version, got: " + e.getMessage());
             } catch (Exception e) {
@@ -443,8 +444,8 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreType("in-memory");
             config.setStoreParameters(Map.of());
 
-            var store1 = factory.getOrCreate("kb-cache-test", config);
-            var store2 = factory.getOrCreate("kb-cache-test", config);
+            var store1 = factory.getOrCreate("kb-cache-test", config, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb-cache-test", config, SecretAccess.outsideAgentGrants("test"));
 
             assertSame(store1, store2, "Same params/kbId should return cached instance");
         }
@@ -456,8 +457,8 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreNamespace("id");
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate("kb-a", config);
-            var store2 = factory.getOrCreate("kb-b", config);
+            var store1 = factory.getOrCreate("kb-a", config, SecretAccess.outsideAgentGrants("test"));
+            var store2 = factory.getOrCreate("kb-b", config, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(store1, store2, "Different kbIds should produce different instances");
         }
@@ -470,9 +471,9 @@ class EmbeddingStoreFactoryExtendedTest {
             var config = new RagConfiguration();
             config.setStoreType("elasticsearch");
 
-            var store1 = factory.getOrCreate("kb-clear", config);
+            var store1 = factory.getOrCreate("kb-clear", config, SecretAccess.outsideAgentGrants("test"));
             factory.clearCache();
-            var store2 = factory.getOrCreate("kb-clear", config);
+            var store2 = factory.getOrCreate("kb-clear", config, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(store1, store2, "After clearCache, new instance should be created");
         }
@@ -483,10 +484,10 @@ class EmbeddingStoreFactoryExtendedTest {
             var config = new RagConfiguration();
             config.setStoreType("in-memory");
 
-            var store1 = factory.getOrCreate("kb-clear", config);
+            var store1 = factory.getOrCreate("kb-clear", config, SecretAccess.outsideAgentGrants("test"));
             factory.clearCache();
 
-            assertSame(store1, factory.getOrCreate("kb-clear", config));
+            assertSame(store1, factory.getOrCreate("kb-clear", config, SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -506,7 +507,7 @@ class EmbeddingStoreFactoryExtendedTest {
             config.setStoreParameters(null);
 
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-null-params", config));
+                    () -> factory.getOrCreate("kb-null-params", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(ex.getMessage().contains("password"),
                     "Should throw for missing password with null storeParameters, got: " + ex.getMessage());
         }

@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -1240,11 +1241,18 @@ public class ChannelTargetRouter {
         return weakWebhookSecretWarnings.get();
     }
 
+    /**
+     * A channel integration's platform credentials (bot token, signing secret) are
+     * used by the channel adapter, not by the agent it routes to, and the agent
+     * grant has never governed them (see {@link SecretAccess}).
+     */
+    private static final SecretAccess CHANNEL_CREDENTIALS = SecretAccess.outsideAgentGrants("channel integration");
+
     private String resolveSecret(String value) {
         if (value == null || value.isBlank())
             return null;
         try {
-            return secretResolver.resolveValue(value);
+            return secretResolver.resolveValue(value, CHANNEL_CREDENTIALS);
         } catch (Exception e) {
             LOGGER.warn("Failed to resolve secret", e);
             return null;

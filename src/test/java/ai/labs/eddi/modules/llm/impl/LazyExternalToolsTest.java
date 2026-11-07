@@ -142,7 +142,7 @@ class LazyExternalToolsTest {
         var journalStore = mock(IHitlToolJournalStore.class);
         when(journalStore.tryClaim(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
 
         orchestrator = new AgentOrchestrator(mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
                 mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class), mock(PdfReaderTool.class),

@@ -92,7 +92,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -102,7 +102,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
             principalSeenByResolver.set(resolutionPrincipalContext.current());
             callerSeenByResolver.set(callerIdentityContext.current());
             return new ResolvedCredential("Authorization", "Bearer live-token");
-        }).when(connectionResolver).resolve(anyString(), any(), any());
+        }).when(connectionResolver).resolve(anyString(), any(), any(), any());
 
         executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), runtime, prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver), connectionResolver,
@@ -168,7 +168,7 @@ class ApiCallExecutorBatchPrincipalPropagationTest {
 
         assertNull(principalSeenByResolver.get(), "the worker only sends: nothing is resolved again on the batch thread");
         assertNull(callerSeenByResolver.get(), "the worker only sends: nothing is resolved again on the batch thread");
-        verify(connectionResolver, times(1)).resolve(anyString(), any(), any());
+        verify(connectionResolver, times(1)).resolve(anyString(), any(), any(), any());
     }
 
     private static ApiCall batchCall() {

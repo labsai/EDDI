@@ -113,7 +113,7 @@ class LessonConsolidationServiceTest {
     }
 
     private void modelAnswers(String json) {
-        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap()))
+        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any()))
                 .thenReturn(new SummarizationResult(json, 500, 100));
     }
 
@@ -128,7 +128,7 @@ class LessonConsolidationServiceTest {
         Result r = service.run(GROUP, false);
         assertEquals(Status.SKIPPED, r.status());
         assertTrue(r.message().contains("not configured"), r.message());
-        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any());
     }
 
     @Test
@@ -145,7 +145,7 @@ class LessonConsolidationServiceTest {
         live.subList(5, 8).clear();
         Result r = service.run(GROUP, false);
         assertEquals(Status.SKIPPED, r.status());
-        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any());
     }
 
     @Test
@@ -153,7 +153,7 @@ class LessonConsolidationServiceTest {
         when(quota.checkCostBudget(any())).thenReturn(QuotaCheckResult.denied("over budget"));
         Result r = service.run(GROUP, false);
         assertEquals(Status.SKIPPED, r.status());
-        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any());
     }
 
     @Test
@@ -174,7 +174,7 @@ class LessonConsolidationServiceTest {
 
         assertEquals(Status.SKIPPED, r.status());
         assertTrue(r.message().contains("maxCostPerRun"), r.message());
-        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any());
         verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
@@ -193,7 +193,7 @@ class LessonConsolidationServiceTest {
         assertEquals(Status.COMPLETED, r.status());
         assertTrue(r.lessonsConsidered() < 40 && r.lessonsConsidered() >= 6, "considered " + r.lessonsConsidered());
         ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
-        verify(llm).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), anyMap(), any());
         assertTrue(LessonConsolidationService.worstCase(content.getValue(), consolidation) <= 0.15);
     }
 
@@ -205,7 +205,8 @@ class LessonConsolidationServiceTest {
         service.run(GROUP, false);
         ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> instructions = ArgumentCaptor.forClass(String.class);
-        verify(llm).summarizeWithUsage(content.capture(), instructions.capture(), eq("anthropic"), eq("claude-x"), eq(Map.of("apiKey", "k")));
+        verify(llm).summarizeWithUsage(content.capture(), instructions.capture(), eq("anthropic"), eq("claude-x"), eq(Map.of("apiKey", "k")),
+                any());
         assertTrue(instructions.getValue().contains("DATA"), "the input is labelled as data");
         assertTrue(content.getValue().contains("retro:k1") && content.getValue().contains("\"id\":\"o1\""), content.getValue());
     }
@@ -398,7 +399,7 @@ class LessonConsolidationServiceTest {
 
         assertEquals(Status.FAILED, r.status());
         assertTrue(r.message().contains("apiKey needs a grant"), r.message());
-        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
+        verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any());
     }
 
     @Test
@@ -456,7 +457,7 @@ class LessonConsolidationServiceTest {
 
     @Test
     void aTransientModelFailureSkipsSoItCannotDeadLetterTheSchedule() throws Exception {
-        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap()))
+        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any()))
                 .thenThrow(new RuntimeException("timeout", new SocketTimeoutException("slow")));
         Result r = service.run(GROUP, false);
         assertEquals(Status.SKIPPED, r.status());
@@ -465,7 +466,7 @@ class LessonConsolidationServiceTest {
 
     @Test
     void aPermanentModelFailureFailsTheRunAndNamesTheModel() {
-        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap()))
+        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any()))
                 .thenThrow(new IllegalArgumentException("401 invalid api key"));
         Result r = service.run(GROUP, false);
         assertEquals(Status.FAILED, r.status());
@@ -491,7 +492,7 @@ class LessonConsolidationServiceTest {
     void aSecondRunOfTheSameTeamWhileOneIsRunningIsSkipped() throws Exception {
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap())).thenAnswer(i -> {
+        when(llm.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap(), any())).thenAnswer(i -> {
             started.countDown();
             release.await();
             return new SummarizationResult("{}", 10, 10);

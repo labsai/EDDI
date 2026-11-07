@@ -56,8 +56,8 @@ class RagIngestionServiceTest {
 
     @Test
     void ingest_shouldReturnIngestionId() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -82,8 +82,8 @@ class RagIngestionServiceTest {
      */
     @Test
     void ingest_asksForADocumentModel() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -93,15 +93,15 @@ class RagIngestionServiceTest {
         // ingest() hands the work to a virtual thread, so the factory call has not
         // necessarily happened yet when ingest() returns.
         var role = ArgumentCaptor.forClass(EmbeddingInputType.class);
-        verify(embeddingModelFactory, timeout(5000).atLeastOnce()).getOrCreate(any(), role.capture());
+        verify(embeddingModelFactory, timeout(5000).atLeastOnce()).getOrCreate(any(), role.capture(), any());
         assertEquals(EmbeddingInputType.DOCUMENT, role.getValue(),
                 "text being stored must be embedded as a DOCUMENT");
     }
 
     @Test
     void getStatus_shouldReturnPendingInitially() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
 
         var config = createConfig();
         String ingestionId = service.ingest("test-kb", "Content", "doc.txt", config);
@@ -274,7 +274,7 @@ class RagIngestionServiceTest {
 
         awaitCompleted(service.ingest(ALPHA_ID, "text", "doc", config, false));
 
-        verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config));
+        verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config), any());
     }
 
     private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
@@ -287,8 +287,8 @@ class RagIngestionServiceTest {
                 return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{1f, 0f})).toList());
             }
         };
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(fixed);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(store);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(fixed);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(store);
     }
 
     private void awaitCompleted(String ingestionId) {

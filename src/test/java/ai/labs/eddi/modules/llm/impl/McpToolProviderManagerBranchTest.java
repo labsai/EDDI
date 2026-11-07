@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -39,7 +40,7 @@ class McpToolProviderManagerBranchTest {
     void setUp() {
         openMocks(this);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
     }
 
@@ -61,7 +62,7 @@ class McpToolProviderManagerBranchTest {
             config.setTimeoutMs(500L);
 
             // Will fail to connect but should not throw
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -75,7 +76,7 @@ class McpToolProviderManagerBranchTest {
             config.setTransport("http");
             config.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }
@@ -96,7 +97,7 @@ class McpToolProviderManagerBranchTest {
             config.setApiKey(null);
             config.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             verify(globalVariableResolver, never()).resolveValue(anyString());
         }
@@ -109,7 +110,7 @@ class McpToolProviderManagerBranchTest {
             config.setApiKey("");
             config.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             verify(globalVariableResolver, never()).resolveValue(anyString());
         }
@@ -122,10 +123,12 @@ class McpToolProviderManagerBranchTest {
             config.setApiKey("{{vault.my-key}}");
             config.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
-            verify(globalVariableResolver).resolveValue("{{vault.my-key}}");
-            verify(secretResolver).resolveValue("{{vault.my-key}}");
+            // At least once: the agent-grant check expands it too, before the client cache
+            // (#1179).
+            verify(globalVariableResolver, atLeastOnce()).resolveValue("{{vault.my-key}}");
+            verify(secretResolver).resolveValue(eq("{{vault.my-key}}"), any());
         }
     }
 
@@ -144,7 +147,7 @@ class McpToolProviderManagerBranchTest {
             config.setUrl("http://127.0.0.1:1/mcp");
             config.setTimeoutMs(null);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
 
@@ -155,7 +158,7 @@ class McpToolProviderManagerBranchTest {
             config.setUrl("http://127.0.0.1:2/mcp");
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }
@@ -179,7 +182,7 @@ class McpToolProviderManagerBranchTest {
             config2.setUrl("http://127.0.0.1:4/mcp");
             config2.setTimeoutMs(500L);
 
-            var result = manager.discoverTools(List.of(config1, config2));
+            var result = manager.discoverTools(List.of(config1, config2), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             // Both fail to connect but process doesn't abort
         }
@@ -217,7 +220,7 @@ class McpToolProviderManagerBranchTest {
             config.setTimeoutMs(500L);
 
             // This will fail to connect, but the client entry may still be cached
-            manager.discoverTools(List.of(config));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             // Regardless of whether connection succeeded, shutdown should not throw
             assertDoesNotThrow(() -> manager.shutdown());

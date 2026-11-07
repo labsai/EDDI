@@ -155,7 +155,8 @@ final class ToolCallGuardrailFixture {
         IMemoryItemConverter converter = mock(IMemoryItemConverter.class);
         lenient().when(converter.convert(any())).thenReturn(Map.of());
         ToolResponseTruncator truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(2));
 
         orchestrator = new AgentOrchestrator(calculatorTool, mock(DateTimeTool.class), mock(WebSearchTool.class), mock(DataFormatterTool.class),
                 mock(WebScraperTool.class), mock(TextSummarizerTool.class), mock(PdfReaderTool.class), mock(WeatherTool.class),

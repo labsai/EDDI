@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -67,7 +68,7 @@ class McpResourceBridgeTest {
     @Test
     @DisplayName("synthesizes exactly two tools, named from the sanitized server name")
     void synthesizesTwoNamedTools() {
-        var bridge = manager.resourceBridgeTools(config("eddi-docs", "http://localhost:7070/mcp"));
+        var bridge = manager.resourceBridgeTools(config("eddi-docs", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
 
         assertEquals(List.of("eddi_docs_list_resources", "eddi_docs_read_resource"),
                 bridge.toolSpecs().stream().map(ToolSpecification::name).toList());
@@ -81,14 +82,14 @@ class McpResourceBridgeTest {
     @Test
     @DisplayName("falls back to the URL host when the server has no name")
     void fallsBackToHost() {
-        var bridge = manager.resourceBridgeTools(config(null, "http://tools.example.com/mcp"));
+        var bridge = manager.resourceBridgeTools(config(null, "http://tools.example.com/mcp"), SecretAccess.outsideAgentGrants("test"));
         assertTrue(bridge.executors().containsKey("tools_example_com_list_resources"));
     }
 
     @Test
     @DisplayName("read_resource declares a required string 'uri' parameter")
     void readResourceParameter() {
-        var bridge = manager.resourceBridgeTools(config("srv", "http://localhost:7070/mcp"));
+        var bridge = manager.resourceBridgeTools(config("srv", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
         ToolSpecification read = bridge.toolSpecs().stream()
                 .filter(spec -> spec.name().endsWith("_read_resource")).findFirst().orElseThrow();
         assertNotNull(read.parameters());
@@ -99,13 +100,13 @@ class McpResourceBridgeTest {
     @DisplayName("rejects the same static misconfigurations discoverTools rejects")
     void rejectsInvalidConfiguration() {
         assertThrows(IllegalArgumentException.class,
-                () -> manager.resourceBridgeTools(config("bad", null)));
+                () -> manager.resourceBridgeTools(config("bad", null), SecretAccess.outsideAgentGrants("test")));
         assertThrows(IllegalArgumentException.class,
-                () -> manager.resourceBridgeTools(config("bad", "ftp://example.com/mcp")));
+                () -> manager.resourceBridgeTools(config("bad", "ftp://example.com/mcp"), SecretAccess.outsideAgentGrants("test")));
         var badTransport = config("bad", "http://localhost:7070/mcp");
         badTransport.setTransport("stdio");
         assertThrows(IllegalArgumentException.class,
-                () -> manager.resourceBridgeTools(badTransport));
+                () -> manager.resourceBridgeTools(badTransport, SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -125,7 +126,7 @@ class McpResourceBridgeTest {
             }
         };
 
-        var bridge = stubbed.resourceBridgeTools(config("dead", "http://127.0.0.1:9/mcp"));
+        var bridge = stubbed.resourceBridgeTools(config("dead", "http://127.0.0.1:9/mcp"), SecretAccess.outsideAgentGrants("test"));
         var request = ToolExecutionRequest.builder().name("dead_list_resources").arguments("{}").build();
 
         String result = bridge.executors().get("dead_list_resources").execute(request, null);
@@ -150,7 +151,7 @@ class McpResourceBridgeTest {
                 return hostile;
             }
         };
-        var bridge = stubbed.resourceBridgeTools(config("hostile", "http://localhost:7070/mcp"));
+        var bridge = stubbed.resourceBridgeTools(config("hostile", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
 
         String listed = bridge.executors().get("hostile_list_resources")
                 .execute(ToolExecutionRequest.builder().name("hostile_list_resources").arguments("{}").build(), null);
@@ -184,7 +185,7 @@ class McpResourceBridgeTest {
                 return client;
             }
         };
-        var bridge = stubbed.resourceBridgeTools(config("srv", "http://localhost:7070/mcp"));
+        var bridge = stubbed.resourceBridgeTools(config("srv", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
 
         String listed = bridge.executors().get("srv_list_resources")
                 .execute(ToolExecutionRequest.builder().name("srv_list_resources").arguments("{}").build(), null);
@@ -227,7 +228,7 @@ class McpResourceBridgeTest {
                 return fat;
             }
         };
-        var bridge = stubbed.resourceBridgeTools(config("fat", "http://localhost:7070/mcp"));
+        var bridge = stubbed.resourceBridgeTools(config("fat", "http://localhost:7070/mcp"), SecretAccess.outsideAgentGrants("test"));
 
         String listed = bridge.executors().get("fat_list_resources")
                 .execute(ToolExecutionRequest.builder().name("fat_list_resources").arguments("{}").build(), null);

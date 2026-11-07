@@ -56,7 +56,7 @@ class ApiCallExecutorDeadlineTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));

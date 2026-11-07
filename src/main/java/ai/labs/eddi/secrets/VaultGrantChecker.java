@@ -50,31 +50,22 @@ import java.util.regex.Matcher;
  * who scopes a secret to one agent therefore got no enforcement at all — the
  * field was decorative.
  * <p>
- * <b>Why deployment time, and not resolution time.</b> Resolution is the
- * tempting place and the wrong one:
- * <ul>
- * <li>{@link SecretResolver} sees only a string. It has no agent identity, and
- * its ~12 call sites include several that legitimately run outside any
- * conversation (embedding-store construction, channel routing, agent
- * signing).</li>
- * <li>{@code ChatModelRegistry} caches the built model keyed on the
- * <em>unresolved</em> parameters, so two agents sharing a config share a cache
- * entry. A check behind that cache runs for whichever agent built the model
- * first and is silently skipped for every other one — enforcement that looks
- * real and is not.</li>
- * </ul>
- * The binding between an agent and a secret is established in the agent's
- * <em>configuration</em>, so that is where it can be checked completely, once,
- * and without a cache in the way.
+ * <b>Deployment time AND resolution time.</b> This class is the early half: it
+ * reads the agent's configuration once, completely, and reports every ungranted
+ * reference before the agent serves traffic. It cannot be the whole control. On
+ * a cluster a deployment can pass this gate on one node after a grant was
+ * written on another, an {@code autoDeploy=false} deployment leaves no shared
+ * record, and an agent deployed before its grant was narrowed would keep
+ * resolving until redeployed. So {@link SecretResolver} checks the same grant
+ * again, for the asking agent, at every resolution and before every cache that
+ * holds a client built from a secret (#1179). The two answer to the same
+ * {@code eddi.vault.grant-enforcement} mode.
  * <p>
- * <b>What it cannot do.</b> An agent already deployed before its grant was
- * narrowed keeps resolving until it is redeployed. This is a deploy-time gate,
- * not a revocation mechanism. A reference to a secret that does not exist yet
- * is let through — promoting a workflow to an instance that does not hold the
- * source's secret, then creating it, is a supported flow — so the grant such a
- * secret is later created with is checked at <em>creation</em> instead: the
- * create endpoints refuse a new secret whose grant leaves out a deployed agent
- * that already references it (see {@link VaultGrantImpactAnalyzer}).
+ * <b>What it lets through.</b> A reference to a secret that does not exist yet:
+ * promoting a workflow to an instance that does not hold the source's secret,
+ * then creating it, is a supported flow. The agent meets the secret's grant the
+ * first time it resolves it, and the create endpoints warn about the agents the
+ * new grant leaves out (see {@link VaultGrantImpactAnalyzer}).
  */
 @ApplicationScoped
 public class VaultGrantChecker {

@@ -112,7 +112,7 @@ class IngestionRetrievalRoundTripTest {
 
         EmbeddingModel embeddingModel = new BagOfWordsEmbeddingModel();
         modelFactory = mock(EmbeddingModelFactory.class);
-        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any()))
                 .thenAnswer(invocation -> {
                     requestedRoles.add(invocation.getArgument(1));
                     return embeddingModel;
@@ -126,8 +126,8 @@ class IngestionRetrievalRoundTripTest {
             requestedKeys.add(key);
             return storesByKey.computeIfAbsent(key, ignored -> new InMemoryEmbeddingStore<>());
         };
-        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenAnswer(storeForKey);
-        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenAnswer(storeForKey);
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any())).thenAnswer(storeForKey);
+        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class), any())).thenAnswer(storeForKey);
 
         var agentStore = mock(IAgentStore.class);
         var workflowStore = mock(IWorkflowStore.class);

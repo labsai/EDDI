@@ -123,7 +123,7 @@ class CascadingModelExecutorCoverageTest {
         task.setEnableBuiltInTools(true); // → isAgentMode() == true
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mock(ChatModel.class));
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
@@ -152,7 +152,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel model = modelReturning("legacy answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
@@ -183,7 +183,7 @@ class CascadingModelExecutorCoverageTest {
         task.setEnableBuiltInTools(true);
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mock(ChatModel.class));
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         // Hedging → heuristic ~0.4 < 0.9 → escalate to step 2 (last, accepted).
@@ -211,7 +211,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel model = modelReturning("legacy answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
         when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
@@ -244,7 +244,7 @@ class CascadingModelExecutorCoverageTest {
         task.setEnableBuiltInTools(true); // → isAgentMode() == true
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mock(ChatModel.class));
 
         var pause = new ToolApprovalRequiredException("needs human approval", null);
         AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
@@ -282,8 +282,8 @@ class CascadingModelExecutorCoverageTest {
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
-        when(registry.getOrCreateStreaming(anyString(), anyMap())).thenReturn(streaming);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreateStreaming(anyString(), anyMap(), any())).thenReturn(streaming);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
@@ -320,9 +320,9 @@ class CascadingModelExecutorCoverageTest {
         }).when(expensiveStream).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
-        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(mock(ChatModel.class));
-        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+        when(registry.getOrCreate(eq("cheap"), anyMap(), any())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap(), any())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap(), any())).thenReturn(expensiveStream);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
@@ -353,8 +353,8 @@ class CascadingModelExecutorCoverageTest {
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
-        when(registry.getOrCreateStreaming(anyString(), anyMap())).thenReturn(streaming);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreateStreaming(anyString(), anyMap(), any())).thenReturn(streaming);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
@@ -376,8 +376,8 @@ class CascadingModelExecutorCoverageTest {
         var sink = mock(ConversationEventSink.class);
         ChatModel model = modelReturning("buffered answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
-        when(registry.getOrCreateStreaming(anyString(), anyMap())).thenReturn(null); // no streaming support
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
+        when(registry.getOrCreateStreaming(anyString(), anyMap(), any())).thenReturn(null); // no streaming support
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, true);
@@ -412,8 +412,8 @@ class CascadingModelExecutorCoverageTest {
         ChatModel model0 = modelWithTokens("A confident and complete first answer to the question.", 1_000_000, 1_000_000);
         ChatModel model1 = modelReturning("second");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(model0);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(model1);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(model0);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(model1);
 
         var result = executor(registry, meter).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -450,8 +450,8 @@ class CascadingModelExecutorCoverageTest {
         });
         ChatModel fast = modelReturning("on time");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("slow"), anyMap())).thenReturn(slow);
-        when(registry.getOrCreate(eq("fast"), anyMap())).thenReturn(fast);
+        when(registry.getOrCreate(eq("slow"), anyMap(), any())).thenReturn(slow);
+        when(registry.getOrCreate(eq("fast"), anyMap(), any())).thenReturn(fast);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
                 memory(mock(ConversationEventSink.class)),
@@ -494,8 +494,8 @@ class CascadingModelExecutorCoverageTest {
             return ChatResponse.builder().aiMessage(AiMessage.from("late")).build();
         });
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("a"), anyMap())).thenReturn(a);
-        when(registry.getOrCreate(eq("b"), anyMap())).thenReturn(b);
+        when(registry.getOrCreate(eq("a"), anyMap(), any())).thenReturn(a);
+        when(registry.getOrCreate(eq("b"), anyMap(), any())).thenReturn(b);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -546,9 +546,9 @@ class CascadingModelExecutorCoverageTest {
         });
         ChatModel c = modelReturning("never used");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("a"), anyMap())).thenReturn(a);
-        when(registry.getOrCreate(eq("b"), anyMap())).thenReturn(b);
-        when(registry.getOrCreate(eq("c"), anyMap())).thenReturn(c);
+        when(registry.getOrCreate(eq("a"), anyMap(), any())).thenReturn(a);
+        when(registry.getOrCreate(eq("b"), anyMap(), any())).thenReturn(b);
+        when(registry.getOrCreate(eq("c"), anyMap(), any())).thenReturn(c);
 
         var result = executor(registry, meter).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -578,7 +578,7 @@ class CascadingModelExecutorCoverageTest {
         when(model.chat(any(ChatRequest.class))).thenReturn(resp);
         when(model.chat(anyList())).thenReturn(resp);
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), /* jsonMode */ true, /* convertToObject */ true, false);
@@ -604,7 +604,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel model = modelReturning("ok");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -632,8 +632,8 @@ class CascadingModelExecutorCoverageTest {
         when(bad.chat(anyList())).thenThrow(new RuntimeException("boom")); // non-retryable → 'error'
         ChatModel good = modelReturning("recovered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("bad"), anyMap())).thenReturn(bad);
-        when(registry.getOrCreate(eq("good"), anyMap())).thenReturn(good);
+        when(registry.getOrCreate(eq("bad"), anyMap(), any())).thenReturn(bad);
+        when(registry.getOrCreate(eq("good"), anyMap(), any())).thenReturn(good);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -663,8 +663,8 @@ class CascadingModelExecutorCoverageTest {
         when(limited.chat(anyList())).thenThrow(new RuntimeException("429 rate limit exceeded"));
         ChatModel ok = modelReturning("recovered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("limited"), anyMap())).thenReturn(limited);
-        when(registry.getOrCreate(eq("ok"), anyMap())).thenReturn(ok);
+        when(registry.getOrCreate(eq("limited"), anyMap(), any())).thenReturn(limited);
+        when(registry.getOrCreate(eq("ok"), anyMap(), any())).thenReturn(ok);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -694,8 +694,8 @@ class CascadingModelExecutorCoverageTest {
         when(down.chat(anyList())).thenThrow(new RuntimeException("network fault", new ConnectException("refused")));
         ChatModel up = modelReturning("recovered");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("down"), anyMap())).thenReturn(down);
-        when(registry.getOrCreate(eq("up"), anyMap())).thenReturn(up);
+        when(registry.getOrCreate(eq("down"), anyMap(), any())).thenReturn(down);
+        when(registry.getOrCreate(eq("up"), anyMap(), any())).thenReturn(up);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -724,7 +724,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel model = modelReturning("answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         var templateData = Map.<String, Object>of("properties", Map.of("tier", "gpt-4o"));
         var result = executorWithTemplating(registry, templatingEngine).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),
@@ -752,7 +752,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel answering = modelReturning("answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(answering);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(answering);
 
         var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(null),
                 mock(AgentOrchestrator.class), Map.of(), false, false, false);
@@ -781,7 +781,7 @@ class CascadingModelExecutorCoverageTest {
 
         assertTrue(failure.getMessage().contains("Cascade step 0 parameter 'modelName' contains the reference ${vault:other-agent-key}"),
                 failure.getMessage());
-        verify(registry, never()).getOrCreate(anyString(), anyMap());
+        verify(registry, never()).getOrCreate(anyString(), anyMap(), any());
     }
 
     @Test
@@ -805,7 +805,7 @@ class CascadingModelExecutorCoverageTest {
         assertThrows(IllegalArgumentException.class, () -> executorWithTemplating(registry, templatingEngine).execute(cascade, messages(),
                 "sys", Map.of("apiKey", "k"), task(), memory(null), mock(AgentOrchestrator.class), Map.of("context", Map.of()), false, false,
                 false));
-        verify(registry, never()).getOrCreate(eq("judgeProvider"), anyMap());
+        verify(registry, never()).getOrCreate(eq("judgeProvider"), anyMap(), any());
     }
 
     @Test
@@ -825,7 +825,7 @@ class CascadingModelExecutorCoverageTest {
 
         ChatModel model = modelReturning("answer");
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
 
         var templateData = Map.<String, Object>of("properties", Map.of("tier", "gpt-4o"));
         var result = executorWithTemplating(registry, templatingEngine).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(),

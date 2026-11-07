@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
@@ -71,13 +72,13 @@ class RestRagStoreInMemoryStoreTest {
     }
 
     private EmbeddingStore<TextSegment> storeWithOneSegment() {
-        var store = storeFactory.getOrCreateForIngestion(KB_ID, inMemoryKnowledgeBase());
+        var store = storeFactory.getOrCreateForIngestion(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test"));
         store.add(Embedding.from(new float[]{0.1f, 0.2f}), TextSegment.from("a fact"));
         return store;
     }
 
     private int segmentsNow() {
-        return storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase())
+        return storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test"))
                 .search(EmbeddingSearchRequest.builder()
                         .queryEmbedding(Embedding.from(new float[]{0.1f, 0.2f}))
                         .minScore(0.0)
@@ -107,7 +108,7 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.deleteRag(KB_ID, 1, false);
 
-        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
+        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test")));
         assertEquals(0, segmentsNow());
     }
 
@@ -115,7 +116,7 @@ class RestRagStoreInMemoryStoreTest {
     @DisplayName("deleting a knowledge base leaves a namesake's store alone")
     void deleteSparesANamesake() throws Exception {
         String otherId = "6b9c2d3e4f5a6b7c8d9e0f1a";
-        var namesake = storeFactory.getOrCreateForIngestion(otherId, inMemoryKnowledgeBase());
+        var namesake = storeFactory.getOrCreateForIngestion(otherId, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test"));
         namesake.add(Embedding.from(new float[]{0.1f, 0.2f}), TextSegment.from("their fact"));
         storeWithOneSegment();
         when(ragStore.getCurrentResourceId(KB_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
@@ -123,7 +124,7 @@ class RestRagStoreInMemoryStoreTest {
         restRagStore.deleteRag(KB_ID, 1, false);
 
         assertEquals(0, segmentsNow());
-        assertSame(namesake, storeFactory.getOrCreate(otherId, inMemoryKnowledgeBase()));
+        assertSame(namesake, storeFactory.getOrCreate(otherId, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -134,7 +135,7 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.deleteRag(KB_ID, 1, false);
 
-        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
+        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test")));
         assertEquals(1, segmentsNow());
     }
 
@@ -147,7 +148,7 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.updateRag(KB_ID, 1, updated);
 
-        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
+        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test")));
         assertEquals(1, segmentsNow());
     }
 
@@ -160,6 +161,6 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.updateRag(KB_ID, 1, renamed);
 
-        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
+        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase(), SecretAccess.outsideAgentGrants("test")));
     }
 }

@@ -20,6 +20,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
@@ -289,7 +290,11 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                 tempConfig.setApiKey(apiKey);
             }
 
-            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig));
+            // A probe from the configuration editor is not an agent: only a secret
+            // granted to every agent may authenticate it. Otherwise any editor could
+            // use a key granted to one agent against a server of their choosing.
+            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig),
+                    SecretAccess.withoutAgent("MCP discovery probe from the configuration editor"));
 
             // A configuration the manager refused outright (blocked address, bad
             // transport, malformed URL) contributes no tools and throws nothing, so it

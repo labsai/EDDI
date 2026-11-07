@@ -198,7 +198,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("audit:model_name records the model the variable resolves to, not the ${vars:...} template")
     void auditRecordsResolvedModelName() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
 
         run(task("${vars:fast-model}", v -> {
         }));
@@ -210,7 +210,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("an unknown variable leaves the configured text, never fails the turn")
     void unresolvableReferenceKeepsTheTemplate() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
         when(globalVariableResolver.resolveValue("${vars:gone}")).thenThrow(new IllegalStateException("vault down"));
 
         run(task("${vars:gone}", v -> {
@@ -223,7 +223,7 @@ class LlmTaskObservabilityTest {
     @DisplayName("the circuit of a model named by a variable is keyed by the resolved name")
     void circuitKeyUsesTheResolvedName() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(400)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task("${vars:fast-model}", v -> {
         });
         var cb = new CircuitBreakerConfig();
@@ -242,7 +242,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("a re-ask that fixes the reply leaves exactly one retry line, with its outcome, attempt and duration")
     void reaskLeavesOneLine() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID)));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID)));
 
         run(task("base-model", v -> v.setOnInvalidJson("retry")));
 
@@ -255,7 +255,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("an exhausted re-ask and the fallback after it are one line each, and nothing else")
     void exhaustedReaskThenFallbackIsTwoLines() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast());
 
         run(task("base-model", v -> v.setOnInvalidJson("retry")));
 
@@ -270,7 +270,7 @@ class LlmTaskObservabilityTest {
     void reaskRespectsTheTurnDeadline() throws Exception {
         when(memory.getTurnDeadline()).thenReturn(TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 2_000, 1_500L));
         var model = FaultInjectingChatModel.script(Step.text(PROSE), Step.text(VALID));
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
         run(task("base-model", v -> v.setOnInvalidJson("retry")));
 
@@ -281,7 +281,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("a locally repaired reply (a code fence) leaves one repair line and counts recovery{repair}")
     void repairLeavesOneLine() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any()))
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any()))
                 .thenReturn(FaultInjectingChatModel.script(Step.text("```json\n" + VALID + "\n```")));
 
         run(task("base-model", v -> {
@@ -296,7 +296,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("a clean reply leaves no recovery line")
     void cleanReplyLeavesNothing() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.text(VALID)));
 
         run(task("base-model", v -> v.setOnInvalidJson("retry")));
 
@@ -306,7 +306,7 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("a failed single-model call counts eddi.llm.failure{class,model} with the resolved model")
     void singleModelFailureIsCounted() throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
 
         assertThrows(Exception.class, () -> run(task("${vars:fast-model}", v -> {
         })));
@@ -319,8 +319,8 @@ class LlmTaskObservabilityTest {
     @Test
     @DisplayName("a cascade that fails on every step counts one failure per step, not one more for the task")
     void cascadeFailuresAreNotCountedTwice() throws Exception {
-        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
-        when(chatModelRegistry.getOrCreate(eq("anthropic"), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
+        when(chatModelRegistry.getOrCreate(eq("openai"), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
+        when(chatModelRegistry.getOrCreate(eq("anthropic"), any(), any())).thenReturn(FaultInjectingChatModel.script(Step.status(400)).repeatLast());
         var task = task("base-model", v -> {
         });
         var cascade = new LlmConfiguration.ModelCascadeConfig();
@@ -342,7 +342,7 @@ class LlmTaskObservabilityTest {
     @DisplayName("an open circuit is a recovery line (circuit_skip) and recovery{circuit_skip}, not a model failure")
     void openCircuitLeavesASkipLine() throws Exception {
         var model = FaultInjectingChatModel.script(Step.status(400)).repeatLast();
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
         var task = task("base-model", v -> {
         });
         var cb = new CircuitBreakerConfig();

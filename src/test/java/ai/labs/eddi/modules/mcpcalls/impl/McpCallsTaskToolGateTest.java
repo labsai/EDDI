@@ -128,7 +128,7 @@ class McpCallsTaskToolGateTest {
         };
         Map<String, ToolExecutor> executors = Map.of("wire_transfer", executor);
         List<ToolSpecification> specs = List.of(ToolSpecification.builder().name("wire_transfer").build());
-        when(mcpToolProviderManager.discoverTools(any()))
+        when(mcpToolProviderManager.discoverTools(any(), any()))
                 .thenReturn(new McpToolProviderManager.McpToolsResult(specs, executors));
     }
 

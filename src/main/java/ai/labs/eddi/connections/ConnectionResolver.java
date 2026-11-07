@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -130,10 +131,15 @@ public class ConnectionResolver {
      *            provenance this parameter cannot. A non-null value that disagrees
      *            with the bound principal is refused rather than preferred — see
      *            {@link #resolvePrincipal(ConnectionConfiguration, String)}.
+     * @param access
+     *            the agent (or other caller) the credential is resolved for; every
+     *            vault secret behind the connection must be granted to it, checked
+     *            before any cached token is handed out (see
+     *            {@link #requireCredentialsGranted})
      * @throws ConnectionException
      *             on every failure; never returns null
      */
-    public ResolvedCredential resolve(String reference, URI targetUrl, String principalOverride) {
+    public ResolvedCredential resolve(String reference, URI targetUrl, String principalOverride, SecretAccess access) {
         ConnectionReference parsed = ConnectionReference.parse(reference);
         ConnectionConfiguration connection;
         try {
@@ -149,7 +155,8 @@ public class ConnectionResolver {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
-            ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl);
+            requireCredentialsGranted(connection, access);
+            ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl, access);
             record(connection, "success", sample);
             return credential;
         } catch (ConnectionException e) {
@@ -194,7 +201,7 @@ public class ConnectionResolver {
      *             {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT} for a
      *             connection that has no bare token to give
      */
-    public String resolveAccessToken(String reference, URI targetUrl, String principalOverride) {
+    public String resolveAccessToken(String reference, URI targetUrl, String principalOverride, SecretAccess access) {
         ConnectionReference parsed = ConnectionReference.parse(reference);
         ConnectionConfiguration connection;
         try {
@@ -207,6 +214,7 @@ public class ConnectionResolver {
         try {
             requireBareTokenAvailable(connection);
             requireTargetAllowed(connection, targetUrl);
+            requireCredentialsGranted(connection, access);
             String accessToken = accessTokenSupplier.accessToken(connection, resolvePrincipal(connection, principalOverride));
             if (accessToken == null || accessToken.isBlank()) {
                 // The supplier contract says never null — but a blank token handed to
@@ -250,7 +258,7 @@ public class ConnectionResolver {
      * @throws ConnectionException
      *             on every failure; never returns null
      */
-    public BasicLogin resolveBasicLogin(String reference, URI targetUrl) {
+    public BasicLogin resolveBasicLogin(String reference, URI targetUrl, SecretAccess access) {
         ConnectionReference parsed = ConnectionReference.parse(reference);
         ConnectionConfiguration connection;
         try {
@@ -276,9 +284,10 @@ public class ConnectionResolver {
                                 + "Re-save the connection to apply the current validation rules.");
             }
             String destination = targetUrl.toString();
+            requireCredentialsGranted(connection, access);
             credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
             String password = credentialReferenceResolver.resolveVaultBackedFor(staticAuth.getPasswordRef(), destination, connection.getName(),
-                    "password");
+                    "password", access);
             record(connection, "success", sample);
             return new BasicLogin(staticAuth.getUsername(), password);
         } catch (ConnectionException e) {
@@ -354,7 +363,7 @@ public class ConnectionResolver {
      *             discovery failure must be loud, not another silent empty tool
      *             list
      */
-    public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl) {
+    public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl, SecretAccess access) {
         // Read the binding without resolving. An unknown name falls through to
         // resolve(), which throws NOT_FOUND and counts it — swallowing it here would
         // reintroduce the empty-tool-list-with-no-explanation failure by a new route.
@@ -366,7 +375,7 @@ public class ConnectionResolver {
         if (isWithheldFromDiscovery(binding)) {
             return Optional.empty();
         }
-        return Optional.of(resolve(reference, targetUrl, null));
+        return Optional.of(resolve(reference, targetUrl, null, access));
     }
 
     /**
@@ -416,7 +425,58 @@ public class ConnectionResolver {
         }
     }
 
-    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride, URI targetUrl) {
+    /**
+     * Refuses {@code access} when a vault secret behind the connection
+     * {@code reference} names has a grant that does not admit it, without resolving
+     * anything. For a caller that keeps a client authenticated with the connection
+     * in a cache of its own (an MCP session, an A2A agent card) and so must check
+     * before its own lookup.
+     *
+     * @throws ConnectionException
+     *             {@code SECRET_NOT_GRANTED} when refused, {@code NOT_FOUND} when
+     *             there is no such connection
+     */
+    public void requireGranted(String reference, SecretAccess access) {
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        requireCredentialsGranted(connection, access);
+    }
+
+    /**
+     * Refuses {@code access} when any vault secret behind {@code connection}'s
+     * credential has a grant that does not admit it.
+     * <p>
+     * Read before anything is resolved or looked up, because two of the auth types
+     * never reach the vault on a warm path: an OAuth access token is served from
+     * the grant store, minted with a client secret that was resolved once, possibly
+     * for another agent. Checking only where a secret is decrypted would let a
+     * cached token stand in for a secret the asking agent is not granted (#1179).
+     * Every credential field is checked whatever the auth type, since a field the
+     * type does not use carries no reference that matters, and a stale one is cheap
+     * to read.
+     */
+    private void requireCredentialsGranted(ConnectionConfiguration connection, SecretAccess access) {
+        if (connection == null) {
+            return; // nothing to check: the lookup that follows fails on its own
+        }
+        StaticAuth staticAuth = connection.getStaticAuth();
+        if (staticAuth != null) {
+            credentialReferenceResolver.requireGranted(staticAuth.getValueTemplate(), access, connection.getName(), "credential");
+            credentialReferenceResolver.requireGranted(staticAuth.getUsername(), access, connection.getName(), "username");
+            credentialReferenceResolver.requireGranted(staticAuth.getPasswordRef(), access, connection.getName(), "password");
+        }
+        if (connection.getOauth() != null) {
+            credentialReferenceResolver.requireGranted(connection.getOauth().getClientSecret(), access, connection.getName(), "client secret");
+        }
+    }
+
+    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride, URI targetUrl,
+                                                 SecretAccess access) {
         // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
         // its value comes from the turn rather than from the document, so it must not
         // reach the STATIC branch below — that one resolves a valueTemplate this
@@ -429,8 +489,8 @@ public class ConnectionResolver {
             // behind them are held to their own allowedHosts as well as to the
             // connection's baseUrlAllowlist. An OAuth access token is not a vault
             // secret; its client secret goes to the token endpoint, not here.
-            case STATIC -> staticCredential(connection, targetUrl);
-            case BASIC -> basicCredential(connection, targetUrl);
+            case STATIC -> staticCredential(connection, targetUrl, access);
+            case BASIC -> basicCredential(connection, targetUrl, access);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
     }
@@ -446,14 +506,14 @@ public class ConnectionResolver {
      * circuit breaker, which then told the operator the server was down and
      * suppressed discovery for everybody configured against it.
      */
-    private ResolvedCredential staticCredential(ConnectionConfiguration connection, URI targetUrl) {
+    private ResolvedCredential staticCredential(ConnectionConfiguration connection, URI targetUrl, SecretAccess access) {
         StaticAuth staticAuth = requireStaticAuth(connection, "STATIC");
         if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
                             + "send. Re-save the connection to apply the current validation rules.");
         }
-        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection, targetUrl));
+        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection, targetUrl, access));
     }
 
     private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
@@ -530,7 +590,7 @@ public class ConnectionResolver {
      * read back to check which account it belongs to, and hides a password inside
      * something that does not look like one.
      */
-    private ResolvedCredential basicCredential(ConnectionConfiguration connection, URI targetUrl) {
+    private ResolvedCredential basicCredential(ConnectionConfiguration connection, URI targetUrl, SecretAccess access) {
         StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
         // A null username would be sent as the literal "null:password" — an
         // authentication failure with no visible cause. Refused instead.
@@ -546,7 +606,7 @@ public class ConnectionResolver {
         }
         credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), targetUrl.toString(), connection.getName(), "username");
         String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password",
-                targetUrl);
+                targetUrl, access);
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
         return new ResolvedCredential(staticAuth.getHeaderName(), "Basic " + encoded);
@@ -723,8 +783,8 @@ public class ConnectionResolver {
      * expand to a vault reference, and the reverse is never intended. Every vault
      * secret the template names is checked against {@code targetUrl} first.
      */
-    private String resolveReferences(String template, ConnectionConfiguration connection, URI targetUrl) {
-        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential", targetUrl);
+    private String resolveReferences(String template, ConnectionConfiguration connection, URI targetUrl, SecretAccess access) {
+        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential", targetUrl, access);
     }
 
     /**

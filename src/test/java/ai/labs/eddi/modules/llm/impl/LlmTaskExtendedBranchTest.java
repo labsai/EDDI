@@ -90,7 +90,7 @@ class LlmTaskExtendedBranchTest {
         });
 
         var secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -457,7 +457,7 @@ class LlmTaskExtendedBranchTest {
             });
 
             var secretResolver = mock(SecretResolver.class);
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
             var gvr = mock(GlobalVariableResolver.class);
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));

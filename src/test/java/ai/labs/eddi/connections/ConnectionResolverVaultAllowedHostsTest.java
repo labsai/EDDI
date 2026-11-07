@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -60,7 +61,7 @@ class ConnectionResolverVaultAllowedHostsTest {
         secretProvider = mock(ISecretProvider.class);
         var globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString()))
+        lenient().when(secretResolver.resolveValue(anyString(), any()))
                 .thenAnswer(i -> i.<String>getArgument(0).replace("${vault:partner-token}", "live-token").replace("${vault:partner-pw}", "hunter2"));
         var credentials = new CredentialReferenceResolver(secretResolver, globalVariableResolver, new VaultHostAllowlist(secretProvider));
         resolver = new ConnectionResolver(registry, credentials, mock(CallerIdentityContext.class), new SimpleMeterRegistry(),
@@ -97,12 +98,13 @@ class ConnectionResolverVaultAllowedHostsTest {
         register(AuthType.STATIC);
         secretAllowedAt("partner-token", List.of("other.example.com"));
 
-        var error = assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:partner}", TARGET, null));
+        var error = assertThrows(ConnectionException.class,
+                () -> resolver.resolve("${connection:partner}", TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
         assertTrue(error.getMessage().contains("${vault:partner-token}"), error.getMessage());
         assertTrue(error.getMessage().contains("partner.example.com"), error.getMessage());
-        verify(secretResolver, never()).resolveValue(anyString());
+        verify(secretResolver, never()).resolveValue(anyString(), any());
     }
 
     @Test
@@ -111,10 +113,11 @@ class ConnectionResolverVaultAllowedHostsTest {
         register(AuthType.BASIC);
         secretAllowedAt("partner-pw", List.of("other.example.com"));
 
-        var error = assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:partner}", TARGET, null));
+        var error = assertThrows(ConnectionException.class,
+                () -> resolver.resolve("${connection:partner}", TARGET, null, SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
-        verify(secretResolver, never()).resolveValue(anyString());
+        verify(secretResolver, never()).resolveValue(anyString(), any());
     }
 
     @Test
@@ -122,9 +125,11 @@ class ConnectionResolverVaultAllowedHostsTest {
     void allowedOrUnrestrictedSecretResolves() throws Exception {
         register(AuthType.STATIC);
         secretAllowedAt("partner-token", List.of("partner.example.com"));
-        assertEquals("Bearer live-token", resolver.resolve("${connection:partner}", TARGET, null).headerValue());
+        assertEquals("Bearer live-token",
+                resolver.resolve("${connection:partner}", TARGET, null, SecretAccess.outsideAgentGrants("test")).headerValue());
 
         secretAllowedAt("partner-token", null);
-        assertEquals("Bearer live-token", resolver.resolve("${connection:partner}", TARGET, null).headerValue());
+        assertEquals("Bearer live-token",
+                resolver.resolve("${connection:partner}", TARGET, null, SecretAccess.outsideAgentGrants("test")).headerValue());
     }
 }

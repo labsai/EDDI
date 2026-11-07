@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -42,7 +43,7 @@ class A2AToolProviderManagerDeepBranchTest {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         secretResolver = mock(SecretResolver.class);
         doReturn("resolved-key").when(globalVariableResolver).resolveValue(anyString());
-        doReturn("resolved-key").when(secretResolver).resolveValue(anyString());
+        doReturn("resolved-key").when(secretResolver).resolveValue(anyString(), any());
 
         manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
 
@@ -84,7 +85,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -106,7 +107,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -127,7 +128,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -152,12 +153,12 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setTimeoutMs(5000L);
 
             // First call fetches
-            var result1 = manager.discoverTools(List.of(config));
+            var result1 = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(1, result1.toolSpecs().size());
             assertEquals(1, callCount[0]);
 
             // Second call uses cache
-            var result2 = manager.discoverTools(List.of(config));
+            var result2 = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(1, result2.toolSpecs().size());
             assertEquals(1, callCount[0], "Should use cached agent card");
         }
@@ -185,7 +186,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setApiKey("my-api-key");
             config.setTimeoutMs(5000L);
 
-            manager.discoverTools(List.of(config));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(receivedHeaders.containsKey("Authorization"));
         }
     }
@@ -221,7 +222,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(2, result.toolSpecs().size());
             assertTrue(result.toolSpecs().get(0).name().contains("translate"));
             assertTrue(result.toolSpecs().get(1).name().contains("summarize"));
@@ -252,7 +253,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setTimeoutMs(5000L);
             config.setSkillsFilter(List.of("translate", "analyze"));
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(2, result.toolSpecs().size());
         }
 
@@ -274,7 +275,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setName("custom-name");
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(1, result.toolSpecs().size());
             assertTrue(result.toolSpecs().get(0).name().contains("custom_name"));
         }
@@ -301,7 +302,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(1, result.toolSpecs().size());
             assertTrue(result.toolSpecs().get(0).name().contains("no_skills_agent"));
         }
@@ -343,7 +344,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertFalse(result.toolSpecs().isEmpty());
             assertNotNull(result.executors().get(result.toolSpecs().get(0).name()));
         }
@@ -365,7 +366,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertFalse(result.toolSpecs().isEmpty());
 
             // Execute the tool to trigger executeA2ATask
@@ -403,7 +404,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -436,7 +437,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -469,7 +470,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -506,7 +507,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -539,7 +540,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setUrl(serverUrl());
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -577,7 +578,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setApiKey("${vault:my-key}");
             config.setTimeoutMs(5000L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             var toolName = result.toolSpecs().get(0).name();
             var executor = result.executors().get(toolName);
             var toolRequest = ToolExecutionRequest.builder()
@@ -607,11 +608,11 @@ class A2AToolProviderManagerDeepBranchTest {
 
             // Fail 3 times to trip the circuit
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // 4th call should be skipped due to circuit breaker
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }
@@ -643,7 +644,7 @@ class A2AToolProviderManagerDeepBranchTest {
             config.setTimeoutMs(5000L);
 
             // Should succeed without issues (vault ref is acceptable)
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }

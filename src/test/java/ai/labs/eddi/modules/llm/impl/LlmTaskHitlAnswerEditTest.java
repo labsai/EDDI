@@ -86,7 +86,7 @@ class LlmTaskHitlAnswerEditTest {
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(memoryItemConverter.convert(any())).thenAnswer(inv -> new HashMap<String, Object>());
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         var counterweightService = mock(CounterweightService.class);
         lenient().when(counterweightService.apply(anyString(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         var identityMaskingService = mock(IdentityMaskingService.class);

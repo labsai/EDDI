@@ -21,6 +21,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
@@ -88,6 +89,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
     private final Instance<EmailChannelSupport> emailSupport;
     private final SecretResolver secretResolver;
+
+    /** The save-time length check of a webhook signing secret. */
+    private static final SecretAccess CHANNEL_SECRET_ACCESS = SecretAccess.outsideAgentGrants("channel integration (signing secret check)");
     private final ChannelTargetRouter channelTargetRouter;
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
@@ -207,7 +211,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
         String resolved;
         try {
-            resolved = secretResolver.resolveValue(reference.trim());
+            // A channel integration is not an agent and the agent grant has never
+            // governed its credentials (see SecretAccess); the value is only measured.
+            resolved = secretResolver.resolveValue(reference.trim(), CHANNEL_SECRET_ACCESS);
         } catch (RuntimeException e) {
             return;
         }

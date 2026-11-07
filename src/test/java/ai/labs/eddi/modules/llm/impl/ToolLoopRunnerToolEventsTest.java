@@ -105,7 +105,7 @@ class ToolLoopRunnerToolEventsTest {
 
     private static ToolLoopRunner runnerOver(ToolExecutionService service) {
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         return new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
     }
 

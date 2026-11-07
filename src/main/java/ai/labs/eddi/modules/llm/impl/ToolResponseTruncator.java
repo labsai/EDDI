@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -134,7 +135,10 @@ public class ToolResponseTruncator {
      */
     public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
                                    String taskType, Map<String, String> taskParameters) {
-        return truncateIfNeeded(conversationId, toolName, result, limits, taskType, taskParameters, SummarizerSpend.UNMETERED);
+        // Outside a turn there is no agent to check the summarizer's key against: an
+        // unknown agent, which resolves only secrets granted to every agent.
+        return truncateIfNeeded(conversationId, toolName, result, limits, taskType, taskParameters, SummarizerSpend.UNMETERED,
+                SecretAccess.agent(null));
     }
 
     /**
@@ -171,10 +175,10 @@ public class ToolResponseTruncator {
      * As
      * {@link #truncateIfNeeded(String, String, String, ToolResponseLimits, String, Map)},
      * with the {@code summarize} strategy's call checked and charged through
-     * {@code spend}.
+     * {@code spend}, and its model built for {@code access} (the turn's agent).
      */
     public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
-                                   String taskType, Map<String, String> taskParameters, SummarizerSpend spend) {
+                                   String taskType, Map<String, String> taskParameters, SummarizerSpend spend, SecretAccess access) {
         if (limits == null || result == null) {
             return result;
         }
@@ -191,7 +195,7 @@ public class ToolResponseTruncator {
             case "headtail" -> headTailResponse(toolName, result, maxChars);
             case "paginate" -> paginateResponse(conversationId, toolName, result, maxChars);
             case "summarize" -> summarizeResponse(toolName, result, maxChars, limits, taskType, taskParameters,
-                    spend != null ? spend : SummarizerSpend.UNMETERED);
+                    spend != null ? spend : SummarizerSpend.UNMETERED, access);
             default -> truncateResponse(toolName, result, maxChars);
         };
     }
@@ -305,7 +309,7 @@ public class ToolResponseTruncator {
      */
     private String summarizeResponse(String toolName, String result, int maxChars,
                                      ToolResponseLimits limits, String taskType,
-                                     Map<String, String> taskParameters, SummarizerSpend spend) {
+                                     Map<String, String> taskParameters, SummarizerSpend spend, SecretAccess access) {
         String summarizerModel = limits.getSummarizerModel();
 
         // Guard 1: no summarizer model configured
@@ -348,7 +352,7 @@ public class ToolResponseTruncator {
             summarizerParams.remove("responseFormat");
 
             // Use the parent task's provider type — inherits API key, baseUrl, etc.
-            ChatModel model = chatModelRegistry.getOrCreate(taskType, summarizerParams);
+            ChatModel model = chatModelRegistry.getOrCreate(taskType, summarizerParams, access);
 
             String systemPrompt = SUMMARIZER_SYSTEM_PROMPT.formatted(maxChars);
             List<ChatMessage> messages = List.of(

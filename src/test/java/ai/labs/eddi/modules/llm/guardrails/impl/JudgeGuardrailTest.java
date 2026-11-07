@@ -108,7 +108,7 @@ class JudgeGuardrailTest {
     }
 
     private StubModel install(String provider, StubModel model) throws Exception {
-        when(registry.getOrCreate(eq(provider), any())).thenReturn(model);
+        when(registry.getOrCreate(eq(provider), any(), any())).thenReturn(model);
         return model;
     }
 
@@ -355,7 +355,7 @@ class JudgeGuardrailTest {
 
             @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Map.class);
-            verify(registry).getOrCreate(eq("gemini"), captor.capture());
+            verify(registry).getOrCreate(eq("gemini"), captor.capture(), any());
             Map<String, String> sent = captor.getValue();
             assertEquals("gemini-3.7-flash", sent.get("modelName"));
             assertEquals("${vault:gemini-key}", sent.get("apiKey"));
@@ -424,7 +424,7 @@ class JudgeGuardrailTest {
         @Test
         @DisplayName("an unsupported provider, a missing provider, a broken template or unusable issues are unavailable")
         void misconfigured() throws Exception {
-            when(registry.getOrCreate(eq("nope"), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
+            when(registry.getOrCreate(eq("nope"), any(), any())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("Type nope"));
             assertEquals(JudgeGuardrail.REASON_UNAVAILABLE,
                     assertThrows(GuardrailUndecidedException.class, () -> judge.evaluate("x", output(params("provider", "nope")))).reason());
             Map<String, String> noProvider = params();

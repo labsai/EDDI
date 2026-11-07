@@ -184,7 +184,7 @@ class RagContextProviderExtendedTest {
             ragContextProvider.retrieveContext(memory, task, "what is the refund policy?");
 
             var role = ArgumentCaptor.forClass(EmbeddingInputType.class);
-            verify(embeddingModelFactory, atLeastOnce()).getOrCreate(any(), role.capture());
+            verify(embeddingModelFactory, atLeastOnce()).getOrCreate(any(), role.capture(), any());
             assertEquals(EmbeddingInputType.QUERY, role.getValue(),
                     "the search key must be embedded as a QUERY; embedding it as a DOCUMENT is the defect");
         }
@@ -317,7 +317,7 @@ class RagContextProviderExtendedTest {
 
             setupWorkflowWithRagConfig("kb-error");
 
-            when(embeddingModelFactory.getOrCreate(any(), any())).thenThrow(
+            when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenThrow(
                     new RuntimeException("Model creation failed"));
 
             String result = ragContextProvider.retrieveContext(memory, task, "query");
@@ -451,13 +451,13 @@ class RagContextProviderExtendedTest {
         setupWorkflowWithRagConfig(kbName);
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
 
         EmbeddingStore<TextSegment> store = mock(EmbeddingStore.class);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(store);
 
         var match = new EmbeddingMatch<>(0.9, "id-1", embedding, TextSegment.from(contentText));
         when(store.search(any(EmbeddingSearchRequest.class)))
@@ -469,13 +469,13 @@ class RagContextProviderExtendedTest {
         setupWorkflowWithRagConfig(kbName);
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
 
         EmbeddingStore<TextSegment> store = mock(EmbeddingStore.class);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(store);
 
         when(store.search(any(EmbeddingSearchRequest.class)))
                 .thenReturn(new EmbeddingSearchResult<>(List.of()));

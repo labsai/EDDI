@@ -30,6 +30,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -174,7 +175,7 @@ public class McpCallsTask implements ILifecycleTask {
         if (ToolMockRegistry.mayRunLive(memory)) {
             // Connect to the MCP server and discover tools (cached)
             McpServerConfig serverConfig = toServerConfig(config);
-            mcpTools = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+            mcpTools = mcpToolProviderManager.discoverTools(List.of(serverConfig), SecretAccess.agent(memory.getAgentId()));
 
             if (mcpTools == null || mcpTools.toolSpecs().isEmpty()) {
                 LOGGER.warnf("No tools discovered from MCP server '%s' — skipping", config.getMcpServerUrl());

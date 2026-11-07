@@ -1865,7 +1865,8 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend),
+                LlmTask.secretAccessOf(memory));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");

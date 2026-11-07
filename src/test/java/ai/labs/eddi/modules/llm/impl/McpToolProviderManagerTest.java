@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -46,7 +47,7 @@ class McpToolProviderManagerTest {
         @Test
         @DisplayName("null mcpServers — returns empty result")
         void nullServers() {
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -55,7 +56,7 @@ class McpToolProviderManagerTest {
         @Test
         @DisplayName("empty mcpServers — returns empty result")
         void emptyServers() {
-            var result = manager.discoverTools(Collections.emptyList());
+            var result = manager.discoverTools(Collections.emptyList(), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -67,7 +68,7 @@ class McpToolProviderManagerTest {
             config.setUrl("");
             config.setName("test");
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -79,7 +80,7 @@ class McpToolProviderManagerTest {
             config.setUrl(null);
             config.setName("test");
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -94,7 +95,7 @@ class McpToolProviderManagerTest {
             config.setTimeoutMs(1000L);
 
             // This will fail to connect but should not throw
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }

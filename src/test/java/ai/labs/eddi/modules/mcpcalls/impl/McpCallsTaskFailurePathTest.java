@@ -115,7 +115,7 @@ class McpCallsTaskFailurePathTest {
 
         var specs = List.of(ToolSpecification.builder().name("wire_transfer").build());
         var toolsResult = new McpToolProviderManager.McpToolsResult(specs, Map.of("wire_transfer", executor));
-        lenient().when(mcpToolProviderManager.discoverTools(anyList())).thenReturn(toolsResult);
+        lenient().when(mcpToolProviderManager.discoverTools(anyList(), any())).thenReturn(toolsResult);
     }
 
     @AfterEach

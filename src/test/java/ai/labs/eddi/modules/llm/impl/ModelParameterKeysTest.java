@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -70,16 +72,17 @@ class ModelParameterKeysTest {
     void summarizationServiceUsesProviderKey() throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         ChatModel model = mock(ChatModel.class);
-        when(registry.getOrCreate(eq("ollama"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("ollama"), anyMap(), any())).thenReturn(model);
         var service = new SummarizationService(registry, new SimpleMeterRegistry());
 
         try {
-            service.summarizeWithUsage("content", "instructions", "ollama", "llama3:8b", Map.of("model", "llama3:70b"));
+            service.summarizeWithUsage("content", "instructions", "ollama", "llama3:8b", Map.of("model", "llama3:70b"),
+                    SecretAccess.outsideAgentGrants("test"));
         } catch (RuntimeException expected) {
             // the mock model returns no response; only the parameters are under test
         }
 
-        verify(registry).getOrCreate(eq("ollama"), argThat(p -> "llama3:8b".equals(p.get("model"))));
+        verify(registry).getOrCreate(eq("ollama"), argThat(p -> "llama3:8b".equals(p.get("model"))), any());
     }
 
     @Test

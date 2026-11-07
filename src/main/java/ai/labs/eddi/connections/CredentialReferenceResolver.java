@@ -6,6 +6,7 @@ package ai.labs.eddi.connections;
 
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -84,8 +85,8 @@ public class CredentialReferenceResolver {
      *             value: sending one produces a provider rejection that looks like
      *             a revoked grant.
      */
-    public String resolveRequired(String template, String connectionName, String what) {
-        return resolveRequired(template, connectionName, what, null);
+    public String resolveRequired(String template, String connectionName, String what, SecretAccess access) {
+        return resolveRequired(template, connectionName, what, null, access);
     }
 
     /**
@@ -103,11 +104,16 @@ public class CredentialReferenceResolver {
      * @param destination
      *            the request's target, or {@code null} when the value is not sent
      *            anywhere this caller knows
+     * @param access
+     *            on whose behalf the vault references are resolved; see
+     *            {@link SecretAccess}
      * @throws ConnectionException
      *             with {@code TARGET_NOT_ALLOWED} when a secret's
-     *             {@code allowedHosts} does not admit {@code destination}
+     *             {@code allowedHosts} does not admit {@code destination}, and with
+     *             {@code SECRET_NOT_GRANTED} when its grant does not admit
+     *             {@code access}
      */
-    public String resolveRequired(String template, String connectionName, String what, URI destination) {
+    public String resolveRequired(String template, String connectionName, String what, URI destination, SecretAccess access) {
         String expanded = globalVariableResolver.resolveValue(template);
         if (template != null && !template.equals(expanded) && !ConnectionConfiguration.isAcceptableValueTemplate(expanded)) {
             // A ${vars:} in a header template may stand for a vault reference or for
@@ -123,7 +129,13 @@ public class CredentialReferenceResolver {
                             + "the variable hold the ${vault:…} reference.");
         }
         requireDestinationAllowed(expanded, destination, connectionName, what);
-        String resolved = secretResolver.resolveValue(expanded);
+        String resolved;
+        try {
+            resolved = secretResolver.resolveValue(expanded, access);
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            throw new ConnectionException(ConnectionException.Reason.SECRET_NOT_GRANTED,
+                    "The " + what + " for connection '" + connectionName + "': " + e.getMessage(), e);
+        }
         if (resolved == null || resolved.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' resolved to an empty value. Check that the referenced vault key "
@@ -164,16 +176,44 @@ public class CredentialReferenceResolver {
      * {@link #resolveVaultBacked(String, String, String, URI)} for a destination
      * given as text.
      */
-    public String resolveVaultBackedFor(String template, String destination, String connectionName, String what) {
-        return resolveVaultBacked(template, connectionName, what, destination == null ? null : URI.create(destination));
+    public String resolveVaultBackedFor(String template, String destination, String connectionName, String what, SecretAccess access) {
+        return resolveVaultBacked(template, connectionName, what, destination == null ? null : URI.create(destination), access);
     }
 
     /**
      * {@link #resolveRequired(String, String, String, URI)} for a destination given
      * as text.
      */
-    public String resolveRequiredFor(String template, String destination, String connectionName, String what) {
-        return resolveRequired(template, connectionName, what, destination == null ? null : URI.create(destination));
+    public String resolveRequiredFor(String template, String destination, String connectionName, String what, SecretAccess access) {
+        return resolveRequired(template, connectionName, what, destination == null ? null : URI.create(destination), access);
+    }
+
+    /**
+     * Refuses {@code access} when a vault secret {@code template} names (after
+     * {@code ${vars:…}} expansion) has a grant that does not admit it, without
+     * decrypting anything.
+     * <p>
+     * For a caller that holds a credential derived from the secret in a cache of
+     * its own: an OAuth access token minted with a client secret is handed out from
+     * the grant store without the client secret ever being resolved again, so the
+     * agent grant has to be read before that lookup. See
+     * {@link SecretResolver#requireGranted}.
+     *
+     * @throws ConnectionException
+     *             with {@code SECRET_NOT_GRANTED}
+     */
+    public void requireGranted(String template, SecretAccess access, String connectionName, String what) {
+        if (template == null || template.isBlank()) {
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        String effective = expanded == null ? template : expanded;
+        try {
+            secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(effective)), access,
+                    "the " + what + " of connection '" + connectionName + "'");
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            throw new ConnectionException(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getMessage(), e);
+        }
     }
 
     /**
@@ -225,8 +265,8 @@ public class CredentialReferenceResolver {
      *             with {@code INVALID_CONFIGURATION} when the field, after
      *             {@code ${vars:…}} expansion, is not exactly one vault reference
      */
-    public String resolveVaultBacked(String template, String connectionName, String what) {
-        return resolveVaultBacked(template, connectionName, what, null);
+    public String resolveVaultBacked(String template, String connectionName, String what, SecretAccess access) {
+        return resolveVaultBacked(template, connectionName, what, null, access);
     }
 
     /**
@@ -234,7 +274,7 @@ public class CredentialReferenceResolver {
      * sent to {@code destination}; see
      * {@link #resolveRequired(String, String, String, URI)}.
      */
-    public String resolveVaultBacked(String template, String connectionName, String what, URI destination) {
+    public String resolveVaultBacked(String template, String connectionName, String what, URI destination, SecretAccess access) {
         if (template == null || template.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' is empty. Re-save the connection with a ${vault:…} reference.");
@@ -244,7 +284,7 @@ public class CredentialReferenceResolver {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' " + notVaultBacked(template, expanded));
         }
-        return resolveRequired(expanded, connectionName, what, destination);
+        return resolveRequired(expanded, connectionName, what, destination, access);
     }
 
     /**

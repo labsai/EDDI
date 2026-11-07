@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -58,7 +59,7 @@ class McpTracePropagationTest {
         GlobalVariableResolver globals = mock(GlobalVariableResolver.class);
         SecretResolver secrets = mock(SecretResolver.class);
         when(globals.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        when(secrets.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secrets.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         manager = new McpToolProviderManager(globals, secrets);
         manager.tracePropagation = new TracePropagation(true);
     }

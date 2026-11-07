@@ -113,7 +113,8 @@ class ToolLoopRunnerQuotaTest {
         service.init();
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
         task = new LlmConfiguration.Task();

@@ -244,7 +244,7 @@ class LlmTaskTest {
         // chatModelRegistry.getOrCreate will be called — let it throw to stop execution
         // at a known point without needing to mock the entire LLM call chain
         doThrow(new ChatModelRegistry.UnsupportedLlmTaskException("test-stop"))
-                .when(chatModelRegistry).getOrCreate(anyString(), any());
+                .when(chatModelRegistry).getOrCreate(anyString(), any(), any());
 
         LifecycleException ex = assertThrows(LifecycleException.class,
                 () -> llmTask.execute(memory, config));
@@ -283,7 +283,7 @@ class LlmTaskTest {
         LifecycleException ex = assertThrows(LifecycleException.class, () -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
 
         assertTrue(ex.getMessage().contains("LLM parameter 'modelName' contains the reference ${vault:another-agents-key}"), ex.getMessage());
-        verify(chatModelRegistry, never()).getOrCreate(anyString(), any());
+        verify(chatModelRegistry, never()).getOrCreate(anyString(), any(), any());
     }
 
     // ====================================================================

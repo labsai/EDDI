@@ -92,7 +92,7 @@ class GeneratedTextBodyExecutionTest {
         when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any())).thenAnswer(inv -> inv.getArgument(1));
 
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);

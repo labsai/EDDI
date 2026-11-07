@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
@@ -67,7 +68,7 @@ class VaultAllowedHostsCoverageTest {
         secretProvider = mock(ISecretProvider.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> ((String) inv.getArgument(0)).replace(REF, "live-key"));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> ((String) inv.getArgument(0)).replace(REF, "live-key"));
         when(secretProvider.getMetadata(any(SecretReference.class)))
                 .thenReturn(new SecretMetadata("default", "k", Instant.EPOCH, null, null, "cs", "d", List.of("*"), List.of(ALLOWED)));
         allowlist = new VaultHostAllowlist(secretProvider);
@@ -85,7 +86,7 @@ class VaultAllowedHostsCoverageTest {
             factory.vaultHostAllowlist = allowlist;
             // Reaching resolution is the observable "the check let it through"; building
             // a live provider client is not this test's business.
-            when(secretResolver.resolveSecrets(any())).thenThrow(new IllegalStateException("resolved"));
+            when(secretResolver.resolveSecrets(any(), any())).thenThrow(new IllegalStateException("resolved"));
         }
 
         private RagConfiguration config(String provider, Map<String, String> params) {
@@ -100,9 +101,10 @@ class VaultAllowedHostsCoverageTest {
         void baseUrlOffListRefused() {
             var config = config("openai", Map.of("apiKey", REF, "baseUrl", "https://collector.attacker.example/v1"));
 
-            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            var e = assertThrows(HostNotAllowedException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("embedding model 'openai'"), e.getMessage());
-            verify(secretResolver, never()).resolveSecrets(any());
+            verify(secretResolver, never()).resolveSecrets(any(), any());
         }
 
         @Test
@@ -111,9 +113,10 @@ class VaultAllowedHostsCoverageTest {
             var config = config("azure-openai",
                     Map.of("apiKey", REF, "baseUrl", "https://" + ALLOWED, "endpoint", "https://azure.attacker.example/openai"));
 
-            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            var e = assertThrows(HostNotAllowedException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("azure.attacker.example"), e.getMessage());
-            verify(secretResolver, never()).resolveSecrets(any());
+            verify(secretResolver, never()).resolveSecrets(any(), any());
         }
 
         @Test
@@ -121,7 +124,8 @@ class VaultAllowedHostsCoverageTest {
         void endpointOnListAllowed() {
             var config = config("azure-openai", Map.of("apiKey", REF, "endpoint", "https://" + ALLOWED + "/openai"));
 
-            var e = assertThrows(IllegalStateException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            var e = assertThrows(IllegalStateException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
             assertEquals("resolved", e.getMessage());
         }
 
@@ -130,7 +134,8 @@ class VaultAllowedHostsCoverageTest {
         void vendorDefaultNotChecked() throws Exception {
             var config = config("openai", Map.of("apiKey", REF));
 
-            var e = assertThrows(IllegalStateException.class, () -> factory.getOrCreate(config, EmbeddingInputType.QUERY));
+            var e = assertThrows(IllegalStateException.class,
+                    () -> factory.getOrCreate(config, EmbeddingInputType.QUERY, SecretAccess.outsideAgentGrants("test")));
             assertEquals("resolved", e.getMessage());
             verify(secretProvider, never()).getMetadata(any());
         }
@@ -157,7 +162,7 @@ class VaultAllowedHostsCoverageTest {
         }
 
         private void resolvingTo(String plaintext) {
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> {
+            when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> {
                 Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
                 resolved.replaceAll((key, value) -> value.replace(REF, plaintext));
                 return resolved;
@@ -170,7 +175,8 @@ class VaultAllowedHostsCoverageTest {
             resolvingTo("db-password");
             var config = config("pgvector", Map.of("host", "db.attacker.example", "password", REF));
 
-            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate("0123456789abcdef01234567", config));
+            var e = assertThrows(HostNotAllowedException.class,
+                    () -> factory.getOrCreate("0123456789abcdef01234567", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("db.attacker.example:5432"), e.getMessage());
         }
 
@@ -180,15 +186,16 @@ class VaultAllowedHostsCoverageTest {
             resolvingTo("mongodb://" + ALLOWED + ":27017,replica.attacker.example:27018/eddi");
             var config = config("mongodb-atlas", Map.of("connectionString", REF));
 
-            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate("0123456789abcdef01234567", config));
+            var e = assertThrows(HostNotAllowedException.class,
+                    () -> factory.getOrCreate("0123456789abcdef01234567", config, SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("replica.attacker.example:27018"), e.getMessage());
         }
 
         @Test
         @DisplayName("a configuration without vault references is not looked up")
         void noReferencesNoLookup() throws Exception {
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-            factory.getOrCreate("0123456789abcdef01234567", config("in-memory", Map.of()));
+            when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+            factory.getOrCreate("0123456789abcdef01234567", config("in-memory", Map.of()), SecretAccess.outsideAgentGrants("test"));
             verify(secretProvider, never()).getMetadata(any());
         }
 
@@ -236,17 +243,17 @@ class VaultAllowedHostsCoverageTest {
                     () -> manager.validateSecretDestination(server("https://mcp.attacker.example/mcp", REF)));
             assertInstanceOf(HostNotAllowedException.class, e.getCause());
             assertTrue(e.getMessage().contains("MCP server 'tools'"), e.getMessage());
-            verify(secretResolver, never()).resolveValue(anyString());
+            verify(secretResolver, never()).resolveValue(anyString(), any());
         }
 
         @Test
         @DisplayName("discovery reports it as INVALID_CONFIGURATION and never contacts the server")
         void discoveryReportsInvalidConfiguration() {
-            var result = manager.discoverTools(List.of(server("https://mcp.attacker.example/mcp", REF)));
+            var result = manager.discoverTools(List.of(server("https://mcp.attacker.example/mcp", REF)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.failures().size());
             assertEquals(McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, result.failures().getFirst().kind());
-            verify(secretResolver, never()).resolveValue(anyString());
+            verify(secretResolver, never()).resolveValue(anyString(), any());
         }
 
         @Test
@@ -291,7 +298,7 @@ class VaultAllowedHostsCoverageTest {
 
             var e = assertThrows(HostNotAllowedException.class, () -> manager.applyCredential(builder, peer(REF), announced, false));
             assertTrue(e.getMessage().contains("peer.attacker.example"), e.getMessage());
-            verify(secretResolver, never()).resolveValue(anyString());
+            verify(secretResolver, never()).resolveValue(anyString(), any());
         }
 
         @Test

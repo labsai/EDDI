@@ -69,12 +69,12 @@ class A2AToolsProviderTest {
         var agentConfig = new A2AAgentConfig();
         var spec = ToolSpecification.builder().name("peer_tool").build();
         var result = new A2AToolProviderManager.A2AToolsResult(List.of(spec), Map.of());
-        when(manager.discoverTools(List.of(agentConfig))).thenReturn(result);
+        when(manager.discoverTools(eq(List.of(agentConfig)), any())).thenReturn(result);
         var provider = new A2AToolsProvider(manager);
 
         var contribution = provider.contribute(context(List.of(agentConfig)));
 
         assertEquals(List.of(spec), contribution.specs());
-        verify(manager).discoverTools(List.of(agentConfig));
+        verify(manager).discoverTools(eq(List.of(agentConfig)), any());
     }
 }

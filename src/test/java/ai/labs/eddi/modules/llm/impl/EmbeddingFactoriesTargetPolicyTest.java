@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
@@ -64,7 +65,7 @@ class EmbeddingFactoriesTargetPolicyTest {
         gvr = mock(GlobalVariableResolver.class);
         sr = mock(SecretResolver.class);
         when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(sr.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(sr.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private static RagConfiguration model(String provider, Map<String, String> params) {
@@ -93,21 +94,25 @@ class EmbeddingFactoriesTargetPolicyTest {
             String privateUrl = "http://" + PRIVATE_HOST + ":11434";
             for (String provider : new String[]{"openai", "mistral", "ollama", "gemini"}) {
                 var e = assertThrows(IllegalArgumentException.class,
-                        () -> factory.getOrCreate(model(provider, Map.of("apiKey", "k", "baseUrl", privateUrl)), EmbeddingInputType.DOCUMENT),
+                        () -> factory.getOrCreate(model(provider, Map.of("apiKey", "k", "baseUrl", privateUrl)), EmbeddingInputType.DOCUMENT,
+                                SecretAccess.outsideAgentGrants("test")),
                         provider);
                 assertTrue(e.getMessage().contains("private/internal"), provider + ": " + e.getMessage());
             }
             assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(
-                    model("azure-openai", Map.of("apiKey", "k", "endpoint", privateUrl)), EmbeddingInputType.DOCUMENT));
+                    model("azure-openai", Map.of("apiKey", "k", "endpoint", privateUrl)), EmbeddingInputType.DOCUMENT,
+                    SecretAccess.outsideAgentGrants("test")));
             assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(
-                    model("vertex", Map.of("project", "p", "endpoint", PRIVATE_HOST + ":443")), EmbeddingInputType.DOCUMENT));
+                    model("vertex", Map.of("project", "p", "endpoint", PRIVATE_HOST + ":443")), EmbeddingInputType.DOCUMENT,
+                    SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("protection on: ollama's default baseUrl is localhost, so it is refused too — the operator must name a public endpoint")
         void onRefusesOllamaDefault() {
             var factory = new EmbeddingModelFactory(gvr, sr, ON);
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(model("ollama", Map.of()), EmbeddingInputType.DOCUMENT));
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate(model("ollama", Map.of()), EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -115,8 +120,9 @@ class EmbeddingFactoriesTargetPolicyTest {
         void onAllowsPublicAndSelf() {
             var factory = new EmbeddingModelFactory(gvr, sr, ON);
             assertNotNull(factory.getOrCreate(model("openai", Map.of("apiKey", "k", "baseUrl", "https://" + PUBLIC_HOST + "/v1")),
-                    EmbeddingInputType.DOCUMENT));
-            assertNotNull(factory.getOrCreate(model("ollama", Map.of("baseUrl", "http://127.0.0.1:7070")), EmbeddingInputType.DOCUMENT));
+                    EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
+            assertNotNull(factory.getOrCreate(model("ollama", Map.of("baseUrl", "http://127.0.0.1:7070")), EmbeddingInputType.DOCUMENT,
+                    SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -124,11 +130,13 @@ class EmbeddingFactoriesTargetPolicyTest {
         void offAllowsPrivate() {
             var factory = new EmbeddingModelFactory(gvr, sr, OFF);
             assertNotNull(factory.getOrCreate(model("openai", Map.of("apiKey", "k", "baseUrl", "http://" + PRIVATE_HOST + "/v1")),
-                    EmbeddingInputType.DOCUMENT));
+                    EmbeddingInputType.DOCUMENT, SecretAccess.outsideAgentGrants("test")));
             var legacy = new EmbeddingModelFactory(gvr, sr);
-            assertNotNull(legacy.getOrCreate(model("ollama", Map.of("baseUrl", "http://" + PRIVATE_HOST + ":11434")), EmbeddingInputType.DOCUMENT));
+            assertNotNull(legacy.getOrCreate(model("ollama", Map.of("baseUrl", "http://" + PRIVATE_HOST + ":11434")), EmbeddingInputType.DOCUMENT,
+                    SecretAccess.outsideAgentGrants("test")));
             var e = assertThrows(IllegalArgumentException.class,
-                    () -> legacy.getOrCreate(model("ollama", Map.of("baseUrl", "http://169.254.169.254")), EmbeddingInputType.DOCUMENT));
+                    () -> legacy.getOrCreate(model("ollama", Map.of("baseUrl", "http://169.254.169.254")), EmbeddingInputType.DOCUMENT,
+                            SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
         }
     }
@@ -142,12 +150,15 @@ class EmbeddingFactoriesTargetPolicyTest {
         void onRefusesPgvector() {
             var factory = new EmbeddingStoreFactory(gvr, sr, ON);
             var e = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-pg", store("pgvector", Map.of("host", PRIVATE_HOST, "password", "pw"))));
+                    () -> factory.getOrCreate("kb-pg", store("pgvector", Map.of("host", PRIVATE_HOST, "password", "pw")),
+                            SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().startsWith("pgvector storeParameters.host refused"), e.getMessage());
             assertTrue(e.getMessage().contains("private/internal"), e.getMessage());
             assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-pg2", store("pgvector", Map.of("host", "10.0.0.9", "password", "pw"))));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("kb-pg3", store("pgvector", Map.of("password", "pw"))),
+                    () -> factory.getOrCreate("kb-pg2", store("pgvector", Map.of("host", "10.0.0.9", "password", "pw")),
+                            SecretAccess.outsideAgentGrants("test")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate("kb-pg3", store("pgvector", Map.of("password", "pw")), SecretAccess.outsideAgentGrants("test")),
                     "the default host is localhost");
         }
 
@@ -156,10 +167,11 @@ class EmbeddingFactoriesTargetPolicyTest {
         void onRefusesMongoHosts() {
             var factory = new EmbeddingStoreFactory(gvr, sr, ON);
             var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("kb-mongo",
-                    store("mongodb-atlas", Map.of("connectionString", "mongodb://" + PUBLIC_HOST + ":27017," + PRIVATE_HOST + ":27017/eddi"))));
+                    store("mongodb-atlas", Map.of("connectionString", "mongodb://" + PUBLIC_HOST + ":27017," + PRIVATE_HOST + ":27017/eddi")),
+                    SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().startsWith("mongodb-atlas storeParameters.host refused"), e.getMessage());
             assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("kb-mongo2",
-                    store("mongodb-atlas", Map.of("connectionString", "mongodb://127.0.0.1:27017/eddi"))));
+                    store("mongodb-atlas", Map.of("connectionString", "mongodb://127.0.0.1:27017/eddi")), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -167,33 +179,40 @@ class EmbeddingFactoriesTargetPolicyTest {
         void onRefusesOtherStores() {
             var factory = new EmbeddingStoreFactory(gvr, sr, ON);
             var qdrant = assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-q", store("qdrant", Map.of("host", PRIVATE_HOST))));
+                    () -> factory.getOrCreate("kb-q", store("qdrant", Map.of("host", PRIVATE_HOST)), SecretAccess.outsideAgentGrants("test")));
             assertTrue(qdrant.getMessage().startsWith("qdrant storeParameters.host refused"), qdrant.getMessage());
             assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-es", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200"))));
-            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate("kb-es2", store("elasticsearch", Map.of())),
+                    () -> factory.getOrCreate("kb-es", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200")),
+                            SecretAccess.outsideAgentGrants("test")));
+            assertThrows(IllegalArgumentException.class,
+                    () -> factory.getOrCreate("kb-es2", store("elasticsearch", Map.of()), SecretAccess.outsideAgentGrants("test")),
                     "the default serverUrl is localhost");
             assertThrows(IllegalArgumentException.class,
-                    () -> factory.getOrCreate("kb-ch", store("chroma", Map.of("baseUrl", "http://" + PRIVATE_HOST + ":8000"))));
+                    () -> factory.getOrCreate("kb-ch", store("chroma", Map.of("baseUrl", "http://" + PRIVATE_HOST + ":8000")),
+                            SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("protection on: a public Elasticsearch URL builds")
         void onAllowsPublic() {
             var factory = new EmbeddingStoreFactory(gvr, sr, ON);
-            assertNotNull(factory.getOrCreate("kb-es-pub", store("elasticsearch", Map.of("serverUrl", "https://" + PUBLIC_HOST + ":9200"))));
+            assertNotNull(factory.getOrCreate("kb-es-pub", store("elasticsearch", Map.of("serverUrl", "https://" + PUBLIC_HOST + ":9200")),
+                    SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("protection off (and the two-argument constructor): a private Elasticsearch builds, the metadata service is refused")
         void offAllowsPrivate() {
             var factory = new EmbeddingStoreFactory(gvr, sr, OFF);
-            assertNotNull(factory.getOrCreate("kb-es-priv", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200"))));
+            assertNotNull(factory.getOrCreate("kb-es-priv", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200")),
+                    SecretAccess.outsideAgentGrants("test")));
             var legacy = new EmbeddingStoreFactory(gvr, sr);
             assertDoesNotThrow(
-                    () -> legacy.getOrCreate("kb-es-legacy", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200"))));
+                    () -> legacy.getOrCreate("kb-es-legacy", store("elasticsearch", Map.of("serverUrl", "http://" + PRIVATE_HOST + ":9200")),
+                            SecretAccess.outsideAgentGrants("test")));
             var e = assertThrows(IllegalArgumentException.class,
-                    () -> legacy.getOrCreate("kb-q-meta", store("qdrant", Map.of("host", "169.254.169.254"))));
+                    () -> legacy.getOrCreate("kb-q-meta", store("qdrant", Map.of("host", "169.254.169.254")),
+                            SecretAccess.outsideAgentGrants("test")));
             assertTrue(e.getMessage().contains("instance-metadata"), e.getMessage());
         }
     }

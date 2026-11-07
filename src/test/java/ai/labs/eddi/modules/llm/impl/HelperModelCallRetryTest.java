@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.exception.AuthenticationException;
@@ -50,12 +51,12 @@ class HelperModelCallRetryTest {
     void summarizationService() throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         ChatModel model = mock(ChatModel.class);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(model);
         when(model.chat(any(ChatRequest.class))).thenThrow(new InternalServerException("upstream")).thenReturn(reply("the summary"));
         var service = new SummarizationService(registry, new SimpleMeterRegistry());
         service.initMetrics();
 
-        assertEquals("the summary", service.summarize("text", "instructions", "anthropic", "claude-x"));
+        assertEquals("the summary", service.summarize("text", "instructions", "anthropic", "claude-x", SecretAccess.outsideAgentGrants("test")));
 
         verify(model, times(2)).chat(any(ChatRequest.class));
     }
@@ -65,12 +66,13 @@ class HelperModelCallRetryTest {
     void summarizationServicePermanentFailure() throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         ChatModel model = mock(ChatModel.class);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(model);
         when(model.chat(any(ChatRequest.class))).thenThrow(new AuthenticationException("bad key"));
         var service = new SummarizationService(registry, new SimpleMeterRegistry());
         service.initMetrics();
 
-        assertThrows(AuthenticationException.class, () -> service.summarizeWithUsage("text", "instructions", "anthropic", "claude-x", null));
+        assertThrows(AuthenticationException.class,
+                () -> service.summarizeWithUsage("text", "instructions", "anthropic", "claude-x", null, SecretAccess.outsideAgentGrants("test")));
 
         verify(model, times(1)).chat(any(ChatRequest.class));
     }
@@ -80,7 +82,7 @@ class HelperModelCallRetryTest {
     void toolResponseTruncator() throws Exception {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         ChatModel model = mock(ChatModel.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(model);
         when(model.chat(any(ChatRequest.class))).thenThrow(new InternalServerException("upstream")).thenReturn(reply("short summary"));
         var truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), registry);
         var limits = new ToolResponseLimits();

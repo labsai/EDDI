@@ -47,11 +47,11 @@ const NAME_LOOKUP_LIMIT = 200;
  *
  * ## Narrowing is the dangerous direction
  *
- * The grant is checked when an agent is *deployed*, not when a secret is resolved.
- * So removing an agent breaks nothing today and refuses its next deployment,
- * possibly weeks later, on a restart nobody connects to this dialog. The backend's
- * dry run names those agents and this dialog refuses to save until the operator
- * has ticked that they have seen them.
+ * The grant is checked whenever a secret is resolved, not only when an agent is
+ * deployed (EDDI #1179). So removing an agent cuts it off at its next turn that
+ * needs the secret, and refuses its next deployment. The backend's dry run names
+ * those agents and this dialog refuses to save until the operator has ticked that
+ * they have seen them.
  */
 export function EditGrantDialog({ secret, onClose }: EditGrantDialogProps) {
   const { t } = useTranslation();
@@ -589,7 +589,7 @@ function GrantEditor({
           <p className="ps-6 text-xs text-warning">
             {t(
               "secrets.grantLosingAccessBody",
-              "They keep running for now — the grant is checked when an agent is deployed, not when a secret is used — but their next deployment will be refused.",
+              "They lose access immediately — the grant is checked whenever a secret is used, not only when an agent is deployed — so their next turn that needs it fails, and so does their next deployment.",
             )}
           </p>
           <label className="flex items-start gap-2 ps-6 text-xs text-warning">

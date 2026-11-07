@@ -221,7 +221,7 @@ class ResumeSecretContextApprovedCallTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -275,7 +275,7 @@ class ResumeSecretContextApprovedCallTest {
         journalStore = mock(IHitlToolJournalStore.class);
         when(journalStore.tryClaim(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
 
         orchestrator = new AgentOrchestrator(mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
                 mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class), mock(PdfReaderTool.class),

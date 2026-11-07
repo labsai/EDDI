@@ -60,7 +60,7 @@ class ApiCallExecutorSaveResponseGuardTest {
         prePostUtils = mock(PrePostUtils.class);
 
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 

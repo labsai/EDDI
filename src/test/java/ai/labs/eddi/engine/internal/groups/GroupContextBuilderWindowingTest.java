@@ -170,13 +170,13 @@ class GroupContextBuilderWindowingTest {
     @DisplayName("first boundary summarizes exactly the overflow slice; the next extends with only the new slice")
     void incrementalExtension_summarizerSeesOnlyTheNewSlice() {
         var gc = gcWith(entry("A", "aaa-1"), entry("B", "bbb-2"), entry("C", "ccc-3"), entry("D", "ddd-4"), entry("E", "eee-5"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini")))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini"), any()))
                 .thenReturn(new SummarizationResult("SUMMARY-1", 10, 5));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"));
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"), any());
         assertTrue(content.getValue().contains("aaa-1") && content.getValue().contains("bbb-2"),
                 "the overflow slice [0, size-cap) is what gets summarized");
         assertFalse(content.getValue().contains("ccc-3"), "entries inside the recent window must not be summarized");
@@ -186,12 +186,12 @@ class GroupContextBuilderWindowingTest {
         // Discussion grows; the next boundary extends incrementally.
         gc.getTranscript().add(entry("F", "fff-6"));
         gc.getTranscript().add(entry("G", "ggg-7"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini")))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini"), any()))
                 .thenReturn(new SummarizationResult("SUMMARY-2", 10, 5));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService);
 
-        verify(summarizationService, times(2)).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"));
+        verify(summarizationService, times(2)).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"), any());
         String secondContent = content.getValue();
         assertTrue(secondContent.contains("SUMMARY-1"), "the previous summary is the compressed form of the old slice");
         assertTrue(secondContent.contains("ccc-3") && secondContent.contains("ddd-4"), "only the new slice rides along verbatim");
@@ -213,13 +213,13 @@ class GroupContextBuilderWindowingTest {
                 entry("A", "aaa-1"), entry("B", "bbb-2"),
                 bookkeeping(TranscriptEntryType.SKIPPED), entry("C", "ccc-3"),
                 bookkeeping(TranscriptEntryType.CONVERGENCE), entry("D", "ddd-4"), entry("E", "eee-5"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationResult("S", 10, 5));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
         // Cap 3 → the verbatim tail must be the 3 newest VISIBLE entries
         // (ccc-3, ddd-4, eee-5); only aaa-1 and bbb-2 may be summarized.
         assertTrue(content.getValue().contains("aaa-1") && content.getValue().contains("bbb-2"), content.getValue());
@@ -242,7 +242,7 @@ class GroupContextBuilderWindowingTest {
     @DisplayName("a summarizer failure leaves the stored state untouched — rendering falls back to truncation")
     void summarizerFailure_stateUntouched() {
         var gc = gcWith(entry("A", "c1"), entry("B", "c2"), entry("C", "c3"), entry("D", "c4"), entry("E", "c5"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenThrow(new RuntimeException("provider down"));
 
         assertDoesNotThrow(() -> builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService),
@@ -259,7 +259,7 @@ class GroupContextBuilderWindowingTest {
     @DisplayName("an empty summarizer answer is not adopted — the boundary index must not advance past unsummarized entries")
     void emptySummary_notAdopted() {
         var gc = gcWith(entry("A", "c1"), entry("B", "c2"), entry("C", "c3"), entry("D", "c4"), entry("E", "c5"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationResult("", 10, 5));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), window(), summarizationService);
@@ -272,13 +272,13 @@ class GroupContextBuilderWindowingTest {
     @DisplayName("ANONYMOUS boundary: the summarizer input carries Anonymous labels, never real names")
     void anonymousBoundary_inputIsAnonymized() {
         var gc = gcWith(entry("Alice", "c1"), entry("Bob", "c2"), entry("Carol", "c3"), entry("Dave", "c4"), entry("Eve", "c5"));
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationResult("anon summary", 10, 5));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.ANONYMOUS), window(), summarizationService);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
         assertFalse(content.getValue().contains("Alice") || content.getValue().contains("Bob"),
                 "no de-anonymization: the summarizer must not even SEE the names");
         assertTrue(content.getValue().contains("Anonymous"));
@@ -291,7 +291,7 @@ class GroupContextBuilderWindowingTest {
     void pricedSummarization_costReachesTheLedger() {
         var gc = gcWith(entry("A", "c1"), entry("B", "c2"), entry("C", "c3"), entry("D", "c4"), entry("E", "c5"));
         var priced = new ContextWindowConfig(true, 3, true, "openai", "gpt-4o-mini", 1.0, 2.0);
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationResult("S", 1000, 500));
 
         builder.updateWindowSummary(gc, opinionPhase(ContextScope.FULL), priced, summarizationService);

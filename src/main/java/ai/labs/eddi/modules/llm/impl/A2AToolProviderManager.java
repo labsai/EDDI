@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -248,7 +249,7 @@ public class A2AToolProviderManager {
     /**
      * Discover tools from configured A2A agents.
      */
-    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents) {
+    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents, SecretAccess access) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, ToolRequestResolver> requestResolvers = new HashMap<>();
@@ -270,6 +271,9 @@ public class A2AToolProviderManager {
                     continue;
                 }
 
+                // Before the agent-card cache, which is keyed on the peer and shared by
+                // every agent naming it (#1179).
+                requireSecretGranted(config, access);
                 discoverAgentTools(config, toolSpecs, executors, requestResolvers);
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
@@ -288,6 +292,40 @@ public class A2AToolProviderManager {
 
         return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
+
+    /**
+     * Refuses {@code access} a peer whose apiKey names a vault secret, directly,
+     * through a {@code ${vars:…}} or behind a {@code ${connection:…}}, that is not
+     * granted to it. The calls that follow resolve under {@link #A2A_SESSION}.
+     *
+     * @throws IllegalStateException
+     *             (a {@link SecretResolver.SecretNotGrantedException}) or a
+     *             {@link ConnectionException}, both kept away from the circuit
+     *             breaker by the caller
+     */
+    void requireSecretGranted(A2AAgentConfig config, SecretAccess access) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey)) {
+            return;
+        }
+        if (ConnectionResolver.containsReference(apiKey)) {
+            if (connectionResolver != null) {
+                connectionResolver.requireGranted(apiKey, access);
+            }
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(apiKey);
+        secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
+                "A2A agent at " + config.getUrl());
+    }
+
+    /**
+     * What a cached peer's own credential resolves as: the tools are shared by
+     * every agent naming the peer, so the agent grant is read for the asking agent
+     * in {@link #requireSecretGranted}, on every tool assembly, before they are
+     * handed out.
+     */
+    static final SecretAccess A2A_SESSION = SecretAccess.outsideAgentGrants("A2A peer session (agent grant checked at tool assembly)");
 
     /** Number of cached agent connections. */
     public int getActiveConnectionCount() {
@@ -986,7 +1024,7 @@ public class A2AToolProviderManager {
             }
             ConnectionReference.requireSole(apiKey, "The apiKey of the A2A agent at " + agentUrl);
             if (discovery) {
-                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl));
+                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl), A2A_SESSION);
                 if (credential.isEmpty()) {
                     // Same rule and same warning as the MCP handshake: the agent card is
                     // fetched once and reused, so a per-caller credential must not pin one
@@ -1002,7 +1040,7 @@ public class A2AToolProviderManager {
                 requestBuilder.header(credential.get().headerName(), credential.get().headerValue());
                 return;
             }
-            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
+            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null, A2A_SESSION);
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
@@ -1013,7 +1051,7 @@ public class A2AToolProviderManager {
         if (vaultHostAllowlist != null) {
             vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
         }
-        String resolved = secretResolver.resolveValue(withVariables);
+        String resolved = secretResolver.resolveValue(withVariables, A2A_SESSION);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

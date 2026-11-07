@@ -159,7 +159,7 @@ class AgentOrchestratorCoverage2Test {
         lenient().when(memory.getAgentId()).thenReturn(null);
         lenient().when(memory.getAgentVersion()).thenReturn(null);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
@@ -533,12 +533,12 @@ class AgentOrchestratorCoverage2Test {
 
         // Discovery returns an empty result -> the a2aTools != null but empty-specs
         // arm (merge skipped) executes.
-        when(a2aToolProviderManager.discoverTools(any()))
+        when(a2aToolProviderManager.discoverTools(any(), any()))
                 .thenReturn(new A2AToolProviderManager.A2AToolsResult(List.of(), Map.of()));
 
         var setup = orchestrator.buildToolSetup(task, memory);
 
-        verify(a2aToolProviderManager, times(1)).discoverTools(any());
+        verify(a2aToolProviderManager, times(1)).discoverTools(any(), any());
         assertTrue(setup.toolSpecs().stream().anyMatch(s -> "calculate".equals(s.name())));
     }
 }

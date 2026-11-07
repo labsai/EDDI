@@ -190,7 +190,7 @@ class LlmTaskAgentModeMetadataTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         var inputData = mock(IData.class);
         lenient().when(currentStep.getLatestData("input")).thenReturn(inputData);

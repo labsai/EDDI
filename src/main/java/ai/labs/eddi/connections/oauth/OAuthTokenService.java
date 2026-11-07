@@ -17,6 +17,7 @@ import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -649,10 +650,20 @@ public class OAuthTokenService implements AccessTokenSupplier {
         return grant;
     }
 
+    /**
+     * The client secret is resolved for the connection's token endpoint, not for an
+     * agent: the token it mints is shared by every caller of the connection and
+     * cached in the grant store. The agent grant is therefore read where an agent
+     * asks for the connection, before this service is reached, by
+     * {@code ConnectionResolver#requireCredentialsGranted}, on every request,
+     * whether the token is cached or not.
+     */
+    private static final SecretAccess TOKEN_ENDPOINT = SecretAccess.outsideAgentGrants("OAuth token endpoint of a connection");
+
     private String resolveClientSecret(ConnectionConfiguration connection) {
         // Checked against the token endpoint, where the client secret is sent.
         return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+                connection.getName(), "client secret", TOKEN_ENDPOINT);
     }
 
     private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,

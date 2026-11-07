@@ -103,7 +103,7 @@ class ApiCallExecutorConfigReferenceTest {
         when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any())).thenAnswer(inv -> inv.getArgument(1));
 
         secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(any())).thenAnswer(inv -> {
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(inv -> {
             String value = inv.getArgument(0);
             return value == null
                     ? null
@@ -226,7 +226,7 @@ class ApiCallExecutorConfigReferenceTest {
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
         assertTrue(failure.getMessage().contains("a request body contains the reference ${vault:api-key}"), failure.getMessage());
         verify(request, never()).send();
-        verify(secretResolver, never()).resolveValue(contains("please echo"));
+        verify(secretResolver, never()).resolveValue(contains("please echo"), any());
     }
 
     @Test
@@ -234,7 +234,7 @@ class ApiCallExecutorConfigReferenceTest {
     void injectedConnectionReferenceIsRefused() throws Exception {
         assertThrows(LifecycleException.class,
                 () -> executor.execute(call(Map.of("Authorization", "{memory.current.input}"), "{}"), memory, data("${connection:jira}"), SERVER));
-        verify(connectionResolver, never()).resolve(anyString(), any(), any());
+        verify(connectionResolver, never()).resolve(anyString(), any(), any(), any());
     }
 
     @Test
@@ -262,14 +262,15 @@ class ApiCallExecutorConfigReferenceTest {
 
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
         assertTrue(failure.getMessage().contains("header 'Authorization' contains the reference ${vault:agent1.apiKey}"), failure.getMessage());
-        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"));
+        verify(secretResolver, never()).resolveValue(contains("${vault:agent1.apiKey}"), any());
         verify(request, never()).send();
     }
 
     @Test
     @DisplayName("a connection reference in a header survives real templating and reaches the connection resolver")
     void connectionHeader() throws Exception {
-        when(connectionResolver.resolve(eq("${connection:jira}"), any(), any())).thenReturn(new ResolvedCredential("Authorization", "Bearer conn"));
+        when(connectionResolver.resolve(eq("${connection:jira}"), any(), any(), any()))
+                .thenReturn(new ResolvedCredential("Authorization", "Bearer conn"));
         when(request.toMap()).thenReturn(storedRequestRecord("{}", Map.of("Authorization", "Bearer conn")));
 
         executor.execute(call(Map.of("Authorization", "${connection:jira}"), "{}"), memory, data("hi"), SERVER);
@@ -434,7 +435,7 @@ class ApiCallExecutorConfigReferenceTest {
     void unresolvableVaultReferenceFailsClosed() throws Exception {
         // What a disabled vault, a failed provider or a missing key looks like:
         // SecretResolver leaves the reference in place.
-        when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         var failure = assertThrows(LifecycleException.class,
                 () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
@@ -452,7 +453,7 @@ class ApiCallExecutorConfigReferenceTest {
         // rotation between them put the NEW plaintext in the request while only the old
         // one was in the redaction set — so the value actually sent was the one that
         // survived into memory. One resolution per reference is what closes it.
-        when(secretResolver.resolveValue(any())).thenAnswer(new Answer<String>() {
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(new Answer<String>() {
             private int calls;
 
             @Override
@@ -522,7 +523,7 @@ class ApiCallExecutorConfigReferenceTest {
         @Test
         @DisplayName("review #7: a connection credential echoed in an error body is redacted like a vault plaintext")
         void connectionCredentialEchoRedacted() throws Exception {
-            when(connectionResolver.resolve(eq("${connection:jira}"), any(), any()))
+            when(connectionResolver.resolve(eq("${connection:jira}"), any(), any(), any()))
                     .thenReturn(new ResolvedCredential("Authorization", "Bearer conn-credential-value-99"));
             respond(401, "{\"error\":\"token conn-credential-value-99 expired\"}");
             var templateData = data("hi");

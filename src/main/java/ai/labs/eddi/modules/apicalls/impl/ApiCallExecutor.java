@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
@@ -315,7 +316,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 if (mocked != null) {
                     return Collections.emptyMap();
                 }
-                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, secretAccessOf(memory), conversationPropertiesOf(memory),
+                        secretContextOf(memory));
                 return Collections.emptyMap();
             } else {
                 IRequest request;
@@ -353,7 +355,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // Re-read per attempt rather than hoisted: a post-response property
                         // instruction can write a property between attempts, and the guard has to
                         // judge the request it is actually about to send.
-                        BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory),
+                        BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, secretAccessOf(memory),
+                                conversationPropertiesOf(memory),
                                 secretContextOf(memory));
                         resolvedSecrets = built.resolvedSecrets();
                         substitutedSecrets.addAll(resolvedSecrets);
@@ -669,7 +672,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             BuiltRequest built;
             try {
-                built = buildRequest(targetServerUrl, call, itemData, conversationProperties, secretContext);
+                built = buildRequest(targetServerUrl, call, itemData, secretAccessOf(memory), conversationProperties, secretContext);
             } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
                 // This item's request cannot be built (a refused reference, a template
                 // that does not render): nothing of it is sent, and the others still are.
@@ -889,7 +892,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, secretAccessOf(memory), conversationPropertiesOf(memory),
+                    secretContextOf(memory));
             var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
@@ -1053,7 +1057,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return response;
     }
 
-    private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+    private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects, SecretAccess access,
                                            Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
@@ -1100,7 +1104,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             for (Object iterationObject : batchIterationList) {
                 Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
                 iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
-                requests.add(buildRequest(targetServerUrl, call, iterationData, conversationProperties, secretContext));
+                requests.add(buildRequest(targetServerUrl, call, iterationData, access, conversationProperties, secretContext));
             }
 
             // The sending runs on a thread of its own; propagate() keeps the turn's
@@ -1120,7 +1124,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }), null);
         } else {
-            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext), callName);
+            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, access, conversationProperties, secretContext),
+                    callName);
         }
     }
 
@@ -1378,6 +1383,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     static final class ResolvedSecrets extends HashSet<String> {
         private final Set<String> vaultReferences = new LinkedHashSet<>();
+        /** On whose behalf every reference in this request is resolved. */
+        private final transient SecretAccess access;
+
+        ResolvedSecrets(SecretAccess access) {
+            this.access = access;
+        }
+
+        SecretAccess access() {
+            return access;
+        }
 
         Set<String> vaultReferences() {
             return vaultReferences;
@@ -1401,10 +1416,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return value == null ? null : value.toString();
     }
 
-    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects, SecretAccess access,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
-        var resolvedSecrets = new ResolvedSecrets();
+        var resolvedSecrets = new ResolvedSecrets(access);
         try {
             BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets);
             if (ApprovedCallScope.isActive()) {
@@ -1685,7 +1700,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // being interpolated into one.
             if (ConnectionResolver.containsReference(headerValue)) {
                 ConnectionReference.requireSole(headerValue, "Header '" + headerName + "'");
-                var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects));
+                var credential = connectionResolver.resolve(headerValue, targetUri, principalFrom(templateDataObjects), resolvedSecrets.access());
                 // The connection owns the header NAME — that is the point of storing
                 // one, since Authorization and X-Api-Key are the same connection model
                 // — but a silent displacement is not acceptable in either direction.
@@ -1857,6 +1872,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * a HITL resume that re-supplied it ({@code Conversation}) — and the
      * placeholder once the turn that carried it has ended.
      */
+    /**
+     * The agent an API call's vault references are resolved for: the
+     * conversation's. A memory without an agent id fails closed — only secrets
+     * granted to every agent resolve (see {@link SecretAccess#agent}).
+     */
+    static SecretAccess secretAccessOf(IConversationMemory memory) {
+        return SecretAccess.agent(memory != null ? memory.getAgentId() : null);
+    }
+
     static Function<String, Context> secretContextOf(IConversationMemory memory) {
         var step = memory.getCurrentStep();
         if (step == null) {
@@ -1904,7 +1928,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         for (ReferenceScanner.Match match : SecretReference.scanner().findAll(value)) {
             String reference = match.text();
             resolvedSecrets.vaultReferences().add(reference);
-            String plaintext = secretResolver.resolveValue(reference);
+            String plaintext = secretResolver.resolveValue(reference, resolvedSecrets.access());
             if (plaintext == null || plaintext.equals(reference)) {
                 unresolved = reference;
             } else if (!plaintext.isEmpty()) {

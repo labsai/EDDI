@@ -140,7 +140,7 @@ class LlmTaskAgentPathFixesTest {
         lenient().when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
         lenient().when(actionData.getResult()).thenReturn(List.of("action1"));
         lenient().when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         var inputData = mock(IData.class);
         lenient().when(currentStep.getLatestData("input")).thenReturn(inputData);
@@ -282,8 +282,9 @@ class LlmTaskAgentPathFixesTest {
 
             verify(chatModelRegistry).getOrCreate(eq("anthropic"),
                     argThat(p -> "strong-model".equals(p.get("modelName")) && "anthropic-key".equals(p.get("apiKey"))
-                            && "You are helpful.".equals(p.get("systemMessage"))));
-            verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any());
+                            && "You are helpful.".equals(p.get("systemMessage"))),
+                    any());
+            verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any(), any());
         }
 
         @Test
@@ -307,7 +308,7 @@ class LlmTaskAgentPathFixesTest {
 
             llmTask.execute(memory, new LlmConfiguration(List.of(cascadeTask())));
 
-            verify(chatModelRegistry).getOrCreate(eq("openai"), argThat(p -> "base-model".equals(p.get("modelName"))));
+            verify(chatModelRegistry).getOrCreate(eq("openai"), argThat(p -> "base-model".equals(p.get("modelName"))), any());
         }
 
         @Test

@@ -56,6 +56,9 @@ public class ConnectionExceptionMapper implements ExceptionMapper<ConnectionExce
             case NOT_FOUND -> Response.Status.NOT_FOUND;
             case NOT_CONNECTED, NO_VERIFIED_PRINCIPAL, GRANT_UNUSABLE -> Response.Status.CONFLICT;
             case TOKEN_ENDPOINT_UNAVAILABLE -> Response.Status.SERVICE_UNAVAILABLE;
+            // A vault grant that leaves the agent out: fixed by an admin widening the
+            // grant, not by retrying or by the caller sending something else.
+            case SECRET_NOT_GRANTED -> Response.Status.FORBIDDEN;
         };
     }
 }

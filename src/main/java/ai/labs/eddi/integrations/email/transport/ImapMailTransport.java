@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.mail.MailSendException;
 import ai.labs.eddi.engine.mail.SmtpSubmitter;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
+import ai.labs.eddi.secrets.SecretAccess;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -144,6 +145,13 @@ public class ImapMailTransport implements MailTransport {
         return SmtpSubmitter.submit(connector, endpoint, settings.address(), login, mime, List.of(new MailAddress(recipient, null)));
     }
 
+    /**
+     * An email channel integration's mailbox login is the channel's, not the
+     * agent's it routes to; the agent grant has never governed channel credentials
+     * (see {@link SecretAccess}).
+     */
+    private static final SecretAccess EMAIL_CHANNEL = SecretAccess.outsideAgentGrants("email channel integration");
+
     /** The SMTP login from the integration's connection, for the SMTP origin. */
     private SmtpSubmitter.Login smtpLogin(EmailChannelSettings settings, SafeSocketConnector.Endpoint endpoint) throws MailSendException {
         if (connectionResolver == null || !connectionResolver.isResolvable()) {
@@ -155,11 +163,11 @@ public class ImapMailTransport implements MailTransport {
         ConnectionResolver resolver = connectionResolver.get();
         try {
             if (resolver.authTypeOf(reference).orElse(null) == AuthType.BASIC) {
-                ConnectionResolver.BasicLogin basic = resolver.resolveBasicLogin(reference, target);
+                ConnectionResolver.BasicLogin basic = resolver.resolveBasicLogin(reference, target, EMAIL_CHANNEL);
                 return new SmtpSubmitter.Login(basic.username(), basic.password(), "PLAIN LOGIN");
             }
             // XOAUTH2: the mailbox as the user, the token as the secret.
-            return new SmtpSubmitter.Login(settings.address(), resolver.resolveAccessToken(reference, target, null), "XOAUTH2");
+            return new SmtpSubmitter.Login(settings.address(), resolver.resolveAccessToken(reference, target, null, EMAIL_CHANNEL), "XOAUTH2");
         } catch (ConnectionException e) {
             throw new MailSendException(MailSendException.Category.AUTHENTICATION, false,
                     "The SMTP credential of connection '" + settings.connection() + "' could not be resolved for " + endpoint.host() + ": "
@@ -222,12 +230,12 @@ public class ImapMailTransport implements MailTransport {
         ConnectionResolver resolver = connectionResolver.get();
         try {
             if (resolver.authTypeOf(reference).orElse(null) == AuthType.BASIC) {
-                ConnectionResolver.BasicLogin basic = resolver.resolveBasicLogin(reference, target);
+                ConnectionResolver.BasicLogin basic = resolver.resolveBasicLogin(reference, target, EMAIL_CHANNEL);
                 return new String[]{basic.username(), basic.password(), "PLAIN LOGIN"};
             }
             // XOAUTH2 carries the mailbox as the user and the token as the secret; for a
             // client-credentials grant on Exchange Online that is the shared mailbox.
-            String token = resolver.resolveAccessToken(reference, target, null);
+            String token = resolver.resolveAccessToken(reference, target, null, EMAIL_CHANNEL);
             return new String[]{settings.address(), token, "XOAUTH2"};
         } catch (ConnectionException e) {
             throw new MailboxException(MailboxException.Category.CREDENTIAL,

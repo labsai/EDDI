@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -33,7 +35,7 @@ class A2AToolProviderManagerExtendedTest {
     @BeforeEach
     void setUp() {
         secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
@@ -52,7 +54,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setUrl("http://192.0.2.1:1"); // RFC5737 TEST-NET, won't connect
             config.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -64,7 +66,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setUrl("ftp://invalid:9999");
             config.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -79,7 +81,7 @@ class A2AToolProviderManagerExtendedTest {
             config2.setUrl("http://192.0.2.2:1");
             config2.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(config1, config2));
+            var result = manager.discoverTools(List.of(config1, config2), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             // Both fail but no exception propagates
             assertTrue(result.toolSpecs().isEmpty());
@@ -101,12 +103,12 @@ class A2AToolProviderManagerExtendedTest {
 
             // Trip circuit breaker (3 failures)
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // Next call should be instant (circuit open = skip)
             long start = System.currentTimeMillis();
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             long elapsed = System.currentTimeMillis() - start;
 
             assertTrue(result.toolSpecs().isEmpty());
@@ -127,11 +129,11 @@ class A2AToolProviderManagerExtendedTest {
 
             // Trip circuit for config1 only
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config1));
+                manager.discoverTools(List.of(config1), SecretAccess.outsideAgentGrants("test"));
             }
 
             // config2 should still attempt discovery (not blocked by config1)
-            var result = manager.discoverTools(List.of(config2));
+            var result = manager.discoverTools(List.of(config2), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
         }
     }
@@ -151,7 +153,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setTimeoutMs(100L);
 
             // Should not throw — vault reference is accepted
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -162,7 +164,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setApiKey("${vault:my-key}");
             config.setTimeoutMs(100L);
 
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -174,7 +176,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setTimeoutMs(100L);
 
             // Should not throw — warning is logged but execution continues
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
     }
 
@@ -190,7 +192,7 @@ class A2AToolProviderManagerExtendedTest {
             manager.shutdown();
             assertEquals(0, manager.getActiveConnectionCount());
             // Can still discover tools after shutdown
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -203,7 +205,7 @@ class A2AToolProviderManagerExtendedTest {
             var config = new A2AAgentConfig();
             config.setUrl("http://192.0.2.1:1");
             config.setTimeoutMs(100L);
-            manager.discoverTools(List.of(config));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertEquals(0, manager.getActiveConnectionCount());
         }
     }
@@ -328,7 +330,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setUrl(""); // blank string — isNullOrEmpty returns true
             config.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -341,7 +343,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setUrl(null);
             config.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -357,7 +359,7 @@ class A2AToolProviderManagerExtendedTest {
             validConfig.setUrl("http://192.0.2.1:1"); // will fail to connect but not skipped
             validConfig.setTimeoutMs(100L);
 
-            var result = manager.discoverTools(List.of(blankConfig, validConfig));
+            var result = manager.discoverTools(List.of(blankConfig, validConfig), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             // Both return no tools (blank skipped, valid fails to connect)
             assertTrue(result.toolSpecs().isEmpty());
@@ -379,7 +381,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setTimeoutMs(100L);
 
             // Should not throw — vars reference is accepted just like vault
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -390,7 +392,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setApiKey("${eddivault:secret-key}");
             config.setTimeoutMs(100L);
 
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -401,7 +403,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setApiKey(null);
             config.setTimeoutMs(100L);
 
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -412,7 +414,7 @@ class A2AToolProviderManagerExtendedTest {
             config.setApiKey("");
             config.setTimeoutMs(100L);
 
-            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")));
         }
     }
 }

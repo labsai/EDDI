@@ -66,7 +66,7 @@ class ChannelTargetRouterAllowedHostsTest {
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.<String, ChannelTarget>getCache(anyString(), any(Duration.class))).thenReturn(mock(ICache.class));
         when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(List.of());
-        when(secretResolver.resolveValue(anyString())).thenAnswer(i -> TOKEN_REF.equals(i.getArgument(0)) ? "xoxb-live" : i.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> TOKEN_REF.equals(i.getArgument(0)) ? "xoxb-live" : i.getArgument(0));
 
         var config = new ChannelIntegrationConfiguration();
         config.setName("support");
@@ -97,7 +97,7 @@ class ChannelTargetRouterAllowedHostsTest {
         tokenAllowedAt(List.of("api.other.example"));
 
         assertNull(router.getBotToken("slack", CHANNEL_ID));
-        verify(secretResolver, never()).resolveValue(TOKEN_REF);
+        verify(secretResolver, never()).resolveValue(eq(TOKEN_REF), any());
     }
 
     @Test

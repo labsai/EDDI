@@ -179,7 +179,7 @@ class LlmTaskCoverage2Test {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         // "input" data drives extractUserInput() → RAG query.
         var inputData = mock(IData.class);
@@ -871,7 +871,7 @@ class LlmTaskCoverage2Test {
         var d = new HitlDecision();
         d.setVerdict(HitlVerdict.APPROVED);
         when(memory.getHitlResumeDecision()).thenReturn(d);
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
@@ -891,7 +891,7 @@ class LlmTaskCoverage2Test {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         try {
             lenient().doAnswer(inv -> byType.get((String) inv.getArgument(0)))
-                    .when(registry).getOrCreate(anyString(), anyMap());
+                    .when(registry).getOrCreate(anyString(), anyMap(), any());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

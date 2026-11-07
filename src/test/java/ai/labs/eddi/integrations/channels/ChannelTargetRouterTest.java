@@ -55,7 +55,7 @@ class ChannelTargetRouterTest {
         when(cacheFactory.<String, ChannelTarget>getCache(anyString(), any(Duration.class)))
                 .thenReturn(threadTargetLock);
         // Make secretResolver pass through
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
         // Empty descriptor list to avoid NPE during refresh
         when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))

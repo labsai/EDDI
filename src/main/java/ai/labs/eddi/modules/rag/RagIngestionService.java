@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.secrets.SecretAccess;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
@@ -37,6 +38,16 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 @ApplicationScoped
 public class RagIngestionService {
+
+    /**
+     * Ingestion runs for a knowledge base, not for an agent, whether it is started
+     * from REST, a schedule or a file upload. There is no agent to check a grant
+     * against, so only a secret granted to every agent may embed or store here: the
+     * rule {@code ServiceJudgeVaultGrants} applies to group-level models. Otherwise
+     * an editor could put a key granted to one agent behind an embedding endpoint
+     * of their choosing and ingest (#1179).
+     */
+    public static final SecretAccess KNOWLEDGE_BASE_INGESTION = SecretAccess.withoutAgent("knowledge base ingestion");
 
     private static final Logger LOGGER = Logger.getLogger(RagIngestionService.class);
 
@@ -151,10 +162,10 @@ public class RagIngestionService {
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
-            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT, KNOWLEDGE_BASE_INGESTION);
             // For writing: an in-memory store built under another embedding
             // configuration is replaced rather than mixed with these vectors.
-            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig, KNOWLEDGE_BASE_INGESTION);
 
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();

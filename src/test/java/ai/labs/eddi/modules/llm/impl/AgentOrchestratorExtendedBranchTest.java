@@ -378,7 +378,7 @@ class AgentOrchestratorExtendedBranchTest {
                     null, "system", List.of(), task, memory);
             assertNull(result);
 
-            verify(a2aToolProviderManager, never()).discoverTools(any());
+            verify(a2aToolProviderManager, never()).discoverTools(any(), any());
         }
 
         @Test
@@ -394,7 +394,7 @@ class AgentOrchestratorExtendedBranchTest {
                     null, "system", List.of(), task, memory);
             assertNull(result);
 
-            verify(a2aToolProviderManager, never()).discoverTools(any());
+            verify(a2aToolProviderManager, never()).discoverTools(any(), any());
         }
     }
 
