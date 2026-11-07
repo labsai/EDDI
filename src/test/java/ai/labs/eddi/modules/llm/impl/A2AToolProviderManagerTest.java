@@ -303,6 +303,19 @@ class A2AToolProviderManagerTest {
             assertEquals(2, new HashSet<>(names).size(), () -> "the second peer was dropped as a name collision: " + names);
             assertProviderValid(names);
         }
+
+        @Test
+        @DisplayName("a blank configured name falls back to the card's name, as an absent one does")
+        void blankConfiguredNameUsesTheCardName() {
+            // The Manager writes "" once a typed name is cleared again.
+            cards.put("one.example.com", hop -> Map.of("name", "Alpha", "skills", List.of(skill("lookup"))));
+            cards.put("two.example.com", hop -> Map.of("name", "Bravo", "skills", List.of(skill("lookup"))));
+
+            var result = managerAgainstPeers().discoverTools(
+                    List.of(peer("one.example.com", "", null), peer("two.example.com", " ", null)));
+
+            assertEquals(List.of("alpha_lookup", "bravo_lookup"), names(result));
+        }
     }
 
     @Nested

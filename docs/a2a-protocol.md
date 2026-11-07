@@ -358,7 +358,7 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `url` | string | *required* | Base URL of the remote A2A agent |
-| `name` | string | from Agent Card | Display name (used in tool naming) |
+| `name` | string | from Agent Card | Display name (used in tool naming). A blank `name` counts as unset |
 | `apiKey` | string | — | A `${vault:...}` or `${connection:...}` reference, to prevent secret leakage. A raw key still works but logs a warning |
 | `timeoutMs` | long | `30000` | Timeout for A2A operations |
 | `skillsFilter` | string[] | all skills | Only expose specific skills (by id or name) |

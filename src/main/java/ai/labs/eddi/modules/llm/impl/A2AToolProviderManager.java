@@ -334,7 +334,11 @@ public class A2AToolProviderManager {
             return;
         }
 
-        String agentName = boundedNamePart(config.getName() != null ? config.getName() : (String) agentCard.getOrDefault("name", "a2a-agent"));
+        // A blank configured name counts as none: the Manager writes "" once a typed
+        // name is cleared, and it would otherwise give every such peer the same
+        // fallback tool name, so all but the first were skipped as collisions.
+        String configuredName = config.getName() == null || config.getName().isBlank() ? null : config.getName();
+        String agentName = boundedNamePart(configuredName != null ? configuredName : (String) agentCard.getOrDefault("name", "a2a-agent"));
         RemoteEndpoint endpoint = resolveEndpoint(agentUrl, agentCard);
 
         // Build the parameter schema for the "message" parameter
