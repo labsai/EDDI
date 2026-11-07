@@ -118,9 +118,30 @@ class SecretScrubberTest {
     }
 
     @Test
-    void scrubJson_invalidJson_returnsOriginal() {
-        String invalid = "not valid json {{{";
-        assertEquals(invalid, scrubber.scrubJson(invalid));
+    void scrubJson_unparseable_throwsWithoutEchoingInput() {
+        // A document that could not be inspected has not been shown to be safe, so
+        // it is never exported as it stands. Jackson's parse errors quote the source
+        // text, so neither the input nor that message may reach the exception.
+        String invalid = "not valid json {{{ sk-fixturefixturefixture00";
+
+        var thrown = assertThrows(IllegalStateException.class, () -> scrubber.scrubJson(invalid));
+
+        assertFalse(thrown.getMessage().contains("fixture"), thrown.getMessage());
+    }
+
+    @Test
+    void scrubJson_overDeepDocument_neverReturnsTheCredential() {
+        // Jackson's default read constraints (nesting depth 1000) do not bind the
+        // write side, so a serialised config can be deeper than readTree accepts.
+        String json = "{\"a\":".repeat(1001) + "{\"apiKey\":\"fixturefixturefixture00\"}" + "}".repeat(1001);
+
+        String scrubbed;
+        try {
+            scrubbed = scrubber.scrubJson(json);
+        } catch (IllegalStateException expected) {
+            return;
+        }
+        assertFalse(scrubbed.contains("fixturefixturefixture00"), "the credential left the scrubber in clear text");
     }
 
     @Test
