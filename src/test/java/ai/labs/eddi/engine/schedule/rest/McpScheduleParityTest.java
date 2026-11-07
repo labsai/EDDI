@@ -168,7 +168,9 @@ class McpScheduleParityTest {
         assertEquals("FORBIDDEN", result.path("errorCode").asText(), result.toString());
         assertTrue(result.path("error").asText().contains("edit access to this RAG configuration"), result.toString());
         verify(pollerService, never()).claimForManualFire(any());
-        verify(fireExecutor, never()).fire(any(), anyString(), anyInt());
+        // any(), not anyString(): the mocked poller's instance id is null, and
+        // anyString() never matches null, so it would pass with the fire made.
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
     }
 
     @Test
