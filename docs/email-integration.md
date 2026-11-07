@@ -318,7 +318,11 @@ cost); an unpriced model counts as zero.
   `email:<integrationId>:<address>` identity — current integrations and those the address's ledger rows name — and the
   ledger rows. See [gdpr-compliance.md](gdpr-compliance.md).
 - Every **refused** mail leaves an audit-ledger entry (`taskId: email.inbound`): integration, reason category, ledger
-  row, Message-ID, and the sender only as domain plus SHA-256 hash — the audit ledger is write-once.
+  row, Message-ID, and the sender only as `senderDomain` plus `senderPseudonym` — the audit ledger is write-once. The
+  pseudonym is the GDPR token [HITL notifications](hitl.md#email-notifications) use — keyed with the audit ledger's key,
+  or salted per deployment when the ledger has none — so it cannot be confirmed by hashing a list of candidate
+  addresses, as the plain SHA-256 written before could. Only a deployment with neither a key nor a place to keep the
+  salt falls back to an unsalted hash, and then that guarantee does not hold.
 - The mailbox host is a processor of the mail: [compliance-data-flow.md](compliance-data-flow.md#other-outbound-recipients).
 
 ## The message ledger
@@ -474,8 +478,9 @@ hear once a day (`thread_throttled`) — usually a mail loop the loop guard did 
 dropped by the loop guard like any automated mail.
 
 A group target's discussion **synthesis** is the reply. A group conversation keeps no copy of the mail it answered, so
-a group reply that fails is retried only by the node that ran the discussion; elsewhere, or after a restart, it ends
-`FAILED` (`CONTENT_UNAVAILABLE`).
+a group reply that fails is retried only by the node that ran the discussion, which holds at most 1,000 of them, each
+for as long as its row can still be retried; elsewhere, after a restart, or for the one dropped past that bound, it
+ends `FAILED` (`CONTENT_UNAVAILABLE`).
 
 ### Bounces and the suppression list
 
@@ -514,9 +519,11 @@ takeover feature ([planning/human-takeover-design.md](../planning/human-takeover
 ### Audit and personal data
 
 Every sent, failed or bounced reply leaves an audit-ledger entry (`taskId: email.reply`): integration, reply kind,
-outcome, Message-ID, ledger row, attempts and the recipient's domain plus SHA-256 hash — never the address or the
-body. A reply row holds the recipient's address (reached by erasure and export) and no content; the reply itself is
-rebuilt from the conversation, where the inbound mail already lives.
+outcome, Message-ID, ledger row, attempts and the recipient as `recipientDomain` plus `recipientPseudonym` (the keyed
+GDPR token HITL notifications and refused-mail entries use) — never the address or the body. The log line for an
+address suppressed after a bounce names it by that pseudonym too. A reply row holds the recipient's address (reached by
+erasure and export) and no content; the reply itself is rebuilt from the conversation, where the inbound mail already
+lives.
 
 ## Helpdesk recipe (webhook + httpcalls)
 
