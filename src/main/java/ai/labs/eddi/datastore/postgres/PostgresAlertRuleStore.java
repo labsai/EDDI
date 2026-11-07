@@ -166,6 +166,18 @@ public class PostgresAlertRuleStore implements IAlertRuleStore {
         }
     }
 
+    @Override
+    public long countAllAgents() {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM alert_rules WHERE all_agents");
+                ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getLong(1) : 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count alert rules", e);
+        }
+    }
+
     private static String listWhere(boolean onlyThatAgent) {
         return onlyThatAgent ? " WHERE ? = ANY(agent_ids) AND cardinality(agent_ids) = 1" : " WHERE ? = ANY(agent_ids)";
     }
