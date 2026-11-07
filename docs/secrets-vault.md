@@ -1133,7 +1133,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 ### Export Sanitization
 
-`SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. A document the scrubber cannot parse (for example one nested deeper than the parser's 1,000-level limit) is never exported as it stands: the export fails, or leaves out the snippet or schedule section it was building, and an agent sync skips that document. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
+`SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. A document the scrubber cannot parse (for example one nested deeper than the parser's 1,000-level limit) is never exported as it stands: the export fails, or stops writing the snippet or schedule section at that document, and an agent sync skips that document (or fails, when it is the agent itself). Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
 
 ### Configuration Read Redaction
 
