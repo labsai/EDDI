@@ -18,17 +18,19 @@ logs the full exception under a fresh UUID and answers
 forbidden, not found, dangling references) still carry their author-facing text.
 
 **`setupAgent` writes through the same `ResourceWriter` as `createApiAgent`.**
-It created its parser, behaviour rules, LLM config, output set, workflow and agent
-with seven hand-written copies of create, read `Location`, record for rollback,
+It created its parser, behaviour rules, LLM config, MCP-calls configs, output set,
+workflow and agent with seven hand-written copies of create, read `Location`, record for rollback,
 patch the descriptor name; `createApiAgent` ran the same steps through the writer
 but still inlined its agent write, and the MCP-calls loop existed twice (live and
 dry run). There was no behavioural drift, but a step added later could miss the
 rollback record or the descriptor name at one call site without any test noticing.
 `ResourceWriter.createDescribed` now does create, record and describe in that order
-in one place; every top-level document of both setup paths and each MCP-calls
-config goes through it, the two MCP loops are one (`ResourceWriter.mcpCalls` is
-gone), and `setupAgent` rolls back through `writer.rollback`. Behaviour, `resources`
-keys and rollback order are unchanged.
+in one place; every document of both setup paths goes through it except
+`createApiAgent`'s per-group httpcalls, which are recorded as one list before
+their loop and named `<agent> - <group>`, and so keep `create` and `describe`.
+The two MCP loops are one (`ResourceWriter.mcpCalls` is gone), and `setupAgent`
+rolls back through `writer.rollback`. Behaviour, `resources` keys and rollback
+order are unchanged.
 
 ### Design decisions
 
@@ -50,6 +52,13 @@ keys and rollback order are unchanged.
 layer answers as `400` with that text. That path is deliberate (the hardening tests
 pin it, and a validation message raised there must reach the caller), so it is a
 follow-up rather than part of this fix.
+
+The MCP twins of these endpoints, `setup_agent` and `create_api_agent` in
+`McpSetupTools`, answer an unmapped failure with
+`errorJson("Failed to set up agent", e)`, which carries the cause's message. They
+could use `McpToolUtils.toolFailure`, which describes a caller-facing failure and
+logs anything else under a reference id; that is a separate change to a separate
+surface.
 
 **Files:** [`RestAgentSetup.java`](../../src/main/java/ai/labs/eddi/engine/rest/RestAgentSetup.java),
 [`AgentSetupService.java`](../../src/main/java/ai/labs/eddi/engine/setup/AgentSetupService.java),
