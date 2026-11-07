@@ -85,8 +85,9 @@ public class AgentConfiguration {
     private Integer compatibilityGeneration;
 
     /**
-     * Cryptographic identity for inter-agent trust. Auto-generated on agent
-     * creation. The public key is stored here; the private key is in SecretsVault.
+     * Cryptographic identity for inter-agent trust. Empty until an admin generates
+     * a signing key with {@code POST /agentstore/agents/{id}/signing-keys}, which
+     * adds the public key here and stores the private key in the Secrets Vault.
      *
      * @since 6.0.0
      */
@@ -756,6 +757,18 @@ public class AgentConfiguration {
 
         public void setKeys(List<AgentPublicKey> keys) {
             this.keys = keys != null ? keys : new ArrayList<>();
+        }
+
+        /**
+         * The key version this agent signs with: the highest one in {@link #keys}, or 0
+         * — the legacy {@code publicKey} — when there are none. The next generated key
+         * takes this plus one. Not a getter, so it stays out of the stored JSON.
+         */
+        public int signingKeyVersion() {
+            if (keys == null || keys.isEmpty()) {
+                return 0;
+            }
+            return keys.stream().mapToInt(AgentPublicKey::version).max().orElse(0);
         }
 
         /**

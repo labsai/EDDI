@@ -8,6 +8,13 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.SigningTestSupport;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.Path;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -619,12 +626,12 @@ class RestAgentStoreTest {
 
         /**
          * A soft delete is the deliberately recoverable path, and the Ed25519 private
-         * key is the one thing about an Agent that cannot be recreated: no endpoint
-         * generates one (see {@code validateSecurityFlags}), so an Agent restored from
-         * a ZIP backup would come back with a public key whose private half is gone and
-         * {@code signInterAgentMessages} permanently broken. The vault cleanup was
-         * briefly unconditional, which made every recoverable delete irreversible for
-         * key material.
+         * key is the one thing about an Agent that cannot be recreated:
+         * {@code createSigningKey} makes a new key, never the old one, so an Agent
+         * restored from a ZIP backup would come back with a public key whose private
+         * half is gone and could not sign until an admin generated it a new key. The
+         * vault cleanup was briefly unconditional, which made every recoverable delete
+         * irreversible for key material.
          */
         @Test
         @DisplayName("keeps the signing key in the vault on a soft delete")
@@ -862,34 +869,153 @@ class RestAgentStoreTest {
         }
     }
 
-    // --- Wave 3: Security flag validation ---
+    // --- Security flag validation: signing is accepted only when the agent can
+    // sign
 
+    /**
+     * Run against a REAL {@link AgentSigningService} over an in-memory vault: the
+     * check under test is whether the vault key signs as the declared public key,
+     * which a stubbed service would only restate.
+     */
     @Nested
-    @DisplayName("rejectInertSecurityFlags")
+    @DisplayName("validateSecurityFlags")
     class SecurityFlagValidationTests {
 
-        @Test
-        @DisplayName("createAgent should reject signInterAgentMessages=true with HTTP 400")
-        void createAgent_rejectsSignInterAgentMessages() {
+        private ISecretProvider vault;
+        private AgentSigningService signing;
+        private RestAgentStore store;
+
+        @BeforeEach
+        void setUpRealSigning() throws Exception {
+            vault = SigningTestSupport.inMemoryVault();
+            signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
+            store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                    capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
+                    mock(AgentCascadeService.class));
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
+        }
+
+        private AgentConfiguration signingAgent(AgentConfiguration.AgentIdentity identity) {
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
             security.setSignInterAgentMessages(true);
             config.setSecurity(security);
+            config.setIdentity(identity);
+            config.setWorkflows(new ArrayList<>());
+            return config;
+        }
 
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+        private AgentConfiguration.AgentIdentity identityWith(AgentPublicKey... keys) {
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(keys)));
+            return identity;
+        }
+
+        private void assertRefused(AgentConfiguration config, String expectedMessagePart) {
+            var e = assertThrows(BadRequestException.class, () -> store.updateAgent(AGENT_ID, 1, config, false));
+            assertTrue(e.getMessage().contains(expectedMessagePart), e.getMessage());
+            assertTrue(e.getMessage().contains("/agentstore/agents/{id}/signing-keys"), "names the way out: " + e.getMessage());
         }
 
         @Test
-        @DisplayName("createAgent should reject requirePeerVerification=true with HTTP 400")
-        void createAgent_rejectsRequirePeerVerification() {
+        @DisplayName("updateAgent accepts signing with a generated key the vault holds")
+        void updateAgent_acceptsAUsableKey() throws Exception {
+            var generated = signing.generateKey("default", AGENT_ID, 1);
+
+            Response response = store.updateAgent(AGENT_ID, 1,
+                    signingAgent(identityWith(AgentPublicKey.createCurrent(1, generated.publicKeyB64()))), false);
+
+            assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("updateAgent checks the NEWEST key, the one that signs")
+        void updateAgent_checksTheKeyThatWouldSign() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+            // v2 is declared, but its private key never reached the vault.
+            String v2PublicKey = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, v1.publicKeyB64()),
+                    AgentPublicKey.createCurrent(2, v2PublicKey))), "Signing key v2 has no private key in the secrets vault");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses signing with no key declared")
+        void updateAgent_rejectsSigningWithoutAKey() {
+            assertRefused(signingAgent(null), "declares none");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses a public key that is not Ed25519")
+        void updateAgent_rejectsAGarbagePublicKey() throws Exception {
+            signing.generateKey("default", AGENT_ID, 1);
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, "base64key=="))), "is not a Base64 X.509 Ed25519 public key");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses a key whose private half is not in the vault")
+        void updateAgent_rejectsAKeyMissingFromTheVault() throws Exception {
+            String publicKey = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, publicKey))), "has no private key in the secrets vault");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses a public key the vault key does not sign as")
+        void updateAgent_rejectsAMismatchedKey() throws Exception {
+            signing.generateKey("default", AGENT_ID, 1);
+            String publicKeyOfAnotherAgent = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, publicKeyOfAnotherAgent))),
+                    "does not match the private key in the secrets vault");
+        }
+
+        @Test
+        @DisplayName("updateAgent checks the legacy unversioned key when no versioned key exists")
+        void updateAgent_checksTheLegacyKey() throws Exception {
+            String publicKey = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setPublicKey(publicKey);
+
+            var e = assertThrows(BadRequestException.class, () -> store.updateAgent(AGENT_ID, 1, signingAgent(identity), false));
+            assertTrue(e.getMessage().contains("The legacy signing key (identity.publicKey) has no private key"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("updateAgent answers 503 when the vault cannot be asked")
+        void updateAgent_vaultFailureIs503() throws Exception {
+            String publicKey = signing.generateKey("default", AGENT_ID, 1).publicKeyB64();
+            doThrow(new ISecretProvider.SecretProviderException("Persistence failure")).when(vault).resolve(any());
+
+            var e = assertThrows(WebApplicationException.class,
+                    () -> store.updateAgent(AGENT_ID, 1, signingAgent(identityWith(AgentPublicKey.createCurrent(1, publicKey))), false));
+            assertEquals(503, e.getResponse().getStatus());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("createAgent refuses signing: a new agent has no key yet")
+        void createAgent_rejectsSignInterAgentMessages() throws Exception {
+            String publicKey = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+
+            var e = assertThrows(BadRequestException.class,
+                    () -> store.createAgent(signingAgent(identityWith(AgentPublicKey.createCurrent(1, publicKey)))));
+            assertTrue(e.getMessage().contains("A new agent has no signing key yet"), e.getMessage());
+            verify(AgentStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("createAgent accepts requirePeerVerification alone: verifying needs no key of the agent's own")
+        void createAgent_acceptsRequirePeerVerification() throws Exception {
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
             security.setRequirePeerVerification(true);
             config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+            when(AgentStore.create(any())).thenReturn(resourceId(AGENT_ID, 1));
 
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+            assertEquals(201, store.createAgent(config).getStatus());
         }
 
         @Test
@@ -938,88 +1064,166 @@ class RestAgentStoreTest {
             assertDoesNotThrow(() -> restAgentStore.createAgent(config));
         }
 
+        /**
+         * The original's private keys are stored under the original's id, so a copy
+         * that kept its identity and signing flag could never sign — and would publish
+         * the original's public keys as its own.
+         */
         @Test
-        @DisplayName("updateAgent should reject signInterAgentMessages=true")
-        void updateAgent_rejectsSecurityFlags() {
-            var config = new AgentConfiguration();
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignInterAgentMessages(true);
-            config.setSecurity(security);
+        @DisplayName("duplicateAgent gives the copy no identity and signing off")
+        void duplicateAgent_dropsTheIdentityAndSigning() throws Exception {
+            var generated = signing.generateKey("default", AGENT_ID, 1);
+            var source = signingAgent(identityWith(AgentPublicKey.createCurrent(1, generated.publicKeyB64())));
+            source.getIdentity().setAgentDid("did:eddi:agent:original");
+            source.getSecurity().setRequirePeerVerification(true);
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(source);
+            when(AgentStore.create(any())).thenReturn(resourceId("ccddeeff0011223344aa", 1));
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(dummyDescriptor());
 
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
+            store.duplicateAgent(AGENT_ID, 1, false);
+
+            var copy = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).create(copy.capture());
+            assertNull(copy.getValue().getIdentity());
+            assertFalse(copy.getValue().getSecurity().isSignInterAgentMessages());
+            assertTrue(copy.getValue().getSecurity().isRequirePeerVerification(), "verifying peers needs no key of the copy's own");
+        }
+    }
+
+    /**
+     * {@code POST /agentstore/agents/{id}/signing-keys}, against a REAL
+     * {@link AgentSigningService} and an in-memory vault.
+     */
+    @Nested
+    @DisplayName("createSigningKey")
+    class SigningKeyProvisioning {
+
+        private ISecretProvider vault;
+        private AgentSigningService signing;
+        private RestAgentStore store;
+        private AgentConfiguration stored;
+
+        @BeforeEach
+        void setUpRealSigning() throws Exception {
+            vault = SigningTestSupport.inMemoryVault();
+            signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
+            store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                    capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
+                    mock(AgentCascadeService.class));
+            stored = new AgentConfiguration();
+            stored.setWorkflows(new ArrayList<>());
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
+        }
+
+        private String vaultKey(int version) throws Exception {
+            return vault.resolve(new SecretReference("default", "agent-signing-key:" + AGENT_ID + ":v" + version));
+        }
+
+        private AgentConfiguration written() throws Exception {
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(true));
+            return captor.getValue();
         }
 
         @Test
-        @DisplayName("duplicateAgent should reject security flags from source config when no keys")
-        void duplicateAgent_rejectsSecurityFlags() throws Exception {
-            var sourceConfig = new AgentConfiguration();
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignInterAgentMessages(true);
-            // No identity/keys — should fail validation
-            sourceConfig.setSecurity(security);
-            sourceConfig.setWorkflows(new ArrayList<>());
+        @DisplayName("stores the private key in the vault and appends the public key as a new, compatible version")
+        void storesTheVaultEntryAndAppendsThePublicKey() throws Exception {
+            Response response = store.createSigningKey(AGENT_ID, 1);
 
-            when(AgentStore.read(AGENT_ID, 1)).thenReturn(sourceConfig);
-
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.duplicateAgent(AGENT_ID, 1, false));
+            assertEquals(201, response.getStatus());
+            assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=2"), response.getLocation().toString());
+            var key = (AgentPublicKey) response.getEntity();
+            assertEquals(1, key.version());
+            assertEquals(0, key.validUntilMs(), "no expiry");
+            assertNotNull(vaultKey(1), "the private key is in the vault under v1");
+            assertEquals(List.of(key), written().getIdentity().getKeys());
+            assertEquals(AgentSigningService.SigningKeyStatus.USABLE, signing.checkSigningKey("default", AGENT_ID, 1, key.publicKeyB64()),
+                    "the vault key signs as the public key the agent now declares");
         }
 
         @Test
-        @DisplayName("createAgent should accept crypto flags when rotated keys exist")
-        void createAgent_acceptsCryptoWithRotatedKeys() throws Exception {
-            var config = new AgentConfiguration();
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignInterAgentMessages(true);
-            config.setSecurity(security);
-            config.setWorkflows(new ArrayList<>());
-
+        @DisplayName("numbers the new key one above the highest declared, keeping the older keys and the legacy key")
+        void rotatesPastTheHighestDeclaredVersion() throws Exception {
             var identity = new AgentConfiguration.AgentIdentity();
-            // No legacy publicKey, but rotated keys list is populated
-            identity.setKeys(List.of(
-                    AgentPublicKey.createCurrent(1, "base64key==")));
-            config.setIdentity(identity);
+            identity.setPublicKey("legacy-public-key");
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, "k1"), AgentPublicKey.createCurrent(3, "k3"))));
+            stored.setIdentity(identity);
 
-            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
-                @Override
-                public String getId() {
-                    return AGENT_ID;
-                }
-                @Override
-                public Integer getVersion() {
-                    return 1;
-                }
-            });
+            var key = (AgentPublicKey) store.createSigningKey(AGENT_ID, 1).getEntity();
 
-            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+            assertEquals(4, key.version());
+            var writtenIdentity = written().getIdentity();
+            assertEquals(List.of(1, 3, 4), writtenIdentity.getKeys().stream().map(AgentPublicKey::version).toList());
+            assertEquals("legacy-public-key", writtenIdentity.getPublicKey(), "entries signed with the legacy key still verify");
+            assertEquals(4, writtenIdentity.signingKeyVersion(), "the new key is the one that signs");
         }
 
         @Test
-        @DisplayName("createAgent should accept crypto flags when legacy publicKey exists")
-        void createAgent_acceptsCryptoWithLegacyKey() throws Exception {
-            var config = new AgentConfiguration();
+        @DisplayName("keeps what else the agent holds, signing flag included")
+        void keepsTheRestOfTheAgent() throws Exception {
             var security = new AgentConfiguration.SecurityConfig();
             security.setSignInterAgentMessages(true);
-            config.setSecurity(security);
-            config.setWorkflows(new ArrayList<>());
+            stored.setSecurity(security);
+            stored.setDescription("kept");
 
-            var identity = new AgentConfiguration.AgentIdentity();
-            identity.setPublicKey("legacyBase64Key==");
-            config.setIdentity(identity);
+            store.createSigningKey(AGENT_ID, 1);
 
-            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
-                @Override
-                public String getId() {
-                    return AGENT_ID;
-                }
-                @Override
-                public Integer getVersion() {
-                    return 1;
-                }
-            });
+            assertTrue(written().getSecurity().isSignInterAgentMessages());
+            assertEquals("kept", written().getDescription());
+        }
 
-            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        /**
+         * The next version is computed from the configuration read here: from a stale
+         * one it could name a version the current configuration already declares.
+         */
+        @Test
+        @DisplayName("refuses a stale version with 409 before the vault is touched")
+        void refusesAStaleVersionBeforeTouchingTheVault() throws Exception {
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 3));
+
+            var e = assertThrows(WebApplicationException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertEquals(409, e.getResponse().getStatus());
+            verify(vault, never()).storeIfAbsent(any(), anyString(), any(), any());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("takes the key back out of the vault when the agent cannot be written")
+        void discardsTheKeyWhenTheConfigWriteFails() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean()))
+                    .thenThrow(new IResourceStore.ResourceModifiedException("changed meanwhile"));
+
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey(1), "no undeclared private key is left behind");
+        }
+
+        @Test
+        @DisplayName("answers 503 and writes nothing when the vault cannot store the key")
+        void vaultFailureIs503() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("Secrets Vault is not available")).when(vault).storeIfAbsent(any(), anyString(),
+                    any(), any());
+
+            var e = assertThrows(WebApplicationException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertEquals(503, e.getResponse().getStatus());
+            assertTrue(e.getMessage().contains("Secrets Vault is not available"), e.getMessage());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        /**
+         * Whoever can mint a key can sign as the agent, so the gate is narrower than
+         * the class-level eddi-admin/eddi-editor one every other agent write has.
+         */
+        @Test
+        @DisplayName("is admin only")
+        void isAdminOnly() throws Exception {
+            var method = IRestAgentStore.class.getMethod("createSigningKey", String.class, Integer.class);
+
+            assertEquals("/{id}/signing-keys", method.getAnnotation(Path.class).value());
+            assertEquals(List.of("eddi-admin"), List.of(method.getAnnotation(RolesAllowed.class).value()));
         }
     }
     /**

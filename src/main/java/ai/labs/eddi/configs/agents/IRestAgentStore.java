@@ -170,8 +170,32 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response createAgent(AgentConfiguration agentConfiguration);
 
     @POST
+    @Path("/{id}/signing-keys")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(operationId = "createAgentSigningKey", summary = "Generate a signing key for this agent",
+               description = "Creates an Ed25519 key pair for the agent. The private key is stored in the secrets vault under "
+                       + "agent-signing-key:{id}:v{n} and never leaves it; the public key is appended to identity.keys as "
+                       + "version n, one above the highest version the agent declares, and saved as a new, compatible agent "
+                       + "version. From then on the agent signs with key n — no redeploy needed — once "
+                       + "security.signInterAgentMessages is on, which a save accepts only while the newest key's private half "
+                       + "is in the vault. Older keys stay in identity.keys so the entries they signed still verify. Admin only: "
+                       + "whoever can mint a key can sign as this agent.")
+    @APIResponse(responseCode = "201", description = "Key generated. The body is the new identity.keys entry (version, publicKeyB64, "
+            + "validFromMs, validUntilMs); Location is the new agent version.")
+    @APIResponse(responseCode = "404", description = "Agent not found.")
+    @APIResponse(responseCode = "409", description = "version is not the agent's current version. Nothing was written.")
+    @APIResponse(responseCode = "503", description = "The secrets vault is not configured or could not store the key. Nothing was "
+            + "written.")
+    Response createSigningKey(@PathParam("id") String id,
+                              @Parameter(name = "version", required = true, example = "1",
+                                         description = "The agent's current version; 0 means current.")
+                              @QueryParam("version") Integer version);
+
+    @POST
     @Path("/{id}")
-    @Operation(description = "Duplicate this agent.")
+    @Operation(description = "Duplicate this agent. The copy gets no identity and signInterAgentMessages off: its signing keys "
+            + "would be the original's, which only the original can use.")
     Response duplicateAgent(@PathParam("id") String id, @QueryParam("version") Integer version,
                             @QueryParam("deepCopy")
                             @DefaultValue("false") Boolean deepCopy);
@@ -202,8 +226,8 @@ public interface IRestAgentStore extends IRestVersionInfo {
             @Parameter(description = "If true, permanently remove from database — every version and every history row, "
                     + "so the version given must be the current one or the request is refused with 409 — and "
                     + "additionally destroy this "
-                    + "Agent's signing keys in the secrets vault — irreversibly, since no endpoint can "
-                    + "regenerate them, so an Agent restored from a backup afterwards cannot sign again. "
+                    + "Agent's signing keys in the secrets vault — irreversibly, so an Agent restored from a "
+                    + "backup afterwards cannot sign until an admin generates it a new key (POST /{id}/signing-keys). "
                     + "This also purges an Agent that was already soft-deleted, keys included. "
                     + "If false (default), soft-delete only: the vault keys are kept so the Agent stays "
                     + "restorable.")
