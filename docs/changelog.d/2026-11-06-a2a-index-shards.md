@@ -55,7 +55,9 @@
   9,400 for evenly spread hashes); the documented bound is an upper bound and stays true.
 - **The previous release's index value is still read, not reset.** In a rolling upgrade, old
   nodes keep writing the single value. Ignoring it would make an erasure on a new node miss
-  their records until the TTL ran out.
+  their records until the TTL ran out. The converse cannot be fixed from this side: an erasure
+  that runs on a not-yet-upgraded node reads only the single value, so it misses what upgraded
+  nodes wrote. `clustering.md` says so.
 - **Read-only views, not views that announce.** No caller changes a cache through a view, and
   announcing views would mean reimplementing `Set`, `Collection` and `Iterator` for both cluster
   wrappers. `CacheImpl` refuses too, so a one-node deployment fails exactly where a cluster

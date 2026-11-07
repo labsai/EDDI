@@ -512,7 +512,9 @@ hand. None of them is part of the normal build or a required check.
   bucket, so concurrent writers on any nodes all land their ids). The sweep counts what it
   removed from the buckets, so the `a2aTasks` entry of the erasure result includes records
   other nodes wrote. It also reads and removes the single per-principal index entry that
-  releases before the 16-entry split kept, so a rolling upgrade loses nothing. One gap remains, and it is
+  releases before the 16-entry split kept, so during a rolling upgrade an erasure on an
+  upgraded node reaches what the older nodes wrote; one run on an older node reads only that
+  single entry, and misses what upgraded nodes wrote. One gap remains, and it is
   narrow: on the erasing node the check and the write are serialised against the sweep; on
   another node they are not, so a write that read the marker as absent an instant before it
   was set and whose `put` reaches the bucket only after the sweep survives, until the 24 h
