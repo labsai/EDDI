@@ -149,11 +149,6 @@ public class MongoOutcomeEventStore implements IOutcomeEventStore {
     }
 
     @Override
-    public long countBySubject(String groupId, String subjectId) {
-        return collection.countDocuments(and(eq(GROUP_ID, groupId), eq(SUBJECT_ID, subjectId)));
-    }
-
-    @Override
     public long deleteOldestBeyond(String groupId, int keep) {
         List<Object> ids = new ArrayList<>();
         for (Document doc : collection.find(eq(GROUP_ID, groupId)).projection(new Document(ID, 1))

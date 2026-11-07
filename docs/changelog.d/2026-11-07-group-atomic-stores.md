@@ -21,7 +21,8 @@
   `idx_outcome_subject_slot (groupId, subjectId, slot)`: two writers that read the same subject pick the same slot and
   only one stores. The service's own count, now redundant, is gone.
 - **Dead code removed:** `OutcomeEventService.retroDigestProvider()` (the RETRO digest is wired through
-  `retroDigest` directly) and `SharedTaskList.findTasksForAgent` (only its own two tests called it).
+  `retroDigest` directly), `SharedTaskList.findTasksForAgent` (only its own two tests called it) and
+  `IOutcomeEventStore.countBySubject` with both store implementations (its one caller was the service's count).
 
 ### Design decisions
 

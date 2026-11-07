@@ -185,12 +185,6 @@ public class PostgresOutcomeEventStore implements IOutcomeEventStore {
     }
 
     @Override
-    public long countBySubject(String groupId, String subjectId) {
-        ensureSchema();
-        return count("SELECT COUNT(*) FROM group_outcomes WHERE group_id = ? AND subject_id = ?", List.of(groupId, subjectId));
-    }
-
-    @Override
     public long deleteOldestBeyond(String groupId, int keep) {
         ensureSchema();
         return update("DELETE FROM group_outcomes WHERE id IN (SELECT id FROM group_outcomes WHERE group_id = ?" + ORDER + " OFFSET ?)",

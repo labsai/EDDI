@@ -62,7 +62,7 @@ public interface OutcomeStoreContract {
         assertEquals(InsertOutcome.DUPLICATE, outcomes().insert(event("a", "g1", "t1", T0, "alice"), 2), "a retry is not a refusal");
         assertEquals(InsertOutcome.INSERTED, outcomes().insert(event("d", "g1", "t2", T0, "alice"), 2), "the cap is per subject");
         assertEquals(InsertOutcome.INSERTED, outcomes().insert(event("e", "g2", "t1", T0, "alice"), 2), "and per team");
-        assertEquals(2, outcomes().countBySubject("g1", "t1"));
+        assertEquals(List.of("b", "a"), outcomes().listBySubject("g1", "t1", ROOMY).stream().map(OutcomeEvent::id).toList());
     }
 
     @Test
@@ -102,7 +102,7 @@ public interface OutcomeStoreContract {
         }
         pool.shutdown();
         assertEquals(1, inserted);
-        assertEquals(3, outcomes().countBySubject("g1", "t1"));
+        assertEquals(3, outcomes().listBySubject("g1", "t1", ROOMY).size());
     }
 
     @Test
@@ -112,8 +112,8 @@ public interface OutcomeStoreContract {
 
         assertEquals(List.of("a"), outcomes().listBySubject("g1", "t1", 10).stream().map(OutcomeEvent::id).toList());
         assertEquals(1, outcomes().countByGroup("g1"));
-        assertEquals(1, outcomes().countBySubject("g2", "t1"));
-        assertEquals(0, outcomes().countBySubject("g1", "other"));
+        assertEquals(List.of("b"), outcomes().listBySubject("g2", "t1", 10).stream().map(OutcomeEvent::id).toList());
+        assertTrue(outcomes().listBySubject("g1", "other", 10).isEmpty());
         assertEquals(List.of("b"), outcomes().listBySubjects("g2", List.of("t1", "t9"), 10).stream().map(OutcomeEvent::id).toList());
         assertTrue(outcomes().listBySubjects("g1", List.of(), 10).isEmpty());
     }

@@ -50,9 +50,6 @@ public interface IOutcomeEventStore {
     /** How many events a team holds. */
     long countByGroup(String groupId);
 
-    /** How many events a team holds about one subject. */
-    long countBySubject(String groupId, String subjectId);
-
     /**
      * Deletes a team's events beyond the newest {@code keep}.
      *

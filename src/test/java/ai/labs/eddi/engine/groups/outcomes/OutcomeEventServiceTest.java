@@ -90,11 +90,6 @@ class OutcomeEventServiceTest {
         }
 
         @Override
-        public long countBySubject(String groupId, String subjectId) {
-            return listBySubject(groupId, subjectId, Integer.MAX_VALUE).size();
-        }
-
-        @Override
         public synchronized long deleteOldestBeyond(String groupId, int keep) {
             List<OutcomeEvent> doomed = sorted(e -> e.groupId().equals(groupId), Integer.MAX_VALUE).stream().skip(keep).toList();
             rows.removeAll(doomed);
@@ -278,25 +273,32 @@ class OutcomeEventServiceTest {
     }
 
     @Test
-    @DisplayName("the cap holds when another write fills the subject after this one counted it")
+    @DisplayName("the cap holds when another write fills the subject while this one is being recorded")
     void theSubjectCapIsDecidedByTheStoreNotByAnEarlierCount() {
-        // A count that lags behind concurrent writes: every request sees room.
+        // A concurrent writer takes the subject's last place after this request
+        // looked it up and before its insert reaches the store.
         store = new MemoryStore() {
+            private boolean raced;
+
             @Override
-            public long countBySubject(String groupId, String subjectId) {
-                return 0;
+            public synchronized InsertOutcome insert(OutcomeEvent event, int maxPerSubject) {
+                if (!raced && rows.size() == 1) {
+                    raced = true;
+                    super.insert(new OutcomeEvent("rival", event.groupId(), event.subjectType(), event.subjectId(), "k", null, null, null, null,
+                            null, "other", NOW, NOW, null), maxPerSubject);
+                }
+                return super.insert(event, maxPerSubject);
             }
         };
         service = new OutcomeEventService(groupStore, workspaceStore, store, new SimpleMeterRegistry());
         service.clock = Clock.fixed(NOW, ZoneOffset.UTC);
         config.setOutcomeConfig(new OutcomeConfig(2, 0, 0, null));
-        service.record(GROUP, onTask("a"), "svc");
-        service.record(GROUP, onTask("b"), "svc");
+        assertEquals(Status.RECORDED, service.record(GROUP, onTask("a"), "svc").status());
 
-        var third = service.record(GROUP, onTask("c"), "svc");
+        var second = service.record(GROUP, onTask("b"), "svc");
 
-        assertEquals(Status.SUBJECT_FULL, third.status());
-        assertEquals(2, store.rows.size());
+        assertEquals(Status.SUBJECT_FULL, second.status());
+        assertEquals(List.of("a", "k"), store.rows.stream().map(OutcomeEvent::kind).toList(), "the request that lost the race stored nothing");
     }
 
     @Test
