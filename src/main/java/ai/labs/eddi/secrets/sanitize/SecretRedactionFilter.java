@@ -113,9 +113,13 @@ public final class SecretRedactionFilter {
             // dotted JWTs; min length 20 avoids redacting short benign words. The
             // scheme name is case-insensitive (RFC 9110), so 'bearer' and 'BEARER'
             // match too, from a word boundary like the sk- rules: "forbearer" is a
-            // word, not a scheme. The replacement is always 'Bearer ', the spelling
-            // notAlreadyRedacted() and FULLY_REDACTED_VALUE recognise.
-            new RedactionRule(Pattern.compile("(?i)(?<![A-Za-z0-9_])bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
+            // word, not a scheme. A word character that is the second half of an
+            // escape (the 'n' of a serialized \n line break) does not count: the
+            // canonical rule, which had no boundary, matched there, and serialized
+            // text is most of what this filter sees. The replacement is always
+            // 'Bearer ', the spelling notAlreadyRedacted() and FULLY_REDACTED_VALUE
+            // recognise.
+            new RedactionRule(Pattern.compile("(?i)(?<!(?<!\\\\)[A-Za-z0-9_])bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
                     "Bearer " + REDACTED),
 
             // Provider key shapes the rules above did not know (L6 of the 2026-10-17

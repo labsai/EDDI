@@ -166,11 +166,10 @@ class SecretRedactionFilterTest {
     /**
      * The scheme name is case-insensitive (RFC 9110 §11.1), and after an explicit
      * {@code authorization:} key the token following it is the credential whatever
-     * its length — exactly as for {@code Basic}. The first three cases leaked
-     * before: the shape rule matched only {@code Bearer} with a capital B, the
-     * scheme rule did not list bearer at all, and the name-bound rules stop the
-     * value at the space after the six-character scheme word, which is under their
-     * floor.
+     * its length — exactly as for {@code Basic}. All four cases leaked before: the
+     * shape rule matched only {@code Bearer} with a capital B, the scheme rule did
+     * not list bearer at all, and the name-bound rules stop the value at the space
+     * after the six-character scheme word, which is under their floor.
      */
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {
@@ -192,6 +191,23 @@ class SecretRedactionFilterTest {
         // "forbearer" is a word, not an Authorization scheme.
         String input = "a forbearer fixturefixturefixture0000";
         assertEquals(input, SecretRedactionFilter.redact(input));
+    }
+
+    /**
+     * The word boundary must not cost a match the rule always made: in serialized
+     * text — a tool call's JSON arguments, a logged request body — a line break
+     * before the scheme is the two characters {@code \n}, so the character in front
+     * of {@code Bearer} is the letter {@code n}.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "{\"text\":\"use this:\\nBearer fixturefixturefixture0000\"}",
+            "{\"text\":\"use this:\\tbearer fixturefixturefixture0000\"}"})
+    void redact_bearerAfterAnEscapedLineBreak(String input) {
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("fixture"), result);
+        assertEquals(result, SecretRedactionFilter.redact(result), "a second pass must not change the result");
     }
 
     /**
