@@ -36,18 +36,22 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack event de-duplication, channel thread locks.
+     * paginated tool responses, Slack event de-duplication, channel thread locks,
+     * and RAG ingestion statuses and warnings (an upload is accepted by one node
+     * and polled on whichever the load balancer picks).
      */
-    static final Map<String, String> SHARED_BUCKETS = Map.of(
-            "nonce-replay-protection", "NONCES",
-            "a2aTaskMapping", "A2A_TASKS",
-            "a2aTaskMapping:context", "A2A_CONTEXTS",
-            "a2aTaskMapping:erasing", "A2A_ERASING",
-            "a2aTaskMapping:index", "A2A_INDEX",
-            "paginated-tool-responses", "TOOL_PAGES",
-            "slack-event-dedup", "DEDUP",
-            "webhook-event-dedup", "DEDUP",
-            "channel-thread-locks", "CHANNEL");
+    static final Map<String, String> SHARED_BUCKETS = Map.ofEntries(
+            Map.entry("nonce-replay-protection", "NONCES"),
+            Map.entry("a2aTaskMapping", "A2A_TASKS"),
+            Map.entry("a2aTaskMapping:context", "A2A_CONTEXTS"),
+            Map.entry("a2aTaskMapping:erasing", "A2A_ERASING"),
+            Map.entry("a2aTaskMapping:index", "A2A_INDEX"),
+            Map.entry("paginated-tool-responses", "TOOL_PAGES"),
+            Map.entry("slack-event-dedup", "DEDUP"),
+            Map.entry("webhook-event-dedup", "DEDUP"),
+            Map.entry("channel-thread-locks", "CHANNEL"),
+            Map.entry("rag-ingestion-status", "RAG_STATUS"),
+            Map.entry("rag-ingestion-warnings", "RAG_WARNINGS"));
 
     /**
      * Node-local copies of database state that the other nodes must drop when this
@@ -261,6 +265,11 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // Listed rather than left to the default so the sizing sits on record next
             // to the per-user caches above.
             Map.entry("tenantQuotas", 1_000L),
+
+            // One status (and at most one warning) per document upload, kept an hour —
+            // the bound the Caffeine caches RagIngestionService held them in had.
+            Map.entry("rag-ingestion-status", 10_000L),
+            Map.entry("rag-ingestion-warnings", 10_000L),
 
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something

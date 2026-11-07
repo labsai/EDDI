@@ -10,7 +10,7 @@ import java.util.concurrent.CompletionStage;
 
 /**
  * Cluster-wide mutual exclusion for a conversation (and, under other key
- * prefixes, for a group discussion or a leader role).
+ * prefixes, for a group discussion, a leader role or a RAG document).
  * <p>
  * A conversation turn runs on the node that received the request, but only
  * while that node holds the conversation's lease; turns of one conversation
@@ -31,6 +31,11 @@ public interface IConversationLeaseManager {
     String GROUP = "g.";
     /** Key prefix of leader roles. */
     String LEADER = "leader.";
+    /**
+     * Key prefix of RAG document leases: a replacing ingestion and a delete of one
+     * document name hold it (see {@code RagIngestionService}).
+     */
+    String RAG_DOCUMENT = "rag.";
 
     /**
      * Acquires the lease of {@code conversationId}.

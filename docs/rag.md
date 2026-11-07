@@ -258,7 +258,7 @@ Response:
 }
 ```
 
-Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that is unknown, expired or held by another instance reports `unknown`: status is kept per instance for one hour, so in a cluster poll the instance that accepted the upload.
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`. Statuses and warnings are kept for one hour; an id that is unknown or expired answers `404` with status `unknown`. In a cluster (`eddi.messaging.type=nats`) they live in the shared `RAG_STATUS` and `RAG_WARNINGS` KV buckets, so any instance answers the poll — no sticky routing is needed. While NATS is unreachable an instance falls back to its own copy, so only the instance running the ingestion knows its status until NATS is back.
 
 **Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
 twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
@@ -276,6 +276,20 @@ is refused with a `400` without one: every document ingested without a name shar
 replacing that would delete all of them. On a vector store that cannot delete by metadata, the
 ingestion still completes and the status response carries a `warning` saying the previous version is
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+A replacement holds the document's **lease** from before it embeds until the previous version is
+removed, so two replacements of one name never interleave — and neither does a replacement and a
+delete of that name. In a cluster the lease is cluster-wide (a `rag.<hash>` key in the `LEASES`
+bucket, see [clustering](clustering.md)), so this holds when several instances share one vector
+store: a replacement that arrives while another instance is replacing or deleting the same name waits
+for it (up to 30 minutes, then fails with `failed: Document '…' is being replaced or deleted on
+another instance`). The lease is renewed for as long as embedding takes. A vector store cannot check a
+fencing token, so a replacement checks that it still holds the lease before it stores and before it
+removes the previous version: an instance cut off from NATS stops there with `failed: This instance
+lost the lease …` instead of overwriting what another instance did meanwhile — if it had already
+stored the new version, the status also carries the both-versions-may-remain `warning`. While NATS is
+unreachable, leases follow `eddi.cluster.degraded.turns`: `local` (the default) replaces under the
+instance-local lock only, `reject` fails the replacement. Appending (`replace=false`) takes no lease.
 
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs

@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
 import ai.labs.eddi.engine.cluster.SharedBucket;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -471,6 +472,37 @@ class CacheFactoryTest {
 
         assertInstanceOf(SharedKvCache.class, cache);
         verify(nats).bucket(new SharedBucket("DEDUP", Duration.ofMinutes(10), -1));
+    }
+
+    /**
+     * Issue #1312: an upload is accepted by one node and its status polled on
+     * whichever node the load balancer picks, so both caches must be shared, each
+     * through a bucket of its own (status and warning are keyed by the same
+     * ingestion id). Asked for by the service's own constants, so a rename cannot
+     * quietly turn them node-local again.
+     */
+    @Test
+    @DisplayName("RAG ingestion status and warnings are shared in a cluster, each through its own bucket")
+    void ragIngestionCachesAreSharedInACluster() {
+        assertEquals("RAG_STATUS", CacheFactory.SHARED_BUCKETS.get(RagIngestionService.STATUS_CACHE));
+        assertEquals("RAG_WARNINGS", CacheFactory.SHARED_BUCKETS.get(RagIngestionService.WARNING_CACHE));
+        assertTrue(CacheFactory.hasExplicitSize(RagIngestionService.STATUS_CACHE));
+        assertTrue(CacheFactory.hasExplicitSize(RagIngestionService.WARNING_CACHE));
+
+        ClusterConfig clusterConfig = mock(ClusterConfig.class);
+        when(clusterConfig.isNats()).thenReturn(true);
+        NatsSharedStateFactory nats = mock(NatsSharedStateFactory.class);
+        when(nats.bucket(any(SharedBucket.class))).thenReturn(mock(ISharedKv.class));
+        @SuppressWarnings("unchecked")
+        Instance<NatsSharedStateFactory> instance = mock(Instance.class);
+        when(instance.get()).thenReturn(nats);
+        factory.clusterConfig = clusterConfig;
+        factory.natsSharedState = instance;
+
+        assertInstanceOf(SharedKvCache.class, factory.getCache(RagIngestionService.STATUS_CACHE, Duration.ofHours(1)));
+        assertInstanceOf(SharedKvCache.class, factory.getCache(RagIngestionService.WARNING_CACHE, Duration.ofHours(1)));
+        verify(nats).bucket(new SharedBucket("RAG_STATUS", Duration.ofHours(1), -1));
+        verify(nats).bucket(new SharedBucket("RAG_WARNINGS", Duration.ofHours(1), -1));
     }
 
     @Test
