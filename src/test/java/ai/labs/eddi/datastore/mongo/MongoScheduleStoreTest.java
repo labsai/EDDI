@@ -273,8 +273,8 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
-            // never the lease-steal clause.
+            // A fresh PENDING row is claimed via the PENDING clause, never the
+            // lease-steal clause.
             assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             assertEquals(FireStatus.CLAIMED, store.readSchedule(id).getFireStatus());
         }
@@ -288,9 +288,8 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            // A PAST leaseExpiry (300s ago) means the second claim cannot steal the
-            // fresh lease: node-1's claimedAt ≈ now is NOT <= leaseExpiry, so node-2's
-            // claim correctly fails.
+            // node-1's claim is seconds old against a 5-minute lease, so node-2 cannot
+            // steal it and its claim correctly fails.
             assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             assertFalse(store.tryClaim(id, "node-2", Instant.now(), Duration.ofMinutes(5)));
         }

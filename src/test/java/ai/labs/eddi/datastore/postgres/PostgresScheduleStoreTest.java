@@ -358,8 +358,8 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
-            // never the lease-steal clause.
+            // A fresh PENDING row is claimed via the PENDING clause, never the
+            // lease-steal clause.
             boolean claimed = store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5));
             assertTrue(claimed);
 
@@ -377,8 +377,8 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            // A PAST leaseExpiry (5 min ago) means the second claim cannot steal the
-            // fresh lease: node-1's claimed_at ≈ now is NOT <= leaseExpiry.
+            // node-1's claim is seconds old against a 5-minute lease, so node-2 cannot
+            // steal it.
             assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             // Second claim should fail — already CLAIMED with a still-valid lease
             assertFalse(store.tryClaim(id, "node-2", Instant.now(), Duration.ofMinutes(5)));
