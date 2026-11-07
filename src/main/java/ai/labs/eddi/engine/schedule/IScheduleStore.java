@@ -124,7 +124,7 @@ public interface IScheduleStore {
     void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException;
 
     /**
-     * Delete all schedules for a Agent (cascade delete).
+     * Delete all schedules for an agent (cascade delete).
      *
      * @return number of deleted schedules
      */

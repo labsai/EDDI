@@ -567,7 +567,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return result.getDeletedCount();
     }
 
-    // === Document conversion ===
+    // === Atomic insert ===
 
     /**
      * Atomic: every field is {@code $setOnInsert}, so an existing entry at the
@@ -628,6 +628,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return and(eq(FIELD_USER_ID, entry.userId()), eq(FIELD_KEY, entry.key()), eq(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
                 ne(FIELD_VISIBILITY, Visibility.global.name()));
     }
+
+    // === Document conversion ===
 
     private UserMemoryEntry documentToEntry(Document doc) {
         String visStr = doc.getString(FIELD_VISIBILITY);

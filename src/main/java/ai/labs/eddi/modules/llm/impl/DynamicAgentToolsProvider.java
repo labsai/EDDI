@@ -50,8 +50,8 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Builds the four dynamic-agent tools — create / converse / discover-by-
- * capability / teardown — with their shared per-conversation tracking lists and
+ * Builds the dynamic-agent tools — create / converse / discover-by-capability /
+ * recruit / teardown — with their shared per-conversation tracking lists and
  * the guardrails ({@code allowRecruitment}, delegation depth,
  * {@code maxCreatedAgentsPerDiscussion} seeding) that bound them (R2 step 2).
  * Extracted from the anonymous block inside
@@ -70,11 +70,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code enableBuiltInTools=true}, no whitelist and {@code
  * dynamicAgents.enabled=true} got none of them — the no-whitelist branch of
  * {@code collectAllBuiltInTools} never called this provider, while
- * {@code docs/langchain.md} states twice that omitting the whitelist enables
- * all built-in tools. {@code collectAllBuiltInTools} now calls this provider
- * unconditionally, and {@link #addDynamicAgentTools} honours an omitted
- * whitelist <em>only under a governing group policy</em> — see the reasoning
- * there for why a standalone conversation still requires the explicit entry.
+ * {@code docs/langchain.md} says that omitting the whitelist enables all
+ * available built-in tools. {@code collectAllBuiltInTools} now calls this
+ * provider unconditionally, and {@link #addDynamicAgentTools} honours an
+ * omitted whitelist <em>only under a governing group policy</em> — see the
+ * reasoning there for why a standalone conversation still requires the explicit
+ * entry.
  */
 class DynamicAgentToolsProvider implements ToolSourceProvider {
 
@@ -257,9 +258,9 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
 
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
         // V7. An omitted whitelist means "all built-in tools" everywhere else —
-        // docs/langchain.md states it twice ("(all if not specified)", "Omitting
-        // builtInToolsWhitelist enables all available built-in tools") and
-        // BuiltinToolsProvider implements exactly that for the nine plain beans.
+        // docs/langchain.md says so ("Omitting builtInToolsWhitelist enables all
+        // available built-in tools") and BuiltinToolsProvider implements exactly
+        // that for the nine plain beans.
         // This method alone returned early, so an agent with enableBuiltInTools=true,
         // no whitelist and dynamicAgents.enabled=true silently got none of them.
         //
@@ -730,7 +731,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * M-T2: the retained set as the most recent turn that recorded one left it.
      * <p>
      * The latest entry, not the union over all steps like the created list: a
-     * retain flag can be <em>removed</em> ({@code unretain_agent}), and a union
+     * retain flag can be <em>removed</em> ({@code unretainAgent}), and a union
      * would resurrect it from the turn that set it. Each turn stores the full set
      * it was seeded with plus its own changes, so the latest entry is the whole
      * state. Narrowed to agents still tracked as created — which excludes torn-down

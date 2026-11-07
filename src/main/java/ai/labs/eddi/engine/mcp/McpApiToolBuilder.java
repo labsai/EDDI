@@ -38,7 +38,9 @@ import java.util.stream.Collectors;
  * Orders").
  *
  * <p>
- * This is a stateless utility used by {@link McpSetupTools#createApIAgent}.
+ * This is a stateless utility used by {@link McpSetupTools#createApIAgent}
+ * (through {@code AgentSetupService}), by {@code ApiAgentSyncService} and by
+ * the endpoint discovery of {@code RestApiCallsStore}.
  * </p>
  *
  * @author ginccc
@@ -643,7 +645,7 @@ public final class McpApiToolBuilder {
             var body = bodyMapping.body();
             // The body template's variables must be declared as tool parameters,
             // or the model has no documented way to fill them: the tool schema is
-            // built from getParameters() alone (AgentOrchestrator), and with
+            // built from getParameters() alone (HttpCallToolsProvider), and with
             // strict-rendering off an undeclared variable renders as empty. The
             // request would go out structurally valid and semantically empty.
             //
@@ -1179,7 +1181,7 @@ public final class McpApiToolBuilder {
         // One variable carrying the whole body, always — never a per-property
         // template. Decomposing looks more helpful and is worse in three ways:
         //
-        // 1. Every variable becomes a REQUIRED tool parameter (AgentOrchestrator
+        // 1. Every variable becomes a REQUIRED tool parameter (HttpCallToolsProvider
         // builds the schema from ApiCall.parameters and marks all of them
         // required, and a Map<String,String> has nowhere to record optionality),
         // so a PATCH of one field forces the model to restate every other —

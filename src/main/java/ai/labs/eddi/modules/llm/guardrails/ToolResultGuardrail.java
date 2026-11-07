@@ -132,9 +132,10 @@ public class ToolResultGuardrail {
     }
 
     /**
-     * Unknown actions fall back to {@code warn}, the least destructive of the
-     * three. A typo in a config field must not silently become "block every tool
-     * result", and must not become "do nothing" either — a warn leaves a trail.
+     * An unset action is the default, {@code redact}. Unknown actions fall back to
+     * {@code warn}, the least destructive of the three. A typo in a config field
+     * must not silently become "block every tool result", and must not become "do
+     * nothing" either — a warn leaves a trail.
      */
     private static String normalizeAction(String configured) {
         if (configured == null) {

@@ -73,7 +73,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * already capped; without this bound a storm of permanently-failing
      * conversations would grow {@link #deadLetters} without limit. Oldest entries
      * are evicted first (the dashboard inspects the most recent failures). Set to
-     * {@code -1} to disable the cap (unbounded).
+     * {@code -1} to disable the cap (unbounded); {@code 0} retains no entries.
      */
     private final int maxDeadLetters;
 

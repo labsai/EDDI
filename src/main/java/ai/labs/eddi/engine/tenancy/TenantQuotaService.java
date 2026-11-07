@@ -50,10 +50,10 @@ public class TenantQuotaService {
     @Inject
     ICacheFactory cacheFactory;
 
-    /** Name of the short-TTL cache behind {@link #quotaFor}. */
     /**
-     * Public for the reason {@code GdprComplianceService.RESTRICTION_CACHE_NAME}
-     * is: {@code CacheFactory.CACHE_SIZES} keys the sizing on this string and
+     * Name of the short-TTL cache behind {@link #quotaFor}. Public for the reason
+     * {@code GdprComplianceService.RESTRICTION_CACHE_NAME} is:
+     * {@code CacheFactory.CACHE_SIZES} keys the sizing on this string and
      * {@code CacheFactoryTest} binds the two, so a rename fails a test instead of
      * silently reverting the cache to the default size.
      */
@@ -485,10 +485,10 @@ public class TenantQuotaService {
      * ({@link #checkCostBudget}) is what stops the next call. Callers must not fail
      * the work that already ran over a denied or unavailable result.
      * <p>
-     * Note: internally calls {@link ITenantQuotaStore#tryAddCost} which resets all
-     * expired time windows (minute, day, month) under the per-tenant lock. This is
-     * harmless (lazy reset is idempotent), but means this method has broader side
-     * effects than its name suggests.
+     * Note: internally calls {@link ITenantQuotaStore#tryAddCost}, which also rolls
+     * an expired monthly window (the in-memory store resets the minute and day
+     * windows too). This is harmless (lazy reset is idempotent), but means this
+     * method has broader side effects than its name suggests.
      */
     public QuotaCheckResult recordCost(String tenantId, double cost) {
         TenantQuota quota;

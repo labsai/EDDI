@@ -95,7 +95,8 @@ public class RagConfiguration {
      * <li>elasticsearch: {"serverUrl", "indexName", "apiKey", "userName",
      * "password"}</li>
      * <li>qdrant: {"host", "port", "collectionName", "apiKey", "useTls"}</li>
-     * <li>chroma: {"baseUrl", "tenantName", "databaseName", "collectionName"}</li>
+     * <li>chroma: {"baseUrl", "tenantName", "databaseName", "collectionName",
+     * "apiVersion"}</li>
      * <li>in-memory: {} (no params needed)</li>
      * </ul>
      */
@@ -107,7 +108,7 @@ public class RagConfiguration {
      * <li>{@code "id"} — by the RAG configuration's id: a dedicated default
      * location ({@code eddi_kbid_<id>}), every chunk tagged with the id and
      * retrieval filtered on it. Stamped on every knowledge base created, imported
-     * or duplicated from this release on.</li>
+     * or duplicated from 6.6 on.</li>
      * <li>{@code "name"} or absent — the 6.5.0 layout, addressed by the name. Kept
      * for knowledge bases that existed before the upgrade, so their stored vectors
      * stay reachable. Cannot be chosen for a new knowledge base, and a knowledge

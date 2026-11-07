@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * Implements {@link GroupDiscussionEventListener} to receive callbacks as
  * agents speak, and posts each contribution to Slack.
  * <p>
- * All discussion styles use <b>EXPANDED</b> mode: each agent's first
+ * All preset discussion styles use <b>EXPANDED</b> mode: each agent's first
  * contribution is a channel-level header with a short preview, and the full
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
@@ -40,8 +40,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     /**
      * Discussion styles that use EXPANDED mode (channel-level messages with peer
-     * threading). All styles use expanded mode in Slack for readability — compact
-     * mode (single thread) is too hard to follow with multiple agents.
+     * threading). All preset styles use expanded mode in Slack for readability —
+     * compact mode (single thread) is too hard to follow with multiple agents; only
+     * {@code CUSTOM} falls back to it.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
             "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");

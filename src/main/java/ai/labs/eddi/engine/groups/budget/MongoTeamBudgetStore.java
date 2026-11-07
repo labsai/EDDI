@@ -42,10 +42,11 @@ import static com.mongodb.client.model.Filters.ne;
  * with {@code _id = groupId:month}.
  * <p>
  * Spend is a {@code $inc} upsert; the first-insert duplicate-key race is
- * retried as a plain update, as in {@code MongoToolQuotaStore}. A debit is one
- * {@code findOneAndUpdate} whose filter carries the "cap stays at or above
- * spend" predicate, so concurrent debits on any node cannot both pass. A TTL
- * index on {@code expiresAt} is the retention.
+ * retried once, as in {@code MongoToolQuotaStore}. An adjustment is one
+ * {@code findOneAndUpdate} (after an upsert that makes sure the document
+ * exists) whose filter carries the "cap stays at or above spend" predicate for
+ * a debit, so concurrent debits on any node cannot both pass. A TTL index on
+ * {@code expiresAt} is the retention.
  */
 @ApplicationScoped
 @DefaultBean

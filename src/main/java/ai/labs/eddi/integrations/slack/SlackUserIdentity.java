@@ -77,7 +77,8 @@ public final class SlackUserIdentity {
 
     /**
      * Whether {@code userId} looks like a raw, pre-namespacing Slack user id — i.e.
-     * data stored under it may be migrated to the namespaced identity.
+     * a thread mapping stored under it may be adopted and re-keyed to the
+     * namespaced identity (long-term memories are never moved).
      */
     public static boolean isLegacySlackUserId(String userId) {
         return userId != null && RAW_SLACK_USER_ID.matcher(userId).matches();

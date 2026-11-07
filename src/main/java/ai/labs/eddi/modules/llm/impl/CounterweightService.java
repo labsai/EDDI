@@ -21,8 +21,8 @@ import java.util.Map;
  * <p>
  * <strong>Important:</strong> These are prompt-level presets, not engine-level
  * guarantees. The LLM may or may not follow the injected instructions. For
- * engine-enforced controls (tool iteration caps), see {@code AgentOrchestrator}
- * strict-mode handling.
+ * engine-enforced controls (tool iteration caps), see the strict-mode handling
+ * in {@code ToolLoopRunner}.
  * <p>
  * Preset text is resolved from {@link PromptSnippetService} first (snippet
  * names: {@code counterweight_cautious}, {@code counterweight_strict}). If no

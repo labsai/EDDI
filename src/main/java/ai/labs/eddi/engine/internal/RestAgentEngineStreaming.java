@@ -72,6 +72,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>{@code cascade_escalation} — a cascade step was rejected and escalated
  * ({@code fromStep}, {@code toStep}, {@code confidence}, {@code threshold},
  * {@code reason}, {@code durationMs})</li>
+ * <li>{@code llm_retry} — the LLM task re-asked the same model after an
+ * unusable reply ({@code reason}, {@code attempt})</li>
+ * <li>{@code guardrail_triggered} — an input or output guardrail fired
+ * ({@code type}, {@code phase}, {@code action}, {@code taskId})</li>
  * <li>{@code tool_call} / {@code tool_result} — one tool call started /
  * finished: name, call id, status and duration, never arguments or results (a
  * designer's {@code toolDisplay} may add a label and a few allow-listed
@@ -80,7 +84,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * committed</li>
  * <li>{@code approval_required} — the turn ended waiting for a human; sent just
  * before {@code done}</li>
- * <li>{@code done} — full conversation snapshot (final event)</li>
+ * <li>{@code task_failed} — a lifecycle task failed ({@code taskId},
+ * {@code taskType}, {@code durationMs}, {@code errorType}, {@code error})</li>
+ * <li>{@code done} — the final event: a reduced snapshot
+ * ({@code conversationState}, {@code hitlPausedAt}, {@code conversationOutputs}
+ * and {@code error}, the last three when present); the full snapshot is
+ * available from the conversation GET endpoint</li>
  * <li>{@code error} — error during processing</li>
  * </ul>
  */
@@ -558,8 +567,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             code = "agent_mismatch";
             message = "Agent version mismatch";
         } else if (e instanceof QuotaAccountingUnavailableException quotaUnavailable) {
-            // Before QuotaExceededException is irrelevant (they are unrelated types),
-            // but the distinction is the same one RestAgentEngine draws: the store
+            // The order relative to QuotaExceededException is irrelevant (they are
+            // unrelated types), but the distinction is the one RestAgentEngine draws: the
+            // store
             // could not answer, so this is not the tenant being over a limit. The
             // message is this class's own fixed text and names nothing internal, so
             // it is echoed rather than replaced — through the mapper's accessor, so a
@@ -673,9 +683,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
      * semantics and the config switch that turns this off.
      * <p>
-     * The cancel is issued synchronously on the calling (pipeline worker) thread
-     * and at most once, so it never touches the Vert.x event loop and never
-     * repeats.
+     * The cancel is issued at most once. When a send notices the disconnect it runs
+     * synchronously on the calling (pipeline worker) thread; when a keep-alive tick
+     * notices it, on a virtual thread ({@code clientGoneExecutor}). Either way it
+     * never touches the Vert.x event loop.
      */
     private final class SseStream {
         private final String conversationId;

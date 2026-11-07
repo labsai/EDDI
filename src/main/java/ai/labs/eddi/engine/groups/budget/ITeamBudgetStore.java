@@ -14,8 +14,9 @@ import java.util.Optional;
  * {@code (groupId, month)}, month as {@code YYYY-MM} in UTC.
  * <p>
  * <b>Atomicity contract.</b> {@link #addSpend} and {@link #applyAdjustment} are
- * single storage-level operations (a {@code $inc} / {@code INSERT ... ON
- * CONFLICT}), safe across nodes. Every method throws
+ * atomic storage-level operations, safe across nodes: a {@code $inc} upsert and
+ * one conditional {@code findOneAndUpdate} on MongoDB; {@code INSERT ... ON
+ * CONFLICT} and a row-locked transaction on PostgreSQL. Every method throws
  * {@link TeamBudgetAccountingUnavailableException} when the database cannot
  * answer; a store never answers 0.0 or "allow" for an outage.
  */

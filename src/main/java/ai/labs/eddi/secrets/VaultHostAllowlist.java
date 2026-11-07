@@ -61,9 +61,11 @@ import java.util.regex.Pattern;
  * client's configuration, not something the scheme reveals.
  * <p>
  * <b>Failure is closed.</b> A reference whose metadata cannot be read is
- * refused: a key that cannot be checked is not a key that may go anywhere. A
- * reference that does not exist is left to the resolver, which already refuses
- * to send the unresolved reference. The refusal message names the reference,
+ * refused: a key that cannot be checked is not a key that may go anywhere. That
+ * includes a reference whose secret no longer exists: on the API-call path this
+ * runs after resolution, so a secret deleted in between must not leave with no
+ * host check. A string that is not a vault reference, or names a reserved key
+ * the resolver refuses, is skipped. The refusal message names the reference,
  * the destination and the list — none of which is a secret — so the operator
  * can fix the list or the configuration without reading a log.
  */

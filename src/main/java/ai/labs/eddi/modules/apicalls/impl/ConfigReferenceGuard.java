@@ -62,14 +62,14 @@ public final class ConfigReferenceGuard {
     private static final String[] CREDENTIAL_OPENERS = {"${vault:", "${eddivault:", "${connection:", "${caller:"};
 
     /**
-     * {@code {properties.name}} and {@code properties.name} inside a template
-     * expression.
-     */
-    /**
      * A global variable reference: not a credential, but a variable may hold one.
      */
     private static final String[] VARS_OPENERS = {"${vars:"};
 
+    /**
+     * {@code {properties.name}} and {@code properties.name} inside a template
+     * expression.
+     */
     private static final Pattern PROPERTY_ACCESS = Pattern.compile("properties\\.([A-Za-z0-9_\\-]+)");
 
     private ConfigReferenceGuard() {

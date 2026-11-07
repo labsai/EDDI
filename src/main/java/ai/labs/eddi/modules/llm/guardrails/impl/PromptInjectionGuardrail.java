@@ -20,9 +20,10 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * {@code prompt-injection} — input only. Flags a message that matches one of a
- * list of instruction-override phrasings ("ignore all previous instructions",
- * "reveal your system prompt", "you are now in developer mode", ...).
+ * {@code prompt-injection} — input and tool-call arguments. Flags a message
+ * that matches one of a list of instruction-override phrasings ("ignore all
+ * previous instructions", "reveal your system prompt", "you are now in
+ * developer mode", ...).
  * <p>
  * A heuristic, not a classifier: it catches the common verbatim attacks and
  * nothing paraphrased or encoded. The list is data, not code — parameters:

@@ -143,7 +143,7 @@ public class AgentSetupService {
      * the new agent a reference that {@code VaultGrantGate} rejects at deploy
      * time.</li>
      * <li>{@code never} — restores the pre-6.3 behaviour: every setup writes its
-     * own {@code setup.<agent>.<timestamp>.apiKey} entry.</li>
+     * own {@code setup.<agent>.<timestamp>-<random>.apiKey} entry.</li>
      * </ul>
      * Neither value affects an {@code apiKey} that is already a
      * {@code ${vault:...}} reference (always used as-is) or a request carrying an
@@ -1110,9 +1110,10 @@ public class AgentSetupService {
     /**
      * Ceiling for a caller-supplied {@code maxToolIterations}. Each iteration is a
      * full LLM round-trip carrying the tool context, so the value multiplies both
-     * cost and worst-case turn latency; nothing in the engine bounds the task field
-     * itself ({@code ToolLoopRunner} honours whatever the config says). 100 is ten
-     * times the engine default — and deliberately exactly the value the Platform
+     * cost and worst-case turn latency. {@code ToolLoopRunner} clamps a stored
+     * value to its own engine ceiling of 100 at run time (with a warning); this
+     * check rejects an out-of-range value at setup time instead. 100 is ten times
+     * the engine default of 10 — and deliberately exactly the value the Platform
      * Operator provisions with: an operator turn is one admin task of arbitrary
      * length (an agent build via granular endpoints already burns ~22 calls), and
      * it runs under the HITL gate, which paces every write regardless of budget.
@@ -1458,7 +1459,9 @@ public class AgentSetupService {
      * parent whose key is plaintext therefore inherits nothing, and the caller gets
      * the ordinary "API key is required" error.
      *
-     * @return the parent's {@code ${vault:...}} reference, or {@code null}
+     * @return the parent's provider, model and {@code ${vault:...}} key reference
+     *         (any of which may be {@code null}), or {@code null} when nothing is
+     *         inheritable
      */
     public ParentLlmProfile resolveParentLlmProfile(String parentAgentId) {
         if (parentAgentId == null || parentAgentId.isBlank()) {
@@ -1669,7 +1672,8 @@ public class AgentSetupService {
      * checksum, unless {@code eddi.setup.vault-key-reuse=never}. See
      * {@link #vaultKeyReuse}.</li>
      * <li><b>{@code apiKey} is plaintext the vault does not hold</b> — stored under
-     * the generated {@code setup.<agent>.<timestamp>.apiKey} name, as before.</li>
+     * the generated {@code setup.<agent>.<timestamp>-<random>.apiKey} name, as
+     * before.</li>
      * </ol>
      *
      * @param vaultKeyName
@@ -2664,7 +2668,7 @@ public class AgentSetupService {
     }
 
     /**
-     * Deploy a Agent and wait for completion.
+     * Deploy an agent and wait for completion.
      */
     Map<String, Object> deployAndWait(Deployment.Environment env, String agentId, int agentVersion) {
         var result = new LinkedHashMap<String, Object>();

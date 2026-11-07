@@ -11,6 +11,12 @@ import jakarta.enterprise.inject.Alternative;
 import jakarta.interceptor.Interceptor;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+/**
+ * Replaces Quarkus' own {@link AuthorizationController} so that
+ * {@code @RolesAllowed} and the other security annotations are enforced only
+ * when {@code authorization.enabled=true} (default {@code false}). With it off,
+ * every role check is a no-op.
+ */
 @Alternative
 @Priority(Interceptor.Priority.LIBRARY_AFTER)
 @ApplicationScoped

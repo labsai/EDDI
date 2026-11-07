@@ -301,9 +301,10 @@ public final class NegotiationEngine {
     }
 
     /**
-     * Unanimous agreement: every non-moderator AGENT participant has signed the
-     * SAME open proposal. Records the AGREEMENT decision — the signed acceptance
-     * entries ARE the co-signatures; their transcript indices ride
+     * Unanimous agreement: every participant other than the moderator and nested
+     * {@code GROUP} members (so {@code AGENT} and {@code HUMAN} members alike) has
+     * signed the SAME open proposal. Records the AGREEMENT decision — the signed
+     * acceptance entries ARE the co-signatures; their transcript indices ride
      * {@code tally.signedAcceptances}, no new crypto — and returns {@code true} so
      * the caller can end the phase's repeats early (the I2 plumbing).
      */

@@ -6,7 +6,7 @@ package ai.labs.eddi.engine.mail;
 
 /**
  * The header values that say a message was sent by a machine, captured raw
- * (unfolded, trimmed, length-capped) so {@link AutoReplyDetector} — and a later
+ * (unfolded, trimmed, length-capped) so {@link AutoReplyDetector} — and the
  * loop guard with more context — can judge them.
  *
  * @param autoSubmitted

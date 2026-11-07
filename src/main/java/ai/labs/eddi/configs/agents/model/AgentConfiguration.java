@@ -759,8 +759,9 @@ public class AgentConfiguration {
         }
 
         /**
-         * Get the key for a specific version. Falls back to {@code publicKey} if no
-         * versioned keys exist.
+         * Get the key for a specific version. Version {@code 0} ("signed before key
+         * versioning existed") falls back to {@code publicKey} when no versioned key
+         * matches; any other version without a matching key yields {@code null}.
          *
          * @param version
          *            the key version to find
@@ -1602,15 +1603,15 @@ public class AgentConfiguration {
      * A checkpoint captures the conversation PROPERTIES only; rolling one back does
      * not restore steps, outputs or external side-effects (see
      * {@code MemorySnapshotService#rollbackToCheckpoint}). Checkpointing itself is
-     * performed unconditionally by {@code AgentOrchestrator} before every tool call
-     * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
-     * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
-     * honoured only where a caller passes it to
-     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
-     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
-     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
-     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
-     * always prunes to the service default of 10.
+     * performed unconditionally by the tool loop ({@code ToolLoopRunner}) before
+     * every tool call — {@link AutoSnapshot#isEnabled()} and
+     * {@link AutoSnapshot#getTriggerOn()} are NOT consulted yet, and
+     * {@link #getMaxCheckpointsPerConversation()} is honoured only where a caller
+     * passes it to {@code MemorySnapshotService#createCheckpoint(..., int)}. No
+     * production caller does: {@code ToolLoopRunner} uses the 3-arg overload
+     * because {@code SessionManagement} has no slot on {@code IConversationMemory}
+     * (unlike {@link UserMemoryConfig} and {@link MemoryPolicy}), so
+     * auto-checkpointing always prunes to the service default of 10.
      *
      * @since 6.0.0
      */
@@ -1635,8 +1636,8 @@ public class AgentConfiguration {
         }
 
         /**
-         * Auto-snapshot configuration. When enabled, checkpoints are created
-         * automatically before state-changing tool executions.
+         * Auto-snapshot configuration. Intended to create checkpoints only before
+         * state-changing tool executions when enabled.
          * <p>
          * <strong>Reserved — not yet honoured by the engine.</strong>
          * Auto-checkpointing currently runs before every tool call regardless of these

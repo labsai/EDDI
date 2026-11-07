@@ -16,10 +16,28 @@ import java.net.URI;
 public interface IResourceClientLibrary {
     void init() throws ResourceClientLibraryException;
 
+    /**
+     * Reads the configuration an {@code eddi://} reference names, at the version
+     * the reference pins. Returns {@code null} when the reference's type is not
+     * registered; a missing resource of a registered type surfaces the store's
+     * {@code ResourceNotFoundException} (rethrown undeclared).
+     */
     <T> T getResource(URI uri, Class<T> clazz) throws ServiceException;
 
+    /**
+     * Duplicates the referenced resource through its REST facade.
+     *
+     * @throws ServiceException
+     *             when the reference's type is not registered
+     */
     Response duplicateResource(URI uri) throws ServiceException;
 
+    /**
+     * Deletes the referenced resource through its REST facade.
+     *
+     * @throws ServiceException
+     *             when the reference's type is not registered (nothing is deleted)
+     */
     Response deleteResource(URI uri, boolean permanent) throws ServiceException;
 
     /**

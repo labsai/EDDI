@@ -33,7 +33,9 @@ import java.util.Set;
  * tool loop) and the runner decides whether, how and how often to use it.
  *
  * <h2>What triggers a re-ask</h2> Only the {@code responseValidation} policies
- * set to {@code "retry"} ({@link Trigger}). In detection order:
+ * set to {@code "retry"} ({@link Trigger}). In detection order (except the
+ * last, which is not a reply property: the provider refuses the prompt, before
+ * any reply exists):
  * <ol>
  * <li>{@code EMPTY} — blank reply;</li>
  * <li>{@code TRUNCATION} — {@code finishReason=LENGTH}: re-asked <b>once</b>
@@ -49,18 +51,18 @@ import java.util.Set;
  * ({@code responseSchema}, {@code nonBlankFields}); re-asked like invalid JSON,
  * with the violation as the corrective message's reason.
  *
- * <h2>The corrective message</h2> Only an invalid-JSON re-ask carries one. The
- * request is the original messages, then the model's own bad reply as an
- * <em>assistant</em> turn (capped at {@link #MAX_ECHOED_REPLY_CHARS}), then one
- * user message: the configured text with {@code {reason}} replaced literally by
- * {@link ModelOutputParser}'s own constant reason. The user-role message
- * therefore never contains model output or user input — the model sees its own
- * words in its own role, the standard corrective-prompting shape, and the only
- * dynamic part of the user turn is a string EDDI wrote. The text is
- * deliberately not run through the template engine. Empty, truncated and
- * filtered replies are re-asked with the original request unchanged: there is
- * nothing for a corrective sentence to tell the model that the same request
- * would not.
+ * <h2>The corrective message</h2> Only an invalid-JSON or schema-mismatch
+ * re-ask carries one. The request is the original messages, then the model's
+ * own bad reply as an <em>assistant</em> turn (capped at
+ * {@link #MAX_ECHOED_REPLY_CHARS}), then one user message: the configured text
+ * with {@code {reason}} replaced literally by {@link ModelOutputParser}'s own
+ * constant reason. The user-role message therefore never contains model output
+ * or user input — the model sees its own words in its own role, the standard
+ * corrective-prompting shape, and the only dynamic part of the user turn is a
+ * string EDDI wrote. The text is deliberately not run through the template
+ * engine. Empty, truncated and filtered replies are re-asked with the original
+ * request unchanged: there is nothing for a corrective sentence to tell the
+ * model that the same request would not.
  *
  * <h2>Budget</h2> {@code maxRetries} is per model (cascade step) and shared by
  * every policy; a re-ask is skipped when the remaining time cannot fit it

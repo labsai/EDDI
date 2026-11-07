@@ -90,7 +90,8 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * request carrying the {@code functionResponse}; otherwise
      * {@code 400 INVALID_ARGUMENT — Function call is missing a thought_signature}.
      * No thinking budget avoids it — the signature is emitted and demanded even at
-     * {@code thinkingBudget = 0}. langchain4j 1.20.0 models the field but gates it:
+     * {@code thinkingBudget = 0}. langchain4j (as analysed at 1.20.0; the pom now
+     * pins a later release) models the field but gates it:
      * {@code PartsAndContentsMapper} captures it into
      * {@code AiMessage.attributes()} only when {@code returnThinking} is
      * {@code TRUE}, and re-sends it only when {@code sendThinking} is {@code true}.

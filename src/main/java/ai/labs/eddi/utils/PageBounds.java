@@ -25,7 +25,7 @@ import java.util.Map;
  * truncated page for the whole.
  * <p>
  * Static on purpose: {@code RestVersionInfo} is built with {@code new} by
- * seventeen stores and has no injection point, and a bound that differs by
+ * sixteen stores and has no injection point, and a bound that differs by
  * surface is what let this one slip. The property is read once and cached; it
  * is deployment configuration, not something that changes at runtime.
  */

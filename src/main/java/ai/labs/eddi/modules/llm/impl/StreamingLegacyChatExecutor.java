@@ -189,34 +189,6 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Resolve the overall wall-clock backstop for one streaming attempt.
-     * <p>
-     * Two settings bound a stream, and they are deliberately kept distinct rather
-     * than merged, because they bound different things:
-     * <ul>
-     * <li>the {@code timeout} model parameter (milliseconds) is handed to the
-     * provider's streaming HTTP client — for the JDK client it bounds the time to
-     * the first response, so it detects a provider that never answers without
-     * truncating one that answers slowly;</li>
-     * <li>{@code streamingTimeoutSeconds} is this overall backstop, covering the
-     * whole stream for providers whose native timeout does not fire (or does not
-     * exist).</li>
-     * </ul>
-     * Precedence, preserving both back-compatible shapes:
-     * <ol>
-     * <li>an explicit positive {@code streamingTimeoutSeconds} always wins —
-     * configs that set only that field behave exactly as before;</li>
-     * <li>otherwise the backstop is the 120s default, raised (never lowered) to
-     * cover an explicitly configured {@code timeout}. A config that sets only
-     * {@code timeout} therefore keeps the 120s default for any value up to 120s,
-     * and no longer has a long deliberate timeout silently cut short at 120s;</li>
-     * <li>otherwise the 120s default.</li>
-     * </ol>
-     * The {@code timeout} value is read from the task's raw parameters. A
-     * Qute-templated value cannot be resolved here and simply leaves the default in
-     * place — the pre-existing behaviour, never a shorter bound.
-     */
-    /**
      * Tasks already warned about a below-backstop {@code timeout}, keyed by task id
      * and configured value.
      * <p>
@@ -280,6 +252,34 @@ class StreamingLegacyChatExecutor {
         shortTimeoutWarnings.set(0);
     }
 
+    /**
+     * Resolve the overall wall-clock backstop for one streaming attempt.
+     * <p>
+     * Two settings bound a stream, and they are deliberately kept distinct rather
+     * than merged, because they bound different things:
+     * <ul>
+     * <li>the {@code timeout} model parameter (milliseconds) is handed to the
+     * provider's streaming HTTP client — for the JDK client it bounds the time to
+     * the first response, so it detects a provider that never answers without
+     * truncating one that answers slowly;</li>
+     * <li>{@code streamingTimeoutSeconds} is this overall backstop, covering the
+     * whole stream for providers whose native timeout does not fire (or does not
+     * exist).</li>
+     * </ul>
+     * Precedence, preserving both back-compatible shapes:
+     * <ol>
+     * <li>an explicit positive {@code streamingTimeoutSeconds} always wins —
+     * configs that set only that field behave exactly as before;</li>
+     * <li>otherwise the backstop is the 120s default, raised (never lowered) to
+     * cover an explicitly configured {@code timeout}. A config that sets only
+     * {@code timeout} therefore keeps the 120s default for any value up to 120s,
+     * and no longer has a long deliberate timeout silently cut short at 120s;</li>
+     * <li>otherwise the 120s default.</li>
+     * </ol>
+     * The {@code timeout} value is read from the task's raw parameters. A
+     * Qute-templated value cannot be resolved here and simply leaves the default in
+     * place — the pre-existing behaviour, never a shorter bound.
+     */
     static long resolveTimeoutSeconds(LlmConfiguration.Task task) {
         if (task == null) {
             return DEFAULT_TIMEOUT_SECONDS;

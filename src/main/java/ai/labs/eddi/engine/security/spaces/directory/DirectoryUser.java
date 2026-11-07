@@ -42,7 +42,8 @@ import java.util.Locale;
  *            when this principal first signed in
  * @param lastSeen
  *            the most recent sign-in the directory recorded — updated at most
- *            every few minutes per principal, not per request
+ *            every ten minutes per principal per instance
+ *            ({@code UserDirectory#RECORD_INTERVAL}), not per request
  */
 public record DirectoryUser(String principal, String subject, String username, String email, boolean emailVerified, String displayName,
         List<String> teams, Instant firstSeen, Instant lastSeen) {

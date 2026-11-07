@@ -35,9 +35,8 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
 
     /**
      * Standard constructor - creates storage via factory, wraps in
-     * HistorizedResourceStore. Used by most stores (LangChain, Parser,
-     * PropertySetter, ApiCalls, Behavior, Output, RegularDictionary, Agent,
-     * Workflow).
+     * HistorizedResourceStore. Used by most stores (Llm, Parser, PropertySetter,
+     * ApiCalls, RuleSet, Output, Dictionary, Agent, Workflow, ...).
      */
     protected AbstractResourceStore(IResourceStorageFactory storageFactory, String collectionName, IDocumentBuilder documentBuilder,
             Class<T> documentType, String... indexes) {

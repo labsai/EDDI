@@ -389,7 +389,7 @@ public class McpAdminTools {
 
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
             + "For structural changes (adding/removing workflows, modifying resources), use the "
-            + "individual resource tools (read_workflow, read_resource) and the REST API directly.")
+            + "individual resource tools (read_workflow, read_resource, update_resource, apply_agent_changes) or the REST API directly.")
     public String updateAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "New Agent name (optional)", required = false) String name,
@@ -1014,6 +1014,7 @@ public class McpAdminTools {
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
             + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
+            + "A cron interval or heartbeat below eddi.schedule.min-interval-seconds (default 60) is refused. "
             + "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON, or HEARTBEAT when only heartbeatIntervalSeconds is given)",
@@ -1128,7 +1129,8 @@ public class McpAdminTools {
     }
 
     @Tool(name = "list_schedules", description = "List all scheduled Agent triggers. "
-            + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fire count. " + "Optionally filter by agentId.")
+            + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fail count (at most 100 when "
+            + "not filtered). " + "Optionally filter by agentId.")
     public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {

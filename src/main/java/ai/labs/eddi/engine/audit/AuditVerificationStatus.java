@@ -32,8 +32,9 @@ public enum AuditVerificationStatus {
     INVALID,
 
     /**
-     * The entry carries no HMAC. Written while no vault master key was configured,
-     * so it proves nothing.
+     * The entry carries no HMAC. Written while the ledger had no signing key
+     * (neither a vault master key nor {@code eddi.audit.hmac-key}), so it proves
+     * nothing.
      */
     UNSIGNED,
 

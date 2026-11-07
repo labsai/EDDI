@@ -125,9 +125,8 @@ public interface IConversationMemory extends Serializable {
 
     /**
      * The agent's per-conversation LLM cost ceiling in USD
-     * ({@code maxCostPerConversationUsd}), or {@code null} when unlimited.
-     * Transient: carried from the agent onto memory for every turn, never
-     * persisted.
+     * ({@code maxCostPerConversationUsd}), or empty when unlimited. Transient:
+     * carried from the agent onto memory for every turn, never persisted.
      * <p>
      * An {@link OptionalDouble}, not a nullable {@code Double}, so that "no
      * ceiling" cannot be mistaken for {@code 0} ("no spend at all") — which is what
@@ -637,8 +636,13 @@ public interface IConversationMemory extends Serializable {
 
         int size();
 
+        /**
+         * The step at {@code index}, counted from the newest: {@code get(0)} is the
+         * newest step in the stack.
+         */
         IConversationStep get(int index);
 
+        /** The step last added to the stack, i.e. the newest one. */
         IConversationStep peek();
 
         /**

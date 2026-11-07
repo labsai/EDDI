@@ -66,6 +66,11 @@ import java.util.*;
  * key)</li>
  * </ol>
  * <p>
+ * Beyond CREATE, UPDATE and SKIP, a matched row is a CONFLICT when the target's
+ * copy was edited on this instance since the last sync wrote it, and the target
+ * resources the source no longer has (workflow steps, or whole workflows past
+ * the end of the source's list) come back as REMOVE rows.
+ * <p>
  * This is the core matching engine shared by all import/sync flows. It is
  * stateless — all state comes from the {@link IResourceSource} and the target
  * agent's existing configuration.

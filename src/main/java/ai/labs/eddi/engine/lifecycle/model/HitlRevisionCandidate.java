@@ -9,15 +9,16 @@ import java.util.Map;
 
 /**
  * What a model answer needs to be revised after a human rejects it at a later
- * behavior-rule pause ({@code hitlConfig.onRejection: REVISE}).
+ * behavior-rule pause ({@code hitlConfig.onRejection: REVISE}), or to be edited
+ * by an approver (since 6.7, {@code hitlConfig.review.allowAnswerEdits}).
  * <p>
  * The LLM task records one on the live memory for every answer it gives while
- * the policy is on; {@code LifecycleManager} stamps where in the pipeline the
- * task sits. When a RULE pause follows in the same workflow, the conversation
- * persists the candidate in the paused step under {@link #STEP_KEY} — step
- * data, so it travels with the step through every store and is scrubbed of
- * secret input like the rest of the step — and removes it again when the pause
- * is decided.
+ * either policy is on; {@code LifecycleManager} stamps where in the pipeline
+ * the task sits. When a RULE pause follows in the same workflow, the
+ * conversation persists the candidate in the paused step under
+ * {@link #STEP_KEY} — step data, so it travels with the step through every
+ * store and is scrubbed of secret input like the rest of the step — and removes
+ * it again when the pause is decided.
  * <p>
  * {@link #getTranscriptJson()} is the request that produced the answer: the
  * system message, the windowed history, the user's message and any tool

@@ -415,6 +415,8 @@ public class ConverseWithAgentTool {
                 .toList();
     }
 
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     /**
      * Refuses when a model-supplied {@code conversationId} belongs to a user other
      * than the one this tool is bound to.
@@ -431,8 +433,6 @@ public class ConverseWithAgentTool {
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
      */
-    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
-
     private String refuseIfNotOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
             // Fail closed: with no bound identity there is nothing to compare the

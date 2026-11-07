@@ -319,10 +319,9 @@ final class ModelParameterValues {
     }
 
     /**
-     * A list of strings: either a JSON array ({@code ["END","
-
-    "]}, needed when an item contains a comma or a newline) or a comma-separated
-     * list. Blank items are dropped; {@code null} when nothing usable remains.
+     * A list of strings: either a JSON array ({@code ["END", "STOP"]}, needed when
+     * an item contains a comma or a newline) or a comma-separated list. Blank items
+     * are dropped; {@code null} when nothing usable remains.
      */
     static List<String> stringList(Map<String, String> parameters, String key) {
         String raw = rawValue(parameters, key);

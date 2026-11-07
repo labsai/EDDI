@@ -1492,7 +1492,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     /**
      * True when {@code date} is at least {@code days} days in the past.
      * <p>
-     * This was written against {@link Period}, which normalizes into
+     * This was written against {@code java.time.Period}, which normalizes into
      * years/months/days — and the check only ever looked at the years and days
      * components, never the months. For a 35-day-old date and a 30-day limit,
      * {@code Period.between(now, date)} is {@code P-1M-4D}, so the test read

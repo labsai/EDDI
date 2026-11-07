@@ -13,7 +13,6 @@ package ai.labs.eddi.modules.llm.guardrails;
  * {@code guardrail_error}, and still counts {@link #costUsd()} — a classifier
  * that answered gibberish was billed for it.
  * <p>
- * <p>
  * A guardrail that gave up part-way may already have found something — a
  * pattern list that timed out on its third pattern after the first one matched.
  * That {@link #partialFinding()} is not lost: a guardrail that fails open

@@ -40,9 +40,12 @@ import java.util.function.LongSupplier;
  * A write on this instance is adopted at once; other instances see it when
  * their cache expires. Access checks read these on every request, so a store
  * read per call is not an option. When the store cannot be read, the values
- * last read are kept, and before any successful read the defaults apply — which
- * for {@code legacy-visibility} is the permissive {@code shared}, matching what
- * an unconfigured deployment has always done.
+ * last read are kept. If the store has never been read successfully, what an
+ * administrator stored is unknown rather than absent: pinned properties still
+ * apply, no default team is set, and {@code legacy-visibility} fails closed to
+ * {@code admin-only} until a read succeeds. Only a store that is readable but
+ * holds nothing yields the permissive {@code shared} default, matching what an
+ * unconfigured deployment has always done.
  *
  * <h3>Why enforcement is a separate switch from ownership</h3>
  * {@code eddi.workspaces.enabled} gates <em>enforcement</em> only. Ownership is

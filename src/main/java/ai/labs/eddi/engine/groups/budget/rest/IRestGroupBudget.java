@@ -52,7 +52,7 @@ public interface IRestGroupBudget {
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-viewer"})
     @Operation(summary = "Past months", description = "Spend and adjustments of the most recent months, newest first, with the "
-            + "adjustment history (actor, reason) of each. At most the retention window (13 months).")
+            + "adjustment history (actor, reason) of each. At most the retention window (eddi.groups.team-budget.retention-months, 13 by default).")
     Response readHistory(@PathParam("groupId") String groupId, @QueryParam("months")
     @DefaultValue("6") int months);
 
@@ -62,7 +62,7 @@ public interface IRestGroupBudget {
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed("eddi-admin")
     @Operation(summary = "Set this month's cap", description = "Sets this month's cap by adjusting the delta over the configured "
-            + "base; the next month starts at the base again. 400 when the cap is below what is already spent, the reason is "
-            + "missing, or the group has no teamBudget.")
+            + "base; the next month starts at the base again. 400 when the cap is not a positive number or is below what is "
+            + "already spent, the reason is missing or over 1000 characters, or the group does not exist or has no teamBudget.")
     Response setCurrentMonthCap(@PathParam("groupId") String groupId, CapRequest request);
 }

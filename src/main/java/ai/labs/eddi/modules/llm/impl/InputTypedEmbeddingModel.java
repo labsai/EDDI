@@ -50,10 +50,10 @@ import java.util.Set;
  * The capability check is not optional. {@code EmbeddingModel.embed} validates
  * the request against {@link EmbeddingModel#supportedParameters()} and throws
  * {@code UnsupportedFeatureException} for anything unsupported <em>rather than
- * ignoring it</em>. In langchain4j 1.20.0 only two of the eight providers EDDI
- * builds declare {@code INPUT_TYPE} — Google Gemini and Cohere — so setting it
- * unconditionally would turn every OpenAI, Azure, Ollama, Bedrock, Vertex and
- * Mistral knowledge base into a hard failure.
+ * ignoring it</em>. In the langchain4j release EDDI pins only two of the eight
+ * providers EDDI builds declare {@code INPUT_TYPE} — Google Gemini and Cohere —
+ * so setting it unconditionally would turn every OpenAI, Azure, Ollama,
+ * Bedrock, Vertex and Mistral knowledge base into a hard failure.
  * <p>
  * The check reads {@code supportedParameters()} on the live model rather than
  * consulting a table of provider names. A hand-maintained matrix would be one

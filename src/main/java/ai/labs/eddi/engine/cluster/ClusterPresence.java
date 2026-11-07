@@ -41,11 +41,11 @@ import java.nio.charset.StandardCharsets;
  * Who is in the cluster right now.
  * <p>
  * Every node writes {@code n.<nodeId>} into the {@code NODES} bucket every
- * {@code eddi.cluster.presence.interval} (10 s); the bucket's 30 s TTL removes
- * a node that stopped writing. The value carries the node's boot id (for fast
- * lease takeover after a restart), its version, the payload protocol it speaks
- * and a few load numbers for the admin cluster view. Nothing here is on a
- * turn's path.
+ * {@code eddi.cluster.presence.interval} (10 s); the bucket's TTL, three
+ * intervals (30 s by default), removes a node that stopped writing. The value
+ * carries the node's boot id (for fast lease takeover after a restart), its
+ * version, the payload protocol it speaks and a few load numbers for the admin
+ * cluster view. Nothing here is on a turn's path.
  * <p>
  * <b>Watched, not polled (D6).</b> Each node keeps a KV watch on the bucket and
  * answers {@link #members()} and {@link #currentMembers()} from what it

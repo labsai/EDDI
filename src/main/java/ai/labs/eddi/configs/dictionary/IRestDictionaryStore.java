@@ -92,9 +92,9 @@ public interface IRestDictionaryStore extends IRestVersionInfo {
     /**
      * example dictionary json config:
      * <p>
-     * { "language" : "en", "words" : [ { "word" : "hello", "exp" :
-     * "greeting(hello)", "frequency" : 0 } ], "phrases" : [ { "phrase" : "good
-     * afternoon", "exp" : "greeting(good_afternoon)" } ] }
+     * { "lang" : "en", "words" : [ { "word" : "hello", "exp" : "greeting(hello)",
+     * "frequency" : 0 } ], "phrases" : [ { "phrase" : "good afternoon", "exp" :
+     * "greeting(good_afternoon)" } ] }
      *
      * @param regularDictionaryConfiguration
      *            dictionary resource to be created

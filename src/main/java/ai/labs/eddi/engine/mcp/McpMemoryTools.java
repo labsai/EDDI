@@ -33,6 +33,11 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  * GDPR-compliant deletion as MCP-compliant tools.
  *
  * <p>
+ * Reads need {@link McpRoles#CONVERSE} and are limited to the caller's own
+ * userId (ownership-guarded); writes and deletes are
+ * {@link McpRoles#ADMIN_ONLY}.
+ *
+ * <p>
  * Phase 11a — Persistent User Memory MCP integration.
  *
  * @author ginccc

@@ -197,7 +197,8 @@ public class ToolResponseTruncator {
     }
 
     /**
-     * Default truncation: hard cut with note about original length.
+     * Hard cut at {@code maxChars} with a note about the original length. The
+     * {@code truncate} strategy, and the fallback of every other strategy.
      */
     private String truncateResponse(String toolName, String result, int maxChars) {
         int originalLength = result.length();
@@ -241,15 +242,17 @@ public class ToolResponseTruncator {
     }
 
     /**
-     * Paginate: split into pages, store in PaginatedResponseStore, return first
-     * page with responseId.
-     * <p>
-     * Responses exceeding {@link #PAGINATE_MAX_STORABLE_CHARS} fall back to
-     * truncation to prevent excessive memory usage from materializing all page
-     * substrings in the Caffeine cache.
+     * Largest response the {@code paginate} strategy will store; anything longer
+     * falls back to truncation to prevent excessive memory usage from materializing
+     * all page substrings in the Caffeine cache.
      */
     static final int PAGINATE_MAX_STORABLE_CHARS = 500_000;
 
+    /**
+     * Paginate: split into pages, store in PaginatedResponseStore, return first
+     * page with responseId. Falls back to truncation without a conversation, above
+     * {@link #PAGINATE_MAX_STORABLE_CHARS}, or when the store is unavailable.
+     */
     private String paginateResponse(String conversationId, String toolName, String result, int maxChars) {
         int originalLength = result.length();
 
@@ -299,8 +302,8 @@ public class ToolResponseTruncator {
      * <li>The spend check refuses the call (conversation cost ceiling, tenant
      * budget) → truncate; an admitted call is charged whatever happens next</li>
      * <li>Model creation or LLM call fails → truncate</li>
-     * <li>Summary is longer than {@code maxChars} → truncate</li>
      * <li>Summary is empty → truncate</li>
+     * <li>Summary plus its header is longer than {@code maxChars} → truncate</li>
      * </ol>
      */
     private String summarizeResponse(String toolName, String result, int maxChars,

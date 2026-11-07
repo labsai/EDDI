@@ -146,6 +146,9 @@ public interface ICache<K, V> extends ConcurrentMap<K, V> {
      * @param maxIdleTimeUnit
      *            time unit for max idle time
      * @return the value being replaced, or null if nothing is being replaced.
+     *         <p>
+     *         The idle time is a hint: the Caffeine-backed {@link CacheImpl} does
+     *         not support it and applies only {@code lifespan}.
      */
     V put(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit);
 

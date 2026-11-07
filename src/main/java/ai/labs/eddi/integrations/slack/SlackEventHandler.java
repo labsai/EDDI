@@ -1593,7 +1593,10 @@ public class SlackEventHandler {
     }
 
     /**
-     * Post a message to Slack, chunking if it exceeds Slack's 4000-char limit.
+     * Post a message to Slack, escaped and split into at most
+     * {@link SlackMrkdwn#MAX_MESSAGES} messages of at most
+     * {@link SlackMrkdwn#MAX_MESSAGE_LENGTH} characters (Slack recommends staying
+     * under 4,000).
      *
      * @param botToken
      *            explicit bot token (if {@code null}, falls back to router lookup)

@@ -19,13 +19,14 @@ import javax.sql.DataSource;
 /**
  * PostgreSQL implementation of {@link IResourceStorageFactory}.
  * <p>
- * Activated when {@code eddi.datastore.type=postgres} is set. Creates
+ * Selected at runtime by {@code DataStoreProducers} when
+ * {@code eddi.datastore.type=postgres} is set. Creates
  * {@link PostgresResourceStorage} instances backed by the Quarkus-managed
  * {@link DataSource} (Agroal connection pool).
  * <p>
- * This overrides the default
+ * The producer returns this instead of the default
  * {@link ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory} when the
- * PostgreSQL profile is active.
+ * datastore type is {@code postgres}.
  *
  * @see ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory
  */

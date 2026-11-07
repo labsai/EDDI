@@ -26,11 +26,11 @@ import java.util.Optional;
  * without enabled OUTPUT_MATCH rules returns right there, having touched
  * nothing of the conversation. Otherwise only what the rules read is copied —
  * the named properties (as plain values, through {@code AlertJson}), the output
- * text (at most {@link TurnSnapshot#MAX_OUTPUT_CHARS}), the action list — into
- * a {@link TurnSnapshot}, and matching runs on the alert worker. The live
- * memory never leaves the turn. On a cache miss the rules are loaded on the
- * worker and this one turn copies everything a rule could read, so nothing is
- * missed.
+ * text (left out when longer than {@link TurnSnapshot#MAX_OUTPUT_CHARS}), the
+ * action list — into a {@link TurnSnapshot}, and matching runs on the alert
+ * worker. The live memory never leaves the turn. On a cache miss the rules are
+ * loaded on the worker and this one turn copies everything a rule could read,
+ * so nothing is missed.
  */
 @ApplicationScoped
 public class OutputMatchHook {

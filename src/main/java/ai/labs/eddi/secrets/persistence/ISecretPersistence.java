@@ -24,7 +24,7 @@ import java.util.Optional;
  * <ul>
  * <li>{@code MongoSecretPersistence} — MongoDB (default)</li>
  * <li>{@code PostgresSecretPersistence} — PostgreSQL (activated when
- * {@code eddi.db.type=postgres})</li>
+ * {@code eddi.datastore.type=postgres})</li>
  * </ul>
  *
  * @author ginccc
@@ -38,12 +38,13 @@ public interface ISecretPersistence {
      * Insert or update an encrypted secret. The composite key is
      * {@code (tenantId, keyName)}.
      * <p>
-     * A {@code null} {@code allowedAgents} or {@code description} means "not
-     * supplied": an update leaves the stored value alone, and an insert writes the
-     * wildcard grant and no description. A value write that did not mention the
-     * grant used to reset a narrowed grant to {@code ["*"]} and wipe the
-     * description — and, being a whole-row write, to revert any grant edit that
-     * landed between the caller's read and this write.
+     * A {@code null} {@code allowedAgents}, {@code allowedHosts} or
+     * {@code description} means "not supplied": an update leaves the stored value
+     * alone, and an insert writes the wildcard grant, no host restriction (any
+     * destination) and no description. A value write that did not mention the grant
+     * used to reset a narrowed grant to {@code ["*"]} and wipe the description —
+     * and, being a whole-row write, to revert any grant edit that landed between
+     * the caller's read and this write.
      *
      * @throws PersistenceException
      *             if the write fails

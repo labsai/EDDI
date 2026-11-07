@@ -62,8 +62,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ol>
  * <li>{@link SecretRedactionFilter} — scrubs potential secrets from string
  * values</li>
- * <li>{@link AuditHmac} — computes HMAC-SHA256 integrity hash using the vault
- * master key</li>
+ * <li>{@link AuditHmac} — computes the HMAC-SHA256 integrity hash with the
+ * signing key from {@link AuditKeyring} (none when signing is disabled)</li>
  * </ol>
  *
  * @author ginccc
@@ -1348,17 +1348,18 @@ public class AuditLedgerService implements UserErasureParticipant {
 
     /**
      * Whether entries are being written with an HMAC integrity signature. False
-     * when no vault master key is configured — the ledger is then a plain log, not
-     * evidence.
+     * when neither a vault master key nor {@code eddi.audit.hmac-key} is configured
+     * — the ledger is then a plain log, not evidence.
      */
     public boolean isSigningEnabled() {
         return keyring != null && keyring.signingKey() != null;
     }
 
     /**
-     * Re-check a stored entry's HMAC against the deployment's signing key.
+     * Re-check a stored entry's HMAC against the deployment's verification keys
+     * (the signing key and every retired or pinned key, see {@link AuditKeyring}).
      * <p>
-     * This is the only place the key is used for verification; it is deliberately
+     * This is the only place the keys are used for verification; it is deliberately
      * kept inside the service so no caller has to hold key material. Backs the
      * admin verification endpoint — without it {@link AuditHmac#verifyHmac} had no
      * production caller at all, and the ledger shipped with tamper detection that

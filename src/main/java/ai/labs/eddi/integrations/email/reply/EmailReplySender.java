@@ -415,7 +415,7 @@ public class EmailReplySender {
     // --- Writing and sending -------------------------------------------------
 
     /**
-     * Writes the reply row unless one exists for this (conversation, kind,
+     * Writes the reply row unless one exists for this (conversation, mail, kind,
      * discriminator), and starts its first attempt.
      */
     Optional<LedgerEntry> enqueue(Request request, Instant now) {

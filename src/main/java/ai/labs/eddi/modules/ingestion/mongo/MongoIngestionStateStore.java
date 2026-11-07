@@ -459,7 +459,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
             // free, so a replacement can claim the source and stamp every document
             // with its own id before the release runs. A source-wide release would
             // then wipe the live run's fence, and its recordSeen / recordIngested /
-            // recordUnreachable / tombstoneMissing would all silently match nothing
+            // recordUnreachable / bumpAndFindMissing would all silently match nothing
             // while it kept crawling and embedding.
             translating("release ownership of a reaped source",
                     () -> documents.updateMany(
@@ -477,8 +477,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
      * One at a time, each id claimed by the same statement that fails its run — the
      * ids have to come back <em>with</em> the write, not from a read after it, or a
      * replacement claiming the source in between would be released by the caller.
-     * The same shape {@code tombstoneMissing} uses, and it terminates for the same
-     * reason: every update removes that run from the filter's own match set.
+     * It terminates because every update removes that run from the filter's own
+     * match set.
      * </p>
      */
     private List<String> doReap(String sourceId, Instant startedBefore) {

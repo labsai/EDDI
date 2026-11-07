@@ -1248,13 +1248,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Cut an over-long response body down to the configured cap before it is
-     * written to conversation memory. The cap is a byte budget applied to the
-     * character count, which is a conservative approximation for multi-byte
-     * content.
-     */
-    // Package-private for unit testing.
-    /**
      * An application/json success body, redacted and capped.
      * <p>
      * The whole body is parsed and scrubbed as a tree FIRST — from the unredacted
@@ -1292,6 +1285,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * Cut an over-long response body down to the configured cap before it is
+     * written to conversation memory. The cap is a byte budget applied to the
+     * character count, which is a conservative approximation for multi-byte
+     * content.
+     */
+    // Package-private for unit testing.
     static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
         if (responseBody == null || responseBody.length() <= maxResponseSize) {
             return responseBody;
@@ -1391,6 +1391,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
+    }
+
     /**
      * Build the request, making sure no failure on the way carries a plaintext the
      * build already substituted.
@@ -1401,10 +1405,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
-    private static String stringOf(Object value) {
-        return value == null ? null : value.toString();
-    }
-
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
@@ -2017,6 +2017,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "plain header, or give it a name the connection does not claim.");
     }
 
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     /**
      * Bytes that may appear un-encoded in a substituted path value: RFC 3986
      * "unreserved", minus {@code .} — everything else is percent-encoded, including
@@ -2029,9 +2032,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
-    /** What a substituted value may keep when it lands in a URL's host:port. */
-    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
-
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -2241,7 +2241,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /**
      * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
-     * the bound exists and why exceeding it passes the value through.
+     * the bound exists and why a map or list past it is replaced by an empty one.
      */
     static final int MAX_PATH_VIEW_DEPTH = 10;
 

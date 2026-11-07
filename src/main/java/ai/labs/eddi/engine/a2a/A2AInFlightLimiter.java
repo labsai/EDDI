@@ -31,8 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code returnImmediately} send, a stream and a blocking send that outlived
  * its wait all keep their slot until the turn settles. So that a turn which
  * never reports back cannot leak a slot for good, every permit also releases
- * itself after a fixed lease. Release is idempotent; whichever comes first
- * wins.
+ * itself after a lease (the task timeout plus a short grace period, set by the
+ * caller). Release is idempotent; whichever comes first wins.
  */
 @ApplicationScoped
 public class A2AInFlightLimiter {

@@ -562,7 +562,10 @@ public class NatsConnectionManager {
         return everConnected;
     }
 
-    /** Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread. */
+    /**
+     * Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread, and
+     * immediately if the connection is already up.
+     */
     public void onConnected(Runnable hook) {
         connectedHooks.add(hook);
         if (isConnected()) {

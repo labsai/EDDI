@@ -964,11 +964,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         throw noAgentFileFound();
     }
 
-    /**
-     * The compatibility generation of the agent version at {@code agentUri}, or
-     * null when it cannot be read — reporting it is best effort and never fails the
-     * import.
-     */
+    /** Whether both URIs name the same agent, whatever their versions. */
     private static boolean sameAgent(URI a, URI b) {
         if (a == null || b == null) {
             return false;
@@ -978,6 +974,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return left != null && right != null && left.getId() != null && left.getId().equals(right.getId());
     }
 
+    /**
+     * The compatibility generation of the agent version at {@code agentUri}, or
+     * null when it cannot be read — reporting it is best effort and never fails the
+     * import.
+     */
     private Integer generationOf(URI agentUri) {
         try {
             IResourceId id = RestUtilities.extractResourceId(agentUri);
@@ -3689,8 +3690,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Live Sync Endpoints ====================
 
     /**
-     * In development mode, allow HTTP for remote sync (easier local testing). In
-     * production, enforce HTTPS to prevent credential leakage.
+     * In development and test mode, allow HTTP for remote sync (easier local
+     * testing). Elsewhere HTTPS is required unless the deployment's
+     * {@link SyncSourcePolicy} relaxes it.
      * <p>
      * Read from the launch mode, not from the {@code quarkus.profile} <em>system
      * property</em>: that property is only set when someone passed
@@ -3906,7 +3908,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * A {@link RemoteApiResourceSource.RemoteReadException} anywhere in the cause
      * chain means the source could not be read: {@code 502 Bad Gateway}, because
      * this deployment is fine and the one it was told to read is not. Anything else
-     * is this deployment's own failure and stays a {@code 500} — with a body.
+     * is this deployment's own failure and stays a {@code 500} — with a body. An
+     * access refusal anywhere in the chain is a {@code 403}.
      */
     private WebApplicationException syncFailure(String what, Exception cause) {
         String reason = cause.getMessage() == null || cause.getMessage().isBlank()
@@ -4067,6 +4070,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
+     * Row types an import writes on their own, without creating an agent version.
+     */
+    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
+
+    /**
      * {@code preview} with what writing the next version of its target would do to
      * the conversations running on it, whether the operator declares it compatible
      * or not — the preview is read before that choice, so it carries both answers.
@@ -4077,8 +4085,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * SKIP (nothing would be written, so no version is created), and when the
      * caller may not see the counts.
      */
-    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
-
     private ImportPreview withConversationImpact(ImportPreview preview) {
         if (promotionImpactReader == null || preview == null || preview.targetAgentId() == null) {
             return preview;

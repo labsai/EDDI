@@ -485,7 +485,8 @@ public class ConnectionConfiguration {
     /**
      * Whether a value passes the rule {@code oauth.clientSecret} and
      * {@code staticAuth.passwordRef} are held to at write time: exactly one
-     * {@code ${vault:…}} or {@code ${vars:…}} reference and nothing else.
+     * {@code ${vault:…}}, {@code ${vars:…}} or legacy {@code ${eddivault:…}}
+     * reference and nothing else.
      */
     public static boolean isReferenceOnly(String value) {
         return value != null && REFERENCE_ONLY.matcher(value.trim()).matches();
@@ -660,9 +661,10 @@ public class ConnectionConfiguration {
     }
 
     /**
-     * A credential endpoint must be an absolute https URL. Parsed, not
-     * prefix-matched: {@code startsWith("https://")} accepts userinfo, a query and
-     * a fragment, any of which changes where the request actually goes.
+     * A credential endpoint must be an absolute https URL (plain http only for a
+     * loopback host), with no userinfo. Parsed, not prefix-matched:
+     * {@code startsWith("https://")} accepts userinfo, a query and a fragment, any
+     * of which changes where the request actually goes.
      * <p>
      * Whether the ORIGIN is one an operator trusts is checked separately, against
      * the deployment-level allowlist — a per-connection document cannot be allowed

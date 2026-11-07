@@ -32,9 +32,9 @@ import java.util.Optional;
  * never cached here.
  * <p>
  * Invalidation is explicit on every write, not merely a TTL. A deleted
- * connection that keeps resolving for another five minutes is a revocation that
- * did not revoke; the TTL is the backstop for a write that happened on another
- * replica, not the mechanism.
+ * connection that keeps resolving for another TTL (one minute) is a revocation
+ * that did not revoke; the TTL is the backstop for a write that happened on
+ * another replica, not the mechanism.
  */
 @ApplicationScoped
 public class ConnectionRegistry {

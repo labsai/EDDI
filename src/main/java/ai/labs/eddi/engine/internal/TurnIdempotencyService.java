@@ -345,7 +345,7 @@ public class TurnIdempotencyService {
     /**
      * A result is replayable when the turn settled. A failed or interrupted turn is
      * not: the caller is being told to retry it, and a replay would hand the same
-     * failure back for ten minutes.
+     * failure back for the whole TTL (ten minutes by default).
      */
     public static boolean isReplayable(SimpleConversationMemorySnapshot snapshot) {
         ConversationState state = snapshot == null ? null : snapshot.getConversationState();

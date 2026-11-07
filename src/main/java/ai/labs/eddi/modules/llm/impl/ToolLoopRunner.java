@@ -337,11 +337,12 @@ class ToolLoopRunner {
      * The single shared tool-calling loop. Each model call inside it is wrapped in
      * {@link AgentExecutionHelper#executeWithRetry}; the loop itself never is, so a
      * retry can never re-execute a tool that already ran. Used by the live path
-     * (start iteration 0, no cleared calls) and by {@link #resumeToolLoop} (start
-     * iteration {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the
-     * approved calls the resumer already ran, so an identical reissue is gated
-     * again as a repeat). A fresh gated batch throws
-     * {@link ToolApprovalRequiredException} to re-pause — it escapes unchanged.
+     * (start iteration 0, no cleared calls) and by
+     * {@link ToolLoopResumer#resumeToolLoop} (start iteration
+     * {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the approved
+     * calls the resumer already ran, so an identical reissue is gated again as a
+     * repeat). A fresh gated batch throws {@link ToolApprovalRequiredException} to
+     * re-pause — it escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);
@@ -1408,9 +1409,9 @@ class ToolLoopRunner {
      * per-conversation budget check, tenant cost budget check, executor dispatch
      * via {@link ToolExecutionService}, response truncation, result trace, LAZY
      * activation) and RETURNS the resulting tool-result string WITHOUT appending it
-     * to any message list. The live loop appends the raw result; the resume path
-     * needs the string to journal it and to build the amended-args envelope, so it
-     * appends its own (possibly-enveloped) message. This is the single shared
+     * to any message list. The live loop appends the governed result; the resume
+     * path needs the string to journal it and to build the amended-args envelope,
+     * so it appends its own (possibly-enveloped) message. This is the single shared
      * per-request pipeline for both paths — the auto-checkpoint fires here (and
      * only here) so replayed/outcome-unknown resume calls never re-checkpoint.
      */

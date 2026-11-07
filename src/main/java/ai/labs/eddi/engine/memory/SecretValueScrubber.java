@@ -30,10 +30,12 @@ import java.util.regex.Pattern;
  * of — strings, numbers, lists, maps (keys and values) and {@link Context}
  * entries — without mutating them.
  * <p>
- * Shared by the two places that must keep a secret out of the stored
- * conversation: {@code PropertySetterTask} after it vaults a
- * {@code scope: "secret"} property, and {@code Conversation} at the end of a
- * turn that carried a context value the client marked secret.
+ * Shared by the places that must keep a secret out of the stored conversation:
+ * {@code PropertySetterTask} after it vaults a {@code scope: "secret"}
+ * property, and {@code Conversation} at the end of a turn that carried a
+ * context value the client marked secret. Checkpoints
+ * ({@link MemorySnapshotService}) and the read-time masking of stored secret
+ * turns ({@link ConversationMemoryUtilities}) apply the same rules.
  * <p>
  * A string is scrubbed by replacing every occurrence of the plaintext. A number
  * is replaced by the placeholder only when its string form equals a plaintext:

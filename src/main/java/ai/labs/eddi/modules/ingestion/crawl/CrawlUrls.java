@@ -104,9 +104,10 @@ public final class CrawlUrls {
      *
      * <p>
      * Lowercases only scheme and host, drops the fragment (never sent to a server)
-     * and any default port, strips tracking parameters, folds an index filename
-     * into its directory, and removes a trailing slash. Returns the input trimmed
-     * if it cannot be parsed, so an odd URL is still comparable with itself.
+     * and any default port, strips tracking parameters and sorts the remaining
+     * ones, folds an index filename into its directory, and removes a trailing
+     * slash. Returns the input trimmed if it cannot be parsed, so an odd URL is
+     * still comparable with itself.
      */
     public static String canonicalize(String url) {
         if (url == null || url.isBlank()) {
@@ -221,7 +222,8 @@ public final class CrawlUrls {
     }
 
     /**
-     * Whether {@code candidate} belongs to {@code seed}'s site.
+     * Whether {@code candidateHost} belongs to {@code seedHost}'s site. A leading
+     * {@code www.} is ignored either way.
      *
      * @param includeSubdomains
      *            when true, {@code docs.example.com} counts as part of

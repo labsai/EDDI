@@ -80,8 +80,13 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentD
  * agent. For each selected resource in the preview, writes the source content
  * into the target's existing resource (creating a new version).
  * <p>
- * The target agent's URI structure stays unchanged — only content is updated
- * and version numbers incremented.
+ * Matched resources are written as new versions of the target's own resources
+ * and the agent is re-pointed at them. Beyond that, a run can create resources
+ * and whole workflows the target lacks, take off the workflows the source no
+ * longer has, reorder workflows, and adopt the source agent's own settings; a
+ * resource the target changed locally since the last sync (CONFLICT) is only
+ * overwritten when it is named in the selection. Nothing is written when the
+ * source changes nothing.
  * <p>
  * Adding an extension type takes two edits: register the resource authority in
  * {@link WorkflowExtensions} (file extension + remote REST path) and add its

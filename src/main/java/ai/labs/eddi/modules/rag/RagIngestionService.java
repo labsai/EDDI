@@ -225,8 +225,9 @@ public class RagIngestionService {
      *
      * @param ingestionId
      *            the ingestion ID returned by {@link #ingest}
-     * @return status string ("pending", "processing", "completed", or "failed:
-     *         ...")
+     * @return status string ("pending", "processing", "completed", "failed: ...",
+     *         or {@link #STATUS_UNKNOWN} when this instance holds no status for the
+     *         id)
      */
     public String getStatus(String ingestionId) {
         String status = ingestionStatus.getIfPresent(ingestionId);

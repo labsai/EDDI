@@ -38,18 +38,6 @@ public interface IRestRuleSetStore extends IRestVersionInfo {
 
     @GET
     @Path("descriptors")
-    /*
-     * @Parameters({
-     *
-     * @Parameter(name = "filter", paramType = "query", dataType = "string", example
-     * = "<name_of_behavior>"),
-     *
-     * @ApiImplicitParam(name = "index", paramType = "query", dataType = "integer",
-     * example = "0"),
-     *
-     * @ApiImplicitParam(name = "limit", paramType = "query", dataType = "integer",
-     * example = "20")})
-     */
     @APIResponse(responseCode = "200", description = "Array of DocumentDescriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of behavior descriptors.")
