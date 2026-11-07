@@ -77,6 +77,14 @@ public class ScheduleConfiguration {
     private String agentId;
     private int agentVersion; // 0 = latest deployed
     private String environment; // "production" | "test"
+    /**
+     * Stored, returned and kept on a PUT that omits it, but read by no fire and by
+     * nothing that routes, filters or bills. Kept only so stored schedules and the
+     * column/index that hold it stay valid.
+     *
+     * @deprecated not read; do not build on it
+     */
+    @Deprecated(since = "6.7.0")
     private String tenantId;
 
     // -- Timing --
@@ -123,6 +131,14 @@ public class ScheduleConfiguration {
 
     // -- Security --
     private double maxCostPerFire = -1.0; // <= 0 = unlimited (Postgres stores 0 as NULL)
+    /**
+     * Stored, returned and kept on a PUT that omits it, but nothing checks it.
+     * Whether an agent may book its own check-backs is decided by its LLM task
+     * whitelisting the {@code schedule_followup} tool, not by a flag on a schedule.
+     *
+     * @deprecated not read; do not build on it
+     */
+    @Deprecated(since = "6.7.0")
     private boolean allowSelfScheduling;
     // Whether a deserialized body carried allowSelfScheduling at all. A primitive
     // cannot say "absent", and a PUT from a client that does not know the field
