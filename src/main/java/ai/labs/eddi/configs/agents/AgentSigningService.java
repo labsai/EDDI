@@ -7,6 +7,8 @@ import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -21,9 +23,9 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
@@ -74,35 +76,47 @@ public class AgentSigningService {
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
-    private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
 
     /**
-     * How long "this agent has no signing key" is believed before the vault is
-     * asked again. Most agents have no key, and the audit ledger signs every entry
-     * it writes — three per turn — so without this each entry of a keyless agent
-     * cost a vault lookup, i.e. a database read, only to learn the same thing
-     * again. A key generated or rotated on this node is used at once (both paths
-     * evict this entry); one generated on another node is picked up within the TTL,
-     * and entries signed meanwhile simply carry no signature, as they would have a
-     * moment earlier.
+     * How long the vault's answer about an agent's signing key is believed before
+     * the vault is asked again — the key it returned, and equally "this agent has
+     * no key".
+     *
+     * <p>
+     * The miss is the frequent case: most agents have no key, and the audit ledger
+     * signs every entry it writes — three per turn — so without remembering it each
+     * entry of a keyless agent cost a vault lookup, i.e. a database read, only to
+     * learn the same thing again. A key that was found expires on the same clock:
+     * it used to be kept for the life of the process, so a key replaced or removed
+     * in the vault by anything but this node's own generate and delete paths was
+     * never picked up, and this node went on signing with the old one — every
+     * signature then failing verification against the new public key. A key
+     * generated or rotated on this node is used at once (both paths evict the
+     * entry); any other change to the vault is picked up within the TTL.
+     * </p>
      */
-    static final long MISSING_KEY_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
+    static final long KEY_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
 
-    /** Bounds {@link #missingKeyUntil}; past it the map is simply cleared. */
-    static final int MAX_MISSING_KEY_ENTRIES = 10_000;
-
-    /**
-     * Cache key → {@link #nanoClock} reading until which the key is known to be
-     * absent. Only a vault answer of "not found" is remembered, never a vault
-     * failure.
-     */
-    private final ConcurrentHashMap<String, Long> missingKeyUntil = new ConcurrentHashMap<>();
-
-    /** Every {@link #evictKey} so far — see {@link #rememberMissing}. */
-    private final AtomicLong evictions = new AtomicLong();
+    /** Bounds {@link #keyCache}; past it Caffeine evicts. */
+    static final int MAX_CACHED_KEYS = 10_000;
 
     /** Package-private so tests can move time instead of sleeping. */
     LongSupplier nanoClock = System::nanoTime;
+
+    /**
+     * Cache key → the agent's private key, or {@link Optional#empty()} for a vault
+     * answer of "not found". A vault failure is never remembered. The ticker reads
+     * {@link #nanoClock} on every call, so a test that replaces the clock after
+     * construction moves this cache's time too.
+     */
+    private final Cache<String, Optional<PrivateKey>> keyCache = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHED_KEYS)
+            .expireAfterWrite(KEY_CACHE_TTL_NANOS, TimeUnit.NANOSECONDS)
+            .ticker(() -> nanoClock.getAsLong())
+            .build();
+
+    /** Every {@link #evictKey} so far — see {@link #rememberMissing}. */
+    private final AtomicLong evictions = new AtomicLong();
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -201,7 +215,7 @@ public class AgentSigningService {
      * As {@link #sign}, for callers that sign when they can and carry on unsigned
      * when the agent has no key: the audit ledger, which signs every entry on the
      * turn's thread. While a "no key" answer is remembered (see
-     * {@link #MISSING_KEY_TTL_NANOS}) this returns {@code null} without throwing,
+     * {@link #KEY_CACHE_TTL_NANOS}) this returns {@code null} without throwing,
      * where {@link #sign} would still build three exceptions per entry.
      *
      * @return Base64-encoded signature, or {@code null} if the agent has no key
@@ -209,8 +223,8 @@ public class AgentSigningService {
      *             if a key exists but signing failed, or the vault could not answer
      */
     public String signIfKeyPresent(String tenantId, String agentId, String payload) throws AgentSigningException {
-        String cacheKeyStr = cacheKey(tenantId, agentId);
-        if (!privateKeyCache.containsKey(cacheKeyStr) && isKnownMissing(cacheKeyStr)) {
+        Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKey(tenantId, agentId));
+        if (cached != null && cached.isEmpty()) {
             return null;
         }
         try {
@@ -221,12 +235,6 @@ public class AgentSigningService {
             }
             throw e;
         }
-    }
-
-    /** Whether a "not found" for this key is still being remembered. */
-    private boolean isKnownMissing(String cacheKeyStr) {
-        Long absentUntil = missingKeyUntil.get(cacheKeyStr);
-        return absentUntil != null && nanoClock.getAsLong() - absentUntil < 0;
     }
 
     /**
@@ -416,9 +424,9 @@ public class AgentSigningService {
      * <p>
      * The cache line is dropped in a {@code finally}: a vault delete that fails
      * leaves the private key in the vault, but leaving the loaded key in
-     * {@link #privateKeyCache} as well would let this process keep SIGNING as the
-     * deleted agent from memory, for as long as it lives — a strictly worse outcome
-     * than the vault entry the WARN is about.
+     * {@link #keyCache} as well would let this process keep SIGNING as the deleted
+     * agent from memory until the entry expires — a strictly worse outcome than the
+     * vault entry the WARN is about.
      * </p>
      */
     private void deleteVaultKey(String tenantId, String vaultKey, String cacheKeyStr, DeleteTally tally) {
@@ -447,8 +455,8 @@ public class AgentSigningService {
      * </p>
      *
      * <p>
-     * The vault round-trip happens OUTSIDE {@code computeIfAbsent}: doing it inside
-     * held a ConcurrentHashMap bin lock across network I/O, blocking unrelated
+     * The vault round-trip happens OUTSIDE a computing load ({@code Cache.get(key,
+     * loader)}): that holds a map bin lock across network I/O, blocking unrelated
      * agents that hash to the same bin. A racing loser simply loads the same key
      * twice, which is harmless.
      * </p>
@@ -462,17 +470,10 @@ public class AgentSigningService {
     private PrivateKey loadPrivateKey(String tenantId, String agentId, int keyVersion) {
         String cacheKeyStr = keyVersion > 0 ? cacheKey(tenantId, agentId) + ";v=" + keyVersion : cacheKey(tenantId, agentId);
 
-        PrivateKey cached = privateKeyCache.get(cacheKeyStr);
+        Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKeyStr);
         if (cached != null) {
-            return cached;
-        }
-        Long absentUntil = missingKeyUntil.get(cacheKeyStr);
-        if (absentUntil != null) {
-            if (nanoClock.getAsLong() - absentUntil < 0) {
-                throw new PrivateKeyLoadException(agentId,
-                        new ISecretProvider.SecretNotFoundException("No signing key for agent " + agentId + " (checked recently)"));
-            }
-            missingKeyUntil.remove(cacheKeyStr, absentUntil);
+            return cached.orElseThrow(() -> new PrivateKeyLoadException(agentId,
+                    new ISecretProvider.SecretNotFoundException("No signing key for agent " + agentId + " (checked recently)")));
         }
 
         String vaultKey = keyVersion > 0 ? vaultKeyNameVersioned(agentId, keyVersion) : vaultKeyName(agentId);
@@ -493,8 +494,8 @@ public class AgentSigningService {
             throw new PrivateKeyLoadException(agentId, e);
         }
 
-        PrivateKey raced = privateKeyCache.putIfAbsent(cacheKeyStr, loaded);
-        return raced != null ? raced : loaded;
+        keyCache.put(cacheKeyStr, Optional.of(loaded));
+        return loaded;
     }
 
     /**
@@ -507,23 +508,18 @@ public class AgentSigningService {
      * removes the entry itself).
      */
     private void rememberMissing(String cacheKeyStr, long evictionsAtLookup) {
-        if (missingKeyUntil.size() >= MAX_MISSING_KEY_ENTRIES) {
-            missingKeyUntil.clear();
-        }
-        Long until = nanoClock.getAsLong() + MISSING_KEY_TTL_NANOS;
-        missingKeyUntil.put(cacheKeyStr, until);
+        keyCache.put(cacheKeyStr, Optional.empty());
         if (evictions.get() != evictionsAtLookup) {
-            missingKeyUntil.remove(cacheKeyStr, until);
+            keyCache.asMap().remove(cacheKeyStr, Optional.empty());
         }
     }
 
-    /** Forgets both what was loaded and what was found missing under this key. */
+    /** Forgets what was loaded, or found missing, under this key. */
     private void evictKey(String cacheKeyStr) {
         // Counted BEFORE the removal, so a concurrent rememberMissing that slips its
         // entry in after the removal still sees the count move and withdraws it.
         evictions.incrementAndGet();
-        privateKeyCache.remove(cacheKeyStr);
-        missingKeyUntil.remove(cacheKeyStr);
+        keyCache.invalidate(cacheKeyStr);
     }
 
     private String vaultKeyName(String agentId) {

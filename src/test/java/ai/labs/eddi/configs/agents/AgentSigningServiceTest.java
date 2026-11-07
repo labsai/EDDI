@@ -12,8 +12,11 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.logging.Handler;
@@ -62,7 +65,7 @@ class AgentSigningServiceTest {
         }
         assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
 
-        now[0] += AgentSigningService.MISSING_KEY_TTL_NANOS;
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
         assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
         assertEquals(2, secretProvider.resolveCalls, "after the TTL the vault is asked again");
     }
@@ -138,6 +141,70 @@ class AgentSigningServiceTest {
         secretProvider.beforeNotFound = null;
 
         assertNotNull(signingService.sign("tenant-1", "agent-x", "entry"), "the new key signs at once, not after the TTL");
+    }
+
+    // ─── positive cache: a loaded key is re-read from the vault after the TTL ───
+
+    /**
+     * The loaded private key used to be cached with no expiry, so a key replaced in
+     * the vault — on this node by anything other than this service, or on another
+     * node by anything at all — was never picked up: this process kept signing with
+     * the old key until it restarted, and every signature failed verification
+     * against the new public key.
+     */
+    @Test
+    void replacedKey_isUsedOnceTheTtlHasPassed() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        String publicKeyA = provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", "first");
+
+        String publicKeyB = provisionKey("tenant-1", "agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
+        String signature = signingService.sign("tenant-1", "agent-1", "second");
+
+        assertTrue(signingService.verify(publicKeyB, "second", signature), "the replaced key must be picked up after the TTL");
+        assertFalse(signingService.verify(publicKeyA, "second", signature), "the old key is still cached");
+    }
+
+    /**
+     * The other half of the TTL: inside it the cached key is used, so the vault is
+     * read once per agent and TTL, not once per signature (the audit ledger signs
+     * three entries a turn).
+     */
+    @Test
+    void loadedKey_isServedFromTheCacheInsideTheTtl() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        String publicKeyA = provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", "first");
+        int readsAfterFirstSignature = secretProvider.resolveCalls;
+
+        provisionKey("tenant-1", "agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS - 1;
+        String signature = signingService.sign("tenant-1", "agent-1", "second");
+
+        assertTrue(signingService.verify(publicKeyA, "second", signature), "inside the TTL the cached key signs");
+        assertEquals(readsAfterFirstSignature, secretProvider.resolveCalls, "inside the TTL the vault is not read again");
+    }
+
+    /**
+     * A key removed from the vault without going through this node's
+     * {@code deleteKeyPair} — another node's delete, for one — stops being used
+     * after the TTL rather than for the rest of the process's life.
+     */
+    @Test
+    void keyRemovedFromTheVaultElsewhere_stopsSigningOnceTheTtlHasPassed() throws Exception {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+        provisionKey("tenant-1", "agent-1");
+        signingService.sign("tenant-1", "agent-1", "first");
+
+        secretProvider.forget("tenant-1:agent-signing-key:agent-1");
+        now[0] += AgentSigningService.KEY_CACHE_TTL_NANOS;
+
+        assertNull(signingService.signIfKeyPresent("tenant-1", "agent-1", "second"),
+                "the removed key must not keep signing from memory past the TTL");
     }
 
     @Test
@@ -823,6 +890,32 @@ class AgentSigningServiceTest {
         assertTrue(captured.stream().anyMatch(value -> value.contains("No signing keys found in the vault")),
                 "the nothing-to-clean DEBUG is the line under test and it did not fire; captured: " + captured);
         assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's nothing-to-clean DEBUG");
+    }
+
+    /**
+     * Provisions a signing key the way an operator does: an Ed25519 keypair whose
+     * PKCS#8 private key goes into the vault, Base64-encoded, under
+     * {@code agent-signing-key:{agentId}}. Writing it again replaces the key.
+     *
+     * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
+     */
+    private String provisionKey(String tenantId, String agentId) throws Exception {
+        return storeNewKey(tenantId, "agent-signing-key:" + agentId, agentId);
+    }
+
+    /**
+     * As {@link #provisionKey(String, String)}, for a rotated key under
+     * {@code agent-signing-key:{agentId}:v{version}}.
+     */
+    private String provisionKey(String tenantId, String agentId, int version) throws Exception {
+        return storeNewKey(tenantId, "agent-signing-key:" + agentId + ":v" + version, agentId);
+    }
+
+    private String storeNewKey(String tenantId, String keyName, String agentId) throws Exception {
+        KeyPair keyPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        secretProvider.store(new SecretReference(tenantId, keyName), Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded()),
+                "Ed25519 signing key for agent " + agentId, List.of(agentId));
+        return Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
     }
 
     /**
