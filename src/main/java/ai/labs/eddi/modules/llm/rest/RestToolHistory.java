@@ -11,8 +11,10 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationS
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
-import ai.labs.eddi.modules.llm.model.ToolExecutionTrace;
-import ai.labs.eddi.modules.llm.model.ToolExecutionTrace.ToolCall;
+import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
+import ai.labs.eddi.modules.llm.impl.ToolOutcomeClassifier;
+import ai.labs.eddi.modules.llm.impl.ToolOutcomeClassifier.Outcome;
+import ai.labs.eddi.modules.llm.model.ToolHistory;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
@@ -28,7 +30,9 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
@@ -52,6 +56,11 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 @ApplicationScoped
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
+
+    /** The error of a call whose result the tool-result guardrail blocked. */
+    private static final String GUARDRAIL_BLOCKED = "blocked by tool-result guardrail";
+    /** The error of a call the trace opened but never recorded an outcome for. */
+    private static final String NO_RESULT = "no_result";
 
     private final ToolCacheService cacheService;
     private final ToolRateLimiter rateLimiter;
@@ -78,6 +87,9 @@ public class RestToolHistory {
      * The trace carries the raw tool ARGUMENTS and RESULTS of the conversation, so
      * it is gated on conversation ownership — a role check alone would let any
      * authenticated user read any conversation's tool traffic.
+     * <p>
+     * The body is a {@link ToolHistory} built from the stored trace: every call
+     * with its outcome, including calls refused before they ran.
      */
     @GET
     @Path("/history/{conversationId}")
@@ -91,8 +103,7 @@ public class RestToolHistory {
                 // dereferencing it below produced.
                 return conversationNotFound();
             }
-            ToolExecutionTrace trace = new ToolExecutionTrace();
-            List<ToolCall> toolCalls = new ArrayList<>();
+            List<ToolHistory.Call> toolCalls = new ArrayList<>();
 
             for (ConversationStepSnapshot step : snapshot.getConversationSteps()) {
                 for (WorkflowRunSnapshot packageRun : step.getWorkflows()) {
@@ -110,20 +121,14 @@ public class RestToolHistory {
                                         LOGGER.warn("Unexpected item type in tool trace list: " + item.getClass());
                                     }
                                 }
-                                processStepTrace(stepTrace, toolCalls);
+                                toolCalls.addAll(callsOf(stepTrace));
                             }
                         }
                     }
                 }
             }
 
-            trace.setToolCalls(toolCalls);
-            // Calculate totals
-            trace.setTotalExecutionTimeMs(toolCalls.stream().mapToLong(ToolCall::getExecutionTimeMs).sum());
-            trace.setHasErrors(toolCalls.stream().anyMatch(tc -> tc.getError() != null));
-            trace.setTotalCost(toolCalls.stream().mapToDouble(ToolCall::getCost).sum());
-
-            return Response.ok(trace).build();
+            return Response.ok(new ToolHistory(toolCalls, toolCalls.stream().anyMatch(call -> !call.success()))).build();
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             return conversationNotFound();
@@ -151,24 +156,129 @@ public class RestToolHistory {
                 .build();
     }
 
-    private void processStepTrace(List<Map<String, Object>> stepTrace, List<ToolCall> toolCalls) {
-        ToolCall currentCall = null;
-        for (Map<String, Object> event : stepTrace) {
-            String type = (String) event.get("type");
-            if ("tool_call".equals(type)) {
-                currentCall = new ToolCall();
-                currentCall.setToolName((String) event.get("tool"));
-                currentCall.setArguments((String) event.get("arguments"));
-                currentCall.setSuccess(true); // Assume success until error
-                toolCalls.add(currentCall);
-            } else if ("tool_result".equals(type) && currentCall != null) {
-                // Match with last call - simplistic but works for sequential execution
-                String toolName = currentCall.getToolName();
-                Object eventTool = event.get("tool");
-                if (toolName != null && toolName.equals(eventTool)) {
-                    currentCall.setResult((String) event.get("result"));
+    /**
+     * The calls one stored tool-loop trace records, in trace order.
+     * <p>
+     * A {@code tool_call} opens a call. Its {@code tool_result} or
+     * {@code tool_error} closes it, found by {@code callId}, or, in a trace without
+     * call ids, as the earliest open call of the same tool. A result's outcome is
+     * {@link ToolOutcomeClassifier}'s, the definition the repeat guard and the
+     * quota give-back use, so a failed HTTP call is not reported as a success. A
+     * {@code tool_error} with no open call (a call refused before it ran: argument
+     * schema, quota, approval-pause cap) and the refusals that are never preceded
+     * by a {@code tool_call} ({@code tool_repeat_refused},
+     * {@code tool_not_activated}, {@code tool_call_capped}) become calls of their
+     * own. A {@code tool_result_guardrail} that blocked the result fails the call
+     * whose result it follows.
+     */
+    private static List<ToolHistory.Call> callsOf(List<Map<String, Object>> trace) {
+        List<TracedCall> calls = new ArrayList<>();
+        Map<String, TracedCall> byCallId = new HashMap<>();
+        TracedCall lastWithResult = null;
+        for (Map<String, Object> event : trace) {
+            String type = text(event.get("type"));
+            if (type == null) {
+                continue;
+            }
+            String tool = text(event.get("tool"));
+            String callId = text(event.get("callId"));
+            switch (type) {
+                case "tool_call" -> {
+                    TracedCall call = new TracedCall(tool, callId, text(event.get("arguments")));
+                    calls.add(call);
+                    if (callId != null) {
+                        byCallId.put(callId, call);
+                    }
+                }
+                case "tool_result" -> {
+                    TracedCall call = openCall(calls, byCallId, tool, callId);
+                    call.result = text(event.get("result"));
+                    Outcome outcome = ToolOutcomeClassifier.classify(call.result);
+                    call.close(outcome == Outcome.SUCCESS ? null : outcome.name().toLowerCase(Locale.ROOT));
+                    lastWithResult = call;
+                }
+                case "tool_error" -> {
+                    String error = text(event.get("error"));
+                    openCall(calls, byCallId, tool, callId).close(error != null ? error : type);
+                }
+                case "tool_repeat_refused", "tool_not_activated", "tool_call_capped" -> {
+                    TracedCall refused = new TracedCall(tool, callId, null);
+                    refused.close(type);
+                    calls.add(refused);
+                }
+                case "tool_result_guardrail" -> {
+                    if (ToolResultGuardrailConfig.ACTION_BLOCK.equals(event.get("action")) && lastWithResult != null
+                            && Objects.equals(lastWithResult.toolName, tool)) {
+                        lastWithResult.close(GUARDRAIL_BLOCKED);
+                    }
+                }
+                default -> {
+                    // Loop-level entries (cost ceilings, answer tool, HITL markers) are
+                    // not tool calls.
                 }
             }
+        }
+        return calls.stream().map(TracedCall::toCall).toList();
+    }
+
+    /**
+     * The open call this result or error closes: the one with its call id, or,
+     * without an id, the earliest open call of the same tool. A new call when there
+     * is none, because the trace records no {@code tool_call} for a call refused
+     * before it ran.
+     */
+    private static TracedCall openCall(List<TracedCall> calls, Map<String, TracedCall> byCallId, String tool, String callId) {
+        if (callId != null) {
+            TracedCall call = byCallId.get(callId);
+            if (call != null && !call.closed) {
+                return call;
+            }
+        } else {
+            for (TracedCall call : calls) {
+                if (!call.closed && call.callId == null && Objects.equals(call.toolName, tool)) {
+                    return call;
+                }
+            }
+        }
+        TracedCall unopened = new TracedCall(tool, callId, null);
+        calls.add(unopened);
+        if (callId != null) {
+            byCallId.put(callId, unopened);
+        }
+        return unopened;
+    }
+
+    private static String text(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
+    /** One call while its trace is read. */
+    private static final class TracedCall {
+        private final String toolName;
+        private final String callId;
+        private final String arguments;
+        private String result;
+        private String error;
+        private boolean closed;
+
+        private TracedCall(String toolName, String callId, String arguments) {
+            this.toolName = toolName;
+            this.callId = callId;
+            this.arguments = arguments;
+        }
+
+        /** Records the outcome; a null error is a success. */
+        private void close(String error) {
+            this.error = error;
+            this.closed = true;
+        }
+
+        /** A call the trace never closed has no known outcome, so it is no success. */
+        private ToolHistory.Call toCall() {
+            if (!closed) {
+                return new ToolHistory.Call(toolName, callId, arguments, result, false, NO_RESULT);
+            }
+            return new ToolHistory.Call(toolName, callId, arguments, result, error == null, error);
         }
     }
 
