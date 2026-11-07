@@ -21,6 +21,18 @@ constructor parameter is gone. The HITL pinning predicate
 (`canExecuteDivergeFromResolve`) is unchanged — a call with pre-request
 instructions stays unpinnable — and its Javadoc now gives the real reason.
 
+**A retried call's failure keys come from its final attempt.** On a non-2xx
+response with `saveResponse`, every attempt wrote `{name}Error` and
+`{name}HttpCode` to memory and to the template data, and nothing removed them:
+a `503` followed by a successful retry left `weatherHttpCode=503` and the 503
+body next to a good `weather`, where `postResponse`, output templates and the
+next call of the turn all saw a failure. A `503` with a body followed by a
+`500` with a blank one paired the first body with the second code. Now the
+template data holds the current attempt's failure keys only (they are removed
+before the next attempt, so a `responseValuePathMatchers` entry on
+`{name}Error` still judges the response it decides about), and memory records
+the final attempt's failure once, after the loop — as the `forEach` path does.
+
 ### Behaviour changes
 
 - A `preRequest` property instruction with a `toObjectPath` now writes into the
@@ -28,6 +40,12 @@ instructions stays unpinnable — and its Javadoc now gives the real reason.
 - The `{memory…}` view in the request templates is no longer rebuilt after the
   instructions run, so it does not show a property they just set;
   `{properties.x}` does, as it always has and as it does in `postResponse`.
+- A retry request can no longer template the previous attempt's
+  `{name}HttpCode` / `{name}Error`. That was undocumented, and it is the
+  divergence between the previewed and the sent request that the HITL pinning
+  guard warns about.
+- Memory gets one `{name}Error` / `{name}HttpCode` entry per call instead of one
+  per failed attempt, written after the response headers rather than before.
 
 **Files:** [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java),
 [`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java);

@@ -332,6 +332,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // call failed. The store refuses that config at save time now; one stored
                 // before the check skips the save and says so, instead of failing the turn.
                 boolean saveResponse = effectiveSaveResponse(call);
+                // A failed attempt's {name}Error / {name}HttpCode. The template data holds
+                // the CURRENT attempt's, so a responseValuePathMatcher judges the response
+                // it is deciding about; memory gets the FINAL attempt's, once, after the loop.
+                String errorObjectName = call.getResponseObjectName() + "Error";
+                String httpCodeObjectName = call.getResponseObjectName() + "HttpCode";
+                boolean failureInTemplateData = false;
+                String failureBody = null;
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -340,6 +347,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
+                    // The same for the failure keys: a retry that succeeds, or fails with
+                    // a blank body, must not leave the previous attempt's code or error
+                    // body next to its own result.
+                    if (failureInTemplateData) {
+                        templateDataObjects.remove(errorObjectName);
+                        templateDataObjects.remove(httpCodeObjectName);
+                        failureInTemplateData = false;
+                    }
+                    failureBody = null;
                     // Agent test harness: with a mock (chosen above, BEFORE the request is
                     // built) everything below — saveResponse, postResponse property
                     // instructions, retries — runs on it unchanged. Building resolves ${vault:},
@@ -428,16 +444,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                 : SecretRedactionFilter.redact(httpCodeMessage);
                         result.put("body", toolErrorBody);
 
-                        // Store error body in memory so downstream templates / rules can inspect it
+                        // Keep the error body so downstream templates / rules can inspect it
                         if (saveResponse) {
-                            String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
-                                prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
                                 templateDataObjects.put(errorObjectName, truncatedError);
+                                failureBody = truncatedError;
                             }
-                            prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
-                                    call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
-                            templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                            templateDataObjects.put(httpCodeObjectName, response.getHttpCode());
+                            failureInTemplateData = true;
                         }
                     }
 
@@ -521,6 +535,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
                 } while (retryCall);
 
+                if (failureInTemplateData) {
+                    recordFailure(currentStep, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode());
+                }
+
                 // This executor has no response-validation stage, so a post-response
                 // property instruction never sees a validation error. Passing the flag
                 // explicitly keeps the (unused) `runOnValidationError` semantics visible
@@ -563,6 +581,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Stores the final attempt's failure in conversation memory: its error body
+     * (when it had one) and its code. Once per call, however many attempts it took,
+     * as the forEach path does.
+     */
+    private void recordFailure(IWritableConversationStep currentStep, String errorObjectName, String errorBody, String httpCodeObjectName,
+                               int httpCode) {
+        if (errorBody != null) {
+            prePostUtils.createMemoryEntry(currentStep, errorBody, errorObjectName, KEY_HTTP_CALLS);
+        }
+        prePostUtils.createMemoryEntry(currentStep, httpCode, httpCodeObjectName, KEY_HTTP_CALLS);
     }
 
     /**
@@ -1021,8 +1052,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Same argument, different loop: buildRequest sits INSIDE execute()'s
         // retry do-while, and between attempts the shared templateDataObjects
-        // map gains {responseObjectName}, …Error, …HttpCode and the response
-        // headers. A call whose path, body or headers template any of those
+        // map gains {responseObjectName} and the response headers (a failed
+        // attempt's …Error and …HttpCode are removed again before the next
+        // attempt is built). A call whose path, body or headers template any of those
         // sends attempts 2..N as requests that were never resolved, never
         // previewed and never fingerprinted — while the approver saw only
         // attempt 1. Keyed on the instruction being present and actually able
