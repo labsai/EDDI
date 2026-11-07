@@ -27,9 +27,15 @@ unsigned transcript entry while the configuration said the agent signed.
   Creating an agent with signing on is refused (a new agent has no key yet), and
   `requirePeerVerification` no longer demands a key of the agent's own: verifying uses the
   speakers' keys.
-- **Duplicating an agent drops its identity and turns its signing off.** The original's keys live
-  under the original's id, so the copy could never sign with them and would have published the
-  original's public keys as its own.
+- **Duplicating an agent drops its identity and turns its signing off, and so does a ZIP import
+  that creates a new agent** (`RestImportService.createNewAgent`). The original's keys live under
+  the original's id, so the new agent could never sign with them and would have published the
+  original's public keys as its own; with the honest validator, every later save of it (a workflow
+  cascade included) would also have been refused. An import *merge* still writes the archive's
+  identity onto the local agent, as before.
+- **The crypto inventory lists `KeyPairGenerator` `Ed25519` again** (`CryptoInventoryTest`,
+  [`cryptography.md`](../cryptography.md)): the base branch dropped it with the unused generators,
+  and `generateKey` uses it.
 - **Manager.** A "Generate signing key" button in Security & Identity (admins only; disabled with a
   reason while there are unsaved edits or an older version is open) that follows the version the key
   was saved as. The copy that said signing is "not yet available" and that the backend rejects any

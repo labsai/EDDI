@@ -1719,6 +1719,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // create_sub_agent here. (A merge that updates an existing agent goes
         // through RestAgentStore.updateAgent, which keeps the local marker.)
         agentConfiguration.setDynamicOrigin(null);
+        // Nor does it keep the archive's identity, which is bound to the agent it was
+        // exported from: the private keys are vault entries under THAT agent's id, so
+        // the new agent could never sign with them, and every later save of it would
+        // be refused for signing with a key it does not hold. It signs once an admin
+        // generates it a key of its own and turns signing back on — as a duplicate.
+        agentConfiguration.setIdentity(null);
+        if (agentConfiguration.getSecurity() != null) {
+            agentConfiguration.getSecurity().setSignInterAgentMessages(false);
+        }
         URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
         registerCapabilities(createdAgentUri, agentConfiguration);
         return createdAgentUri;

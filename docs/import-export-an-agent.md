@@ -352,6 +352,12 @@ curl -X POST -H "Content-Type: application/zip" \
   --data-binary @agent-export.zip http://localhost:7070/backup/import
 ```
 
+An agent created this way gets no `identity` and `security.signInterAgentMessages` off, whatever
+the archive says: the archived keys belong to the agent that was exported, whose private halves
+are vault entries under its own id. To have the new agent sign, an admin generates it a key
+(`POST /agentstore/agents/{id}/signing-keys`) and turns signing back on; see
+[architecture.md](architecture.md#cryptographic-agent-identity).
+
 ### Preview Merge Import
 
 Dry-run analysis: returns what would change without modifying any data.

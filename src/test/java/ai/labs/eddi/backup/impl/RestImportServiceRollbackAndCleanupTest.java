@@ -16,6 +16,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import java.io.ByteArrayInputStream;
@@ -54,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -631,6 +634,52 @@ class RestImportServiceRollbackAndCleanupTest {
                 Files.writeString(new File(snippetsDir, ARCHIVE_SNIPPET_ID + ".snippet.json").toPath(), "SNIPPETJSON");
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+        }
+    }
+
+    // ==================== an imported agent's signing identity
+    // ====================
+
+    @Nested
+    @DisplayName("signing identity of an agent the import creates")
+    class ImportedAgentIdentity {
+
+        /**
+         * The archive's identity belongs to the agent it was exported from: its private
+         * keys are vault entries under that agent's id. Kept, the new agent could never
+         * sign, and every later save of it — a workflow cascade included — was refused
+         * for signing with a key it does not hold.
+         */
+        @Test
+        @DisplayName("gets no identity and signing off, and keeps peer verification")
+        void createdAgentDropsTheArchivedIdentity() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            stubAgentWithOneWorkflowZip();
+            var archived = new AgentConfiguration();
+            archived.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1")));
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(List.of(AgentPublicKey.createCurrent(1, "MCowBQYDK2VwAyEAkeyOfTheExportedAgent")));
+            archived.setIdentity(identity);
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            security.setRequirePeerVerification(true);
+            archived.setSecurity(security);
+            when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(archived);
+            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
+
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+
+                var created = ArgumentCaptor.forClass(AgentConfiguration.class);
+                verify(agentStore).create(created.capture());
+                assertNull(created.getValue().getIdentity());
+                assertFalse(created.getValue().getSecurity().isSignInterAgentMessages());
+                assertTrue(created.getValue().getSecurity().isRequirePeerVerification(), "verifying peers needs no key of the agent's own");
+            }
         }
     }
 
