@@ -956,7 +956,7 @@ public class HtmlToMarkdownConverter {
         /**
          * Prefixing containers currently open; see {@link #MAX_PREFIXED_NESTING}.
          */
-        int prefixNesting;
+        private int prefixNesting;
 
         Walk(String baseUrl, int cap) {
             this.baseUrl = baseUrl;
