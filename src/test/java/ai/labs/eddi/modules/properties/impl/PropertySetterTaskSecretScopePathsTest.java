@@ -312,6 +312,30 @@ class PropertySetterTaskSecretScopePathsTest {
         assertEquals("hello {properties.name}", memory.getConversationProperties().get("greeting").getValueString());
     }
 
+    /**
+     * A {@code "*"} default listed before an action's own value used to run again
+     * for every later action of the turn and overwrite that value, so the result
+     * depended on how many actions the turn had and in which order.
+     */
+    @Test
+    @DisplayName("a '*' default does not overwrite an action's own value when a later action selects it again")
+    void wildcardDefaultDoesNotOverwriteALaterSelectedValue() throws Exception {
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("greet", "other")));
+
+        task.execute(memory, setterFor(List.of(setOnActions(List.of("*"), conversationInstruction("mood", "default")),
+                setOnActions(List.of("greet"), conversationInstruction("mood", "hello")))));
+
+        assertEquals("hello", memory.getConversationProperties().get("mood").getValueString());
+    }
+
+    private static PropertyInstruction conversationInstruction(String name, String value) {
+        var instruction = new PropertyInstruction();
+        instruction.setName(name);
+        instruction.setValueString(value);
+        instruction.setScope(Scope.conversation);
+        return instruction;
+    }
+
     private static SetOnActions setOnActions(List<String> actions, PropertyInstruction instruction) {
         var setOnActions = new SetOnActions();
         setOnActions.setActions(actions);
