@@ -259,7 +259,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.environment` | `production` | Which deployment environment's agents are exposed. |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-turn wait before returning `504`. |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | In-flight completions; excess gets `429`. |
-| `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
+| `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. A failed agent listing is not cached: the next request retries it. |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let a chat mapped under the raw `X-OpenWebUI-User-Id` (before ids were namespaced) keep its conversation. Enable only if `/v1` never ran with `http-policy=authenticated` — see §4. |
 | `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat is mapped: `history` keys it by its opening messages (one conversation per client-side chat); `shared` keeps one conversation per user and agent, as earlier releases did. See §2. |
@@ -517,7 +517,7 @@ The conversation id is also on every response as `X-EDDI-Conversation-Id`.
 | **Two SDK chats without a chat id** | Two conversations, one per chat (§2) — unless both open with the same system and first user message *at the same time*. |
 | **A failing agent** | An OpenAI error (`500`, `code: agent_error`, the failing task's sanitized reason as `message`) — on a stream, an error event. Never a reply with `finish_reason: "stop"`. |
 | **Token counts** | Reported as `usage` for agents that call a model, summed across cascade steps and tool round-trips. Rule-based agents spend no tokens, so the field is omitted rather than zero-filled. On streams it needs `stream_options.include_usage` (§7.1). |
-| **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. |
+| **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. If the chat's conversation has ended, both requests (Open WebUI's completion and title request, say) move to the same new conversation rather than one each. |
 
 ### 7.1 Token usage
 
