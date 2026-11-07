@@ -1,4 +1,4 @@
-## fix(signing): the cached agent signing key expires after 60 s (2026-11-07)
+## fix(signing): private-key cache expires; unused provisioning and rotation methods removed (2026-11-07)
 
 **Repo:** EDDI (`fix/agent-signing-key-cache`)
 
@@ -14,11 +14,26 @@
   10,000 entries) on the existing test clock, replacing the two hand-rolled maps and the
   clear-everything size bound. The TTL constant is renamed `KEY_CACHE_TTL_NANOS` since it no longer
   covers only misses.
+- **`generateKeyPair`, `generateKeyPairVersioned` and `rotateKey` are deleted**, with the
+  eviction counter that guarded a race between a vault lookup and one of them. None had a
+  production caller — `RestAgentStore.validateSecurityFlags` already said so — and
+  [`architecture.md`](../architecture.md#cryptographic-agent-identity) claimed keys were
+  "provisioned as part of agent creation", sending operators looking for a step that does not
+  exist. The section now says what is true: nothing in EDDI provisions or rotates an agent signing
+  key, the secrets API cannot write an `agent-signing-key:` name (its key-name pattern has no `:`),
+  and an agent without a vault key signs nothing. `deleteKeyPair` and its version sweep stay. The
+  deleted generators were the only code able to write such an entry, so making signing keys
+  provisionable means bringing key generation back behind an admin operation.
 - [`configuration-reference.md`](../configuration-reference.md) `eddi.audit.agent-signing-enabled`:
   the 60 s re-check now covers a replaced or removed key, not only a missing one.
 
 ### Design decisions
 
+- **Deletion over wiring an admin endpoint.** The alternative was a REST and MCP operation
+  (`eddi-admin`) that calls the generators. That is a new capability surface — a route, an MCP
+  tool, the operator prompt, docs — for a feature nobody has asked to provision yet; the methods
+  were removed and later recovered once before (2026-05) without ever gaining a caller. The
+  deletion is its own commit, so it can be reverted alone if the endpoint is wanted.
 - **One cache for hits and misses** rather than a Caffeine cache beside the existing miss map:
   one TTL, one size bound, one eviction call, and `signIfKeyPresent`'s fast path is a single
   lookup.
@@ -29,8 +44,10 @@
 
 `AgentSigningServiceTest`: a key replaced in the vault signs after the TTL and the old one no
 longer does; inside the TTL the cached key signs with no second vault read; a key removed from the
-vault elsewhere stops signing after the TTL.
+vault elsewhere stops signing after the TTL; a key added for an agent just found keyless (unversioned
+and rotated) signs after the TTL. The generator and rotation tests are gone; the remaining tests
+provision keys by writing the vault entry directly, which is all the service reads.
 
 **Files:** [`AgentSigningService.java`](../../src/main/java/ai/labs/eddi/configs/agents/AgentSigningService.java),
 [`AgentSigningServiceTest.java`](../../src/test/java/ai/labs/eddi/configs/agents/AgentSigningServiceTest.java),
-[`configuration-reference.md`](../configuration-reference.md)
+[`architecture.md`](../architecture.md), [`configuration-reference.md`](../configuration-reference.md)

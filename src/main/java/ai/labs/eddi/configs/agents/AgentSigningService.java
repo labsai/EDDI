@@ -27,7 +27,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.stream.IntStream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -47,13 +46,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * Key lifecycle:
  * <ol>
- * <li>On agent creation: {@link #generateKeyPair(String, String)} creates an
- * Ed25519 keypair</li>
- * <li>Public key stored in {@code AgentConfiguration.identity.publicKey}</li>
- * <li>Private key stored in {@link ISecretProvider} (encrypted, never in config
- * JSON)</li>
- * <li>On deletion: {@link #deleteKeyPair(String, String)} cleans up vault
- * entry</li>
+ * <li>Private key in {@link ISecretProvider} under
+ * {@code agent-signing-key:{agentId}}, or
+ * {@code agent-signing-key:{agentId}:v{n}} for a rotated key (Base64 PKCS#8,
+ * never in config JSON); this service only reads it. Nothing in EDDI writes one
+ * — see the "Cryptographic Agent Identity" section of
+ * {@code docs/architecture.md}</li>
+ * <li>Public key in {@code AgentConfiguration.identity.publicKey}, or
+ * {@code identity.keys[]} for rotated keys</li>
+ * <li>On permanent agent deletion:
+ * {@link #deleteKeyPair(String, String, Collection)} removes the vault
+ * entries</li>
  * </ol>
  *
  * @since 6.0.0
@@ -64,7 +67,7 @@ public class AgentSigningService {
     private static final String ALGORITHM = "Ed25519";
     /**
      * Reserved key-name prefix, defined once in {@link SecretReference} so that the
-     * writer here and the resolution-time refusal in {@code SecretResolver} cannot
+     * reader here and the resolution-time refusal in {@code SecretResolver} cannot
      * drift apart.
      */
     private static final String VAULT_KEY_PREFIX = SecretReference.AGENT_SIGNING_KEY_PREFIX;
@@ -88,11 +91,11 @@ public class AgentSigningService {
      * entry of a keyless agent cost a vault lookup, i.e. a database read, only to
      * learn the same thing again. A key that was found expires on the same clock:
      * it used to be kept for the life of the process, so a key replaced or removed
-     * in the vault by anything but this node's own generate and delete paths was
-     * never picked up, and this node went on signing with the old one — every
-     * signature then failing verification against the new public key. A key
-     * generated or rotated on this node is used at once (both paths evict the
-     * entry); any other change to the vault is picked up within the TTL.
+     * in the vault by anything but this node's own {@link #deleteKeyPair} was never
+     * picked up, and this node went on signing with the old one — every signature
+     * then failing verification against the new public key. A key added, replaced
+     * or removed in the vault is now picked up within the TTL; this node's own
+     * delete takes effect at once.
      * </p>
      */
     static final long KEY_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
@@ -115,8 +118,6 @@ public class AgentSigningService {
             .ticker(() -> nanoClock.getAsLong())
             .build();
 
-    /** Every {@link #evictKey} so far — see {@link #rememberMissing}. */
-    private final AtomicLong evictions = new AtomicLong();
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -132,44 +133,6 @@ public class AgentSigningService {
         signCounter = meterRegistry.counter("eddi.agent.identity.sign.count");
         verifySuccessCounter = meterRegistry.counter("eddi.agent.identity.verify.success");
         verifyFailCounter = meterRegistry.counter("eddi.agent.identity.verify.fail");
-    }
-
-    /**
-     * Generate a new Ed25519 keypair for an agent.
-     *
-     * @param tenantId
-     *            the tenant identifier
-     * @param agentId
-     *            the agent identifier
-     * @return the Base64-encoded public key (to store in AgentConfiguration)
-     * @throws AgentSigningException
-     *             if key generation fails
-     */
-    public String generateKeyPair(String tenantId, String agentId) throws AgentSigningException {
-        try {
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
-            KeyPair keyPair = keyGen.generateKeyPair();
-
-            String publicKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
-            String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
-
-            // Store private key in vault
-            SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
-            secretProvider.store(ref, privateKeyB64,
-                    "Ed25519 signing key for agent " + agentId,
-                    List.of(agentId));
-
-            // Evict cached private key so the new key is used immediately
-            // (prevents stale key on re-generation / rotation)
-            evictKey(cacheKey(tenantId, agentId));
-
-            LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
-            return publicKeyB64;
-        } catch (NoSuchAlgorithmException e) {
-            throw new AgentSigningException("Ed25519 not available in JVM", e);
-        } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSigningException("Failed to store private key in vault", e);
-        }
     }
 
     /**
@@ -278,15 +241,15 @@ public class AgentSigningService {
      *
      * <p>
      * With no list of versions to work from this sweeps the whole range rather than
-     * stopping at the first gap: {@code rotateKey} takes an arbitrary version
-     * number from its caller, so a rotation that skipped a number (v1, v3) used to
-     * leave every key after the gap in the vault forever. Callers that have read
-     * the agent's configuration should pass its declared versions instead — see
-     * {@link #deleteKeyPair(String, String, Collection)}. And the legacy key is
-     * deleted in its own guard, because it not existing is the ordinary state of a
-     * rotated agent — letting that {@code SecretNotFoundException} out skipped the
-     * versioned scan entirely and leaked exactly the keys this method exists to
-     * remove.
+     * stopping at the first gap: rotated keys are written to the vault under
+     * whatever version number their provisioner chose, so a rotation that skipped a
+     * number (v1, v3) used to leave every key after the gap in the vault forever.
+     * Callers that have read the agent's configuration should pass its declared
+     * versions instead — see {@link #deleteKeyPair(String, String, Collection)}.
+     * And the legacy key is deleted in its own guard, because it not existing is
+     * the ordinary state of a rotated agent — letting that
+     * {@code SecretNotFoundException} out skipped the versioned scan entirely and
+     * leaked exactly the keys this method exists to remove.
      * </p>
      *
      * <p>
@@ -358,21 +321,21 @@ public class AgentSigningService {
     /**
      * The versioned keys to attempt: the blind 1..{@value #MAX_KEY_VERSION_SCAN}
      * range when the configuration is unknown, and otherwise everything up to the
-     * highest version it declares. Positive versions only — {@code rotateKey}
-     * rejects anything else, so a stored zero or negative names no vault entry.
+     * highest version it declares. Positive versions only — signing treats a
+     * version {@code <= 0} as the unversioned key, so a stored zero or negative
+     * names no versioned vault entry.
      *
      * <p>
-     * Deliberately NOT just the declared list. {@code rotateKey} writes the vault
-     * entry and returns; adding the version to {@code identity.keys} is a SEPARATE
-     * config write by the caller, which can fail after the vault write succeeded —
-     * and {@code keys[]} is operator-editable JSON that nothing prunes. Sweeping
-     * only what is listed therefore left an Ed25519 private key in the vault
-     * forever after a permanent delete, while the tally reported "Deleted N signing
-     * key(s)": the same leak wearing a success message that this class's Javadoc
-     * warns about, on a narrower path. Covering the gaps and the skipped numbers
-     * {@code rotateKey} allows costs a handful of extra round trips for a normal
-     * agent — not the 101 the blind sweep cost, which is what the declared-versions
-     * path exists to avoid.
+     * Deliberately NOT just the declared list. The vault entry and the
+     * {@code identity.keys} entry are two separate writes — the private key into
+     * the vault, the version into the agent's configuration — and either can land
+     * without the other; {@code keys[]} is also operator-editable JSON that nothing
+     * prunes. Sweeping only what is listed therefore left an Ed25519 private key in
+     * the vault forever after a permanent delete, while the tally reported "Deleted
+     * N signing key(s)": the same leak wearing a success message that this class's
+     * Javadoc warns about, on a narrower path. Covering gaps and skipped numbers
+     * costs a handful of extra round trips for a normal agent — not the 101 the
+     * blind sweep cost, which is what the declared-versions path exists to avoid.
      * </p>
      *
      * <p>
@@ -385,14 +348,14 @@ public class AgentSigningService {
      * <p>
      * An empty list of valid versions is an UNKNOWN bound, not a known-empty one,
      * and falls back to the full sweep exactly as {@code null} does. It is the same
-     * argument as the gaps above, at its extreme: {@code rotateKey} writes the
-     * vault entry and the caller then updates {@code identity.keys} separately, so
-     * a first rotation whose config write failed leaves v1 in the vault with
-     * {@code keys[]} still empty — and treating that as "no rotated versions,
-     * nothing to sweep" left an Ed25519 private key behind after a permanent delete
-     * while the tally reported success. An operator who pruned {@code keys[]} by
-     * hand produces the same shape. The 101 round trips are the price of not
-     * leaking a private key on a rare, irreversible operation.
+     * argument as the gaps above, at its extreme: the vault entry and
+     * {@code identity.keys} are written separately, so a first rotation whose
+     * config update never landed leaves v1 in the vault with {@code keys[]} still
+     * empty — and treating that as "no rotated versions, nothing to sweep" left an
+     * Ed25519 private key behind after a permanent delete while the tally reported
+     * success. An operator who pruned {@code keys[]} by hand produces the same
+     * shape. The 101 round trips are the price of not leaking a private key on a
+     * rare, irreversible operation.
      * </p>
      */
     private static List<Integer> versionsToSweep(Collection<Integer> knownVersions) {
@@ -441,7 +404,7 @@ public class AgentSigningService {
                 tally.firstFailure = vaultKey + ": " + e.getMessage();
             }
         } finally {
-            evictKey(cacheKeyStr);
+            keyCache.invalidate(cacheKeyStr);
         }
     }
 
@@ -458,7 +421,9 @@ public class AgentSigningService {
      * The vault round-trip happens OUTSIDE a computing load ({@code Cache.get(key,
      * loader)}): that holds a map bin lock across network I/O, blocking unrelated
      * agents that hash to the same bin. A racing loser simply loads the same key
-     * twice, which is harmless.
+     * twice, which is harmless. A load racing this node's {@link #deleteKeyPair}
+     * can put back the key the delete has just dropped; it then lives at most
+     * {@link #KEY_CACHE_TTL_NANOS}, as it does on every other node.
      * </p>
      *
      * @param keyVersion
@@ -477,9 +442,6 @@ public class AgentSigningService {
         }
 
         String vaultKey = keyVersion > 0 ? vaultKeyNameVersioned(agentId, keyVersion) : vaultKeyName(agentId);
-        // Read before asking the vault: an eviction after this point means a key may
-        // have been stored since, and this lookup's "not found" is then stale.
-        long evictionsAtLookup = evictions.get();
         PrivateKey loaded;
         try {
             SecretReference ref = new SecretReference(tenantId, vaultKey);
@@ -488,7 +450,7 @@ public class AgentSigningService {
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             loaded = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
         } catch (ISecretProvider.SecretNotFoundException e) {
-            rememberMissing(cacheKeyStr, evictionsAtLookup);
+            keyCache.put(cacheKeyStr, Optional.empty());
             throw new PrivateKeyLoadException(agentId, e);
         } catch (Exception e) {
             throw new PrivateKeyLoadException(agentId, e);
@@ -496,30 +458,6 @@ public class AgentSigningService {
 
         keyCache.put(cacheKeyStr, Optional.of(loaded));
         return loaded;
-    }
-
-    /**
-     * Remembers a "not found" — unless a key was generated, rotated or deleted on
-     * this node while the vault was being asked. A lookup that started before
-     * {@link #generateKeyPair} stored the key can otherwise publish its miss after
-     * that method's eviction, and the new key would go unused for the whole TTL.
-     * Publishing first and checking second closes the window: an eviction either
-     * happened before the check (seen, entry withdrawn) or after the publish (it
-     * removes the entry itself).
-     */
-    private void rememberMissing(String cacheKeyStr, long evictionsAtLookup) {
-        keyCache.put(cacheKeyStr, Optional.empty());
-        if (evictions.get() != evictionsAtLookup) {
-            keyCache.asMap().remove(cacheKeyStr, Optional.empty());
-        }
-    }
-
-    /** Forgets what was loaded, or found missing, under this key. */
-    private void evictKey(String cacheKeyStr) {
-        // Counted BEFORE the removal, so a concurrent rememberMissing that slips its
-        // entry in after the removal still sees the count move and withdraws it.
-        evictions.incrementAndGet();
-        keyCache.invalidate(cacheKeyStr);
     }
 
     private String vaultKeyName(String agentId) {
@@ -536,50 +474,6 @@ public class AgentSigningService {
      */
     private static String cacheKey(String tenantId, String agentId) {
         return "tenant=" + tenantId + ";agent=" + agentId;
-    }
-
-    /**
-     * Generate a versioned keypair for key rotation.
-     *
-     * @param tenantId
-     *            the tenant identifier
-     * @param agentId
-     *            the agent identifier
-     * @param version
-     *            the key version number
-     * @return the Base64-encoded public key
-     * @throws AgentSigningException
-     *             if key generation fails
-     */
-    public String generateKeyPairVersioned(String tenantId, String agentId, int version) throws AgentSigningException {
-        if (version <= 0) {
-            throw new AgentSigningException("Key version must be positive, got: " + version, null);
-        }
-        try {
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
-            KeyPair keyPair = keyGen.generateKeyPair();
-
-            String publicKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
-            String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
-
-            // Store versioned private key in vault
-            SecretReference ref = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version));
-            secretProvider.store(ref, privateKeyB64,
-                    "Ed25519 signing key v" + version + " for agent " + agentId,
-                    List.of(agentId));
-
-            // Evict version-specific cached private key so the new key is used immediately
-            evictKey(cacheKey(tenantId, agentId) + ";v=" + version);
-            // Also evict the legacy unversioned entry (if any)
-            evictKey(cacheKey(tenantId, agentId));
-
-            LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
-            return publicKeyB64;
-        } catch (NoSuchAlgorithmException e) {
-            throw new AgentSigningException("Ed25519 not available in JVM", e);
-        } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSigningException("Failed to store private key in vault", e);
-        }
     }
 
     /**
@@ -646,29 +540,6 @@ public class AgentSigningService {
             verifyFailCounter.increment();
             return false;
         }
-    }
-
-    /**
-     * Rotate the signing key for an agent. Creates a new versioned key and returns
-     * the public key for it.
-     *
-     * @param tenantId
-     *            the tenant identifier
-     * @param agentId
-     *            the agent identifier
-     * @param newVersion
-     *            the new key version number
-     * @return the Base64-encoded new public key
-     * @throws AgentSigningException
-     *             if rotation fails
-     */
-    public String rotateKey(String tenantId, String agentId, int newVersion) throws AgentSigningException {
-        if (newVersion <= 0) {
-            throw new AgentSigningException("Key version must be positive, got: " + newVersion, null);
-        }
-        String publicKeyB64 = generateKeyPairVersioned(tenantId, agentId, newVersion);
-        LOGGER.infof("Rotated signing key for agent '%s' to version %d", agentId, newVersion);
-        return publicKeyB64;
     }
 
     public static class AgentSigningException extends Exception {
