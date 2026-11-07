@@ -182,13 +182,13 @@ things: lessons that **say the same thing** (merged into one) and lessons a **la
 | `llmProvider`, `llmModel` | — | | The model to ask; without both the run fails |
 | `parameters` | `{}` | | Model-builder parameters (`apiKey`, `baseUrl`, …); vault references need an open grant, below |
 | `maxCostPerRun` | `0.10` | `5` | USD per run, checked against an estimate before the call |
-| `inputPricePer1M`, `outputPricePer1M` | an upper bound | | USD per million tokens, for that estimate |
+| `inputPricePer1M`, `outputPricePer1M` | an upper bound when unset | | USD per million tokens, for that estimate; an explicit value, zero included, is kept as given |
 | `minLessons` | `6` | | A team holding fewer lessons is skipped; values of 1 or less take the default |
 | `maxLessonsPerRun` | `40` | `100` | Lessons read per run, oldest first |
 | `outcomeLookbackDays` | `30` | `365` | How far back outcomes are read |
 | `maxOutcomesPerRun` | `20` | `100` | Outcomes shown to the model per run |
 
-Non-positive values take the default.
+For `maxCostPerRun`, `maxLessonsPerRun`, `outcomeLookbackDays` and `maxOutcomesPerRun`, non-positive values take the default; for `minLessons`, so do values of 1 or less.
 
 - **It runs on the schedule machinery**, like Dream and team cadences: cluster-wide claim, retry, dead-letter, fire log.
   `PUT /groupstore/groups/{groupId}/lessons/consolidation/schedule {"cronExpression": "0 3 * * 1"}` creates the schedule

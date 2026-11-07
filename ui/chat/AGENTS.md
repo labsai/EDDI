@@ -85,8 +85,9 @@ src/
   `llm_retry`, `approval_required` and `hitl_resume` (of these, the Manager's
   `use-chat.ts` handles only `guardrail_triggered`). There is **no `thinking` event** — the backend never emits one.
 - **`tool_call` is `{"tool":"<name>","callId":…}`, sent right before each tool runs**
-  (plus `displayName`/`display` only when the designer configured `toolDisplay`) —
-  never the arguments; those reach the client later, redacted, in
+  (plus `displayName`/`display` only when the designer configured `toolDisplay`;
+  `display` then holds the selected argument values, redacted and truncated) —
+  never the full arguments; those reach the client later, redacted, in
   `task_complete`'s `toolTrace`. A `tool_result` (`tool`, `callId`, `status`,
   `durationMs`, never the result) follows when it finishes, but the widget does not
   read it: it shows "Using {tool}…" (the Manager's wording) until the next `token`,

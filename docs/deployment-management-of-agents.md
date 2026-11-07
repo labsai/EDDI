@@ -582,8 +582,10 @@ This will:
 1. Read the agent configuration to discover its workflows
 2. Resolve each workflow reference to the workflow's **current** version — references are version-pinned and are not re-pointed when the workflow is edited, so the pinned version frequently is not the one that exists
 3. Skip any workflow another agent still references (at any version), and any workflow with no live version left
-4. Soft-delete each remaining workflow, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, LLM configs, property setters, parser dictionaries)
-5. Delete the agent itself
+4. Delete the agent itself
+5. Delete the agent's schedules, then soft-delete each remaining workflow, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, LLM configs, property setters, parser dictionaries)
+
+The agent is deleted **before** the schedules and workflows. A failure in step 5 is logged as a warning and does not roll the agent deletion back, so the agent can be gone while some of its workflows remain.
 
 > **`permanent=true` never cascades.** It applies to the resource named in the request — every
 > version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault,

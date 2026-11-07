@@ -21,3 +21,4 @@ Checked every line of the 100 pages under `docs/` (not `archive/` or the changel
 - `DreamConfig.batchSize` / `maxUsersPerRun` and `ScheduleConfiguration.allowSelfScheduling` / `tenantId` are stored but never read.
 - `IParserExtensionProvider` casts `lookupIfKnown` to `String`, so a JSON boolean would throw; it is also missing from the correction providers' `ExtensionDescriptor`.
 - `helm/eddi/values.yaml` still says `nats.buildProfileImage` stopped being read with chart "< 2.5"; it was 2.7.0. Left alone, because a change under `helm/` needs a chart version bump.
+- `McpConversationTools.buildConversationResponse` builds `agentResponse` only from output items that are `Map`s with a `text` key. Whether a live turn's snapshot still holds `TextOutputItem` objects (so the field would be missing) was not verified; `docs/mcp-server.md` keeps documenting the field.

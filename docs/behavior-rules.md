@@ -395,8 +395,7 @@ anything.
 {
   "type": "deploymentContext",
   "configs": {
-    "when": "production",
-    "tagMatches": "high-risk"
+    "when": "production"
   }
 }
 (...)

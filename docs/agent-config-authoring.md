@@ -226,7 +226,7 @@ The output system supports an `inputField` output type that tells the UI to swit
 }
 ```
 
-Supported `subType` values: `"password"` (the default when omitted — the only one that is masked and sent as a secret), `"text"`, `"email"`. The item also accepts `defaultValue` and a `validation` object (`minLength`, `maxLength`, `validationErrorMessage`). When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+Supported `subType` values: `"password"` (the default when omitted), `"text"`, `"email"`. The Chat UI masks and sends only a `password` response as a secret turn; the Manager sends the response of all three subtypes as a secret turn and masks it in the conversation. The item also accepts `defaultValue` and a `validation` object (`minLength`, `maxLength`, `validationErrorMessage`). When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
 
