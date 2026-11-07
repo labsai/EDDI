@@ -129,7 +129,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  * @see ILifecycleTask
  * @see IConversationMemory
- * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
+ * @see ai.labs.eddi.engine.runtime.IConversationCoordinator
  */
 public class LifecycleManager implements ILifecycleManager {
 
@@ -171,7 +171,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
-     * initialization based on package configuration.
+     * initialization based on workflow configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -897,19 +897,6 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Filters lifecycle tasks to execute only those starting from specified types.
-     *
-     * <p>
-     * This enables partial workflow execution. For example, if you specify
-     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
-     * but skip earlier tasks like parsing.
-     * </p>
-     *
-     * @param lifecycleTaskTypes
-     *            list of task type prefixes to match
-     * @return filtered list of tasks to execute
-     */
-    /**
      * Returns the ABSOLUTE index of the first task whose type matches any of the
      * requested types (prefix match); selective execution runs that task and all
      * subsequent ones. Returns -1 when no task matches.
@@ -989,8 +976,8 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
-     * called during Agent initialization, when the agent's package configuration is
-     * being loaded.
+     * called during Agent initialization, when the agent's workflow configuration
+     * is being loaded.
      * </p>
      *
      * <p>

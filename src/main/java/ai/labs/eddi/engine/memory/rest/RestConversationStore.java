@@ -1335,21 +1335,8 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
-     * point to — every version, including those only its undo history and redo
-     * cache still reference. Each auto-vaulted write owns its own slot (see
-     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
-     * resolve them any more — left in place they would be orphaned plaintext
-     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
-     * the references live.
-     * <p>
-     * Unlike the attachment cleanup this is not best effort. A snapshot deleted
-     * after a failed vault delete takes the only record of the slot names with it,
-     * and neither a retry nor a GDPR erasure could find them again (a custom tenant
-     * is named only there).
-     *
-     * @return {@code false} when the slots could not be deleted — the caller must
-     *         then keep the conversation so the cleanup can be retried
+     * The injected purge service, or one built from this resource's own stores when
+     * none was injected.
      */
     private ConversationPurgeService purgeService() {
         if (conversationPurgeService != null) {
@@ -1359,6 +1346,22 @@ public class RestConversationStore implements IRestConversationStore {
                 autoVaultedSecretsInstance, attachmentStorageInstance);
     }
 
+    /**
+     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
+     * point to — every version, including those only its undo history and redo
+     * cache still reference. Each auto-vaulted write owns its own slot (see
+     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
+     * resolve them any more — left in place they would be orphaned plaintext
+     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
+     * the references live.
+     * <p>
+     * This is not best effort. A snapshot deleted after a failed vault delete takes
+     * the only record of the slot names with it, and neither a retry nor a GDPR
+     * erasure could find them again (a custom tenant is named only there).
+     *
+     * @return {@code false} when the slots could not be deleted — the caller must
+     *         then keep the conversation so the cleanup can be retried
+     */
     private boolean deleteAutoVaultedSecretsForConversation(String conversationId) {
         return purgeService().deleteAutoVaultedSecrets(conversationId);
     }
@@ -1395,10 +1398,6 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    /**
-     * Delete any binary attachments stored for a conversation. Silently skips if no
-     * attachment storage is configured.
-     */
     /**
      * Delete the channel mappings ({@code (intent, userId)} rows of
      * {@link IUserConversationStore}) that point at a conversation the retention

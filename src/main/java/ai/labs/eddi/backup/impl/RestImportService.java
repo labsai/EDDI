@@ -550,25 +550,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * Lists the archive's scheduled triggers.
-     * <p>
-     * A schedule id belongs to the store that issued it, so it cannot be matched
-     * on. What a merge does match on is the <b>name</b>, against the schedules of
-     * the agent it writes into ({@link #existingScheduleIdsByName}), and it
-     * overwrites what it finds — so a row promising CREATE told the operator a
-     * nightly job would be added while the import was about to replace theirs. Rows
-     * are therefore UPDATE where that same name lookup finds a target, with the
-     * target's id, and CREATE where it does not.
-     * <p>
-     * Matches are consumed exactly as the import consumes them, so a second
-     * archived schedule of the same name is previewed as the CREATE it will be
-     * rather than as a second UPDATE onto the one target.
-     *
-     * @param targetAgentId
-     *            the agent a merge would write into, or null when nothing on this
-     *            instance matches the archived agent — then every schedule is new
-     */
-    /**
      * The archive's schedule files, in a stable order.
      * <p>
      * {@link Files#newDirectoryStream} yields entries in whatever order the
@@ -593,6 +574,25 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return files;
     }
 
+    /**
+     * Lists the archive's scheduled triggers.
+     * <p>
+     * A schedule id belongs to the store that issued it, so it cannot be matched
+     * on. What a merge does match on is the <b>name</b>, against the schedules of
+     * the agent it writes into ({@link #existingScheduleIdsByName}), and it
+     * overwrites what it finds — so a row promising CREATE told the operator a
+     * nightly job would be added while the import was about to replace theirs. Rows
+     * are therefore UPDATE where that same name lookup finds a target, with the
+     * target's id, and CREATE where it does not.
+     * <p>
+     * Matches are consumed exactly as the import consumes them, so a second
+     * archived schedule of the same name is previewed as the CREATE it will be
+     * rather than as a second UPDATE onto the one target.
+     *
+     * @param targetAgentId
+     *            the agent a merge would write into, or null when nothing on this
+     *            instance matches the archived agent — then every schedule is new
+     */
     private void addScheduleDiffs(List<ResourceDiff> diffs, Path targetDirPath, String targetAgentId) {
         Path schedulesDir = findArchiveDir(targetDirPath, SCHEDULES_DIR);
         if (schedulesDir == null) {
@@ -3378,19 +3378,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * Loads every config a workflow references from the unzipped archive.
-     * <p>
-     * A config that cannot be read fails the import with a 400 naming the file.
-     * Returning null instead put that null straight into the list handed to
-     * {@code store.create(...)}, so a selectively-exported ZIP — whose workflow
-     * still carries the URIs of the files the export left out — died with a bare
-     * NullPointerException surfaced as a 500 whose message was literally "null".
-     *
-     * @param isMerge
-     *            whether this is a merge import, where a resource the archive does
-     *            not carry is answered from the local deployment instead
-     */
-    /**
      * The LLM references a workflow still spells with the 5.x authority, in their
      * normalized (v6) form. Read from the raw text, before normalization erases the
      * difference.
@@ -3405,6 +3392,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return found;
     }
 
+    /**
+     * Loads every config a workflow references from the unzipped archive.
+     * <p>
+     * A config that cannot be read fails the import with a 400 naming the file.
+     * Returning null instead put that null straight into the list handed to
+     * {@code store.create(...)}, so a selectively-exported ZIP — whose workflow
+     * still carries the URIs of the files the export left out — died with a bare
+     * NullPointerException surfaced as a 500 whose message was literally "null".
+     *
+     * @param isMerge
+     *            whether this is a merge import, where a resource the archive does
+     *            not carry is answered from the local deployment instead
+     */
     private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
                                       boolean isMerge) {
         return readResources(uris, workflowPath, extension, clazz, isMerge, Set.of());

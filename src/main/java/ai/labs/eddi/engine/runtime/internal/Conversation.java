@@ -173,7 +173,7 @@ public class Conversation implements IConversation {
      * <p>
      * This has to happen per turn, not per conversation. The field is not part of
      * the persisted snapshot, and every request rebuilds memory from the store — so
-     * setting it only in {@link #init()} meant it was present for the
+     * setting it only in {@link #init(Map)} meant it was present for the
      * CONVERSATION_START turn and null for every turn after it. The gate in
      * {@code ContextualToolsProvider.addUserMemoryToolIfEnabled} reads exactly that
      * field, so the {@code UserMemoryTool} was never assembled on a turn a user
@@ -316,16 +316,6 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * Loads user properties from the {@code usermemories} collection. This replaces
-     * both the old {@code loadLongTermProperties()} (which read from the legacy
-     * {@code properties} collection) and the old {@code loadUserMemories()}.
-     * <p>
-     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
-     * scoping (self + group + global). Recall order and max entries come from
-     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
-     * defaults.
-     */
-    /**
      * One entry per key. A key can be visible more than once — the shared
      * {@code global} row and this agent's own {@code self} or {@code group} row are
      * different documents, and they coexist, for instance when an agent whose
@@ -359,6 +349,16 @@ public class Conversation implements IConversation {
         return visibility == Visibility.group ? 1 : 2;
     }
 
+    /**
+     * Loads user properties from the {@code usermemories} collection. This replaces
+     * both the old {@code loadLongTermProperties()} (which read from the legacy
+     * {@code properties} collection) and the old {@code loadUserMemories()}.
+     * <p>
+     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
+     * scoping (self + group + global). Recall order and max entries come from
+     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
+     * defaults.
+     */
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)

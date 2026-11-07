@@ -633,8 +633,8 @@ offerings do); authentication is what holds without one.
 ### Network Policy
 
 The production overlay includes a `NetworkPolicy` that restricts EDDI to:
-- **Ingress**: HTTP port 7070 from within the namespace + Ingress controllers
-- **Egress**: Database (MongoDB/PG), NATS, Keycloak, DNS, and external HTTPS (port 443 for LLM APIs)
+- **Ingress**: HTTP port 7070 from within the namespace + the `ingress-nginx` controller (namespace and pods labelled `ingress-nginx`; patch the policy for another controller)
+- **Egress**: Database (MongoDB/PG), NATS, Keycloak, DNS, and external HTTPS (port 443 for LLM APIs — to public addresses only: private, loopback, link-local, CGNAT and multicast ranges are excluded)
 
 The datastores carry their own ingress policies — see
 [Datastore authentication and isolation](#datastore-authentication-and-isolation).
@@ -660,7 +660,7 @@ conversation turns a node runs at once. Each in-flight turn holds its conversati
 |---|---|---|
 | Memory limit | 3 GiB (Helm, base), 4 GiB (production overlay) | The heap is **75 %** of it (`JAVA_MAX_MEM_RATIO` in the image); the rest covers metaspace, thread stacks and direct buffers. Raise it for more turns per node |
 | Memory request | equal to the limit | Guaranteed QoS: the pod is not the first evicted under node pressure |
-| CPU | request 1, limit 4 | The JVM sizes its GC, virtual-thread carrier and Jlama threads from the **limit**; without one it sees every core on the node |
+| CPU | request 1 (2 in the production overlay), limit 4 | The JVM sizes its GC, virtual-thread carrier and Jlama threads from the **limit**; without one it sees every core on the node |
 | GC | G1 (`GC_CONTAINER_OPTIONS`) | Short pauses with hundreds of turns in flight. For heaps of 8 GB and more, `-XX:+UseZGC` |
 | Out of memory | the JVM exits (`-XX:+ExitOnOutOfMemoryError`) | The orchestrator restarts it instead of a half-working JVM holding its turns |
 

@@ -779,10 +779,10 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * work has one place to change. Until {@code TenantContext} lands this is the
      * default tenant, which is also what every connection document defaults to.
      * <p>
-     * It does not move alone. {@link #requireConnection} looks the connection up
-     * under the same default and must take its tenant from the same source;
-     * {@code ConnectionConfiguration.tenantId} has to be populated from the tenant
-     * context rather than from the stored document; and
+     * It does not move alone. {@link #requireCurrentConnection} looks the
+     * connection up under the same default and must take its tenant from the same
+     * source; {@code ConnectionConfiguration.tenantId} has to be populated from the
+     * tenant context rather than from the stored document; and
      * {@code RestConnectionStore.requireDefaultTenant()}, which today refuses any
      * other tenant at the write boundary precisely because this method cannot see
      * one, comes out at that point. Changing any one of the four on its own files a

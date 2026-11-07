@@ -207,7 +207,9 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `POST` | `/ragstore/rags` | Create a new KB |
 | `PUT` | `/ragstore/rags/{id}?version=N` | Update a KB |
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
-| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
+| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB (`permanent=true` removes the history too) |
+| `GET` | `/ragstore/rags/{id}/currentversion` | Current version number |
+| `POST` | `/ragstore/rags/{id}/currentversion` | `303` redirect to the latest version |
 
 > **There is no retrieval endpoint.** `/ragstore/rags/` covers configuration and ingestion only —
 > there is no `/query`, `/search` or `/retrieve`, and requests to those return `404`. Retrieval is
@@ -871,7 +873,7 @@ RAG operations write audit traces to conversation memory:
 | `rag:context:{taskId}` | Formatted context string injected into the LLM |
 | `rag:httpcall:trace:{taskId}` | httpCall RAG execution metadata (httpCall name, context length) |
 
-These are visible in the conversation memory snapshot and the audit ledger.
+All three are stored in the conversation document. `rag:context:{taskId}` is returned by a snapshot with `returnDetailed=true`; the two `:trace:` keys are withheld from that view and are read from the raw conversation (`GET /conversationstore/conversations/{conversationId}`, the conversation's owner or an admin). The audit ledger does not copy them, but its `llmDetail.compiledPrompt` contains the injected context.
 
 ## Troubleshooting
 
@@ -997,11 +999,11 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host` (one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
-| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
-| `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host` (default `localhost`; one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port` (default `5432`), `database` (default `eddi`), `user` (default `eddi`), `table`, `dimension` (default `1536` — must match the embedding model's vector size). `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
+| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName` (default `eddi`), `collectionName`, `indexName` (default `vector_index`) |
+| `elasticsearch` | — | `serverUrl` (default: `http://localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
-| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
+| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName`; `tenantName` (default `default_tenant`), `databaseName` (default `default_database`), `apiVersion` (`V2` default, or `V1`) |
 
 > **`in-memory` is a dev/test option, not a small-corpus one.** For this store the object in the
 > EDDI process *is* the data, so it is kept apart from the cache of external-store clients: it is

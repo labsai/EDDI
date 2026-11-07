@@ -427,9 +427,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Limits for the agent-operations tools ({@code read_team_scorecard},
-         * {@code propose_team_budget_change}, {@code schedule_followup}). The tools
-         * themselves are off unless named in {@code builtInToolsWhitelist}; this only
-         * tunes their caps. See {@link AgentOpsConfig}.
+         * {@code propose_team_budget_raise}, {@code propose_team_budget_transfer},
+         * {@code schedule_followup}). The tools themselves are off unless their keys
+         * ({@code team_scorecard}, {@code propose_team_budget},
+         * {@code schedule_followup}) are named in {@code builtInToolsWhitelist}; this
+         * only tunes their caps. See {@link AgentOpsConfig}.
          *
          * @since 6.7.0
          */
@@ -2821,7 +2823,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Phrases indicating refusal (scored {@code refusalScore}). */
         private List<String> refusalPhrases;
 
-        /** Responses shorter than this many characters score {@code shortScore}. */
+        /**
+         * Responses shorter than this many characters score {@code shortScore}. Default
+         * 20.
+         */
         private Integer shortLengthThreshold;
 
         /** Score assigned to very short responses. Default 0.3. */

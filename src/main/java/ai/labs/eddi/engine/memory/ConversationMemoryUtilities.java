@@ -252,12 +252,6 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
-    /**
      * Sums {@code audit:cost} over every step of the conversation. The value is per
      * step — {@code LlmTask} accumulates it on the current step, and each new step
      * starts without one — so the conversation's spend is the sum, never any single
@@ -346,6 +340,12 @@ public class ConversationMemoryUtilities {
         return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;

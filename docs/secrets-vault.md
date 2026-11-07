@@ -57,6 +57,10 @@ ${vault:tenantId/keyName}
 | **HTTP Calls** (`httpcalls.json`)     | URL, headers, body, query parameters   |
 | **LangChain** (`langchain.json`)      | `apiKey` and other model configuration |
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
+| **MCP Calls** (`mcpcalls.json`) | `apiKey` |
+| **A2A peers** (`a2aAgents` in `langchain.json`) | `apiKey` |
+| **RAG** (`rag.json`) | Embedding-model and vector-store parameters |
+| **Channel integrations** | Slack `botToken` and signing secrets |
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
@@ -778,7 +782,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination`, `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`; the list endpoint adds `unrestrictedDestination` and `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -1091,6 +1095,8 @@ The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheu
 | `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
 | `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
 | `eddi.vault.store.duration`  | Timer   | Duration of store operations               |
+| `eddi.vault.legacy.unbound.opened.count` | Counter | Values that opened only through the no-AAD legacy fallback — see [Retiring the fallback](#envelope-encryption) |
+| `eddi.vault.reseal.failures` | Counter | Rows a DEK-rotation sweep could not open, tagged `participant` (`connection-grants` for OAuth grants) |
 
 ## Manager — Secrets Admin Page
 

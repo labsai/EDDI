@@ -23,8 +23,9 @@ import java.util.List;
  * <strong>Cluster safety:</strong> In-memory implementations achieve atomicity
  * via Java synchronization. DB-backed implementations MUST use storage-level
  * atomicity (e.g., {@code UPDATE ... WHERE count < limit RETURNING count} in
- * PostgreSQL, or {@code findAndModify} with conditional update in MongoDB).
- * Java-level synchronization is NOT sufficient for multi-instance deployments.
+ * PostgreSQL, or {@code findOneAndUpdate} with a conditional filter in
+ * MongoDB). Java-level synchronization is NOT sufficient for multi-instance
+ * deployments.
  */
 public interface ITenantQuotaStore {
 

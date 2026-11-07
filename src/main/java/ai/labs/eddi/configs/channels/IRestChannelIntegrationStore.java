@@ -21,13 +21,14 @@ import java.util.List;
 /**
  * JAX-RS interface for channel integration configuration CRUD.
  * <p>
- * Admin-only — channel configurations expose target topology and vault
- * references. Same security posture as {@code IRestAgentStore}.
+ * The authoring tier ({@code eddi-admin} and {@code eddi-editor}), the same
+ * security posture as {@code IRestAgentStore} — channel configurations expose
+ * target topology and vault references.
  *
  * @since 6.1.0
  */
 @Path("/channelstore/channels")
-@Tag(name = "Integrations / Channels", description = "Channel integration configuration (Slack, Teams, etc.)")
+@Tag(name = "Integrations / Channels", description = "Channel integration configuration (Slack, webhook, email)")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.channel";

@@ -355,15 +355,18 @@ We will emphasize the `httpCall` model and go through an example step by step, y
             "iterationObjectName": "String",
             "templateFilterExpression": "String",
             "outputType": "String",
-            "outputValue": "String"
+            "outputValue": "String",
+            "httpCodeValidator": { "runOnHttpCode": [ <array of Integers> ], "skipOnHttpCode": [ <array of Integers> ] }
           }
         ],
         "qrBuildInstructions": [
           {
             "pathToTargetArray": "String",
             "iterationObjectName": "String",
+            "templateFilterExpression": "String",
             "quickReplyValue": "String",
-            "quickReplyExpressions": "String"
+            "quickReplyExpressions": "String",
+            "httpCodeValidator": { "runOnHttpCode": [ <array of Integers> ], "skipOnHttpCode": [ <array of Integers> ] }
           }
         ],
         "propertyInstructions": [
@@ -395,7 +398,7 @@ We will emphasize the `httpCall` model and go through an example step by step, y
 
 ### Description
 
-An `httpCall` is mainly composed from the `targetServer` `array` of `httpCalls`, the latter will have request where you put all details about your actual **http request** (`method`,`path`,`headers`, etc..) and postResponse where you can define what happens after the `httpCall` has been executed and a `response` has been received; such as quick replies by using `qrBuildInstruction`.
+An `httpCall` configuration is mainly composed of the `targetServerUrl` and the `array` of `httpCalls`, the latter will have request where you put all details about your actual **http request** (`method`,`path`,`headers`, etc..) and postResponse where you can define what happens after the `httpCall` has been executed and a `response` has been received; such as quick replies by using `qrBuildInstruction`.
 
 You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access your `JSON` object, so you can use it in `output templating` or in another `httpCall`, for example an `httpCall` will get the `oAuth` `token` and another `httpCall` will use in the `http` `headers` to authenticate to an API.
 
@@ -430,7 +433,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent — use [`forEach`](#foreach--one-call-per-element) to collect per-element results. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.preRequest.batchRequests.maxBatchSize                              | (`Integer`, default `100`, at most `1000` — both operator-configurable, see `eddi.httpcalls.batch.*` in the [configuration reference](configuration-reference.md)) most requests the batch may expand into. A target array with more elements refuses the whole call — nothing is sent and the turn fails with a message naming the limit — instead of silently dropping the tail. Saving a value above the ceiling is refused with `400`. |
-| httpCall.request.path                                                       | (`String`) path in the `targetServer` of the `httpCall` (e.g /`books`)                                                                                                                                                           |
+| httpCall.request.path                                                       | (`String`) path below the `targetServerUrl` of the `httpCall` (e.g /`books`)                                                                                                                                                         |
 | httpCall.request.headers                                                    | (`Array`:\<key, value> ) for each `httpCall HTTP header`                                                                                                                                                                         |
 | httpCall.request.queryParams                                                | (`Array`: \<key, value>) for each `httpCall` query parameter                                                                                                                                                                     |
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
@@ -441,11 +444,11 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.postResponse.retryApiCallInstruction.maxBackoffDelayInMillis       | (`Integer`) upper bound for one backoff delay — the engine clamps it to 30 s in any case.                                                                                                                                      |
 | httpCall.postResponse.retryApiCallInstruction.retryOnHttpCodes              | (`List<Integer>`, default `[502, 503]`) response codes that trigger a retry.                                                                                                                                                   |
 | httpCall.postResponse.retryApiCallInstruction.responseValuePathMatchers     | (`List`) `{valuePath, equals, contains, trueIfNoMatch}` checks on the response; a match (or, with `trueIfNoMatch`, a non-match) triggers a retry.                                                                                |
-| httpCall.postResponse.outputBuildInstructions[]                             | (`List`) builds output items from the response: one item of `outputType` per element of `pathToTargetArray` (bound to `iterationObjectName`, optionally filtered by `templateFilterExpression`), its text rendered from `outputValue`. Without `pathToTargetArray`, `outputValue` is rendered once. The items reach the reply through the output task. |
+| httpCall.postResponse.outputBuildInstructions[]                             | (`List`) builds output items from the response: one item of `outputType` per element of `pathToTargetArray` (bound to `iterationObjectName`, optionally filtered by `templateFilterExpression`), its text rendered from `outputValue`. Without `pathToTargetArray`, `outputValue` is rendered once. The items reach the reply through the output task. Each instruction also takes an `httpCodeValidator`, with the defaults described below. |
 | httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
 | httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`. `templateFilterExpression` and `httpCodeValidator` work as for `outputBuildInstructions`.                                                              |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.valueString                      | (`String`) a static value (a template) used when `fromObjectPath` is not defined. Typed siblings exist for other value types: `valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueBoolean`, `valueObject`, `valueList`. |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) one of: </p><p><code>step</code> for this user interaction only, </p><p><code>conversation</code> for the entire conversation, </p><p><code>longTerm</code> across conversations, </p><p><code>secret</code> vaulted — see [Properties](properties.md#secret-properties)</p> |
@@ -455,8 +458,8 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.postResponse.propertyInstructions.convertToObject                  | (`Boolean`, default `false`) parse a string value shaped like a JSON object (`{...}`) into an object.                                                                                                                          |
 | httpCall.postResponse.propertyInstructions.override                         | (`Boolean`, default `true`) `false` leaves an already-set property alone.                                                                                                                                                        |
 | httpCall.postResponse.propertyInstructions.runOnValidationError             | (`Boolean`, default `false`) also run the instruction when the call ended in a validation error (an MCP call's error path uses this).                                                                                         |
-| httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]                                                                                                                                   |
-| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http codes that skip this property instruction e.g \[`500,501,400`]                                                                                                                              |
+| httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]. Unset: `[200, 201]`                                                                                                             |
+| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http codes that skip this property instruction e.g \[`500,501,400`]. Unset: `[0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502]` (`0` = no response) |
 
 A property instruction here runs on the same implementation as a `property.json` instruction, so the two store the same values. A failing one (a template that does not render) no longer disappears into the log: it is logged with the conversation id and recorded in the step under `propertyInstructions:errors`, and the remaining instructions still run. See [Properties](properties.md#via-prepost-request-instructions).
 
@@ -607,6 +610,9 @@ Each element of the stored array describes one item, in the order of the source 
 | PUT         | `/apicallstore/apicalls/{id}`                | http-call-model | N/A                                   |
 | GET         | `/apicallstore/apicalls/{id}/currentversion` | N/A             | current version number (`text/plain` integer) |
 | POST        | `/apicallstore/apicalls/{id}/currentversion` | N/A             | `303` redirect to `/apicallstore/apicalls/{id}?version=<latest>` |
+| POST        | `/apicallstore/apicalls/{id}`                | N/A             | duplicates the config (query: `version`); `Location` names the copy |
+| PATCH       | `/apicallstore/apicalls/{id}`                | RFC 6902 JSON Patch (`application/json-patch+json`) | new version in `Location` (query: `version`, required; `409` when it is not the current version) |
+| POST        | `/apicallstore/apicalls/discover-endpoints`  | `{specUrl, apiBaseUrl, authHeaderRef}` — `specUrl` is the OpenAPI 3.x URL or the document inline; `authHeaderRef` must be a `${vault:…}`, `${vars:…}` or `${caller:…}` reference | the spec's operations grouped by tag, as generated httpcalls (used by the Manager's API import) |
 
 ### httpCall Sample
 
@@ -1089,7 +1095,7 @@ _Response Body_
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -1142,7 +1148,7 @@ _Response Body_
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [

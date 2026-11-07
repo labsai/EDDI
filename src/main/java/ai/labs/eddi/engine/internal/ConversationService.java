@@ -639,6 +639,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
+
     /**
      * Rejects new work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
@@ -651,12 +657,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
      */
-    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    final ConversationHitlService conversationHitlService;
-
-    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
-    private final ConversationStepRunner conversationStepRunner;
-
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(

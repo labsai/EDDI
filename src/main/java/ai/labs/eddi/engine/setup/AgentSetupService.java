@@ -1683,8 +1683,8 @@ public class AgentSetupService {
      *            generated one are deliberately never recorded: rollback deletes
      *            what it finds there, and a key another agent may already point at
      *            must survive the failure of the one that happened to create it.
-     *            Also used to carry non-fatal warnings (see
-     *            {@link #VAULT_GRANT_WARNING}) into {@code SetupResult.resources}.
+     *            Also used to carry non-fatal warnings (see {@link #VAULT_WARNING})
+     *            into {@code SetupResult.resources}.
      */
     private String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
             throws AgentSetupException {

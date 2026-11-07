@@ -590,8 +590,9 @@ Every failure uses the OpenAI envelope:
 | Ambiguous model name | 400 | `ambiguous_model` |
 | `stateless:true` while stateless requests are disabled | 400 | `invalid_request_field` |
 | No `user` message | 400 | `no_user_message` |
+| User message longer than `eddi.conversations.max-input-chars` (default `200000`) | 400 | `input_too_large` |
 | Agent not deployed | 503 | `agent_not_ready` |
-| Adapter concurrency cap (`max-concurrent-requests`) or a busy conversation | 429 | — |
+| Adapter concurrency cap (`max-concurrent-requests`) or a busy conversation | 429 | — (`type: rate_limit_exceeded`) |
 | Node at its in-flight turn limit, coordinator saturated, shutdown drain | 503 | `capacity_exceeded` (with `Retry-After`) |
 | Tenant quota store unavailable | 503 | `quota_accounting_unavailable` |
 | Authenticated caller without a permitted role | 403 | `insufficient_permissions` |

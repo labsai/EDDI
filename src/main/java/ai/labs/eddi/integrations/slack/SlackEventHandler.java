@@ -80,8 +80,6 @@ public class SlackEventHandler {
      */
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
 
-    /** Maximum Slack message length (safe limit under 4000). */
-
     /** Retry budget for reading the HITL bookmark after a pause (see H10). */
     private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
     private static final long HITL_BOOKMARK_READ_DELAY_MS = 100;
@@ -211,8 +209,6 @@ public class SlackEventHandler {
      *            the unique event ID (for dedup)
      * @param event
      *            the parsed event JSON as a Map
-     */
-    /**
      * @param botUserId
      *            this app's own Slack user id, from the event envelope, or
      *            {@code null} when it did not carry one. Used only to tell a
@@ -313,11 +309,6 @@ public class SlackEventHandler {
     }
 
     /**
-     * Whether {@code type} appears anywhere in the throwable's cause chain.
-     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
-     * between it and the handler, so a top-level {@code instanceof} would miss it.
-     */
-    /**
      * Whether {@code route} belongs to the app whose signing secret verified the
      * event: its integration's (or legacy connector's) secret equals the verified
      * one. Fails closed when nothing was verified.
@@ -327,6 +318,11 @@ public class SlackEventHandler {
                 && ChannelTargetRouter.secretsEqual(route.signingSecret(), origin.verifiedSigningSecret());
     }
 
+    /**
+     * Whether {@code type} appears anywhere in the throwable's cause chain.
+     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
+     * between it and the handler, so a top-level {@code instanceof} would miss it.
+     */
     private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             if (type.isInstance(c)) {

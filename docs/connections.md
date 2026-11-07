@@ -205,8 +205,9 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | Field | Purpose |
 | --- | --- |
 | `name` | What `${connection:name}` refers to. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters, no surrounding whitespace. Refused otherwise, never trimmed: a space, `/`, `}` or `:` would make the name unreferenceable, and the `X-EDDI-Connection-Credential` header splits at the first space |
-| `authType` | `STATIC`, `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
-| `binding` | `SERVICE` (one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
+| `description` | Free text shown in the connection list |
+| `authType` | `STATIC` (the default), `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_AUTHORIZATION_CODE` |
+| `binding` | `SERVICE` (the default; one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
@@ -246,7 +247,7 @@ is punctuated, a key EDDI composes itself (`redirect_uri`, `state`,
 `code_challenge`, `code_challenge_method`, `client_id`, `response_type`,
 `code_verifier`, `client_secret`) is refused case-insensitively, and every
 **value** must be a literal of at most 512 characters with no `${…}` reference
-and no credential-shaped prefix (`sk-`, `xoxb-`, `ghp_`, `AKIA`, `eyJ`, `Bearer `).
+and no credential-shaped prefix (`sk-`, `xox?-` Slack tokens, `gh?_` and `github_pat_`, `AKIA`, `eyJ`, `Bearer ` or `Basic `).
 
 For `clientSecret` and `passwordRef` the check is "the value **is** a reference",
 not "contains one". A `valueTemplate` may carry literal text around its references
@@ -273,6 +274,7 @@ characters.
 | httpcall **header** | ✅ Resolved per request |
 | mcpcalls `apiKey` | ✅ Resolved per request (on discovery too, unless `PER_USER` — see below) |
 | A2A `apiKey` | ✅ Resolved per call (same discovery rule) |
+| Mail login — the system mailer (`eddi.mail.smtp.connection`) and an [email channel](email-integration.md)'s mailbox | ✅ A `BASIC` connection logs in with username and password; an OAuth connection supplies a bare access token for XOAUTH2. `CALLER_SUPPLIED`, and `PER_USER` for a mailbox, are refused (`UNSUPPORTED_PLACEMENT`) |
 | httpcall path / query / body | ❌ Refused at build time |
 | LLM, embedding, vector-store parameters | ❌ Refused — see [Limitations](#limitations) |
 
@@ -613,7 +615,7 @@ describes it, message included:
 
 | Refusal | Status |
 | --- | --- |
-| `INVALID_CONFIGURATION`, `TARGET_NOT_ALLOWED`, `UNSUPPORTED_PLACEMENT` | **400** |
+| `INVALID_CONFIGURATION`, `TARGET_NOT_ALLOWED`, `UNSUPPORTED_PLACEMENT`, `NO_CALLER_CREDENTIAL` | **400** |
 | `NOT_FOUND` — no connection of that name in this tenant | **404** |
 | `NOT_CONNECTED`, `NO_VERIFIED_PRINCIPAL`, `GRANT_UNUSABLE` | **409** |
 | `TOKEN_ENDPOINT_UNAVAILABLE` | **503** |
@@ -1002,7 +1004,7 @@ who can read the endpoint.
 
 | Metric | Tags | `outcome` values |
 | --- | --- | --- |
-| `eddi.connection.resolve.count` | `authType`, `binding`, `outcome` | `success`, plus the lower-cased refusal reason: `not_found`, `invalid_configuration`, `no_verified_principal`, `not_connected`, `no_caller_credential`, `grant_unusable`, `target_not_allowed`, `token_endpoint_unavailable` |
+| `eddi.connection.resolve.count` | `authType`, `binding`, `outcome` | `success`, plus the lower-cased refusal reason: `not_found`, `invalid_configuration`, `no_verified_principal`, `not_connected`, `no_caller_credential`, `grant_unusable`, `target_not_allowed`, `token_endpoint_unavailable`, `unsupported_placement` |
 | `eddi.connection.resolve.time` | `authType`, `binding` | — |
 | `eddi.connection.grant.missing.count` | `binding` | — (incremented alongside a `not_connected` resolve: the per-user "not connected yet" signal) |
 | `eddi.connection.oauth.authorize.count` | `outcome`, `authType` | `issued` |
@@ -1039,7 +1041,7 @@ Three of those are worth knowing by name:
   `${connection:…}`** and refuse it with an explanatory error. A connection
   resolves to an HTTP *header*, while those builders need a bare credential, and
   there is no honest way to derive one — stripping a scheme prefix off a static
-  template is a guess, and a guess that is wrong for one provider out of eleven
+  template is a guess, and a guess that is wrong for one provider out of many
   produces an authentication failure with no visible cause. Those caches are also
   keyed on *unresolved* parameters by design. Use `${vault:…}`, which does
   everything a `SERVICE`-bound connection would there.

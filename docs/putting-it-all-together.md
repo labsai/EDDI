@@ -159,7 +159,7 @@ curl -X POST http://localhost:7070/rulestore/rulesets \
 
 **How it connects**:
 
-- Welcome rule triggers on first message → shows welcome output
+- Welcome rule triggers when the conversation starts (the `CONVERSATION_START` turn, before the user types anything) and never again → shows welcome output
 - Check Availability rule triggers when the user asks about availability → calls the API. The city and the dates are not part of the rule: the client sends them as context, and Step 3 stores them as properties
 - Book Room rule triggers when the user picks a room — the room quick replies built in Step 4 carry `intent(book)` → creates the booking
 

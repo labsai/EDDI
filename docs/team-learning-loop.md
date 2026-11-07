@@ -99,7 +99,8 @@ POST /groupstore/groups/{groupId}/outcomes
 - **201** when stored, **200** with the stored event when the `idempotencyKey` was already stored (scoped to the team, so
   a retrying webhook stores once), **400** invalid, **404** no such task on the team's backlog, **409** outcomes are not
   enabled for the group (add `outcomeConfig`) or the subject is full.
-- `GET /groupstore/groups/{groupId}/outcomes[?subjectId=…&limit=…]` reads them back, newest first.
+- `kind` is required. `kind`, `metric`, `unit`, `source` and `idempotencyKey` are tokens of the same character set, at most 64, 100, 32, 100 and 128 characters; `subjectId` at most 200; `value` must be finite.
+- `GET /groupstore/groups/{groupId}/outcomes[?subjectId=…&limit=…]` reads them back, newest first (`limit` default 50, at most 200).
 - A permanent group deletion removes the team's outcomes. A GDPR erasure keeps them (they describe work, not a person) and
   replaces the posting principal with the ledger pseudonym.
 - Storage: MongoDB collection and PostgreSQL table `group_outcomes`. Metric: `eddi.group.outcomes` by `outcome`.
@@ -175,6 +176,19 @@ calls them other teams' words, not instructions.
 A retro that runs for months leaves duplicates, and lessons the team has since learned were wrong. The consolidation job
 reads the team's lessons (oldest first, up to `maxLessonsPerRun`) and its recent outcomes, and asks one model call for two
 things: lessons that **say the same thing** (merged into one) and lessons a **later outcome contradicted** (retired).
+
+| `consolidation` field | Default | Ceiling | Meaning |
+| --- | --- | --- | --- |
+| `llmProvider`, `llmModel` | — | | The model to ask; without both the run fails |
+| `parameters` | `{}` | | Model-builder parameters (`apiKey`, `baseUrl`, …); vault references need an open grant, below |
+| `maxCostPerRun` | `0.10` | `5` | USD per run, checked against an estimate before the call |
+| `inputPricePer1M`, `outputPricePer1M` | an upper bound when unset | | USD per million tokens, for that estimate; an explicit value, zero included, is kept as given; a negative value falls back to the upper bound, which can push the estimate over `maxCostPerRun` and skip the run |
+| `minLessons` | `6` | | A team holding fewer lessons is skipped; values of 1 or less take the default |
+| `maxLessonsPerRun` | `40` | `100` | Lessons read per run, oldest first |
+| `outcomeLookbackDays` | `30` | `365` | How far back outcomes are read |
+| `maxOutcomesPerRun` | `20` | `100` | Outcomes shown to the model per run |
+
+For `maxCostPerRun`, `maxLessonsPerRun`, `outcomeLookbackDays` and `maxOutcomesPerRun`, non-positive values take the default; for `minLessons`, so do values of 1 or less.
 
 - **It runs on the schedule machinery**, like Dream and team cadences: cluster-wide claim, retry, dead-letter, fire log.
   `PUT /groupstore/groups/{groupId}/lessons/consolidation/schedule {"cronExpression": "0 3 * * 1"}` creates the schedule

@@ -20,7 +20,7 @@
 
 ### Ecosystem
 
-- **EDDI backend** (repository root) — Quarkus REST API at `/agents/{env}/{agentId}`; the Maven build copies this widget into the jar, served at `/chat`
+- **EDDI backend** (repository root) — Quarkus REST API under `/agents` (`POST /agents/{agentId}/start?environment=…`, then `/agents/{conversationId}`); the Maven build copies this widget into the jar, served at `/chat`
 - **EDDI Manager** (`ui/manager`) — Admin UI with embedded chat panel, shares API patterns
 
 ---
@@ -38,8 +38,11 @@ src/
 │   ├── sse-events.ts       # Pure interpretation of SSE payloads
 │   ├── snapshot.ts         # Snapshot steps → messages (masks secret input)
 │   ├── rating-api.ts       # Conversation/reply ratings, profile `rating` parsing, error-code copy
+│   ├── brand.ts            # Deployment brand from `window.__EDDI_BRAND__` (/branding/__brand__.js)
+│   ├── chat-config.ts      # Operator settings from `window.__EDDI_CHAT__` (/chat/__config__.js), `?token=` gate
 │   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
+│   ├── ChatRoute.tsx       # `/chat/:environment/:agentId[/:userId]` route; neutral state for the demo under a brand
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 │   ├── MessageBubble.tsx   # User/agent messages with markdown
@@ -74,14 +77,20 @@ src/
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Eleven SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
-  `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
-  `guardrail_triggered`, `llm_retry`, `done`, `error`. The widget does not handle
-  `guardrail_triggered` or `llm_retry` (the Manager's `use-chat.ts` does). There is **no `thinking` event** — the backend never emits one.
-- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
-  the name only; arguments reach the client later, redacted, in
-  `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
-  widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
+- **Fourteen SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
+  `task_failed`, `token`, `tool_call`, `tool_result`, `cascade_step_start`,
+  `cascade_escalation`, `guardrail_triggered`, `llm_retry`, `approval_required`
+  (just before `done` when the turn pauses), `hitl_resume` (resume streams only),
+  `done`, `error`. The widget ignores `tool_result`, `guardrail_triggered`,
+  `llm_retry`, `approval_required` and `hitl_resume` (of these, the Manager's
+  `use-chat.ts` handles only `guardrail_triggered`). There is **no `thinking` event** — the backend never emits one.
+- **`tool_call` is `{"tool":"<name>","callId":…}`, sent right before each tool runs**
+  (plus `displayName`/`display` only when the designer configured `toolDisplay`;
+  `display` then holds the selected argument values, redacted and truncated) —
+  never the full arguments; those reach the client later, redacted, in
+  `task_complete`'s `toolTrace`. A `tool_result` (`tool`, `callId`, `status`,
+  `durationMs`, never the result) follows when it finishes, but the widget does not
+  read it: it shows "Using {tool}…" (the Manager's wording) until the next `token`,
   a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
   model can write a sentence and then call a tool.
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
@@ -137,7 +146,9 @@ src/
   file/byte quotas, empty files, and on Postgres any wrapped `SQLException`, so
   a database outage also arrives as a 400 "rejection". Only `error` says which.
   A body-less 413 from Quarkus is possible but not the normal path — this repo
-  raises `max-body-size` to 25M precisely so in-cap uploads do not hit it.
+  raises `quarkus.http.limits.max-body-size` to 60M, and `RequestBodyLimitGuard`
+  lifts the 25M default request limit to fit a base64-encoded attachment at
+  `eddi.attachments.max-size-bytes`, precisely so in-cap uploads do not hit it.
 - **A 409 means the input was never consumed** — restore it, do not leave it in
   the transcript as if sent.
 - **The rating endpoints answer `{error: "<CODE>", message}`** — the stable code is
@@ -155,7 +166,7 @@ src/
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
 4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
+6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `lang` (`en`/`de`/`fr`/`es`, read in `i18n.ts`), `apiServer`, `token` (read once, then removed from the address bar; honoured only when the operator sets `eddi.chat.url-token.enabled`, default `false`), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
 8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 

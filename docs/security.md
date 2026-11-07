@@ -224,7 +224,8 @@ value, so a changed name orphans everything filed under the old one.
 for callers that bring no token: `slack:<team>:<user>` for a Slack user,
 `openwebui:…` for a header-named Open WebUI user, `group:<id>` for a group's
 shared memory, `system:…` for the scheduler and other engine work, `a2a:…`,
-`mcp:…`, `webhook:…`, `agent-test:…`, `anonymous-…` and `anonymous`, and the
+`mcp:…`, `webhook:…`, `email:…` and `email-anon:…` for mail senders, `agent-test:…`,
+`unverified:…` for an approver nobody authenticated, `anonymous-…` and `anonymous`, and the
 `gdpr-erased:…` pseudonym. Because ownership is a string comparison, a token
 whose principal were `slack:T1:U2` would own that Slack user's conversations.
 EDDI therefore **rejects a token whose principal starts with any of these
@@ -264,8 +265,11 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | `/q/health/*` | **Permit** (GET only) — required for k8s probes |
 | `/q/metrics/*` | **Role `eddi-admin` or `eddi-metrics`** (policy `eddi.metrics.http-policy`, default `eddi-metrics-reader`; roles from `eddi.metrics.roles-allowed`) — metrics leak deployment shape, so a scraper presents a Bearer token **carrying one of those roles**. `authenticated` (any token, the 6.5 default) and `permit` remain selectable; see [Scraping with authentication on](monitoring/monitoring-guide.md#scraping-with-authentication-on) |
 | `/openapi`, `/q/openapi`, `/q/swagger-ui` (and below), plus `/openapi.json`, `.yaml` and `.yml` (and the `/q/` forms) | **Any EDDI role** (policy `eddi.api-docs.http-policy`, default `eddi-api-docs-reader`; roles from `eddi.api-docs.roles-allowed`) — the API description names every endpoint and model; a token with no EDDI role gets `403` |
-| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
-| `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
+| `/`, `/index.html`, `/manage`, `/manage/*`, `/chat`, `/chat/*`, `/welcome`, `/welcome/*`, `/workforce`, `/workforce/*` | **Permit** (GET/HEAD) — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
+| `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*`, `/assets/*`, `/branding/*`, and the root icons (`/eddi-icon.svg`, `/eddi-icon.ico`, `/favicon.ico`, `/robots.txt`) | **Permit** (GET/HEAD) — Static assets for the SPAs |
+| `/integrations/slack/*`, `/integrations/webhook/*` | **Permit** (POST only) — inbound channel events; each request is authenticated in the handler by its HMAC signature, fail-closed |
+| `/v1/*` | Policy `eddi.openai-compat.http-policy` (default **permit**: the [OpenAI-compatible adapter](open-webui-integration.md) checks its shared API key itself; `authenticated` hands validation to OIDC — see below) |
+| `/connections/callback` | **Permit** (GET) — the OAuth redirect target of a per-user [connection](connections.md#per-user-accounts), guarded by its single-use `state` and nonce cookie |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
 | `/.well-known/agent-card.json`, `/.well-known/agent.json`, `/a2a/agents/*/agent.json`, `/a2a/agents/*/.well-known/agent-card.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
 | `/.well-known/capabilities`, `/.well-known/capabilities/skills` | **Permit** (GET) — A2A capability discovery, and additionally gated by `eddi.a2a.capabilities.public` (default `false`, which answers 404) |
@@ -948,10 +952,11 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
   - `g` for `global` scope
   - When `user` scope is in effect but no user id is available, the entry falls back to the narrower `c:` partition. If neither a user id nor a conversation id is available, **no tag can be derived and the cache is bypassed entirely** — nothing is read and nothing is stored. A placeholder is deliberately never substituted, because that would put every unattributable request back into one shared partition
 - **Configuration:** `enableToolCaching` (default `true`), `toolCacheScopes` (per-tool overrides, keyed on the dispatch name or the built-in slug — dispatch name wins, same vocabulary as `toolRateLimits` and `toolPricing`), `defaultToolCacheScope` (task-level default, effectively `user`)
+- **Per-conversation tools are never cached:** a tool built per turn with that conversation's state (it is not a shared CDI bean — the attachment, dynamic-agent, artifact and user-memory tools) is neither read from nor written to the cache, whatever the scope, because its result depends on state that changes within a conversation
 - **Side-effecting sources are opt-in:** HTTP-call, MCP and A2A tools are cached only when named in `toolCacheScopes` — a cache hit skips the call, and for a write that means the write never happens. Keys also carry the tool's source and the agent id, so same-named tools of different agents never share an entry
 - **Unparseable tokens fail safe:** a `toolCacheScopes` value that does not parse resolves to `user` and is logged at WARN — never to `defaultToolCacheScope`, so a typo in an override that was written to *narrow* one tool cannot promote it onto a `global` partition
 - **Behaviour:** A cached result is only ever served back inside its own partition. With the default `user` scope, one authenticated user's tool result is never returned to another. Set a tool to `global` only when its result depends purely on its arguments and never on who is asking — that is an explicit, per-tool opt-in to cross-user reuse
-- **Expiry:** Each entry expires on its own per-tool TTL, measured from the write (`weather` 300s, `websearch` 1800s, `news` 600s, `calculator` 7 days, 300s for tools with no table entry — see `GET /llm/tools/cache/ttl/{toolName}`). The TTL is matched against the dispatch name first and the slug second, so `searchNews` gets the `news` entry rather than its tool's `websearch` entry. Size-based eviction (`tool-results` holds 10 000 entries) is the secondary bound. A stale or poisoned result cannot outlive its TTL
+- **Expiry:** Each entry expires on its own per-tool TTL, measured from the write (`datetime` 60s, `weather` 300s, `news` 600s, `websearch` 1800s, `webscraper` 1h, `pdfreader`, `dataformatter` and `textsummarizer` 24h, `calculator` 7 days, 300s for tools with no table entry — see `GET /llm/tools/cache/ttl/{toolName}`). The TTL is matched against the dispatch name first and the slug second, so `searchNews` gets the `news` entry rather than its tool's `websearch` entry. Size-based eviction (`tool-results` holds 10 000 entries) is the secondary bound. A stale or poisoned result cannot outlive its TTL
 
 ### Cost Tracking
 
@@ -1071,7 +1076,7 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 |------|------|-------|------|----------|
 | **CodeQL** | SAST | Java source code; the shipped UI sources (`.github/codeql/codeql-ui.yml`) | Blocking (PR) + weekly deep scan | N/A |
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
-| **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
+| **Gitleaks** | Secret scanning | The commits each push or PR adds | Blocking | `.gitleaksignore` (taken from the base branch, so a PR cannot allowlist itself) |
 | **CycloneDX** | SBOM | Maven dependency tree + both UIs’ npm production dependencies | Artifact generation | N/A |
 | **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities, SafeJsonExpression | JUnit integration | N/A |
 

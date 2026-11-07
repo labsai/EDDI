@@ -121,12 +121,12 @@ This is the standard way to use the LLM task - just connect to an LLM and start 
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format. If it is a JSON Schema it is also validated against the parsed reply and sent natively to OpenAI, Azure OpenAI, Mistral and Gemini — see [Structured Output](#shape-validation-responseschema-and-nonblankfields) | ""                |
-| `addToOutput`              | boolean | Add response to conversation output                   | false             |
+| `addToOutput`              | boolean | Add response to conversation output. A turn that ran in agent mode (tools) adds it unless this is explicitly `"false"` | false             |
 | **Logging**                |         |                                                       |                   |
 | `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
 | `logResponses`             | boolean | Log API responses (sync and streaming)                | false             |
 | **API Configuration**      |         |                                                       |                   |
-| `temperature`              | string  | Model temperature (0-1)                               | Provider-specific |
+| `temperature`              | string  | Model temperature (range is provider-specific: 0–2 on OpenAI, 0–1 on Anthropic) | Provider-specific |
 | `maxTokens`                | string  | Maximum output tokens per response — see [Output Token Limits](#output-token-limits) | Provider-specific |
 | `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
 
@@ -357,10 +357,9 @@ Both are exposed as parameters:
       "type": "gemini-vertex",
       "description": "Google Gemini chat",
       "parameters": {
-        "publisher": "vertex-ai",
         "projectId": "your-project-id",
         "location": "us-central1",
-        "modelId": "gemini-pro",
+        "modelId": "gemini-2.5-flash",
         "temperature": "0.7",
         "timeout": "15000",
         "systemMessage": "You are a helpful assistant",
@@ -398,7 +397,7 @@ Both are exposed as parameters:
 
 | Parameter        | Effect                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------- |
-| `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
+| `baseUrl`        | Ollama's address. Unset, the client uses `http://localhost:11434`. `EDDI_OLLAMA_DEFAULT_BASE_URL` (`eddi.ollama.default-base-url`) is the base URL the setup wizard and the agent-setup tools write into a new agent when none is given; it does not change a task that omits `baseUrl`. |
 | `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
 | `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
 | `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
@@ -807,7 +806,8 @@ preset, and are judged by OpenAI's capabilities.
 each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
 pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcript-max-bytes`) the
 gating assistant message is replayed with its thinking, unless that single message exceeds its
-64 KB cap: it is then persisted without the thinking, and those two providers can reject the
+64 KB cap: it is then persisted without its text and, if still too large, without the thinking
+too, and those two providers can reject the
 resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
 
 #### Self-hosted OpenAI-compatible servers
@@ -917,6 +917,12 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableBuiltInTools`       | boolean  | Enable built-in tools                            | false                  |
 | `builtInToolsWhitelist`    | string[] | Specific tools to enable (keys: see [Built-in Tools](#built-in-tools) and [Context-bound tools](#context-bound-tools-and-their-whitelist-keys)) | the standard built-in tools, plus user memory and recall when configured |
 | `tools`                    | string[] | Legacy: entries are ignored, a non-empty list only switches the task into agent mode. HTTP call tools come from `enableHttpCallTools` | (none)                 |
+| `enableHttpCallTools` / `enableMcpCallTools` | boolean | Expose every `httpcalls` / `mcpcalls` config of the workflow as tools — see [Custom HTTP Tools](#custom-http-tools) | true |
+| `a2aAgents`                | object[] | Remote A2A agents whose skills become tools — see [A2A client](a2a-protocol.md#client--consuming-remote-a2a-agents-as-tools) | (none) |
+| `toolApprovals`            | object   | Per-task tool-approval gate. When present it fully replaces the agent's `hitlConfig.toolApprovals` for this task — see [HITL](hitl.md#tool-level-approval-gating) | (agent-level setting) |
+| `agentOps`                 | object   | Caps for the agent-operations tools (`read_team_scorecard`, `propose_team_budget_raise` / `propose_team_budget_transfer`, `schedule_followup` / `list_followups` / `cancel_followup`), which stay off unless `builtInToolsWhitelist` names their keys — see [Agent-ops tools](agent-ops-tools.md) | (built-in caps) |
+| `modelCascade`             | object   | Try a cheap model first and escalate on low confidence — see [Model Cascade](model-cascade.md) | (none) |
+| `multimodal`               | object   | Per-task capability overrides `vision`, `documents`, `audio`: each `auto`, `on` or `off` — see [Attachments](attachments-guide.md#llm-multimodal-support) | all `auto` |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
 | `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
@@ -952,7 +958,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
 | `ragDefaults`              | object   | `maxResults` / `minScore` applied under `enableWorkflowRag`; falls back to each KB's own defaults | (KB defaults) |
 | `httpCallRag`              | string   | Name of an httpCall to execute as a search, injecting its response as `## Search Results:`. Needs no vector store and no workflow step, but calls an **external** search API — it cannot query an EDDI knowledge base | (none) |
-| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters, per retrieval block (vector-store RAG and `httpCallRag` are capped independently). `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
 | `markRagProvenance`        | boolean  | Wrap retrieved context in a `[retrieved context — source '…' …]` … `[end of retrieved context]` envelope that marks it as data, not instructions, before it joins the system prompt. The envelope adds about 200 characters on top of `maxRagContextChars` | true |
 | **Prompt & History Limits** |         |                                                  |                        |
 | `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
@@ -1000,7 +1006,7 @@ Counterweights append behavioral safety instructions to the system prompt. Three
 | `counterweight.placement` | string | `suffix` (after system prompt) or `prefix` (before) | `suffix` |
 | `counterweight.customInstructions` | string[] | Custom instruction list that overrides the preset entirely | (none) |
 
-> **Note**: Both `enabled: true` **and** a `level` other than `normal` are required for counterweight to have any effect.
+> **Note**: `enabled: true` is always required. With the presets, a `level` other than `normal` is also required; non-empty `customInstructions` are injected whatever the `level`.
 
 **Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (names `counterweight_cautious` and `counterweight_strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
 
@@ -1108,6 +1114,9 @@ A `block` is a returned value, never an exception, so a block message can never 
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
 | `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
+| `disclosure` | output | An answer that does not carry a fixed label (e.g. "— AI-assisted reply"); used with `redact` only, which adds the label once (an answer already ending — or, with `prepend`, starting — with it is left alone). | `text` — the label (required, at most 500 characters); `position` — `append` (default) or `prepend`; `separator` (default a blank line) |
+
+Every type above, and `classifier`, can also screen tool-call **arguments** through `toolCallGuardrails` — see [Tool-call guardrails](tool-call-guardrails.md).
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
 
@@ -1252,7 +1261,7 @@ The judge is called exactly like a [`classifier`](#the-classifier-type-a-safety-
 
 **The answer format is EDDI's, not yours.** After your rendered template EDDI appends a fixed instruction that lists the declared codes (with their fix texts, so the judge knows what each one means) and asks for exactly `{"issues": ["CODE", ...]}` — an empty list when nothing applies. The request asks for JSON where the provider takes it per request, with the codes as an `enum` where the provider enforces a schema (`openai`, `azure-openai`, `mistral`, `gemini`); nothing is baked into the cached model. The reply is read tolerantly — a Markdown code fence or prose around the object is fine, and a code is matched case-insensitively.
 
-**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
+**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, is longer than 16,384 characters, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
 
 **Feedback without injection.** A finding carries reason `judge_failed:<CODE>[,<CODE>…]` — your codes, so they are safe in audit records and metrics — and the reprompt's corrective message is EDDI's frame around **your fix texts** for those codes:
 
@@ -1391,17 +1400,19 @@ When `enableBuiltInTools: true`, you can use these tools:
 
 ### Context-bound tools and their whitelist keys
 
-These tools are assembled from the conversation or the group rather than from the built-in catalog above. Each is selected by its own whitelist key and has its own availability condition.
+These tools are assembled from the conversation or the group rather than from the built-in catalog above. Each is selected by its own whitelist key and has its own availability condition; all of them also need `enableBuiltInTools: true`.
 
 | Whitelist key | Tool | Available when |
 | --- | --- | --- |
 | `usermemory` | Persistent user memory tool | `enableMemoryTools` is on; see [User Memory](user-memory.md) |
 | `conversationRecall` | Recall of turns the rolling summary compressed | `conversationSummary.enabled` is true |
-| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`, and `enableBuiltInTools` is on; see [Group Conversations](group-conversations.md) |
-| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true`, and `enableBuiltInTools` is on |
+| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`; see [Group Conversations](group-conversations.md) |
+| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true` |
+| `team_handoff` | `handoff_to_team` | The task's `teamHandoff` (or the group's handoff policy) names at least one target; see [Cross-Team Handoff](team-handoff.md) |
+| `team_scorecard`, `propose_team_budget`, `schedule_followup` | Agent-operations tools | Only when the whitelist names them — an omitted whitelist does not include them; see [Agent-ops tools](agent-ops-tools.md) |
 | `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted |
 
-An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact and group-task tools when the group policy enables them (and dynamic-agent tools under a governing group policy). If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
+An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact, group-task and handoff tools when their policy enables them (and dynamic-agent tools under a governing group policy); never the agent-operations tools. If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
 
 ### Tool response limits
 
@@ -1655,7 +1666,7 @@ The LLM task supports advanced pre-request and post-response processing for fine
 - **preRequest.propertyInstructions**: Defines properties to be set before making the request to the LLM API
   - **name**: The property name
   - **valueString**: The value to be assigned (supports templating)
-  - **scope**: The scope of the property (`step`, `conversation`, `longTerm`)
+  - **scope**: The scope of the property (`step`, `conversation`, `longTerm`, or `secret`, which stores the value in the secrets vault)
 
 #### Post-Response Configuration
 
@@ -1883,8 +1894,8 @@ exactly as before.
 
 | Setting                 | Description                                                                                                                  | Default |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
-| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts). Capped at 600000 (10 minutes) | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it. Capped at 60000; a negative value means the default | 1500    |
 
 **Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
 `say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
@@ -1908,6 +1919,8 @@ HITL resume starts a turn without one.
   and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
   `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
   passed, in which case the call fails fast with a clear message.
+- **Tool calls**: once the deadline has passed, a tool call the model asks for is not run; the
+  model gets an error result saying so.
 
 Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
 deadline.
@@ -2979,7 +2992,7 @@ Up to three violations are listed, joined by `; `. Reasons contain only the keyw
 
 ### Using with Output Configuration
 
-When `convertToObject=true`, the LLM's JSON response is stored in conversation memory as a parsed object. You can then reference its fields in the Output Configuration:
+When `convertToObject=true`, the LLM's JSON response is a parsed object in the task's template data, under `responseObjectName` (or the task id). To read it in a later Output Configuration, store it as a property in `postResponse` — for example `{"name": "aiOutputObject", "fromObjectPath": "aiOutput", "scope": "conversation"}` with `responseObjectName: "aiOutput"` (see [Post-Response Configuration](#post-response-configuration)). You can then reference its fields:
 
 ```json
 {
@@ -3109,7 +3122,10 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 
 | Field | Meaning | Default |
 | --- | --- | --- |
+| `enabled` | Master switch of the `on…` policies below: while it is `false` none of them runs | `false` |
 | `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
+| `onRefusal`, `refusalPatterns` | A reply that starts (trimmed, case-insensitively) with one of `refusalPatterns`; `retry` is not supported here (treated as `warn`) | `ignore`; `["i'm sorry, i can't", "i cannot", "i'm not able to", "as an ai"]` |
+| `onStreamingTimeout` | The streaming backstop fired; `retry` is not supported here (treated as `warn`) | `warn` |
 | `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `wrap` (with `wrapField`) wraps a plain-text reply into an object with no model call, see [Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call); `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
 | `onSchemaMismatch` | A reply that parses but breaks the response shape (`responseSchema` or `nonBlankFields`, see above). `retry` re-asks like `onInvalidJson`, with the violation (for example `nonBlank: $.answer` or `schema: $.answer required`) as the corrective message's `{reason}`; `ignore` and `warn` keep the parsed object; `fallback` and `error` act as usual | `ignore` |
 | `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
@@ -3171,7 +3187,7 @@ Transient provider errors, rate limits and timeouts are **never** counted (and n
 
 ### Debugging
 
-When `convertToObject=true`, the raw LLM response is **always** persisted in conversation memory (key: `langchain:data`) even if JSON parsing fails. This ensures you can inspect what the LLM actually returned via the conversation log.
+When `convertToObject=true`, the raw LLM response is **always** persisted in conversation memory (key: `langchain:<type>:<taskId>`, e.g. `langchain:openai:myChat`) even if JSON parsing fails. This ensures you can inspect what the LLM actually returned via the conversation log.
 
 ### Tips
 
@@ -3209,8 +3225,8 @@ MongoDB and imported from ZIPs — the one backward-compatibility boundary this
 codebase has. Silently ignoring a parameter an author set deliberately would be
 worse than honouring it: an agent that genuinely wants its greeting withheld
 would start sending it, with no diagnostic. So the flag keeps working exactly as
-before, and `LlmTask` logs a WARN naming the task the first time each configured
-task uses it.
+before, and `LlmTask` logs a WARN naming the task each time a configuration that
+sets it is loaded (at deploy time, not on every turn).
 
 **What to do:** delete it from the task. Keep it only if that agent must really
 withhold its opening greeting from the model — which is a presentation choice,
@@ -3264,7 +3280,7 @@ not a provider requirement.
 ### Response Not Added to Output
 
 - **Problem**: LLM response not visible to user
-- **Solution**: Set `addToOutput: "true"` in parameters, or configure `postResponse.outputBuildInstructions`
+- **Solution**: Set `addToOutput: "true"` in parameters, or configure `postResponse.outputBuildInstructions`. (A turn that ran in agent mode adds the answer by itself unless `addToOutput` is `"false"`.)
 
 ---
 
@@ -3282,7 +3298,7 @@ LlmTask.execute(memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
-      └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
+      └─→ Rate Limiter → Cache Check → Quota → Execute (timeout) → Cost Tracker → Result
 ```
 
 ### Implicit Context

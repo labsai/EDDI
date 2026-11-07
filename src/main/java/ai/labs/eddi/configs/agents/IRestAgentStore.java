@@ -178,9 +178,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    @Operation(summary = "Delete agent", description = "Delete a Agent configuration. When cascade=true, also deletes referenced packages "
-            + "and their extension resources (behavior sets, HTTP calls, output sets, langchains, "
-            + "property setters, dictionaries). Shared resources (packages used by other agents, "
+    @Operation(summary = "Delete agent", description = "Delete a Agent configuration. When cascade=true, also deletes the Agent's "
+            + "schedules and its referenced workflows with every extension resource they reference (behavior sets, "
+            + "HTTP calls, MCP calls, output sets, LLM configs, property setters, dictionaries, ...). Shared resources "
+            + "(workflows used by other agents, "
             + "extensions used by other packages) are skipped. "
             + "An agent's workflow reference is version-pinned and routinely names an older version than the one that "
             + "exists; the cascade resolves each reference to the workflow's CURRENT version before deciding, and asks "

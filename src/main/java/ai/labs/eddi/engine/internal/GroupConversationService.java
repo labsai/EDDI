@@ -2258,10 +2258,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2295,6 +2291,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 

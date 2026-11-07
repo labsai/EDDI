@@ -63,9 +63,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * {@code webhook} is the signed inbound webhook channel ({@code POST
      * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
      * {@link WebhookChannelSettings#validate}. {@code email} is the mailbox channel
-     * (trigger mode: a polled IMAP mailbox starts turns, nothing is sent back),
-     * validated by {@link EmailChannelSettings#validate} and, against the
-     * deployment, by {@link EmailChannelSupport}.
+     * (a polled mailbox starts turns; in conversation mode the agent also replies
+     * over SMTP), validated by {@link EmailChannelSettings#validate} and, against
+     * the deployment, by {@link EmailChannelSupport}.
      */
     private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE,
             EmailChannelSettings.CHANNEL_TYPE);
