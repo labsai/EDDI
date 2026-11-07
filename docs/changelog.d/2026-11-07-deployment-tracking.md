@@ -29,7 +29,18 @@ Two defects in `AgentDeploymentManagement`, both in cluster mode.
   by dropping every tracked row this node's registry does not hold READY. A registry that
   cannot be read drops nothing. The tracked set is a concurrent set, so an undeploy event
   no longer takes the sweep lock: one undeploy arriving during a long sweep used to stall
-  every later cluster event on the node, cache invalidations included.
+  every later cluster event on the node, cache invalidations included. The sweep reads
+  the registry before the deployment records, so an undeploy (registry first, record
+  second) that lands while the sweep runs is not taken for a deployment that went
+  missing.
+- **An undeploy-only teardown now marks the deployment record undeployed.**
+  `teardown_agent` without `delete`, and the end-of-discussion cleanup when it only
+  undeploys (`lifecyclePolicy: UNDEPLOY_ONLY`, or an agent whose origin cannot be
+  verified), removed the sub-agent from this node's registry and left its record saying
+  deployed. Once tracking follows the registry, the next sweep would deploy it again
+  within about ten seconds; before, it came back at the next restart, and other nodes in
+  a cluster never undeployed it. Both paths now flip the agent's `production` records to
+  undeployed, as a REST undeploy does, so every node's sweep undeploys it too.
 
 ### Design decisions
 
@@ -45,4 +56,7 @@ Two defects in `AgentDeploymentManagement`, both in cluster mode.
 [`IAgentDeploymentManagement.java`](../../src/main/java/ai/labs/eddi/engine/runtime/IAgentDeploymentManagement.java),
 [`AgentDeploymentManagementClusterTest.java`](../../src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementClusterTest.java),
 [`AgentDeploymentManagementBranchTest.java`](../../src/test/java/ai/labs/eddi/engine/runtime/internal/AgentDeploymentManagementBranchTest.java),
-[`clustering.md`](../clustering.md)
+[`GroupLifecycleOps.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupLifecycleOps.java),
+[`TeardownAgentTool.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/TeardownAgentTool.java),
+[`clustering.md`](../clustering.md),
+[`group-conversations.md`](../group-conversations.md)
