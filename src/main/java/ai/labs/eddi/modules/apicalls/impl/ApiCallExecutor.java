@@ -1149,14 +1149,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Sends a fire-and-forget batch, on the batch's own thread, one request at a
-     * time. A request that fails — a timeout, a refused connection — is logged with
-     * its position and the rest are still sent: the batch used to be one task that
-     * a single exception ended, dropping every later request without a word while
-     * the turn had long reported success. A concurrent request that fails
-     * asynchronously never stopped the others; now one whose dispatch throws does
-     * not either. An interrupted thread stops sending: the runtime is shutting the
-     * task down.
+     * Sends a fire-and-forget batch on the batch's own thread, in order: each
+     * request in turn, or, concurrently, each dispatched in turn without waiting
+     * for its response. A request that fails — a timeout, a refused connection — is
+     * logged with its position and the rest are still sent: the batch used to be
+     * one task that a single exception ended, dropping every later request without
+     * a word while the turn had long reported success. A concurrent request that
+     * fails asynchronously never stopped the others; now one whose dispatch throws
+     * does not either. An interrupted thread stops sending: the runtime is shutting
+     * the task down.
      */
     private static void sendBatch(List<BuiltRequest> requests, String callName, boolean sequentially) {
         int total = requests.size();
