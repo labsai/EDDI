@@ -766,14 +766,6 @@ class AgentSigningServiceTest {
         assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's nothing-to-clean DEBUG");
     }
 
-    /**
-     * Writes a signing key into the vault in the one shape this service reads: an
-     * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
-     * {@code agent-signing-key:{agentId}}. Nothing in EDDI writes one, so the test
-     * stands in for whatever provisions it. Writing it again replaces the key.
-     *
-     * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
-     */
     // ─── generateKey / checkSigningKey: provisioning, and the save-time check ───
 
     @Test
@@ -912,6 +904,16 @@ class AgentSigningServiceTest {
         assertEquals(0.0, registry.counter("eddi.agent.identity.verify.fail").count());
     }
 
+    /**
+     * Writes a signing key into the vault in the one shape this service reads: an
+     * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
+     * {@code agent-signing-key:{agentId}}. {@link AgentSigningService#generateKey}
+     * writes only versioned keys, so the test stands in for a legacy unversioned
+     * one — and, through the overload below, for a version already taken in the
+     * vault. Writing it again replaces the key.
+     *
+     * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
+     */
     private String provisionKey(String tenantId, String agentId) throws Exception {
         return storeNewKey(tenantId, "agent-signing-key:" + agentId, agentId);
     }
