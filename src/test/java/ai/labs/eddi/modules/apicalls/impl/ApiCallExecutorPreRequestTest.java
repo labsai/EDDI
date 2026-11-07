@@ -14,9 +14,10 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
-import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -77,7 +78,7 @@ class ApiCallExecutorPreRequestTest {
 
         var engine = Engine.builder().addDefaults().strictRendering(false).build();
         var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(engine),
-                mock(IDataFactory.class), mock(SecretPropertyVault.class));
+                new DataFactory(), mock(SecretPropertyVault.class));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, mock(IRuntime.class), prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, mock(CallerIdentityContext.class), new RequestRedactor(callerIdentityResolver), null,
@@ -121,7 +122,38 @@ class ApiCallExecutorPreRequestTest {
         assertEquals("/items/42", uri.getRawPath());
     }
 
+    /**
+     * The rebuild is not needed for {@code {memory.current…}} either: what
+     * {@code MemoryItemConverter} puts under {@code memory.current} is the current
+     * step's own output object, and every property set is mirrored into it.
+     */
+    @Test
+    @DisplayName("{memory.current…} is a live view: it shows the property the instruction just set")
+    void memoryCurrentShowsThePropertyJustSet() throws Exception {
+        var instruction = new PropertyInstruction();
+        instruction.setName("reason");
+        instruction.setValueString("cleanup");
+        instruction.setScope(Property.Scope.conversation);
+        var liveMemory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("id", "42");
+        templateData.put("memory", Map.of("current", liveMemory.getCurrentStep().getConversationOutput()));
+
+        URI uri = executeDelete(liveMemory, templateData, "/items/{id}/{memory.current.properties.reason}", List.of(instruction));
+
+        assertEquals("/items/42/cleanup", uri.getRawPath());
+    }
+
     private URI executeDelete(String path, List<PropertyInstruction> instructions) throws Exception {
+        // What HttpCallToolsProvider hands in for a model argument {"id": "42"}.
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("id", "42");
+        return executeDelete(memory, templateData, path, instructions);
+    }
+
+    private URI executeDelete(IConversationMemory conversationMemory, Map<String, Object> templateData, String path,
+                              List<PropertyInstruction> instructions)
+            throws Exception {
         var call = new ApiCall();
         call.setName("deleteItem");
         call.setSaveResponse(false);
@@ -134,11 +166,7 @@ class ApiCallExecutorPreRequestTest {
         preRequest.setPropertyInstructions(instructions);
         call.setPreRequest(preRequest);
 
-        // What HttpCallToolsProvider hands in for a model argument {"id": "42"}.
-        Map<String, Object> templateData = new HashMap<>();
-        templateData.put("id", "42");
-
-        executor.execute(call, memory, templateData, "http://api.example.com");
+        executor.execute(call, conversationMemory, templateData, "http://api.example.com");
 
         var captor = ArgumentCaptor.forClass(URI.class);
         verify(httpClient).newRequest(captor.capture(), any());

@@ -15,8 +15,9 @@ template. An empty `propertyInstructions: []` list did the same. The method now
 works like `runPostResponse`: the instructions update the caller's map in place
 (each one already refreshed `{properties}` there), a plaintext a
 `scope: "secret"` instruction vaulted is scrubbed from it, and the same map is
-returned. `LlmTask` (which ignored the return value) and `McpCallsTask` are fixed
-by the same change. `PrePostUtils` no longer needs `IMemoryItemConverter`; the
+returned. `McpCallsTask`, which assigns the return value the same way, is fixed
+by the same change; `LlmTask` ignored the return value, so it kept its map all
+along and now also gets the scrub. `PrePostUtils` no longer needs `IMemoryItemConverter`; the
 constructor parameter is gone. The HITL pinning predicate
 (`canExecuteDivergeFromResolve`) is unchanged — a call with pre-request
 instructions stays unpinnable — and its Javadoc now gives the real reason.
@@ -48,9 +49,10 @@ interrupted batch thread stops sending and says how many were left.
 
 - A `preRequest` property instruction with a `toObjectPath` now writes into the
   template data the request renders from; the rebuild used to discard it.
-- The `{memory…}` view in the request templates is no longer rebuilt after the
-  instructions run, so it does not show a property they just set;
-  `{properties.x}` does, as it always has and as it does in `postResponse`.
+- Nothing a template read through the rebuilt map is lost: `{properties.x}` is
+  refreshed in place by every instruction, and `{memory.current…}` is a live view
+  of the current step, which already shows the property just set (under
+  `memory.current.properties`) without a rebuild.
 - A retry request can no longer template the previous attempt's
   `{name}HttpCode` / `{name}Error`. That was undocumented, and it is the
   divergence between the previewed and the sent request that the HITL pinning
@@ -60,7 +62,7 @@ interrupted batch thread stops sending and says how many were left.
 
 **Files:** [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java),
 [`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java),
-[`httpcalls.md`](../httpcalls.md) (`executeCallsSequentially` row);
+[`httpcalls.md`](../httpcalls.md) (`executeCallsSequentially` and `retryApiCallInstruction.maxRetries` rows);
 tests `PrePostUtilsTest`, `PrePostUtilsDeepBranchTest`, `PrePostUtilsSecretScopeTest`,
 `ApiCallExecutorTest`, `ApiCallExecutorPreRequestTest` (new), `ApiCallExecutorFireAndForgetBatchTest` (new),
 and the constructor call in the other `PrePostUtils` users.
