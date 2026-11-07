@@ -594,13 +594,6 @@ public final class SecretRedactionFilter {
     }
 
     /**
-     * Redact potential secret values from a log message.
-     *
-     * @param message
-     *            the raw log message
-     * @return the message with secrets replaced by {@code <REDACTED>}
-     */
-    /**
      * Only the rules that recognise a credential by its SHAPE alone (an {@code sk-}
      * key, a long bearer token, ...), never the name-bound rules
      * ({@code password: ...}, {@code token=...}). For text that is prose rather
@@ -687,6 +680,13 @@ public final class SecretRedactionFilter {
                 && c != ']';
     }
 
+    /**
+     * Redact potential secret values from a log message.
+     *
+     * @param message
+     *            the raw log message
+     * @return the message with secrets replaced by {@code <REDACTED>}
+     */
     public static String redact(String message) {
         if (message == null || message.isEmpty()) {
             return message;

@@ -1498,20 +1498,6 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Whether the source workflow's steps may replace the target's, or the reason
-     * they may not.
-     * <p>
-     * Only when both sides wire up the same extensions. A source step referencing
-     * something the target workflow does not have would be written pointing at a
-     * resource id from the other instance — a pipeline step loading a config that
-     * is not in this database. That is the same refusal
-     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
-     * the step that would reference it.
-     *
-     * @return null when the source config can be adopted, otherwise the reason for
-     *         the operator
-     */
-    /**
      * A copy of the workflow whose steps' maps and lists are its own, so repointing
      * a reference in it leaves the original as it was.
      */
@@ -1550,6 +1536,20 @@ public class UpgradeExecutor {
         return value;
     }
 
+    /**
+     * Whether the source workflow's steps may replace the target's, or the reason
+     * they may not.
+     * <p>
+     * Only when both sides wire up the same extensions. A source step referencing
+     * something the target workflow does not have would be written pointing at a
+     * resource id from the other instance — a pipeline step loading a config that
+     * is not in this database. That is the same refusal
+     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
+     * the step that would reference it.
+     *
+     * @return null when the source config can be adopted, otherwise the reason for
+     *         the operator
+     */
     private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs,
                                          Set<String> createdForAdoption) {
         for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {

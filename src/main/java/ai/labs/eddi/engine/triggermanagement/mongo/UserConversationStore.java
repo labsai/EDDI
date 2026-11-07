@@ -27,8 +27,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MongoDB implementation of {@link IUserConversationStore}. Annotated
- * {@code @DefaultBean} so PostgreSQL can override.
+ * MongoDB implementation of {@link IUserConversationStore};
+ * {@code DataStoreProducers} picks it or the PostgreSQL one by
+ * {@code eddi.datastore.type}.
  *
  * @author ginccc
  */

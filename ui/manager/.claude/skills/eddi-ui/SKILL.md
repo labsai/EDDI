@@ -15,13 +15,13 @@ class system, never use raw hex.
 
 | Component | Notes |
 |---|---|
-| `Button` | `variant`: primary (default) · secondary · destructive · warning · outline · ghost · link. `size`: sm · md (default) · lg · icon. `asChild` for link buttons. Lucide icon as a child auto-sizes to 16px. |
+| `Button` | `variant`: primary (default) · secondary · destructive · warning · outline · ghost · link. `size`: sm · md (default) · lg · icon · iconSm (24px, for icon controls in a dense list row). `asChild` for link buttons. Lucide icon as a child auto-sizes to 16px. |
 | `Badge` | `variant`: default (gold) · secondary · success · warning · destructive · outline. Pill, `text-xs font-semibold`. |
 | `Card` | Compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`. `rounded-xl border bg-card shadow-sm`; header is `p-5 pb-0`, content `p-5`. |
 | `Input` | `h-10 rounded-lg`, gold focus ring. Plain `InputHTMLAttributes`. |
 | `Skeleton` | Loading placeholder. |
 | `AccessibleDialog` | Focus-trapped modal. |
-| `AlertDialog` | Confirm/destructive prompt: `open`, `onOpenChange`, `title`, `description`, `onConfirm`, `confirmLabel`, `cancelLabel`, `isPending`, `variant` (`destructive` \| `warning`), plus `children` for extra controls between description and buttons (e.g. a "permanently delete" checkbox). Use for every delete. |
+| `AlertDialog` | Confirm/destructive prompt: `open`, `onOpenChange`, `title`, `description`, `onConfirm`, `confirmLabel`, `cancelLabel`, `isPending`, `variant` (`destructive` \| `warning`), `lockWhilePending` (default true: Escape/backdrop/X ignored while pending), `confirmDisabled` (e.g. an unmet type-to-confirm), plus `children` for extra controls between description and buttons (e.g. a "permanently delete" checkbox). Use for every delete. |
 | `UnsavedChangesDialog` | Discard-changes confirm. Pair with `useUnsavedChangesGuard`. |
 | `DropdownMenu` | Radix wrapper. |
 | `ErrorBoundary` | Wrap risky subtrees. |
@@ -33,9 +33,9 @@ class system, never use raw hex.
 | Component | Use it for |
 |---|---|
 | `EmptyState` | `icon` (Lucide), `title`, `description?`, `actionLabel?`, `onAction?`. Dashed-border box, `py-16`. |
-| `ErrorState` | `message`, `onRetry?`, `retryLabel?`. Destructive-tinted box. |
+| `ErrorState` | `message?`, `error?` (the failure itself — 401/403/404 and network errors get their own headline), `onRetry?`, `retryLabel?`. Destructive-tinted box. |
 | `ViewToggle` | Card ↔ list switch. Already keyboard-accessible (arrow keys, radiogroup). |
-| `BackLink` | Detail-page back nav. Takes only `to` / `label` — no `className`. |
+| `BackLink` | Detail-page back nav. Takes only `to` / `label` / `onNavigate?` (intercept a plain click, e.g. to ask about unsaved edits) — no `className`. |
 | `AgentPicker`, `SecretKeyPicker` | Async pickers, already wired to react-query. |
 | `ResourceTypeBadge` | `type` slug → per-type color chip (rules amber, apicalls green, llm pink, …). |
 | `ActionBadge` | Diff actions: CREATE · UPDATE · SKIP · CONFLICT. |
@@ -52,10 +52,10 @@ class system, never use raw hex.
 
 | Component | Notes |
 |---|---|
-| `AppLayout` | Owns the whole frame: sidebar, top bar, drawers, onboarding, and `<main>` with `p-6`, `max-w-screen-2xl` and an `@container/main` context. A page renders its body only. |
-| `Sidebar` | `collapsed` / `onToggle`. Four collapsible nav sections (persisted to `eddi-sidebar-sections`), Manager/Workforce switch, approvals count badge, external links, help menu, version footer. Uses the `sidebar-*` tokens, not the page tokens. |
-| `TopBar` | `onMenuClick` / `sidebarVisible`. Breadcrumb, command-palette trigger, theme and chat controls. |
-| `PlatformStatus` | Backend connectivity pill with a click-to-expand popover (instance, latency, last checked). |
+| `AppLayout` | Owns the whole frame: sidebar, top bar, drawers, onboarding, and `<main>` with `p-4 md:p-6`, `max-w-screen-2xl` and an `@container/main` context. A page renders its body only. |
+| `Sidebar` | `collapsed` / `onToggle` / `showLanguage?` (footer language picker, for the phone drawer). Four collapsible nav sections (persisted to `eddi-sidebar-sections`), Manager/Workforce switch, approvals count badge, external links, help menu, version footer. Uses the `sidebar-*` tokens, not the page tokens. |
+| `TopBar` | `onMenuClick` / `sidebarVisible`. Breadcrumb, platform-status pill, notification bell, Platform Operator launcher, theme and language controls, user menu. |
+| `PlatformStatus` | Backend connectivity pill with a click-to-expand popover (instance, latency, last checked). `compact` shows only the dot (phones). |
 | `PageLoader` | Route-level skeleton. Use it for lazy-route fallbacks, not for in-page loading. |
 | `MockDataBanner` | Demo-mode strip; self-hides unless MSW is active. |
 | `UpdateBanner` | New-release strip, mounted by `AppLayout`. No props; self-hides unless the opt-in check is on and an update is available. |

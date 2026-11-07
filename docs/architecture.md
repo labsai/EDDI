@@ -474,7 +474,7 @@ void redoLastStep();
 void executeLifecycle(
     IConversationMemory conversationMemory,
     List<String> lifecycleTaskTypes
-) throws LifecycleException
+) throws LifecycleException, ConversationStopException, ConversationPauseException
 ```
 
 **How It Works**:
@@ -1029,9 +1029,9 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 
 1. **Key generation**: `AgentSigningService.generateKeyPair(tenantId, agentId)` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault. **This is a service-level API with no REST endpoint** — keys are provisioned as part of agent creation, not by an operator call
 2. **Key rotation**: `AgentPublicKey` records support versioned keys with `validFromMs`/`validUntilMs` windows. Old and new keys overlap during rotation. Private keys use versioned vault paths (`agent-signing-key:{agentId}:v{version}`)
-3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
+3. **Signing**: When `security.signInterAgentMessages=true`, the group engine (`GroupSigningGuard`, called by `GroupConversationService`) creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
 4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
-5. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (5min default) and clock-skew (30s default) checks. Duplicate nonces are rejected
+5. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (`eddi.a2a.signing.nonce.max-age-ms`, 5 min default) and clock-skew (`eddi.a2a.signing.nonce.clock-skew-ms`, 30 s default) checks. A duplicate, stale or skewed nonce is rejected, and the entry is then stored unsigned
 6. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key. This is **detect-and-log, not a gate**: a failed or unsigned prior entry is recorded at ERROR (for security monitoring) but is **not currently dropped or blocked** — the transcript is still passed to the receiving agent. Hard enforcement (excluding unverified entries from the context the receiver sees) is a planned follow-up; do not rely on this flag to keep tampered peer content out of an agent's context today
 
 **What is NOT covered:** MCP invocation signing is not yet implemented — the `signMcpInvocations` config field has been removed until the feature is built.
@@ -1051,8 +1051,9 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 | Tool | Trigger | What It Checks |
 |------|---------|----------------|
-| **CodeQL** | Every PR + weekly schedule | Java semantic analysis (injection, SSRF, crypto misuse) |
-| **Trivy** | Docker image build | CVEs in OS packages and Java dependencies |
+| **CodeQL** | Every PR + weekly schedule | Semantic analysis of the Java backend and, in a separate job, the UIs (injection, SSRF, crypto misuse) |
+| **Trivy** | Every code PR (filesystem scan) + Docker image build (image scan) | CVEs in OS packages and Java dependencies; both scans block on fixable CRITICAL/HIGH |
+| **Gitleaks** (`Secret Scanning`) | Every PR | Committed credentials |
 | **Dependency Review** | Every PR | License compliance and known vulnerabilities in new dependencies |
 | **Jackson 3 Ban** | Every build (Maven Enforcer) | Prevents accidental Jackson 3.x introduction (incompatible with Quarkus) |
 

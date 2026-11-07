@@ -21,7 +21,7 @@ import java.util.List;
 public interface IRestAction {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(description = "Read expressions.")
+    @Operation(description = "Read actions.")
     List<String> readActions(@QueryParam("workflowId") String workflowId, @QueryParam("workflowVersion") Integer workflowVersion,
                              @QueryParam("filter")
                              @DefaultValue("") String filter,

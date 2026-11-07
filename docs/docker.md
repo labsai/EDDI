@@ -154,7 +154,7 @@ docker run --name eddi \
 | `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` | `false`                      | Opt out of the production auth requirement. Required to boot with OIDC disabled |
 | `EDDI_MCP_ALLOW_UNAUTHENTICATED` | `false`                           | Knowingly expose `/mcp` without authentication. Required to boot with OIDC disabled |
 | `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED` | `false`                   | Knowingly expose `/secretstore` without authentication. Required to boot with OIDC disabled |
-| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
+| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, `*.localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 
@@ -164,7 +164,7 @@ docker run --name eddi \
 | -------------------------- | --------------------------------------------- | ----------- |
 | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
 | `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
-| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters or a known default) |
+| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters, fewer than 6 distinct characters, or a known default/placeholder) unless `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` |
 | `POSTGRES_PASSWORD`        | *(required)*                                  | `docker-compose.postgres-only.yml` only: the database password for both PostgreSQL and EDDI. No default — the file used to ship `eddi`/`eddi`. The postgres image reads it at first init only, so keep it stable; `install.sh --db=postgres` generates one into `.env` |
 | `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` | `eddi` / `changeme` | MongoDB's root user, created on first init. Only `mongod` and the one-shot `mongodb-app-user` service see it; EDDI does not connect with it |
 | `MONGO_APP_USERNAME`       | `eddi_app`                                    | EDDI's own MongoDB user: `readWrite` + `dbAdmin` on `eddi`, nothing else. `mongodb-app-user` creates it, or resets its password, on every `up` — including on a volume from before it existed, so no manual migration is needed |

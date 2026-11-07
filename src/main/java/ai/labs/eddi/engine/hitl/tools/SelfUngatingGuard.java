@@ -439,10 +439,6 @@ public final class SelfUngatingGuard {
     }
 
     /**
-     * Adds the JSON pointer of every {@code key} member at any depth of
-     * {@code node}.
-     */
-    /**
      * As {@link #collectKeyPaths}, but a key holding an empty array or object is
      * skipped: an empty stored list protects nothing, and a default-serialised
      * document carries one, so counting it would refuse every whole-document write.
@@ -470,6 +466,10 @@ public final class SelfUngatingGuard {
         }
     }
 
+    /**
+     * Adds the JSON pointer of every {@code key} member at any depth of
+     * {@code node}.
+     */
     static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
         if (node == null) {
             return;

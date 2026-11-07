@@ -15,10 +15,10 @@ import java.util.concurrent.Callable;
  * own body. That is what releases the in-flight metrics reference and completes
  * the caller's response handler. A task the coordinator discards — because
  * handing it to the runtime was rejected and there is no caller left to
- * propagate to (see {@code InMemoryConversationCoordinator#submitNext}) — never
- * reaches that {@code finally}: its body is never invoked at all. Without this
- * hook the reference leaks for the JVM's lifetime and the HTTP caller waits for
- * a response that can never arrive.
+ * propagate to (see {@code AbstractQueuedConversationCoordinator#submitNext}) —
+ * never reaches that {@code finally}: its body is never invoked at all. Without
+ * this hook the reference leaks for the JVM's lifetime and the HTTP caller
+ * waits for a response that can never arrive.
  * </p>
  *
  * <p>

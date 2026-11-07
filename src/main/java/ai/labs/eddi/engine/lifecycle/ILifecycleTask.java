@@ -174,8 +174,7 @@ public interface ILifecycleTask {
      *            the conversation memory containing all conversation state and
      *            history
      * @param component
-     *            task-specific configuration/resources loaded from package
-     *            extensions
+     *            the component {@link #configure} returned for this workflow step
      * @throws LifecycleException
      *             if an error occurs during task execution
      */
@@ -186,7 +185,7 @@ public interface ILifecycleTask {
      *
      * <p>
      * This method is called during Agent initialization to set up task-specific
-     * configurations from package extensions. The default implementation returns
+     * configurations from its workflow step. The default implementation returns
      * null, indicating no configuration is needed.
      * </p>
      *
@@ -207,16 +206,16 @@ public interface ILifecycleTask {
      * <pre>{@code
      * @Override
      * public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
-     *     String uri = (String) extensions.get("uri");
-     *     MyConfig config = configStore.load(uri);
-     *     return config;
+     *     URI uri = URI.create(configuration.get("uri").toString());
+     *     return resourceClientLibrary.getResource(uri, MyConfig.class);
      * }
      * }</pre>
      *
      * @param configuration
-     *            task-specific configuration parameters from package config
+     *            the workflow step's {@code config} map (for a resource-backed
+     *            task, its {@code uri})
      * @param extensions
-     *            extension URIs and metadata from package definition
+     *            the workflow step's {@code extensions} map
      * @return configured component object to be passed to execute(), or null if no
      *         configuration needed
      * @throws WorkflowConfigurationException

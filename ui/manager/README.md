@@ -20,7 +20,7 @@ EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. 
 - **LLM Configuration** — Connect to 19 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
 - **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
 - **Secrets Vault** — Manage encrypted API keys with vault references
-- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{{vars.<key>}}`)
+- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{vars.<key>}`)
 - **Audit Trail** — Timeline-based compliance and debugging viewer
 - **11 Languages** — English, German, French, Spanish, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
@@ -42,7 +42,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 If you want to develop the Manager UI itself:
 
 ```bash
-# Prerequisites: Node.js ≥ 22.18 (Stryker 10's Babel 8 floor; the build pins 26.13.0), EDDI backend on localhost:7070
+# Prerequisites: Node.js 22.22.2+, 24.15.0+ or 26+ (jsdom's floor for the test suite; the build pins 26.13.0), EDDI backend on localhost:7070
 npm install
 npm run dev          # Vite dev server on http://localhost:3000
 ```

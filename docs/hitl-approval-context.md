@@ -200,5 +200,6 @@ shows them with no further work.
 - The Manager's tool-approval editor has no rule editor, so `rules[].context` is written in the agent's JSON. The agent
   and group editors have a block editor.
 - A draft produced by a rule-pause task is not exposed as `hitl.draft`; read it from `memory.current` or a property.
-- The Platform Operator does not know about `approvalContext` yet; that is tracked in
+- The Platform Operator's system prompt describes `approvalContext`, but its tools cannot read a rendered context
+  (`approval-status` is not on its allow-list); the remaining follow-ups are tracked in
   `planning/operator-followups/approval-card-context.md` in the repository.

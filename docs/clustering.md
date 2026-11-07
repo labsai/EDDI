@@ -88,7 +88,7 @@ out. Longer, each area applies its policy:
 | Area | Default | Alternative |
 |---|---|---|
 | Turns | run with node-local ordering only, **unfenced**: steps appended concurrently on different nodes merge, but the conversation properties a turn writes are last-writer-wins, so concurrent turns can overwrite each other's properties and miss each other's context | `degraded.turns=reject`: 409 + `Retry-After` |
-| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
+| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on). That is the only user of the shared nonce store (`NONCES`): the [signed control plane](#signed-control-plane) remembers its nonces per node and is unaffected, and webhook delivery de-duplication, a separate bucket, follows the same `degraded.nonces` policy (see its row below) | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
@@ -336,7 +336,7 @@ cluster step incomplete rather than a clean erasure — run it again after the r
 
 ### Upgrading from the build-profile NATS coordinator
 
-The `nats` Maven build profile and its coordinator are gone; the published
+The `nats` Quarkus build profile and its coordinator are gone; the published
 image selects cluster mode at runtime. Its properties — `eddi.nats.stream-name`,
 `eddi.nats.max-retries`, `eddi.nats.ack-wait-seconds`,
 `eddi.nats.stream-max-age`, `eddi.nats.stream-max-messages`,

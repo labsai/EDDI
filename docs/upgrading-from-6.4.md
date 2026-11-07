@@ -399,7 +399,8 @@ Besides the MongoDB change in [section 2.4](#24-helm-with-the-in-chart-mongodb-t
   - `quarkus.http.limits.max-body-size` rises from `25M` to `60M`, but only RAG file uploads
     can use it. Every other endpoint, ZIP import included, is held to
     `eddi.http.limits.default-max-body-size` (`25M`), raised automatically to fit an attachment
-    of `eddi.attachments.max-size-bytes` (about 27.7 MB by default). A larger body gets `413`.
+    of `eddi.attachments.max-size-bytes` once base64-encoded (about 27.7 MB for the default
+    20 MB attachment). A larger body gets `413`.
   - A chunked HTTP/1.1 body without `Content-Length` gets `411`, unless
     `eddi.http.limits.refuse-unsized-bodies=false`.
   - Raise a proxy's body limit only if you want large RAG uploads.

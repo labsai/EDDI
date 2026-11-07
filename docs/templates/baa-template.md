@@ -46,8 +46,9 @@ integrity, and availability of ePHI, including but not limited to:
   Encryption at Rest, storage-level encryption for PostgreSQL, or
   equivalent). EDDI does not encrypt the database itself; this is a
   deployer-configured control
-- Encryption in transit via TLS 1.2+ for all EDDI endpoints (EDDI does not
-  terminate TLS itself; it is configured at the reverse proxy)
+- Encryption in transit via TLS 1.2+ for all EDDI endpoints (TLS is not on
+  by default: it is configured at the reverse proxy, or in EDDI itself through
+  the Quarkus `quarkus.http.ssl.*` settings with plaintext disabled)
 - Access control via Keycloak OIDC with role-based permissions
 - Automatic session timeout (15-minute idle maximum), configured in the
   identity provider; EDDI does not enforce it

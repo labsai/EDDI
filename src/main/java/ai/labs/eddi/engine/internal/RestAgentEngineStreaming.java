@@ -615,34 +615,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     }
 
     /**
-     * Per-request SSE stream: it owns the sink and, crucially, notices when the
-     * client is gone.
-     * <p>
-     * <strong>Why the send path is the disconnect detector.</strong> The endpoint
-     * receives only {@link SseEventSink} and {@link Sse}. A JAX-RS
-     * {@code ConnectionCallback} is not an option here: RESTEasy Reactive's
-     * {@code AsyncResponseImpl.register} stores connection callbacks in a request
-     * property that <em>nothing in the server ever reads</em>, so registering one
-     * would be dead code that silently cancels nothing. What IS reliable is
-     * {@code SseEventSink.isClosed()} — RESTEasy Reactive implements it as
-     * {@code serverResponse().closed()}, which Vert.x flips as soon as the client
-     * drops the connection. Every outbound frame therefore re-checks it, which
-     * makes a disconnect observable at the very next token/task boundary.
-     * <p>
-     * On the first such observation before the terminal frame, the in-flight turn
-     * is cancelled through {@code IConversationService.cancelConversation}, which
-     * sets the cooperative cancel flag on the live conversation memory. Without it,
-     * closing the tab at token 5 of 4000 still ran — and billed — the whole
-     * completion, and could escalate through every cascade model on the way. A
-     * cancelled turn is DISCARDED rather than saved — see
-     * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
-     * semantics and the config switch that turns this off.
-     * <p>
-     * The cancel is issued synchronously on the calling (pipeline worker) thread
-     * and at most once, so it never touches the Vert.x event loop and never
-     * repeats.
-     */
-    /**
      * Prefix every line of an SSE payload with one space.
      * <p>
      * The SSE grammar is {@code field ":" [ space ] value}, and a consumer strips a
@@ -677,6 +649,34 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return " " + normalised.replace("\n", "\n ");
     }
 
+    /**
+     * Per-request SSE stream: it owns the sink and, crucially, notices when the
+     * client is gone.
+     * <p>
+     * <strong>Why the send path is the disconnect detector.</strong> The endpoint
+     * receives only {@link SseEventSink} and {@link Sse}. A JAX-RS
+     * {@code ConnectionCallback} is not an option here: RESTEasy Reactive's
+     * {@code AsyncResponseImpl.register} stores connection callbacks in a request
+     * property that <em>nothing in the server ever reads</em>, so registering one
+     * would be dead code that silently cancels nothing. What IS reliable is
+     * {@code SseEventSink.isClosed()} — RESTEasy Reactive implements it as
+     * {@code serverResponse().closed()}, which Vert.x flips as soon as the client
+     * drops the connection. Every outbound frame therefore re-checks it, which
+     * makes a disconnect observable at the very next token/task boundary.
+     * <p>
+     * On the first such observation before the terminal frame, the in-flight turn
+     * is cancelled through {@code IConversationService.cancelConversation}, which
+     * sets the cooperative cancel flag on the live conversation memory. Without it,
+     * closing the tab at token 5 of 4000 still ran — and billed — the whole
+     * completion, and could escalate through every cascade model on the way. A
+     * cancelled turn is DISCARDED rather than saved — see
+     * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
+     * semantics and the config switch that turns this off.
+     * <p>
+     * The cancel is issued synchronously on the calling (pipeline worker) thread
+     * and at most once, so it never touches the Vert.x event loop and never
+     * repeats.
+     */
     private final class SseStream {
         private final String conversationId;
         private final String safeConversationId;

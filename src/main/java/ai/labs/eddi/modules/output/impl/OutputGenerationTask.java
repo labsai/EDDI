@@ -327,7 +327,7 @@ public class OutputGenerationTask implements ILifecycleTask {
      * helper method to convert from OutputConfiguration to internal Output Value
      *
      * @param configOutputs
-     *            List<OutputConfiguration.OutputType> as it comes from the
+     *            List<OutputConfiguration.Output> as it comes from the
      *            configuration repository
      * @return List<OutputValue> as it is used in the internal system
      */
