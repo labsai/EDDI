@@ -411,8 +411,8 @@ class ChannelConnectorMigrationBranchTest {
         }
 
         @Test
-        @DisplayName("lookupAgentName returns null when descriptor not found")
-        void lookupAgentNameNotFound() throws Exception {
+        @DisplayName("agent without a descriptor still gets its channel migrated")
+        void agentDescriptorNotFound() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var deployInfo = new DeploymentInfo();
@@ -433,7 +433,7 @@ class ChannelConnectorMigrationBranchTest {
             when(agentStore.read("agent1", 1)).thenReturn(agentConfig);
 
             when(descriptorStore.readDescriptor("agent1", 1))
-                    .thenThrow(new RuntimeException("not found"));
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
@@ -444,8 +444,8 @@ class ChannelConnectorMigrationBranchTest {
         }
 
         @Test
-        @DisplayName("lookupAgentName returns null when name is blank")
-        void lookupAgentNameBlank() throws Exception {
+        @DisplayName("agent descriptor with a blank name still gets its channel migrated")
+        void agentDescriptorNameBlank() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var deployInfo = new DeploymentInfo();

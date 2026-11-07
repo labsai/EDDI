@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -131,39 +132,44 @@ public class ChannelConnectorMigration {
         // Group connectors by channelType:channelId
         var channelGroups = new LinkedHashMap<String, List<ConnectorEntry>>();
 
+        List<DeploymentInfo> statuses;
         try {
-            var statuses = deploymentStore.readDeploymentInfos(deployed);
-            for (var status : statuses) {
-                if (status.getAgentId() == null || status.getAgentVersion() == null) {
-                    continue;
-                }
-                String agentId = status.getAgentId();
-                try {
-                    var agentConfig = agentStore.read(agentId, status.getAgentVersion());
-                    if (agentConfig == null || agentConfig.getChannels() == null) {
-                        continue;
-                    }
-                    DocumentDescriptor agentDescriptor = readAgentDescriptor(agentId, status.getAgentVersion());
-                    for (var connector : agentConfig.getChannels()) {
-                        if (connector.getType() == null || connector.getConfig() == null) {
-                            continue;
-                        }
-                        String channelId = connector.getConfig().get("channelId");
-                        if (channelId == null || channelId.isBlank()) {
-                            continue;
-                        }
-                        String channelType = connector.getType().toString().toLowerCase(Locale.ROOT);
-                        String groupKey = channelType + ":" + channelId;
-                        channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
-                                .add(new ConnectorEntry(connector, agentId, channelType, agentDescriptor));
-                    }
-                } catch (Exception e) {
-                    LOGGER.warnf("Skipping agent %s during channel migration: %s", agentId, e.getMessage());
-                }
-            }
+            statuses = deploymentStore.readDeploymentInfos(deployed);
         } catch (Exception e) {
             LOGGER.warn("Failed to read deployment infos for channel migration", e);
             throw new RuntimeException("Cannot read deployment infos", e);
+        }
+        for (var status : statuses) {
+            if (status.getAgentId() == null || status.getAgentVersion() == null) {
+                continue;
+            }
+            String agentId = status.getAgentId();
+            AgentConfiguration agentConfig;
+            try {
+                agentConfig = agentStore.read(agentId, status.getAgentVersion());
+            } catch (Exception e) {
+                LOGGER.warnf("Skipping agent %s during channel migration: %s", agentId, e.getMessage());
+                continue;
+            }
+            if (agentConfig == null || agentConfig.getChannels() == null) {
+                continue;
+            }
+            // Outside the skip above, deliberately: a descriptor that cannot be read aborts
+            // the run (see readAgentDescriptor).
+            DocumentDescriptor agentDescriptor = readAgentDescriptor(agentId, status.getAgentVersion());
+            for (var connector : agentConfig.getChannels()) {
+                if (connector.getType() == null || connector.getConfig() == null) {
+                    continue;
+                }
+                String channelId = connector.getConfig().get("channelId");
+                if (channelId == null || channelId.isBlank()) {
+                    continue;
+                }
+                String channelType = connector.getType().toString().toLowerCase(Locale.ROOT);
+                String groupKey = channelType + ":" + channelId;
+                channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
+                        .add(new ConnectorEntry(connector, agentId, channelType, agentDescriptor));
+            }
         }
 
         // Pre-load existing channel configs to avoid creating duplicates on retry.
@@ -357,14 +363,24 @@ public class ChannelConnectorMigration {
 
     /**
      * Read an agent's document descriptor, for its name and its ownership. Returns
-     * {@code null} if the descriptor is not found or cannot be read.
+     * {@code null} when the agent has none, which makes its channel unowned like
+     * the agent itself.
+     * <p>
+     * A read that fails is not an agent without an owner, and treating it as one
+     * would open the channel to everyone under the default legacy policy. It aborts
+     * the run instead, which then retries on the next start. Skipping only that
+     * agent would not do: a channel it shares would be created without its target,
+     * and the retry would skip that channel as already migrated.
      */
     private DocumentDescriptor readAgentDescriptor(String agentId, Integer version) {
         try {
             return descriptorStore.readDescriptor(agentId, version);
-        } catch (Exception e) {
-            LOGGER.debugf("Could not read descriptor for agent %s: %s", agentId, e.getMessage());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            LOGGER.debugf("Agent %s has no descriptor; its channel is migrated unowned", agentId);
             return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException("Cannot read the descriptor of agent " + agentId
+                    + ", so the owner of its channel is unknown", e);
         }
     }
 

@@ -99,7 +99,7 @@ class ChannelConnectorMigrationTest {
     }
 
     /**
-     * Stubs descriptorStore.readDescriptor (for lookupAgentName) to return a
+     * Stubs descriptorStore.readDescriptor (the agent's descriptor) to return a
      * DocumentDescriptor with the given name.
      */
     private void stubAgentName(String agentId, Integer version, String name) throws Exception {
@@ -473,6 +473,49 @@ class ChannelConnectorMigrationTest {
                 documents.values().stream().map(config -> config.getPlatformConfig().get("channelId")).toList(),
                 "the re-run created the channel that failed, and did not create the first one again");
         verify(migrationLogStore).createMigrationLog(argThat(log -> MIGRATION_KEY.equals(log.getName())));
+    }
+
+    @Test
+    @DisplayName("An agent with no descriptor leaves its channel unowned, as the agent is")
+    void agentWithoutDescriptorLeavesTheChannelUnowned() throws Exception {
+        doReturn(null).when(migrationLogStore).readMigrationLog(anyString());
+        doReturn(List.of(createDeploymentInfo(AGENT_ID, 1))).when(deploymentStore).readDeploymentInfos(deployed);
+        stubAgentWithChannel(AGENT_ID, "C12345");
+        stubEmptyDescriptors();
+        doThrow(new IResourceStore.ResourceNotFoundException("no descriptor"))
+                .when(descriptorStore).readDescriptor(AGENT_ID, 1);
+        stubCreateReturns(CHANNEL_ID, 1);
+
+        migration.runIfNeeded();
+
+        var captor = ArgumentCaptor.forClass(DocumentDescriptor.class);
+        verify(descriptorStore).createDescriptor(eq(CHANNEL_ID), eq(1), captor.capture());
+        assertTrue(DescriptorAccess.isUnowned(captor.getValue()));
+        verify(migrationLogStore).createMigrationLog(argThat(log -> MIGRATION_KEY.equals(log.getName())));
+    }
+
+    /**
+     * Not knowing an agent's owner is not the same as it having none: an unowned
+     * channel is open to everyone under the default legacy policy, so a read that
+     * failed must not decide that. The run stops and retries; skipping only that
+     * agent would create a shared channel without its target, which the retry would
+     * then skip as already migrated.
+     */
+    @Test
+    @DisplayName("An agent descriptor that cannot be read aborts the run instead of migrating its channel unowned")
+    void unreadableAgentDescriptorAbortsTheRun() throws Exception {
+        doReturn(null).when(migrationLogStore).readMigrationLog(anyString());
+        doReturn(List.of(createDeploymentInfo(AGENT_ID, 1))).when(deploymentStore).readDeploymentInfos(deployed);
+        stubAgentWithChannel(AGENT_ID, "C12345");
+        stubEmptyDescriptors();
+        doThrow(new IResourceStore.ResourceStoreException("descriptor store unavailable"))
+                .when(descriptorStore).readDescriptor(AGENT_ID, 1);
+        stubCreateReturns(CHANNEL_ID, 1);
+
+        migration.runIfNeeded();
+
+        verify(channelStore, never()).create(any());
+        verify(migrationLogStore, never()).createMigrationLog(any());
     }
 
     @Test

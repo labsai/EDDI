@@ -13,7 +13,9 @@
   index built (`DescriptorAccess.rebuildIndex`), named like the config, and owned and filed like the agent it routes
   to by default. That agent's visibility is copied only when it is `private`; anything wider becomes `space`, since a
   channel holds the bot's credentials. A descriptor that cannot be written fails that channel (no completion flag) and
-  removes the document again, so the retry does not duplicate it.
+  removes the document again, so the retry does not duplicate it. An agent with no descriptor leaves its channel
+  unowned, as the agent is; an agent descriptor that cannot be *read* aborts the run instead (no completion flag), since
+  an unowned channel is open to everyone under the default legacy policy and an unknown owner is not an absent one.
 - **A failed duplicate check no longer creates duplicates.** When the channel listing itself failed, the run went on
   "but may create duplicates". It now aborts and retries on the next start.
 - **Back-fill.** The completion flag is renamed to `channel-connector-migration-v2-complete`, so a deployment that
@@ -31,7 +33,8 @@
 ### Tests
 
 `ChannelConnectorMigrationTest`: the descriptor's resource URI, name, owner, space, narrowed visibility and index; a
-private agent's channel stays private; a re-run after a partial failure creates only the failed channel (stores that
+private agent's channel stays private; an agent without a descriptor gives an unowned channel, and an unreadable one
+aborts the run; a re-run after a partial failure creates only the failed channel (stores that
 remember the first run's writes); a descriptor write failure removes the document and leaves the flag unset; a listing
 failure creates nothing; the first run's flag does not skip the second. `MigrationManagerTest`: a call from inside the
 completion callback runs its own callback. `V6RenameMigrationTest`: an agent rewrite that matched nothing leaves the
