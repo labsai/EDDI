@@ -887,7 +887,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
         }
 
-        throw new RuntimeException("Agent " + agentId + " is not listed on " + baseUrl
+        throw new RemoteReadException("Agent " + agentId + " is not listed on " + baseUrl
                 + " — cannot determine its latest version. Pass an explicit sourceAgentVersion.");
     }
 
