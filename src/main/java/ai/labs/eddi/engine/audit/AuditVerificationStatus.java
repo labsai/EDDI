@@ -5,7 +5,8 @@
 package ai.labs.eddi.engine.audit;
 
 /**
- * Outcome of re-checking one stored audit entry's HMAC.
+ * Outcome of re-checking one stored audit entry: its HMAC, and on an entry
+ * whose HMAC verified, the agent signature it carries.
  *
  * @since 6.2.0
  */
@@ -52,6 +53,19 @@ public enum AuditVerificationStatus {
      * treated as unverified until the key is supplied. A key id the deployment
      * never recorded is reported as {@link #INVALID} instead — the id is text in
      * the row, and anyone able to edit the row can write one.
+     * <p>
+     * Also an entry whose HMAC verified and whose agent signature cannot be
+     * checked, because the agent version that signed it no longer exists (the agent
+     * was deleted).
      */
-    UNKNOWN_KEY
+    UNKNOWN_KEY,
+
+    /**
+     * The HMAC verified, but the agent signature does not: it does not verify
+     * against the public key the entry's agent version declares, it names a key
+     * version that agent version never declared, or it is malformed. The content is
+     * intact; the signature was altered or forged. Counted with the invalid
+     * entries.
+     */
+    AGENT_SIGNATURE_INVALID
 }

@@ -14,8 +14,9 @@ import java.util.List;
  * <p>
  * Two independent things are reported, because they catch different attacks:
  * <ul>
- * <li><strong>Per-entry HMAC status</strong> — catches a field edited in
- * place.</li>
+ * <li><strong>Per-entry status</strong> — the HMAC catches a field edited in
+ * place; on an entry that carries one, the agent's signature over that HMAC
+ * shows which agent's key vouched for it.</li>
  * <li><strong>Chain status</strong> — catches an entry <em>removed</em> or
  * reordered, which a per-entry HMAC cannot see at all. Entries carry a signed,
  * gap-free per-conversation sequence; a missing number is a missing entry, and
@@ -61,7 +62,10 @@ import java.util.List;
  *            that verdict is "not proven" rather than "disproven", and that a
  *            narrower page or a larger budget would say more
  * @param invalid
- *            entries whose HMAC did not match — tampering, or a key change
+ *            entries whose HMAC did not match — tampering, or a key change —
+ *            plus those whose agent signature did not verify
+ *            ({@code AGENT_SIGNATURE_INVALID}), and those that name a key this
+ *            deployment no longer holds ({@code UNKNOWN_KEY})
  * @param unsigned
  *            entries stored without an HMAC
  * @param chainStatus

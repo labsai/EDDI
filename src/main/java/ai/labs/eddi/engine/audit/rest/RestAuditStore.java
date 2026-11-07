@@ -159,8 +159,8 @@ public class RestAuditStore implements IRestAuditStore {
                 }
                 // Not proven intact, so not valid — but reported by its own status in
                 // the problem list, where an operator can tell a missing key from a
-                // forged row.
-                case INVALID, UNKNOWN_KEY -> invalid++;
+                // forged row, and a forged agent signature from edited content.
+                case INVALID, UNKNOWN_KEY, AGENT_SIGNATURE_INVALID -> invalid++;
                 case UNSIGNED -> unsigned++;
                 case SIGNING_DISABLED -> {
                     // counted only as a problem — nothing was actually checked

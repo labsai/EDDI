@@ -29,7 +29,7 @@ Every time a conversation turn is processed, each lifecycle task (parser, behavi
 | `EDDI_VAULT_MASTER_KEY`             | (none)  | Vault master key — also used to derive the HMAC signing key |
 | `eddi.audit.hmac-key` (`EDDI_AUDIT_HMAC_KEY`) | (none) | A signing secret for the ledger alone; rotating the vault master key never touches it. See [HMAC Integrity](#hmac-integrity) |
 | `eddi.audit.hmac-previous-keys`     | (none)  | Retired signing keys still accepted for verification |
-| `eddi.audit.agent-signing-enabled`  | `true`  | Sign each entry with the agent's own key (`agentSignature`) |
+| `eddi.audit.agent-signing-enabled`  | `true`  | Let agents sign their own entries (`agentSignature`). An agent signs only when the version that produced the entry has `security.signInterAgentMessages` on and a signing key; see [Agent signatures](#agent-signatures) |
 | `eddi.audit.verify.recover-legacy`  | `true`  | Let verification reconstruct the timestamp precision of pre-v4 rows |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many rows one verification may try to recover |
 | `eddi.compliance.audit-signing-required` | `false` | `true` makes a missing signing key a startup failure |
@@ -61,7 +61,7 @@ Each audit entry captures:
 | `cost`           | double  | Monetary cost of this step                                 |
 | `timestamp`      | Instant | When the task completed                                    |
 | `hmac`           | String  | HMAC-SHA256 integrity hash                                 |
-| `agentSignature` | String  | Optional per-agent signature (null when agent signing is off) |
+| `agentSignature` | String  | The agent's Ed25519 signature over `hmac`, as `v<keyVersion>:<Base64>`; null when the agent does not sign. See [Agent signatures](#agent-signatures) |
 | `sequence`       | long    | 0-based, gap-free position within the conversation; part of the signed payload |
 
 HITL oversight writes `hitl.sample.review`, `autonomy.promotion`, `autonomy.revert`, `autonomy.recommendation.dismissed`, `autonomy.demotion` and `autonomy.suspension.lifted` entries (`taskType: hitl`); approval analytics reads a projection of the `hitl.approval` entries, never the ledger itself — see [HITL Oversight](hitl-oversight.md#audit-ledger-entries).
@@ -117,11 +117,11 @@ Returns the total number of audit entries for a conversation.
 GET /auditstore/verify/{conversationId}?skip=0&limit=1000
 ```
 
-Recomputes every entry's HMAC and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
+Recomputes every entry's HMAC, checks the [agent signature](#agent-signatures) of an entry that carries one, and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
 
 A window that also holds unsequenced rows is no longer simply `UNAVAILABLE`: a hole between its sequenced rows still proves a deletion and is reported `BROKEN`; only a window without such a hole is `UNAVAILABLE`, since its start cannot be anchored. With signing on, a position counts as present only when its row is signed by a form that covers the sequence (v3 and later) — a v1/v2 row's sequence is not signed and could be rewritten to close a hole. What the chain still cannot show is the deletion of the **newest** entries of a conversation, or of its whole trail: nothing outside the trail records where it ended.
 
-**Per-entry verdicts:** `VALID` (HMAC matches); `VALID_RECOVERED` (a pre-v4 row that verified once its timestamp precision was reconstructed, as strong as `VALID`); `INVALID` (altered, or signed with another key); `UNSIGNED` (no HMAC, written while no key was configured); `SIGNING_DISABLED` (this deployment has no key, so nothing can be checked); `UNKNOWN_KEY` (names a recorded key the deployment no longer holds; treat as unverified).
+**Per-entry verdicts:** `VALID` (HMAC matches); `VALID_RECOVERED` (a pre-v4 row that verified once its timestamp precision was reconstructed, as strong as `VALID`); `INVALID` (altered, or signed with another key); `UNSIGNED` (no HMAC, written while no key was configured); `SIGNING_DISABLED` (this deployment has no key, so nothing can be checked); `UNKNOWN_KEY` (names a recorded key the deployment no longer holds, or carries an agent signature whose agent version no longer exists; treat as unverified); `AGENT_SIGNATURE_INVALID` (the HMAC matches, but the [agent signature](#agent-signatures) does not verify, so the signature was altered or forged). `UNKNOWN_KEY` and `AGENT_SIGNATURE_INVALID` count towards `invalid`.
 
 **Chain verdicts:** `INTACT` (gap-free), `BROKEN` (a missing sequence number not explained by the ledger's own drops), `INCOMPLETE` (every gap was recorded as never persisted), `UNAVAILABLE` (no sequence to check), `NOT_APPLICABLE` (agent-scoped sweeps).
 
@@ -131,7 +131,7 @@ A window that also holds unsequenced rows is no longer simply `UNAVAILABLE`: a h
 GET /auditstore/verify/agent/{agentId}?agentVersion=1&skip=0&limit=1000
 ```
 
-Same per-entry HMAC check across all of an agent's conversations. Because the sweep spans many conversations, the chain verdict is `NOT_APPLICABLE`. The `agentVersion` parameter is optional; the `skip`/`limit` semantics are those of the conversation sweep.
+Same per-entry check, HMAC and agent signature, across all of an agent's conversations. Because the sweep spans many conversations, the chain verdict is `NOT_APPLICABLE`. The `agentVersion` parameter is optional; the `skip`/`limit` semantics are those of the conversation sweep.
 
 ## HMAC Integrity
 
@@ -140,6 +140,18 @@ When the vault master key or `eddi.audit.hmac-key` is configured, each audit ent
 1. A **signing key** is derived using PBKDF2 with a distinct salt (`eddi-audit-hmac-v1`, 600K iterations), so an audit key never doubles as the vault's KEK. Which secret it is derived from is described under [Signing keys and rotation](#signing-keys-and-rotation).
 2. A **canonical string** is built from all entry fields (excluding the HMAC itself), with map keys sorted alphabetically for deterministic output. Nested maps and lists are canonicalized recursively.
 3. The HMAC is computed and stored as `v5:<key id>:<64 hex chars>`. The v5 canonical form signs the user identifier as a keyed identity token rather than verbatim (so a GDPR pseudonymisation does not invalidate the signature it had), includes the per-conversation `sequence`, signs the timestamp as epoch milliseconds, and names the key that signed it.
+
+### Agent signatures
+
+The HMAC proves the deployment wrote an entry. An agent with its own signing key also signs the entries it produces, so an entry can show which agent's key vouched for it.
+
+- **Who signs.** The agent version that produced the entry decides: it signs when it has `security.signInterAgentMessages` on and declares a key in `identity`. That is the setting whose save checks the key works (see [architecture.md](architecture.md#cryptographic-agent-identity) for provisioning), so an agent never writes a signature that fails against its own public key. `eddi.audit.agent-signing-enabled=false` turns agent signing off for the whole deployment.
+- **What is signed.** Only entries that carry an HMAC are signed. The signature is Ed25519 over the bytes `eddi-audit-entry:` followed by the entry's `hmac`, so it covers everything the HMAC covers. Without an HMAC key nothing is signed, because a signature over an entry id would say nothing about the content.
+- **Stored form.** `agentSignature` holds `v<keyVersion>:<Base64 signature>`, for example `v2:MEUCIQ…`. The key version is part of the value, so it is stored, redacted and dead-lettered together with the signature. Rewriting the version names another key, and the signature then fails.
+- **Which key verifies.** `/auditstore/verify` takes the public key that the entry's own agent version (`agentVersion`) declares for that key version. Agent versions are never edited in place, so changing the agent or replacing its key later cannot make an old entry verify against a different key. A rotation adds a key and keeps the old ones, so entries signed before it still verify.
+- **Verdicts.** The signature is checked only when the HMAC verified. A signature that does not verify, that names a key version its agent version never declared, or that is malformed, makes the entry `AGENT_SIGNATURE_INVALID`. When the agent version no longer exists (the agent was deleted), the signature cannot be checked and the entry reports `UNKNOWN_KEY`. If the agent store cannot be read, the sweep fails instead of guessing.
+- **Not detected.** A signature removed from a row. The HMAC is computed before the agent signs and cannot cover the signature, and an unsigned entry is also what an agent with signing off writes. When an agent that should sign cannot (its key is missing from the vault, or the vault is down), the ledger stores the entry unsigned and logs a WARN naming the entry.
+- **GDPR erasure** decides whether to re-sign a row from its HMAC alone, and the reseal makes a new agent signature when the agent still signs.
 
 ### Signing keys and rotation
 

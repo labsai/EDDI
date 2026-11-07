@@ -182,6 +182,28 @@ class RestAuditStoreTest {
     }
 
     /**
+     * An agent signature that does not verify is a finding even though the HMAC
+     * did: the sweep must not count the row as valid, and must raise the tampering
+     * verdict.
+     */
+    @Test
+    @DisplayName("an entry whose agent signature does not verify is invalid and suspected tampering")
+    void agentSignatureInvalidCountsAsInvalid() {
+        var signedByAnotherKey = entryAt("id-1", 0);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(signedByAnotherKey));
+        when(auditStore.countByConversation("conv-1")).thenReturn(1L);
+        when(auditLedgerService.verifyEntry(eq(signedByAnotherKey), any())).thenReturn(AuditVerificationStatus.AGENT_SIGNATURE_INVALID);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.valid());
+        assertEquals(1, report.invalid());
+        assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_INVALID, report.problems().getFirst().status());
+        assertFalse(report.intact());
+        assertTrue(report.tamperingSuspected());
+    }
+
+    /**
      * The sweep's budget lives on the service; the report's {@code recoverySkipped}
      * must be read back off that same budget after the loop — wiring a literal 0
      * here would make a budget-exhausted sweep look more thorough than it was, and
