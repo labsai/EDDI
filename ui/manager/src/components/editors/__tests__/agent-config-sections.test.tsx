@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   SecurityIdentitySection,
@@ -76,12 +76,13 @@ describe("SecurityIdentitySection", () => {
     );
     await user.click(screen.getByText("Security & Identity"));
     expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
-    expect(screen.getByText("Sign inter-agent (A2A) messages")).toBeInTheDocument();
-    expect(screen.getByText("Sign MCP invocations")).toBeInTheDocument();
+    expect(screen.getByText("Sign group-conversation messages")).toBeInTheDocument();
     expect(screen.getByText("Require peer verification")).toBeInTheDocument();
+    // The backend removed signMcpInvocations; a toggle for it saved nothing.
+    expect(screen.queryByTestId("security-flag-signMcpInvocations")).not.toBeInTheDocument();
   });
 
-  it("shows warning when a security flag is enabled", () => {
+  it("warns that a save will be refused when signing is on and the agent has no key", () => {
     const agentWithFlag: Agent = {
       ...baseAgent,
       security: { signInterAgentMessages: true },
@@ -90,7 +91,55 @@ describe("SecurityIdentitySection", () => {
       <SecurityIdentitySection agent={agentWithFlag} onChange={mockOnChange} />
     );
     // Section auto-opens since defaultOpen depends on security flags being set
-    expect(screen.getByTestId("security-flag-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("security-flag-warning")).toHaveTextContent(/no signing key/);
+  });
+
+  it("does not warn when signing is on and the agent has a key", () => {
+    const agentWithKey: Agent = {
+      ...baseAgent,
+      security: { signInterAgentMessages: true },
+      identity: { keys: [{ version: 1, publicKeyB64: "MCowBQYDK2VwAyEAkey" }] },
+    };
+    renderWithProviders(
+      <SecurityIdentitySection agent={agentWithKey} onChange={mockOnChange} />
+    );
+    expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
+    expect(screen.queryByTestId("security-flag-warning")).not.toBeInTheDocument();
+  });
+
+  it("offers no Generate button when the page passes no action (not an admin)", () => {
+    renderWithProviders(
+      <SecurityIdentitySection agent={{ ...baseAgent, security: { signInterAgentMessages: true } }} onChange={mockOnChange} />
+    );
+    expect(screen.queryByTestId("generate-signing-key")).not.toBeInTheDocument();
+  });
+
+  it("generates a key through the page's action", async () => {
+    const user = userEvent.setup();
+    const onGenerate = vi.fn();
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{ ...baseAgent, security: { signInterAgentMessages: true } }}
+        onChange={mockOnChange}
+        signingKeyAction={{ onGenerate, pending: false }}
+      />
+    );
+    await user.click(screen.getByTestId("generate-signing-key"));
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+    // Generating saves on the server; it is not a draft edit.
+    expect(mockOnChange).not.toHaveBeenCalled();
+  });
+
+  it("disables Generate and says why while the page cannot generate", () => {
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{ ...baseAgent, security: { signInterAgentMessages: true } }}
+        onChange={mockOnChange}
+        signingKeyAction={{ onGenerate: vi.fn(), pending: false, disabledReason: "Save or discard your changes first" }}
+      />
+    );
+    expect(screen.getByTestId("generate-signing-key")).toBeDisabled();
+    expect(screen.getByTestId("generate-signing-key-hint")).toHaveTextContent("Save or discard your changes first");
   });
 
   it("shows versioned keys when identity has keys array", () => {
@@ -112,8 +161,7 @@ describe("SecurityIdentitySection", () => {
     expect(screen.getByText(/Key v1/)).toBeInTheDocument();
   });
 
-  it("shows legacy key when identity has publicKey but no keys array", async () => {
-    const user = userEvent.setup();
+  it("shows legacy key when identity has publicKey but no keys array", () => {
     const agentWithLegacyKey: Agent = {
       ...baseAgent,
       identity: {
@@ -123,36 +171,17 @@ describe("SecurityIdentitySection", () => {
     renderWithProviders(
       <SecurityIdentitySection agent={agentWithLegacyKey} onChange={mockOnChange} />
     );
-    await user.click(screen.getByText("Security & Identity"));
+    // Section auto-opens: the agent has a key
     expect(screen.getByText(/Legacy key/)).toBeInTheDocument();
   });
 
-  it("shows confirmation dialog when enabling a security flag", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(
-      <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
-    );
-    await user.click(screen.getByText("Security & Identity"));
-    // Click to enable signInterAgentMessages
-    await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
-    // Confirmation dialog should appear
-    await waitFor(() => {
-      expect(screen.getByText("Enable security flag?")).toBeInTheDocument();
-    });
-  });
-
-  it("records the flag in the draft after confirming the dialog", async () => {
+  it("records a flag turned on in the draft, with no confirmation step", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <SecurityIdentitySection agent={baseAgent} onChange={mockOnChange} />
     );
     await user.click(screen.getByText("Security & Identity"));
     await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
-    // Confirm dialog
-    await waitFor(() => {
-      expect(screen.getByText("Enable anyway")).toBeInTheDocument();
-    });
-    await user.click(screen.getByText("Enable anyway"));
     expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
           security: expect.objectContaining({ signInterAgentMessages: true }),
         }));

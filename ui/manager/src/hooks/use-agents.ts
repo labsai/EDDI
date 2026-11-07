@@ -13,6 +13,7 @@ import {
   updateAgent,
   deleteAgent,
   duplicateAgent,
+  generateAgentSigningKey,
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
@@ -371,6 +372,17 @@ export function useDuplicateAgent() {
       version: number;
       deepCopy?: boolean;
     }) => duplicateAgent(id, version, deepCopy),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/** Generates a signing key, which the backend saves as a new agent version. */
+export function useGenerateAgentSigningKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) => generateAgentSigningKey(id, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },

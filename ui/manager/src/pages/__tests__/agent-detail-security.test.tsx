@@ -7,6 +7,8 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { SecurityIdentitySection } from "@/components/editors/agent-config-sections";
 import type { Agent } from "@/lib/api/agents";
 import { server } from "@/test/mocks/server";
+import { renderPage } from "@/test/test-utils";
+import { AgentDetailPage } from "@/pages/agent-detail";
 import { http, HttpResponse } from "msw";
 
 /** The page's draft setter; a section only ever reports an edit through it. */
@@ -24,7 +26,6 @@ function renderSection(agentOverrides: Partial<Agent> = {}) {
     workflows: [],
     security: {
       signInterAgentMessages: false,
-      signMcpInvocations: false,
       requirePeerVerification: false,
     },
     ...agentOverrides,
@@ -49,94 +50,49 @@ describe("SecurityIdentitySection — Flag UX", () => {
     });
   });
 
-  it("renders all three security flag labels when expanded", async () => {
+  it("renders the two flags the backend has", async () => {
     const user = userEvent.setup();
     renderSection();
     await user.click(screen.getByText(/Security & Identity/i));
 
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
-      expect(screen.getByText(/Sign MCP invocations/i)).toBeInTheDocument();
-      expect(screen.getByText(/Require peer verification/i)).toBeInTheDocument();
+      expect(screen.getByTestId("security-flag-signInterAgentMessages")).toBeInTheDocument();
+      expect(screen.getByTestId("security-flag-requirePeerVerification")).toBeInTheDocument();
     });
+    expect(screen.queryByTestId("security-flag-signMcpInvocations")).not.toBeInTheDocument();
   });
 
-  it("does NOT show warning banner when no flags are enabled", async () => {
+  it("does NOT show the warning when no flags are enabled", async () => {
     const user = userEvent.setup();
     renderSection();
     await user.click(screen.getByText(/Security & Identity/i));
 
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
+      expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("security-flag-warning")).not.toBeInTheDocument();
   });
 
-  it("shows warning banner when a flag is enabled", async () => {
-    renderSection({
-      security: {
-        signInterAgentMessages: true,
-        signMcpInvocations: false,
-        requirePeerVerification: false,
-      },
-    });
+  it("warns when signing is on and the agent has no key", async () => {
+    renderSection({ security: { signInterAgentMessages: true, requirePeerVerification: false } });
 
     await waitFor(() => {
       expect(screen.getByTestId("security-flag-warning")).toBeInTheDocument();
-      expect(screen.getByText(/Cryptographic signing is not yet available/i)).toBeInTheDocument();
+      expect(screen.getByText(/no signing key, so a save with signing on is refused/i)).toBeInTheDocument();
     });
   });
 
-  it("shows confirmation dialog when toggling a flag ON", async () => {
-    const user = userEvent.setup();
-    renderSection();
-    await user.click(screen.getByText(/Security & Identity/i));
+  it("does not warn for peer verification alone: it needs no key of the agent's own", async () => {
+    renderSection({ security: { signInterAgentMessages: false, requirePeerVerification: true } });
 
     await waitFor(() => {
-      expect(screen.getByTestId("security-flag-signInterAgentMessages")).toBeInTheDocument();
+      expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
     });
-
-    // Use the specific data-testid instead of index-based selector
-    await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
-
-    await waitFor(() => {
-      expect(screen.getByText(/Enable security flag\?/i)).toBeInTheDocument();
-      expect(screen.getByText(/Enable anyway/i)).toBeInTheDocument();
-    });
+    expect(screen.queryByTestId("security-flag-warning")).not.toBeInTheDocument();
   });
 
-  it("closes confirmation dialog when cancel is clicked and checkbox remains unchecked", async () => {
-    const user = userEvent.setup();
-    renderSection();
-    await user.click(screen.getByText(/Security & Identity/i));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("security-flag-signInterAgentMessages")).toBeInTheDocument();
-    });
-
-    const checkbox = screen.getByTestId("security-flag-signInterAgentMessages") as HTMLInputElement;
-
-    // Verify checkbox starts unchecked
-    expect(checkbox.checked).toBe(false);
-
-    await user.click(checkbox);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Enable security flag\?/i)).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Cancel"));
-
-    await waitFor(() => {
-      expect(screen.queryByText(/Enable security flag\?/i)).not.toBeInTheDocument();
-    });
-
-    // After cancel, the checkbox should still be unchecked
-    expect(checkbox.checked).toBe(false);
-  });
-
-  it("clicking 'Enable anyway' confirms the flag records the edit without saving", async () => {
+  it("turning a flag on records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -155,24 +111,13 @@ describe("SecurityIdentitySection — Flag UX", () => {
     await waitFor(() => {
       expect(screen.getByTestId("security-flag-signInterAgentMessages")).toBeInTheDocument();
     });
-
-    // Click the checkbox to open the confirmation dialog
     await user.click(screen.getByTestId("security-flag-signInterAgentMessages"));
 
-    await waitFor(() => {
-      expect(screen.getByText(/Enable anyway/i)).toBeInTheDocument();
-    });
-
-    // Click "Enable anyway" to confirm
-    await user.click(screen.getByText(/Enable anyway/i));
-
-    // The dialog closes and the flag goes into the draft, unsaved
-    await waitFor(() => {
-      expect(screen.queryByText(/Enable security flag\?/i)).not.toBeInTheDocument();
-      // Recorded in the draft — and not written: saving is the page's Save.
-      expect(onChange).toHaveBeenCalled();
-      expect(updateCalled).toBe(false);
-    });
+    // Recorded in the draft — and not written: saving is the page's Save.
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ security: expect.objectContaining({ signInterAgentMessages: true }) }),
+    );
+    expect(updateCalled).toBe(false);
   });
 
   it("renders identity fields when expanded", async () => {
@@ -185,26 +130,35 @@ describe("SecurityIdentitySection — Flag UX", () => {
       expect(screen.getByText("Cryptographic Identity")).toBeInTheDocument();
     });
   });
+});
 
-  it("shows security toggles section", async () => {
+describe("AgentDetailPage — Generate signing key", () => {
+  it("generates a key for the version on screen, then follows the version the key was saved as", async () => {
+    let postedVersion: string | null = null;
+    const loadedVersions: string[] = [];
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys", ({ request }) => {
+        postedVersion = new URL(request.url).searchParams.get("version");
+        return HttpResponse.json(
+          { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAnewKey", validFromMs: 1, validUntilMs: 0 },
+          { status: 201, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" } },
+        );
+      }),
+      // Records which versions the page loads, then falls through to the default handler.
+      http.get("*/agentstore/agents/:id", ({ request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        if (version) loadedVersions.push(version);
+      }),
+    );
     const user = userEvent.setup();
-    renderSection();
-    await user.click(screen.getByText(/Security & Identity/i));
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
-    });
-  });
+    const button = await screen.findByTestId("generate-signing-key");
+    await waitFor(() => expect(button).toBeEnabled());
+    const versionOnScreen = loadedVersions[loadedVersions.length - 1];
+    await user.click(button);
 
-  it("renders all three checkboxes with correct data-testids", async () => {
-    const user = userEvent.setup();
-    renderSection();
-    await user.click(screen.getByText(/Security & Identity/i));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("security-flag-signInterAgentMessages")).toBeInTheDocument();
-      expect(screen.getByTestId("security-flag-signMcpInvocations")).toBeInTheDocument();
-      expect(screen.getByTestId("security-flag-requirePeerVerification")).toBeInTheDocument();
-    });
+    await waitFor(() => expect(postedVersion).toBe(versionOnScreen));
+    await waitFor(() => expect(loadedVersions).toContain("9"));
   });
 });

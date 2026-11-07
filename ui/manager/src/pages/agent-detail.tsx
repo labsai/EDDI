@@ -45,6 +45,7 @@ import {
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
+import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -56,6 +57,7 @@ import {
   useUndeployAgent,
   useDeleteAgent,
   useDuplicateAgent,
+  useGenerateAgentSigningKey,
   useAgentVersions,
   useUpdateAgent,
   useUpdateAgentDescriptor,
@@ -221,6 +223,9 @@ export function AgentDetailPage() {
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
   const updateAgentMutation = useUpdateAgent();
+  const generateSigningKeyMutation = useGenerateAgentSigningKey();
+  // The endpoint is eddi-admin only: whoever can mint a key can sign as the agent.
+  const mayGenerateSigningKey = useIsAdminOrUnknown();
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
@@ -480,6 +485,22 @@ export function AgentDetailPage() {
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
+  }
+
+  /** Generates a signing key; the backend saves it as a new version, which the page then follows. */
+  async function handleGenerateSigningKey() {
+    try {
+      const result = await generateSigningKeyMutation.mutateAsync({ id: id!, version: resolvedVersion });
+      const created = parseVersionFromLocation(result?.location);
+      if (created !== null) setVersion(created);
+      toast.success(
+        t("agentDetail.signingKeyGenerated", "Signing key v{{version}} generated and saved as a new agent version.", {
+          version: result?.version,
+        }),
+      );
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
   }
 
   async function handleDuplicate() {
@@ -1060,7 +1081,27 @@ export function AgentDetailPage() {
       />
 
       {/* Security & Identity */}
-      <SecurityIdentitySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("security", "identity")} />
+      <SecurityIdentitySection
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("security", "identity")}
+        signingKeyAction={
+          mayGenerateSigningKey
+            ? {
+                onGenerate: () => void handleGenerateSigningKey(),
+                pending: generateSigningKeyMutation.isPending,
+                // The key lands as a new version of the CURRENT one: unsaved edits
+                // would then conflict with it, and an older version is refused.
+                disabledReason: isDirty
+                  ? t("agentDetail.generateSigningKeySaveFirst", "Save or discard your changes first: the key is saved as a new agent version.")
+                  : isNotLatest
+                    ? t("agentDetail.generateSigningKeyLatestOnly", "Open the latest version to generate a key.")
+                    : undefined,
+              }
+            : undefined
+        }
+      />
 
       {/* Capabilities */}
       <CapabilitiesSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("capabilities")} />

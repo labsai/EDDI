@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
   Fingerprint,
+  KeyRound,
   Brain,
   Moon,
   Plus,
@@ -127,42 +128,39 @@ function DraftNumberInput({
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
-/** Security flags that the backend rejects (cryptographic signing not yet available). */
-const INERT_SECURITY_FLAGS = ["signInterAgentMessages", "signMcpInvocations", "requirePeerVerification"] as const;
+/** The security flags the backend has; `signMcpInvocations` was removed there. */
+type SecurityFlag = "signInterAgentMessages" | "requirePeerVerification";
+
+/**
+ * The page's "Generate signing key" action. Absent hides the button: the
+ * endpoint is admin-only, since whoever can mint a key can sign as the agent.
+ */
+export interface SigningKeyAction {
+  onGenerate: () => void;
+  /** True while the key is being generated. */
+  pending: boolean;
+  /** Why generating is not possible right now; the button is disabled while set. */
+  disabledReason?: string;
+}
 
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  signingKeyAction,
+}: AgentSectionProps & { signingKeyAction?: SigningKeyAction }) {
   const { t } = useTranslation();
-  const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
-  const hasAnyFlagEnabled = INERT_SECURITY_FLAGS.some((f) => agent.security?.[f]);
+  // The backend refuses a save with signing on unless the key that would sign
+  // is in the vault; with no key declared at all that refusal is certain.
+  const hasSigningKey = (agent.identity?.keys?.length ?? 0) > 0 || !!agent.identity?.publicKey;
+  const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasSigningKey;
 
-  function handleToggle(field: typeof INERT_SECURITY_FLAGS[number]) {
-    const current = agent.security?.[field] ?? false;
-    if (!current) {
-      // Toggling ON → show confirmation dialog first
-      setPendingFlag(field);
-      return;
-    }
-    // Toggling OFF → safe, no confirmation needed
-    doToggle(field, true);
-  }
-
-  function doToggle(field: typeof INERT_SECURITY_FLAGS[number], currentValue: boolean) {
+  function toggle(field: SecurityFlag) {
     onChange({
       ...agent,
-      security: { ...agent.security, [field]: !currentValue },
+      security: { ...agent.security, [field]: !(agent.security?.[field] ?? false) },
     });
-  }
-
-  function confirmPendingFlag() {
-    if (pendingFlag) {
-      doToggle(pendingFlag, false);
-      setPendingFlag(null);
-    }
   }
 
   return (
@@ -172,7 +170,9 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
       accent="text-rose-500"
       variant="card"
       modified={modified}
-      defaultOpen={!!(agent.security?.signInterAgentMessages || agent.security?.signMcpInvocations || agent.identity?.agentDid)}
+      defaultOpen={
+        !!(agent.security?.signInterAgentMessages || agent.security?.requirePeerVerification || agent.identity?.agentDid) || hasSigningKey
+      }
     >
       {/* Identity */}
       <div className="space-y-3" data-testid="identity-section">
@@ -206,7 +206,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               type="text"
               value={agent.identity?.publicKey ?? ""}
               readOnly
-              placeholder={t("agentDetail.publicKeyHint", "Auto-generated on first signing")}
+              placeholder={t("agentDetail.publicKeyHint", "Legacy key; generated keys are listed below")}
               className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
             />
           </div>
@@ -254,6 +254,28 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             </div>
           </div>
         ) : null}
+
+        {signingKeyAction && (
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={signingKeyAction.onGenerate}
+              disabled={disabled || signingKeyAction.pending || !!signingKeyAction.disabledReason}
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+              data-testid="generate-signing-key"
+            >
+              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("agentDetail.generateSigningKey", "Generate signing key")}
+            </button>
+            <p className="text-[10px] text-muted-foreground" data-testid="generate-signing-key-hint">
+              {signingKeyAction.disabledReason ??
+                t(
+                  "agentDetail.generateSigningKeyHint",
+                  "Creates a new Ed25519 key pair and saves it as a new agent version. The private key stays in the secrets vault; the agent signs with the newest key.",
+                )}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Security toggles */}
@@ -263,8 +285,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           {t("agentDetail.securityFlags", "Signing & Verification")}
         </h3>
 
-        {/* Inline warning when any flag is enabled */}
-        {hasAnyFlagEnabled && (
+        {signingWithoutKey && (
           <div
             className="flex items-start gap-2 rounded-lg border border-warn-400/30 bg-warn-50 px-3 py-2.5 dark:bg-warn-900/15 dark:border-warn-700/30"
             data-testid="security-flag-warning"
@@ -272,21 +293,23 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           >
             <AlertTriangle className="h-4 w-4 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
             <p className="text-[11px] text-warn-800 dark:text-warn-300 leading-relaxed">
-              {t("agentDetail.securityFlagWarning", "Cryptographic signing is not yet available in this version. The backend will reject saves with these flags enabled (HTTP 400).")}
+              {t(
+                "agentDetail.signingNeedsKey",
+                "This agent has no signing key, so a save with signing on is refused. An admin can generate one above.",
+              )}
             </p>
           </div>
         )}
 
         {([
-          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign inter-agent (A2A) messages"), t("agentDetail.signA2ADesc", "Cryptographically sign outbound A2A messages for tamper-proofing")],
-          ["signMcpInvocations", t("agentDetail.signMcp", "Sign MCP invocations"), t("agentDetail.signMcpDesc", "Attach signatures to MCP tool calls for secure server verification")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Reject inbound A2A tasks from agents that can't prove their identity")],
+          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input
               type="checkbox"
               checked={agent.security?.[field] ?? false}
-              onChange={() => handleToggle(field)}
+              onChange={() => toggle(field)}
               disabled={disabled}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid={`security-flag-${field}`}
@@ -298,17 +321,6 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </label>
         ))}
       </div>
-
-      {/* Confirmation dialog for enabling a security flag */}
-      <AlertDialog
-        open={!!pendingFlag}
-        onOpenChange={(open) => { if (!open) setPendingFlag(null); }}
-        title={t("agentDetail.securityFlagConfirmTitle", "Enable security flag?")}
-        description={t("agentDetail.securityFlagConfirmDesc", "Cryptographic signing is not yet available in this version. Enabling this flag will cause the backend to reject saves with HTTP 400. Are you sure you want to proceed?")}
-        confirmLabel={t("agentDetail.securityFlagConfirmBtn", "Enable anyway")}
-        cancelLabel={t("common.cancel", "Cancel")}
-        onConfirm={confirmPendingFlag}
-      />
     </EditorSection>
   );
 });

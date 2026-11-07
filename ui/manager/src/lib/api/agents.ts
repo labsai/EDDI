@@ -141,8 +141,12 @@ export interface AgentPublicKey {
 }
 
 export interface SecurityConfig {
+  /**
+   * Sign this agent's group-conversation messages. A save with this on is
+   * refused unless the newest key in `identity.keys` has its private half in
+   * the vault — see `generateAgentSigningKey`.
+   */
   signInterAgentMessages?: boolean;
-  signMcpInvocations?: boolean;
   requirePeerVerification?: boolean;
 }
 
@@ -428,6 +432,21 @@ export function updateAgent(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.compatible === true) params.set("compatible", "true");
   return api.put(`/agentstore/agents/${seg(id)}?${params.toString()}`, agent);
+}
+
+/**
+ * Generates a signing key for the agent (eddi-admin only). The backend stores
+ * the private key in the vault and saves the public key into `identity.keys`
+ * as a NEW agent version, named by `location`; `version` must be the current
+ * one or the call is refused with 409.
+ */
+export function generateAgentSigningKey(
+  id: string,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys?version=${version}`
+  );
 }
 
 export function deleteAgent(

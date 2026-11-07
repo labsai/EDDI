@@ -1467,6 +1467,19 @@ export const handlers = [
     });
   }),
 
+  // Generate a signing key: the backend answers 201 with the new identity.keys
+  // entry, and Location names the agent version it was saved as.
+  http.post("*/agentstore/agents/:id/signing-keys", ({ request, params }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? "1");
+    return HttpResponse.json(
+      { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=", validFromMs: Date.now(), validUntilMs: 0 },
+      {
+        status: 201,
+        headers: { Location: `eddi://ai.labs.agent/agentstore/agents/${String(params.id)}?version=${version + 1}` },
+      },
+    );
+  }),
+
   // Delete agent
   http.delete("*/agentstore/agents/:id", () => {
     return new HttpResponse(null, { status: 204 });
