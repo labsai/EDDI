@@ -1140,21 +1140,52 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // The sending runs on a thread of its own; propagate() keeps the turn's
             // bindings available there for anything the send itself resolves.
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                for (BuiltRequest built : requests) {
-                    IRequest request = built.request();
-                    if (executeCallsSequentially) {
-                        long executionStart = currentTimeMillis();
-                        LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
-                        IResponse response = request.send();
-                        logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
-                    } else {
-                        executeFireAndForgetCall(built, callName);
-                    }
-                }
+                sendBatch(requests, callName, executeCallsSequentially);
                 return null;
             }), null);
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext), callName);
+        }
+    }
+
+    /**
+     * Sends a fire-and-forget batch, on the batch's own thread, one request at a
+     * time. A request that fails — a timeout, a refused connection — is logged with
+     * its position and the rest are still sent: the batch used to be one task that
+     * a single exception ended, dropping every later request without a word while
+     * the turn had long reported success. A concurrent request that fails
+     * asynchronously never stopped the others; now one whose dispatch throws does
+     * not either. An interrupted thread stops sending: the runtime is shutting the
+     * task down.
+     */
+    private static void sendBatch(List<BuiltRequest> requests, String callName, boolean sequentially) {
+        int total = requests.size();
+        int failed = 0;
+        for (int i = 0; i < total; i++) {
+            if (Thread.currentThread().isInterrupted()) {
+                LOGGER.warnf("fire-and-forget batch of http call '%s' interrupted: %d of %d requests not sent", LogSanitizer.sanitize(callName),
+                        total - i, total);
+                break;
+            }
+            BuiltRequest built = requests.get(i);
+            try {
+                if (sequentially) {
+                    IRequest request = built.request();
+                    long executionStart = currentTimeMillis();
+                    LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
+                    IResponse response = request.send();
+                    logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
+                } else {
+                    executeFireAndForgetCall(built, callName);
+                }
+            } catch (IRequest.HttpRequestException | RuntimeException e) {
+                failed++;
+                LOGGER.warnf("fire-and-forget batch of http call '%s': request %d of %d failed, continuing with the rest: %s",
+                        LogSanitizer.sanitize(callName), i + 1, total, ForEachItems.describe(e, built.resolvedSecrets(), MAX_ITEM_ERROR_CHARS));
+            }
+        }
+        if (failed > 0) {
+            LOGGER.warnf("fire-and-forget batch of http call '%s': %d of %d requests failed", LogSanitizer.sanitize(callName), failed, total);
         }
     }
 

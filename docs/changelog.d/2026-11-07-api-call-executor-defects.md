@@ -33,6 +33,17 @@ before the next attempt, so a `responseValuePathMatchers` entry on
 `{name}Error` still judges the response it decides about), and memory records
 the final attempt's failure once, after the loop — as the `forEach` path does.
 
+**One failed request of a fire-and-forget batch no longer drops the rest.**
+A `fireAndForget` call with `preRequest.batchRequests` sends its requests as
+one background task. With `executeCallsSequentially`, a request that threw (a
+timeout, a connection reset) ended that task, so every later request was never
+sent; the only trace was a generic runtime error naming neither the call nor
+the item. In the concurrent mode the same happened when a dispatch threw
+synchronously. Each request is now sent on its own: a failure is logged with
+the call name, its position (`request 2 of 5`) and a redacted reason, the rest
+of the batch still goes out, and a summary line counts the failures. An
+interrupted batch thread stops sending and says how many were left.
+
 ### Behaviour changes
 
 - A `preRequest` property instruction with a `toObjectPath` now writes into the
@@ -48,6 +59,8 @@ the final attempt's failure once, after the loop — as the `forEach` path does.
   per failed attempt, written after the response headers rather than before.
 
 **Files:** [`PrePostUtils.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtils.java),
-[`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java);
+[`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java),
+[`httpcalls.md`](../httpcalls.md) (`executeCallsSequentially` row);
 tests `PrePostUtilsTest`, `PrePostUtilsDeepBranchTest`, `PrePostUtilsSecretScopeTest`,
-`ApiCallExecutorPreRequestTest` (new), and the constructor call in the other `PrePostUtils` users.
+`ApiCallExecutorTest`, `ApiCallExecutorPreRequestTest` (new), `ApiCallExecutorFireAndForgetBatchTest` (new),
+and the constructor call in the other `PrePostUtils` users.
