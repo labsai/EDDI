@@ -1016,6 +1016,7 @@ eddi_backup_upgrade_resource_failure_count_total  # Resources a sync could not p
 eddi_session_checkpoint_count_total         # Conversation memory checkpoints written
 eddi_conversations_listing_owner_scan_exhausted_total  # Conversation listing gave up scanning for an owner
 eddi_conversations_listing_orphaned_descriptors_total  # Descriptors a listing skipped because their conversation memory is gone
+eddi_conversations_listing_scan_bound_exceeded_total   # Admin listings refused with 422 after rejecting 10,000 rows without filling the page
 ```
 
 ### Audit Ledger Metrics

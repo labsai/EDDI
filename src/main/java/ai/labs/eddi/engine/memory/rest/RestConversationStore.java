@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationPurgeService;
@@ -47,6 +48,7 @@ import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import ai.labs.eddi.utils.PageBounds;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -115,6 +117,35 @@ public class RestConversationStore implements IRestConversationStore {
      * layer puts on one query's results.
      */
     static final int MAX_RESULT_OFFSET = IResourceStorage.MAX_RESULT_LIMIT;
+
+    /**
+     * Most conversation ids a {@code conversationState} filter pushes into the
+     * descriptor query. The state lives in the conversation memory, not on the
+     * descriptor, so the listing reads the ids in that state off the memory store's
+     * state index first and lets the descriptor query page through those alone
+     * ({@link #idsInState}). A state held by more conversations than this is not
+     * sparse: the listing then filters it row by row, as it always did, under
+     * {@link #MAX_REJECTED_SCAN}. A set this size costs one index read on the
+     * memory store and a primary-key match in each descriptor query; the
+     * measurements are in the #931 changelog entry.
+     */
+    static final int MAX_STATE_ID_SET = IResourceStorage.MAX_RESULT_LIMIT;
+
+    /**
+     * Most descriptors a listing for a caller who sees all conversations (an admin,
+     * or anyone when authorization is disabled) examines and rejects before it
+     * gives up - the bound on the per-row work no query can do: a conversation
+     * state too common for {@link #MAX_STATE_ID_SET}, descriptors whose
+     * conversation is gone (orphans) or cannot be read, and legacy descriptors that
+     * name no agent. Rows counted off for earlier pages and rows returned are not
+     * charged. A listing that reaches the bound before its page is full answers 422
+     * ({@link #scanBoundExceeded}) instead of returning a short page that would
+     * read as the last one.
+     */
+    static final int MAX_REJECTED_SCAN = 10_000;
+
+    /** Error code of a listing refused for reaching {@link #MAX_REJECTED_SCAN}. */
+    static final String SCAN_BOUND_EXCEEDED = "listing_scan_bound_exceeded";
 
     /** Descriptor fields the listing filters on in the query. */
     private static final String FIELD_AGENT_RESOURCE = "agentResource";
@@ -222,6 +253,13 @@ public class RestConversationStore implements IRestConversationStore {
     @ConfigProperty(name = "eddi.migration.v6-rename.retention-confirmed", defaultValue = "false")
     boolean retentionConfirmed;
 
+    /**
+     * {@link #MAX_STATE_ID_SET} and {@link #MAX_REJECTED_SCAN}, as fields so a test
+     * can lower them instead of writing ten thousand rows.
+     */
+    int maxStateIdSet = MAX_STATE_ID_SET;
+    int maxRejectedScan = MAX_REJECTED_SCAN;
+
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
     @Inject
@@ -311,8 +349,20 @@ public class RestConversationStore implements IRestConversationStore {
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
-        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, agentId, viewState);
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, agentId, agentVersion, viewState);
         final long matchesToSkip = (long) index * limit;
+        if (conversationState != null) {
+            // The state filter, pushed into the query as the set of ids in that state
+            // (see MAX_STATE_ID_SET). The per-row check below still compares every
+            // row's state, so the set only ever narrows what is read.
+            List<String> idsInState = idsInState(conversationState);
+            if (idsInState != null) {
+                if (idsInState.isEmpty()) {
+                    return new LinkedList<>();
+                }
+                restrictions.add(new QueryFilters(List.of(QueryFilter.idIn(idsInState))));
+            }
+        }
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
         // off first, so it reads in batches sized to that work (SCAN_BATCH to
@@ -334,6 +384,7 @@ public class RestConversationStore implements IRestConversationStore {
             int descriptorPage = 0;
             long skippedMatches = 0;
             long scannedDescriptors = 0;
+            long rejectedDescriptors = 0;
             int orphanedDescriptors = 0;
             boolean pageFull = false;
 
@@ -364,6 +415,8 @@ public class RestConversationStore implements IRestConversationStore {
                     if (candidateId != null) {
                         candidates.add(conversationDescriptor);
                         candidateIds.add(candidateId);
+                    } else {
+                        rejectedDescriptors++;
                     }
                 }
 
@@ -377,6 +430,7 @@ public class RestConversationStore implements IRestConversationStore {
                     var conversationDescriptor = candidates.get(i);
                     var summary = summaries.get(candidateIds.get(i));
                     if (summary == null && unreadable.contains(candidateIds.get(i))) {
+                        rejectedDescriptors++;
                         continue;
                     }
                     if (summary == null) {
@@ -385,10 +439,12 @@ public class RestConversationStore implements IRestConversationStore {
                         // many of these behind, and once the v6 rename gives them an
                         // agentResource they would otherwise surface in by-agent listings.
                         orphanedDescriptors++;
+                        rejectedDescriptors++;
                         continue;
                     }
                     if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, agentId, agentVersion,
                             conversationState, viewState)) {
+                        rejectedDescriptors++;
                         continue;
                     }
 
@@ -414,11 +470,24 @@ public class RestConversationStore implements IRestConversationStore {
                 } else {
                     break; // prevent integer overflow
                 }
-                // Bound the owner-filtered back-fill: stop once the scan budget is spent
-                // (admins/auth-disabled are never filtered, so they page only as far as
-                // filling `limit` requires and never hit this).
+                // Bound the back-fill. A caller who sees only their own conversations has
+                // the owner-scan budget; a caller who sees all of them is bounded by the
+                // rows it rejected (maxRejectedScan), and reports reaching that bound
+                // below rather than returning a short page as if it were the last.
             } while (!pageFull && !conversationDescriptors.isEmpty()
-                    && (seesAllConversations || scannedDescriptors - skippedMatches < MAX_OWNER_SCAN));
+                    && (seesAllConversations
+                            ? rejectedDescriptors < maxRejectedScan
+                            : scannedDescriptors - skippedMatches < MAX_OWNER_SCAN));
+
+            // A batch shorter than scanSize was the last one: nothing was left to read,
+            // so a short page is the complete answer. A full one may have more behind it.
+            if (seesAllConversations && !pageFull && conversationDescriptors.size() == scanSize
+                    && rejectedDescriptors >= maxRejectedScan) {
+                // More descriptors remain and the page is not full: the rows found are
+                // not the whole page, and saying so is the only honest answer.
+                meterRegistry.counter("eddi.conversations.listing.scan_bound_exceeded").increment();
+                throw scanBoundExceeded(rejectedDescriptors, retConversationDescriptors.size(), limit);
+            }
 
             // Observability: a non-admin listing that stopped on the scan budget with
             // fewer than `limit` results may have owned conversations beyond what was
@@ -439,6 +508,49 @@ public class RestConversationStore implements IRestConversationStore {
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * The ids of the conversations in {@code state}, read off the memory store's
+     * state index - or {@code null} when the listing has to filter the state row by
+     * row instead: more than {@link #MAX_STATE_ID_SET} conversations are in it, or
+     * the read failed. Either way nothing is left out: {@code null} only means the
+     * descriptor query is not narrowed.
+     * <p>
+     * The set is read once, before the first descriptor page, so every batch of the
+     * listing pages through the same rows. A conversation that enters the state
+     * after that read is not on this listing, as with any listing read while
+     * conversations change; one that leaves it is rejected by the per-row check,
+     * which reads the state again.
+     */
+    private List<String> idsInState(ConversationState state) {
+        try {
+            List<String> ids = conversationMemoryStore.findConversationIdsByState(state, maxStateIdSet + 1);
+            if (ids == null || ids.size() > maxStateIdSet) {
+                return null;
+            }
+            return ids;
+        } catch (Exception e) {
+            log.warn(format("Could not read the conversations in state %s; filtering the listing row by row: %s", state,
+                    sanitize(e.getMessage())));
+            return null;
+        }
+    }
+
+    /**
+     * The 422 a listing answers when it rejected {@link #MAX_REJECTED_SCAN}
+     * descriptors without filling its page - explicit, so neither a client nor an
+     * agent mistakes the rows found so far for the complete page.
+     */
+    static WebApplicationException scanBoundExceeded(long rejected, int found, int limit) {
+        String message = format("The listing examined and rejected %d conversations without filling the page (%d of %d found) "
+                + "and stopped there: more conversations remain unexamined, so a shorter page would not be the complete "
+                + "answer. Narrow the listing with agentId, agentVersion or filter, or ask for a shallower page.", rejected, found,
+                limit);
+        return new WebApplicationException(Response.status(422)
+                .type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(ErrorResponses.body(SCAN_BOUND_EXCEEDED, message))
+                .build());
     }
 
     /**
@@ -600,8 +712,8 @@ public class RestConversationStore implements IRestConversationStore {
      * <ul>
      * <li><b>Agent</b> — the descriptor names this agent, or names no agent at all:
      * a descriptor an earlier 6.x rewrote without its agent gets it from the
-     * conversation in {@link #conversationAdmits}. The version is left to the
-     * per-row check.</li>
+     * conversation in {@link #conversationAdmits}. With a version, the version too,
+     * when the descriptor's agentResource carries one.</li>
      * <li><b>Owner</b> (non-admins) — the caller, or no recorded owner (a
      * pre-v5.1.6 conversation, whose owner comes from its memory). Not pushed when
      * an agent is named: a reviewer of that agent may list conversations they do
@@ -610,15 +722,22 @@ public class RestConversationStore implements IRestConversationStore {
      * <li><b>View state</b> — equality; a descriptor without one never
      * matched.</li>
      * </ul>
-     * The conversation state is not here: it is read from the conversation memory,
-     * not from the descriptor.
+     * The conversation state is not here: it lives in the conversation memory, not
+     * on the descriptor, and is pushed into the query as a set of ids
+     * ({@link #idsInState}).
      */
-    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String agentId,
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String agentId, Integer agentVersion,
                                                    ConversationDescriptor.ViewState viewState) {
         List<QueryFilters> restrictions = new LinkedList<>();
         if (!isNullOrEmpty(agentId)) {
+            // With a version, the descriptor names that version: agentResource is
+            // ".../agents/<id>?version=<n>". One whose URI carries no version is left
+            // to the per-row check, like one that names no agent.
+            String agentPattern = isNullOrEmpty(agentVersion)
+                    ? "/" + escapeRegex(agentId) + "(\\?|$)"
+                    : "/" + escapeRegex(agentId) + "(\\?(.*&)?version=" + agentVersion + "(&|$)|$)";
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
-                    new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
+                    new QueryFilter(FIELD_AGENT_RESOURCE, agentPattern),
                     new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
         } else {
             restrictions.addAll(ownerScope(seesAllConversations));

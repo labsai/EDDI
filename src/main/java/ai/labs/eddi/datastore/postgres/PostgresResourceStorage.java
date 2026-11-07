@@ -1029,6 +1029,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                     clauses.add(fieldExpression + " LIKE ? ESCAPE '\\'");
                     params.add("%" + escapeLike(contains.text()) + "%");
                     substringSearch = true;
+                } else if (qf.getFilter() instanceof IResourceFilter.IdIn idIn) {
+                    // The primary key column, whatever field the filter names. A string that
+                    // is no UUID could never have been issued — and would fail the cast.
+                    clauses.add("id = ANY(?::uuid[])");
+                    params.add(idIn.ids().stream().filter(PostgresResourceStorage::isUuid).toArray(String[]::new));
                 } else if (qf.getFilter() instanceof Boolean boolVal) {
                     clauses.add("COALESCE((" + fieldExpression + ")::boolean, false) = ?");
                     params.add(boolVal);
@@ -1067,6 +1072,8 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                 Object param = params.get(i);
                 if (param instanceof Boolean b) {
                     ps.setBoolean(i + 1, b);
+                } else if (param instanceof String[] ids) {
+                    ps.setArray(i + 1, conn.createArrayOf("text", ids));
                 } else {
                     ps.setString(i + 1, param.toString());
                 }
@@ -1096,6 +1103,18 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             }
         }
         return results;
+    }
+
+    private static boolean isUuid(String id) {
+        if (id == null) {
+            return false;
+        }
+        try {
+            UUID.fromString(id);
+            return id.length() == 36;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static String sanitizeJsonPath(String path) {

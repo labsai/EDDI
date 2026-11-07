@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Accumulators;
@@ -156,6 +157,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
         // owner-scoped pending-approvals inbox: filter by (state, userId) in-query
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, "userId"));
+        // The conversation listing's state filter reads the ids in one state off this
+        // index alone (a covered query): the plain state index would fetch every
+        // matching conversation document just to read its _id.
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, OBJECT_ID));
     }
 
     @Override
@@ -1233,6 +1238,33 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 Filters.eq(KEY_CONVERSATION_STATE, expected.name())), fence);
         var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
         return conversationCollectionDocument.updateOne(filter, update).getMatchedCount() > 0;
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state, int limit) {
+        var stateIdIndex = Indexes.ascending(KEY_CONVERSATION_STATE, OBJECT_ID);
+        try {
+            // Projection of _id alone, with the {conversationState, _id} index: covered,
+            // so no conversation document is read.
+            return idsInState(state, limit, stateIdIndex);
+        } catch (MongoException e) {
+            // The index could not be built at startup (a hint to a missing index is an
+            // error): the same answer, at the cost of fetching the documents.
+            LOGGER.warnf("The {conversationState: 1, _id: 1} index is unavailable, reading ids by state without it: %s", e.getMessage());
+            return idsInState(state, limit, null);
+        }
+    }
+
+    private List<String> idsInState(ConversationState state, int limit, Bson hint) {
+        List<String> ids = new ArrayList<>();
+        var query = conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))
+                .projection(new Document(OBJECT_ID, 1))
+                .limit(Math.max(1, limit));
+        if (hint != null) {
+            query = query.hint(hint);
+        }
+        query.forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
     }
 
     @Override

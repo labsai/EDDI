@@ -485,12 +485,45 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
 | --- | --- |
 | `index`, `limit` | Page number and page size (default `0`, `20`). Page until a page comes back empty. `index × limit` above 10,000 is refused with `400` — narrow the listing with a filter instead |
 | `agentId`, `agentVersion` | Only this agent (version) |
-| `conversationState` | Only conversations in this state |
+| `conversationState` | Only conversations in this state. The ids in the state are read off the conversation store's state index and become part of the descriptor query, so a rare state costs what its matches cost, not a scan — see [Bounded listings](#bounded-listings) |
 | `conversationId` | One conversation |
 | `viewState` | `UNSEEN`, `SEEN`, … |
 | `filter` | Free-text filter |
 
 Results are newest first. A non-admin sees only their own conversations.
+
+### Bounded listings
+
+A listing reads conversation descriptors newest first and keeps the ones that
+pass every filter. The filters that are descriptor fields — agent and version,
+view state, the owner of a non-admin, the text filter — are part of the
+descriptor query. The conversation state lives in the conversation document, not
+on the descriptor; with `conversationState`, the listing first reads the ids of
+the conversations in that state from the conversation store's state index (at
+most 10,000 of them) and adds them to the descriptor query as a primary-key
+match. Every row is still checked against its conversation, so a conversation
+that changed state since is not listed in the wrong one. A state held by more
+than 10,000 conversations is checked row by row instead; it is then common, so
+matches are dense.
+
+What no query can decide is checked row by row: a descriptor whose conversation
+is gone (an orphan) or cannot be read, and a legacy descriptor that names no
+agent or no agent version. For an admin, or any caller when authorization is
+disabled, a listing stops after rejecting **10,000** such rows without filling
+its page and answers `422`:
+
+```json
+{ "error": "listing_scan_bound_exceeded",
+  "message": "The listing examined and rejected 10000 conversations without filling the page (3 of 20 found) …" }
+```
+
+It never returns the rows it had found as if they were the whole page. Narrow the
+listing (`agentId`, `agentVersion`, `filter`) or ask for a shallower page. Rows
+counted off for earlier pages and rows returned are not charged, so one request
+reads at most `index × limit + limit` matches plus 10,000 rejected rows (plus one
+batch of up to 1,000 past the bound). A non-admin's listing keeps its owner
+budget of 500 scanned rows. The counter
+`eddi_conversations_listing_scan_bound_exceeded_total` counts the refusals.
 
 | Call | Notes |
 | --- | --- |

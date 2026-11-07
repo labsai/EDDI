@@ -912,6 +912,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
                 } else if (queryFilter.getFilter() instanceof IResourceFilter.Contains contains) {
                     // An unanchored regex already finds the text anywhere; no .* wrapping.
                     filters.add(Filters.regex(queryFilter.getField(), StringUtilities.escapeRegexChars(contains.text())));
+                } else if (queryFilter.getFilter() instanceof IResourceFilter.IdIn idIn) {
+                    // The primary key, whatever field the filter names. Ids are stored as
+                    // ObjectIds; a string that is not one could never have been issued.
+                    List<ObjectId> objectIds = new ArrayList<>(idIn.ids().size());
+                    for (String id : idIn.ids()) {
+                        if (id != null && ObjectId.isValid(id)) {
+                            objectIds.add(new ObjectId(id));
+                        }
+                    }
+                    filters.add(Filters.in(ID_FIELD, objectIds));
                 } else {
                     filters.add(Filters.eq(queryFilter.getField(), queryFilter.getFilter()));
                 }

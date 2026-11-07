@@ -49,6 +49,7 @@ import com.mongodb.MongoTimeoutException;
 import com.mongodb.client.MongoDatabase;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -1419,11 +1420,15 @@ class RestConversationStoreTest {
     class DescriptorsStateFilter {
 
         @Test
-        @DisplayName("should filter by conversation state")
+        @DisplayName("a conversation that left the state after its id was read is still filtered out, row by row")
         void filtersConversationState() throws Exception {
             var descriptor = new ConversationDescriptor();
             descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
             descriptor.setLastModifiedOn(new Date());
+            // The id was READY when the listing read the ids in that state; it has ENDED
+            // since. The id set only narrows the query; the summary decides.
+            when(conversationMemoryStore.findConversationIdsByState(eq(ConversationState.READY), anyInt()))
+                    .thenReturn(List.of("111111111111111111111111"));
 
             when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), any()))
                     .thenReturn(List.of(descriptor));
@@ -2106,6 +2111,8 @@ class RestConversationStoreTest {
         @Test
         @DisplayName("should include descriptor when conversationState matches filter")
         void includesMatchingConversationState() throws Exception {
+            when(conversationMemoryStore.findConversationIdsByState(eq(ConversationState.READY), anyInt()))
+                    .thenReturn(List.of("111111111111111111111111"));
             var descriptor = new ConversationDescriptor();
             descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
             descriptor.setLastModifiedOn(new Date());
@@ -2331,8 +2338,21 @@ class RestConversationStoreTest {
                     .thenAnswer(invocation -> {
                         int index = invocation.getArgument(2);
                         int limit = invocation.getArgument(3);
-                        int from = Math.min(index * limit, store.size());
-                        return new ArrayList<>(store.subList(from, Math.min(from + limit, store.size())));
+                        List<IResourceFilter.QueryFilters> restrictions = invocation.getArgument(5);
+                        // An id-set restriction (the state filter) narrows the rows the
+                        // query pages through, as the storage backends do.
+                        List<ConversationDescriptor> rows = new ArrayList<>(store);
+                        if (restrictions != null) {
+                            for (var group : restrictions) {
+                                for (var filter : group.getQueryFilters()) {
+                                    if (filter.getFilter() instanceof IResourceFilter.IdIn idIn) {
+                                        rows.removeIf(row -> idIn.ids().stream().noneMatch(id -> row.getResource().toString().contains(id)));
+                                    }
+                                }
+                            }
+                        }
+                        int from = Math.min(index * limit, rows.size());
+                        return new ArrayList<>(rows.subList(from, Math.min(from + limit, rows.size())));
                     });
 
             // The conversations, as their listing summaries: READY unless a test
@@ -2352,6 +2372,12 @@ class RestConversationStoreTest {
                 }
                 return summaries;
             }).when(conversationMemoryStore).loadListingSummaries(any());
+            lenient().when(conversationMemoryStore.findConversationIdsByState(any(), anyInt())).thenAnswer(invocation -> {
+                ConversationState wanted = invocation.getArgument(0);
+                int limit = invocation.getArgument(1);
+                return states.entrySet().stream().filter(entry -> entry.getValue() == wanted).map(Map.Entry::getKey).sorted()
+                        .limit(limit).toList();
+            });
         }
 
         private Map<String, ConversationState> states;
@@ -2614,17 +2640,132 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("the conversation state is not pushed down: it lives in the conversation memory")
-        @SuppressWarnings("unchecked")
-        void conversationStateIsFilteredAfterLoading() throws Exception {
+        @DisplayName("no conversation in the state: an empty page, and no descriptor is read")
+        void noConversationInTheStateReadsNoDescriptor() throws Exception {
             List<ConversationDescriptor> page = restConversationStore.readConversationDescriptors(
                     0, 10, null, null, null, null, ConversationState.ENDED, null);
 
             assertTrue(page.isEmpty(), "every conversation in memory is READY");
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any());
+            verify(conversationMemoryStore).findConversationIdsByState(ConversationState.ENDED, RestConversationStore.MAX_STATE_ID_SET + 1);
+        }
+
+        @Test
+        @DisplayName("the conversation state is pushed into the query as the ids in that state")
+        @SuppressWarnings("unchecked")
+        void conversationStateIsPushedDownAsIds() throws Exception {
+            states.put(conversationId(7), ConversationState.ENDED);
+            states.put(conversationId(41), ConversationState.ENDED);
+
+            List<ConversationDescriptor> page = restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null);
+
+            assertEquals(List.of(store.get(7).getResource().toString(), store.get(41).getResource().toString()), resources(page));
             ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
             verify(conversationDescriptorStore, atLeastOnce())
                     .readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), captor.capture());
-            assertTrue(captor.getValue().isEmpty());
+            var idFilter = captor.getAllValues().getFirst().getFirst().getQueryFilters().getFirst();
+            assertEquals(IResourceFilter.ID_FIELD, idFilter.getField());
+            assertEquals(List.of(conversationId(7), conversationId(41)), ((IResourceFilter.IdIn) idFilter.getFilter()).ids());
+            // One summary read, for the two rows: the 58 READY rows are never examined.
+            verify(conversationMemoryStore, times(1)).loadListingSummaries(any());
+        }
+
+        @Test
+        @DisplayName("a state too common for the id set is filtered row by row, with the same page")
+        @SuppressWarnings("unchecked")
+        void commonStateIsFilteredRowByRow() throws Exception {
+            for (int i = 0; i < store.size(); i += 2) {
+                states.put(conversationId(i), ConversationState.ENDED);
+            }
+            List<String> viaIds = resources(restConversationStore.readConversationDescriptors(
+                    1, 10, null, null, null, null, ConversationState.ENDED, null));
+
+            restConversationStore.maxStateIdSet = 29;
+            clearInvocations(conversationDescriptorStore);
+            List<String> rowByRow = resources(restConversationStore.readConversationDescriptors(
+                    1, 10, null, null, null, null, ConversationState.ENDED, null));
+
+            assertEquals(viaIds, rowByRow);
+            assertEquals(store.get(20).getResource().toString(), rowByRow.getFirst());
+            ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+            verify(conversationDescriptorStore, atLeastOnce())
+                    .readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), captor.capture());
+            assertTrue(captor.getValue().isEmpty(), "30 ENDED ids are more than the set of 29 the query takes");
+        }
+
+        @Test
+        @DisplayName("an id read that fails leaves the state to the per-row filter: nothing is left out")
+        void failedIdReadFallsBackToRowByRow() throws Exception {
+            states.put(conversationId(7), ConversationState.ENDED);
+            when(conversationMemoryStore.findConversationIdsByState(any(), anyInt())).thenThrow(new IllegalStateException("index gone"));
+
+            List<ConversationDescriptor> page = restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null);
+
+            assertEquals(List.of(store.get(7).getResource().toString()), resources(page));
+        }
+
+        @Test
+        @DisplayName("a listing that rejects its bound of rows without filling the page answers 422, never a short page")
+        void scanBoundIsReportedNotTruncated() {
+            states.put(conversationId(55), ConversationState.ENDED);
+            restConversationStore.maxStateIdSet = -1;
+            restConversationStore.maxRejectedScan = 25;
+
+            var refused = assertThrows(WebApplicationException.class, () -> restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null));
+
+            assertEquals(422, refused.getResponse().getStatus());
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = (Map<String, String>) refused.getResponse().getEntity();
+            assertEquals(RestConversationStore.SCAN_BOUND_EXCEEDED, body.get("error"));
+            assertTrue(body.get("message").contains("rejected 30 conversations"), body.get("message"));
+            assertEquals(1.0, restConversationStore.meterRegistry.counter("eddi.conversations.listing.scan_bound_exceeded").count());
+        }
+
+        @Test
+        @DisplayName("within the bound, the per-row filter still finds a match far down the store")
+        void withinTheBoundTheMatchIsFound() {
+            states.put(conversationId(55), ConversationState.ENDED);
+            restConversationStore.maxStateIdSet = -1;
+            restConversationStore.maxRejectedScan = 60;
+
+            List<ConversationDescriptor> page = restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null);
+
+            assertEquals(List.of(store.get(55).getResource().toString()), resources(page));
+        }
+
+        @Test
+        @DisplayName("a caller who sees only their own conversations keeps the owner budget and is never refused")
+        void ownerScopedListingKeepsItsBudget() {
+            when(conversationAccessGuard.seesAllConversations()).thenReturn(false);
+            when(conversationAccessGuard.callerActor(null)).thenReturn("alice");
+            when(conversationAccessGuard.canAccessConversation(any())).thenReturn(true);
+            restConversationStore.maxStateIdSet = -1;
+            restConversationStore.maxRejectedScan = 5;
+
+            assertTrue(restConversationStore.readConversationDescriptors(
+                    0, 10, null, null, null, null, ConversationState.ENDED, null).isEmpty());
+        }
+
+        @Test
+        @DisplayName("agentVersion is pushed into the agent pattern")
+        @SuppressWarnings("unchecked")
+        void agentVersionIsPushedDown() throws Exception {
+            restConversationStore.readConversationDescriptors(0, 10, null, null, AGENT_A, 3, null, null);
+
+            ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+            verify(conversationDescriptorStore, atLeastOnce())
+                    .readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), captor.capture());
+            Pattern agentPattern = Pattern.compile((String) captor.getValue().getFirst().getQueryFilters().getFirst().getFilter());
+            String agent = "eddi://ai.labs.agent/agentstore/agents/" + AGENT_A;
+            assertTrue(agentPattern.matcher(agent + "?version=3").find());
+            assertTrue(agentPattern.matcher(agent + "?foo=1&version=3").find());
+            assertTrue(agentPattern.matcher(agent).find(), "no version on the URI: left to the per-row check");
+            assertFalse(agentPattern.matcher(agent + "?version=31").find());
+            assertFalse(agentPattern.matcher(agent + "?version=4").find());
         }
     }
 }

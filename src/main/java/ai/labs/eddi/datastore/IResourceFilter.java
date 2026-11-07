@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -20,6 +21,9 @@ import java.util.List;
  * had a single, MongoDB-only implementation that nothing called any more.
  */
 public interface IResourceFilter {
+
+    /** The field name an {@link IdIn} filter is recorded under. */
+    String ID_FIELD = "_id";
 
     class QueryFilters {
         public enum ConnectingType {
@@ -87,6 +91,25 @@ public interface IResourceFilter {
     }
 
     /**
+     * A filter value that matches when the resource's own id is one of {@code ids}.
+     * The {@link QueryFilter}'s field is not consulted: each backend compares its
+     * native id — MongoDB's {@code _id} (an {@code ObjectId} for a 24-hex id),
+     * PostgreSQL's {@code id} column — so the test is served by the primary key.
+     * Build it with {@link QueryFilter#idIn(Collection)}.
+     * <p>
+     * An id the backend could never have issued (not hex on MongoDB, not a UUID on
+     * PostgreSQL) cannot match and is dropped; an empty set matches nothing.
+     *
+     * @param ids
+     *            the ids to admit
+     */
+    record IdIn(Collection<String> ids) {
+        public IdIn {
+            ids = List.copyOf(ids);
+        }
+    }
+
+    /**
      * One condition on one field. A {@code String} filter is a regular expression
      * on both backends; any other value is compared for equality. Use
      * {@link #exact(String, String)} to compare a string for equality instead.
@@ -115,6 +138,13 @@ public interface IResourceFilter {
             QueryFilter queryFilter = new QueryFilter(field, value);
             queryFilter.exact = true;
             return queryFilter;
+        }
+
+        /**
+         * The resource's id is one of {@code ids} — see {@link IdIn}.
+         */
+        public static QueryFilter idIn(Collection<String> ids) {
+            return new QueryFilter(ID_FIELD, new IdIn(ids));
         }
 
         public boolean isExact() {
