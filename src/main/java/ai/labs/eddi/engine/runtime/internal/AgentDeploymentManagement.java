@@ -958,12 +958,16 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
         runDeferredDocumentMigrations();
         try {
+            // Before the records are read, not after: an undeploy drops the agent from
+            // the registry and then flips its record. Read the other way round, an
+            // undeploy landing between the two reads finds the record still deployed and
+            // the agent no longer served, and this sweep would deploy it again.
+            untrackWhatIsNotServed();
             List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
             // A deployment that is no longer meant to be deployed is no longer failing.
             failingDeployments.keySet().retainAll(meantToBeDeployed);
             trackedConfigChecks.keySet().retainAll(meantToBeDeployed);
-            untrackWhatIsNotServed();
             if (clustered()) {
                 reconcileUndeployed(meantToBeDeployed);
                 reconcileTransient(meantToBeDeployed);

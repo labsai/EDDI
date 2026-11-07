@@ -42,6 +42,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -241,8 +242,8 @@ class AgentDeploymentManagementClusterTest {
         verify(agentFactory, times(1)).deployAgent(Environment.production, "agent1", 1, null);
 
         // Undeployed by this node itself (REST, retirement, delete cascade): the
-        // registry
-        // loses the agent and the record flips, and no event reaches this node.
+        // registry loses the agent and the record flips, and no event reaches this
+        // node.
         when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of());
         when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
         sweepAt(t0.plusSeconds(10));
@@ -268,6 +269,27 @@ class AgentDeploymentManagementClusterTest {
         sweepAt(t0);
         sweepAt(t0.plusSeconds(10));
         sweepAt(t0.plusSeconds(20));
+
+        verify(agentFactory, times(1)).deployAgent(Environment.production, "agent1", 1, null);
+    }
+
+    @Test
+    @DisplayName("an undeploy that lands while the sweep reads the records is not reverted by that sweep")
+    void anUndeployDuringTheRecordsReadIsNotReverted() throws Exception {
+        AtomicReference<List<IAgent>> registry = new AtomicReference<>(List.of(registered("agent1", 1, Deployment.Status.READY)));
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenAnswer(inv -> registry.get());
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("agent1")));
+        Instant t0 = Instant.parse("2026-10-03T10:00:00Z");
+        sweepAt(t0);
+
+        // A REST undeploy drops the agent from the registry, then flips its record.
+        // Here the registry drop lands after the sweep has read the record, which
+        // therefore still says deployed.
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenAnswer(inv -> {
+            registry.set(List.of());
+            return List.of(deployed("agent1"));
+        });
+        sweepAt(t0.plusSeconds(10));
 
         verify(agentFactory, times(1)).deployAgent(Environment.production, "agent1", 1, null);
     }
