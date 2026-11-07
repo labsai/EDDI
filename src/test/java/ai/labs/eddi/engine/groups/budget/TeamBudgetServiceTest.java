@@ -203,7 +203,7 @@ class TeamBudgetServiceTest {
             TeamBudgetService service;
 
             @Override
-            public Optional<TeamBudgetMonth> read(String g, String m) {
+            public synchronized Optional<TeamBudgetMonth> read(String g, String m) {
                 Optional<TeamBudgetMonth> stale = super.read(g, m);
                 if (raced.compareAndSet(false, true)) {
                     service.setCurrentMonthCap(g, 80.0, "the other admin", "bob");
