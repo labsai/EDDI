@@ -308,6 +308,7 @@ class AuditLedgerServiceBranchTest {
             identity.setKeys(new ArrayList<>(List.of(new AgentPublicKey(key.version(), key.publicKeyB64(), 0, 0))));
             config.setIdentity(identity);
             when(agentStore.read("agent1", 1)).thenReturn(config);
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenReturn(config);
             service = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
         }
 
@@ -347,16 +348,30 @@ class AuditLedgerServiceBranchTest {
         }
 
         @Test
-        @DisplayName("the agent signature of an entry whose agent was deleted is UNKNOWN_KEY")
+        @DisplayName("the agent signature of an entry whose agent was permanently deleted is UNKNOWN_KEY")
         void deletedAgentIsUnknownKey() throws Exception {
             service.submit(entry("id1", "conv1", "agent1"));
             AuditEntry stored = flushedEntry(service);
             when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
             var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
 
             assertEquals(AuditVerificationStatus.UNKNOWN_KEY, afterDeletion.verifyEntry(stored));
             service.shutdown();
             afterDeletion.shutdown();
+        }
+
+        @Test
+        @DisplayName("an entry of a soft-deleted agent still verifies VALID")
+        void softDeletedAgentStillVerifies() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            var afterSoftDelete = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
+
+            assertEquals(AuditVerificationStatus.VALID, afterSoftDelete.verifyEntry(stored));
+            service.shutdown();
+            afterSoftDelete.shutdown();
         }
 
         /**
@@ -372,6 +387,7 @@ class AuditLedgerServiceBranchTest {
             AuditEntry stored = flushedEntry(service);
             service.shutdown();
             when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
             var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
             when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(stored));
             when(auditStore.redactEntry(any(), eq(stored.hmac()))).thenReturn(true);

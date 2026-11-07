@@ -56,7 +56,7 @@ public enum AuditVerificationStatus {
      * <p>
      * Also an entry whose HMAC verified and whose agent signature cannot be
      * checked, because the agent version that signed it no longer exists (the agent
-     * was deleted).
+     * was deleted permanently; a soft-deleted agent's entries are still checked).
      */
     UNKNOWN_KEY,
 

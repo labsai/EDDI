@@ -50,9 +50,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <strong>Which public key verifies.</strong> The one the entry's own agent
  * version declares for that key version. Agent versions are immutable, so
  * editing the agent afterwards (or replacing its key) cannot make an old entry
- * verify against a substituted key. An entry naming a key version its agent
- * version never declared is {@link Verdict#INVALID}, as a forged row would be;
- * one whose agent version no longer exists (the agent was deleted) is
+ * verify against a substituted key. A soft-deleted agent's versions are still
+ * read: the delete flags them and leaves them unchanged, so the ledger outlives
+ * the agent. An entry naming a key version its agent version never declared is
+ * {@link Verdict#INVALID}, as a forged row would be; one whose agent version no
+ * longer exists (the agent was deleted permanently) is
  * {@link Verdict#KEY_UNAVAILABLE}: not proven, not disproven.
  * </p>
  *
@@ -113,7 +115,7 @@ public class AuditAgentSigner {
             return entry;
         }
         try {
-            AgentConfiguration config = agentConfigurations.read(entry.agentId(), entry.agentVersion());
+            AgentConfiguration config = agentVersionOf(entry);
             if (config == null || config.getSecurity() == null || !config.getSecurity().isSignInterAgentMessages()) {
                 return entry;
             }
@@ -132,7 +134,13 @@ public class AuditAgentSigner {
                 return entry;
             }
             return entry.withAgentSignature("v" + keyVersion + ":" + signature);
-        } catch (ResourceNotFoundException | ResourceStoreException | AgentSigningService.AgentSigningException e) {
+        } catch (ResourceNotFoundException e) {
+            // Deleted permanently, and its private keys with it: there is nothing to sign
+            // with. An erasure resealing that agent's rows ends up here once per row.
+            LOGGER.debugf("Audit entry '%s' of agent '%s' is not signed: its agent version no longer exists", sanitize(entry.id()),
+                    sanitize(entry.agentId()));
+            return entry;
+        } catch (ResourceStoreException | AgentSigningService.AgentSigningException e) {
             // A removed signature cannot be detected later (see the class Javadoc), so
             // this line is the only record that the entry should have carried one.
             LOGGER.warnf("Audit entry '%s' of agent '%s' is not signed: %s", sanitize(entry.id()), sanitize(entry.agentId()),
@@ -161,7 +169,7 @@ public class AuditAgentSigner {
         }
         AgentConfiguration config;
         try {
-            config = agentConfigurations.read(entry.agentId(), entry.agentVersion());
+            config = agentVersionOf(entry);
         } catch (ResourceNotFoundException e) {
             return Verdict.KEY_UNAVAILABLE;
         } catch (ResourceStoreException e) {
@@ -176,6 +184,15 @@ public class AuditAgentSigner {
             return Verdict.INVALID;
         }
         return signingService.verify(publicKey, signedBytes(entry), matcher.group(2)) ? Verdict.VALID : Verdict.INVALID;
+    }
+
+    /**
+     * The agent version that produced the entry, soft-deleted or not: an old entry
+     * is checked against what that version declared, whatever has happened to the
+     * agent since.
+     */
+    private AgentConfiguration agentVersionOf(AuditEntry entry) throws ResourceNotFoundException, ResourceStoreException {
+        return agentConfigurations.readIncludingDeleted(entry.agentId(), entry.agentVersion());
     }
 
     private static String signedBytes(AuditEntry entry) {

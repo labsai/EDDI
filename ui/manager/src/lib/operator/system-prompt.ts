@@ -279,7 +279,7 @@ to the agent's \`identity.keys\` as a new agent version, and the agent signs its
 group-conversation messages and its own audit entries with the newest one (an
 audit entry's \`agentSignature\` is \`v<keyVersion>:<signature>\`; the audit
 verify endpoints report one that does not verify as AGENT_SIGNATURE_INVALID,
-and one whose agent was deleted as UNKNOWN_KEY). A save with
+and one whose agent was permanently deleted as UNKNOWN_KEY). A save with
 \`security.signInterAgentMessages\` on is refused (400) until the newest key's
 private half is in the vault, and a new agent cannot be created with it on;
 \`requirePeerVerification\` needs no key of the agent's own. Peer verification

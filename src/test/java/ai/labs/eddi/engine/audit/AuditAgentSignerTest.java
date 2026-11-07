@@ -60,6 +60,7 @@ class AuditAgentSignerTest {
     /** Stores {@code config} as version {@code version} of {@link #AGENT}. */
     private void agentVersion(int version, AgentConfiguration config) throws Exception {
         when(agentStore.read(AGENT, version)).thenReturn(config);
+        when(agentStore.readIncludingDeleted(AGENT, version)).thenReturn(config);
     }
 
     /** An agent version that signs, declaring {@code keys}. */
@@ -161,7 +162,7 @@ class AuditAgentSignerTest {
 
     @Test
     void anUnreadableAgentVersionLeavesTheEntryUnsigned() throws Exception {
-        when(agentStore.read(AGENT, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+        when(agentStore.readIncludingDeleted(AGENT, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
 
         assertNull(signer.sign(TENANT, entry(1, HMAC)).agentSignature());
     }
@@ -230,6 +231,25 @@ class AuditAgentSignerTest {
         assertEquals(Verdict.VALID, signer.verify(signed));
     }
 
+    /**
+     * A soft delete flags the agent's current version and leaves it in the store
+     * with the public key it declared, so its entries still verify. Read the way a
+     * running agent is read, that version is gone and every entry it signed would
+     * report UNKNOWN_KEY, while the agent's older versions still verified.
+     */
+    @Test
+    void anEntryOfASoftDeletedAgentStillVerifies() throws Exception {
+        AgentConfiguration config = signing(List.of(generate(1)));
+        agentVersion(1, config);
+        AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
+        IAgentStore afterSoftDelete = mock(IAgentStore.class);
+        when(afterSoftDelete.read(AGENT, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+        when(afterSoftDelete.readIncludingDeleted(AGENT, 1)).thenReturn(config);
+
+        assertEquals(Verdict.VALID, new AuditAgentSigner(signingService, new AgentConfigurationCache(afterSoftDelete)).verify(signed));
+    }
+
+    /** Permanently deleted: the version, and the key it declared, are gone. */
     @Test
     void anAgentVersionThatNoLongerExistsLeavesTheSignatureUncheckable() throws Exception {
         agentVersion(1, signing(List.of(generate(1))));
