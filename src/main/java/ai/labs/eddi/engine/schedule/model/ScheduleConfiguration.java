@@ -97,8 +97,8 @@ public class ScheduleConfiguration {
     private Instant lastFired;
     private FireStatus fireStatus = FireStatus.PENDING;
     private String claimedBy;
-    private Instant claimedAt;
-    private String fireId; // idempotency key: scheduleId + fireTime
+    private Instant claimedAt; // written by the database's clock; leases are judged on it
+    private String fireId; // claim key: IScheduleStore.fireIdOf(scheduleId, claim time)
     private int failCount;
     private Instant nextRetryAt;
 
