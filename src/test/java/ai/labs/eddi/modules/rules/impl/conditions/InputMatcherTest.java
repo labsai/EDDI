@@ -19,6 +19,7 @@ import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -272,12 +273,12 @@ public class InputMatcherTest extends BaseMatcherTest {
          */
         private static Arguments row(String description, String configuredExpressions, String occurrence, ExecutionState expected,
                                      String... steps) {
-            return Arguments.of(description, configuredExpressions, occurrence, expected, Arrays.asList(steps));
+            return Arguments.of(Named.of(description, configuredExpressions), occurrence, expected, Arrays.asList(steps));
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("rows")
-        void matches(String description, String configuredExpressions, String occurrence, ExecutionState expected, List<String> steps) {
+        void matches(String configuredExpressions, String occurrence, ExecutionState expected, List<String> steps) {
             var memory = new ConversationMemory("conversation-1", "agent-1", 1, "user-1");
             for (int i = 0; i < steps.size(); i++) {
                 if (i > 0) {

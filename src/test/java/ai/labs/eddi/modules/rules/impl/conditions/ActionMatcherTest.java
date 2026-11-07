@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.rules.impl.conditions.BaseMatcher.ConversationStepOc
 import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -220,12 +221,12 @@ public class ActionMatcherTest extends BaseMatcherTest {
         @SafeVarargs
         private static Arguments row(String description, String configuredActions, String occurrence, ExecutionState expected,
                                      List<String>... steps) {
-            return Arguments.of(description, configuredActions, occurrence, expected, Arrays.asList(steps));
+            return Arguments.of(Named.of(description, configuredActions), occurrence, expected, Arrays.asList(steps));
         }
 
         @ParameterizedTest(name = "{0}")
         @MethodSource("rows")
-        void matches(String description, String configuredActions, String occurrence, ExecutionState expected, List<List<String>> steps) {
+        void matches(String configuredActions, String occurrence, ExecutionState expected, List<List<String>> steps) {
             var memory = new ConversationMemory("conversation-1", "agent-1", 1, "user-1");
             for (int i = 0; i < steps.size(); i++) {
                 if (i > 0) {
