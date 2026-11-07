@@ -335,12 +335,21 @@ class CachedA2ATaskStoreTest {
                 .thenAnswer(invocation -> caches.computeIfAbsent(invocation.getArgument(0), name -> new MapCache<>()));
         CachedA2ATaskStore capped = new CachedA2ATaskStore(factory);
 
+        int[] perShard = new int[CachedA2ATaskStore.INDEX_SHARDS];
         for (int i = 0; i < CachedA2ATaskStore.MAX_INDEXED_IDS + 1_000; i++) {
             capped.saveTask("alice", record("t" + i, "task " + i));
+            perShard[CachedA2ATaskStore.shardOf("t" + i)]++;
+        }
+        // Each shard keeps its newest MAX_IDS_PER_SHARD ids; a shard that never filled
+        // keeps all of its own. Nothing else may be evicted.
+        int expected = 0;
+        for (int written : perShard) {
+            expected += Math.min(written, CachedA2ATaskStore.MAX_IDS_PER_SHARD);
         }
 
         int held = capped.tasksOf("alice").size();
         assertTrue(held <= CachedA2ATaskStore.MAX_INDEXED_IDS, held + " tasks held");
+        assertEquals(expected, held, "only ids pushed out of a full shard are evicted");
         assertEquals(held, indexedTaskIds(caches.get(CachedA2ATaskStore.INDEX_CACHE), "alice").size(),
                 "every record still held is in the index, so another node can reach it");
         assertEquals(held, capped.eraseForPrincipal("alice"));
