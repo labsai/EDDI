@@ -25,11 +25,17 @@ The endpoint now builds its answer from the trace as written:
   repeat guard, the `tool_result` event status and the `toolQuotas` give-back
   already use. The class, its `Outcome` enum, `classify` and `isFailure` are now
   public for that.
-- A `tool_error` with no open call, and the `tool_repeat_refused`,
-  `tool_not_activated` and `tool_call_capped` refusals, become failed calls of
-  their own. A `tool_result_guardrail` with `action: block` fails the call it
+- A `tool_error` with no open call, the `tool_repeat_refused`,
+  `tool_not_activated` and `tool_call_capped` refusals, and the gated calls the
+  HITL resume settles without running them (`hitl_rejected`,
+  `hitl_not_executed`, `hitl_request_changed`, `hitl_self_conversation`,
+  `hitl_self_ungating`, `hitl_outcome_unknown`) become failed calls of their
+  own. A `tool_result_guardrail` with `action: block` fails the call it
   follows. A call the trace opened but never closed is reported as
   `success: false, error: "no_result"`, not as a success.
+- Still not listed, because the trace cannot identify them: a call a
+  `toolCallGuardrails` entry refused (one entry per finding, no call id) and an
+  approved call replayed from the HITL journal (no result in the trace).
 
 ### Response shape (a REST client notices)
 
@@ -51,9 +57,9 @@ the Platform Operator calls the history endpoint.
   `ToolOutcomeClassifier` keeps one definition of a failed call; a local rule
   would drift from the repeat guard's.
 - **Refusals always get their own entry.** `tool_repeat_refused`,
-  `tool_not_activated` and `tool_call_capped` are only ever written for calls
-  that never got a `tool_call`, so pairing them by tool name with an open call
-  could only attach them to the wrong one.
+  `tool_not_activated`, `tool_call_capped` and the `hitl_*` refusals are only
+  ever written for calls that never got a `tool_call`, so pairing them by tool
+  name with an open call could only attach them to the wrong one.
 - **No invented numbers.** Timing and cost would have to be added to the trace
   first; until then the history reports neither.
 

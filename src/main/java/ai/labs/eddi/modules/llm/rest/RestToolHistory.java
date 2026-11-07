@@ -167,9 +167,13 @@ public class RestToolHistory {
      * {@code tool_error} with no open call (a call refused before it ran: argument
      * schema, quota, approval-pause cap) and the refusals that are never preceded
      * by a {@code tool_call} ({@code tool_repeat_refused},
-     * {@code tool_not_activated}, {@code tool_call_capped}) become calls of their
-     * own. A {@code tool_result_guardrail} that blocked the result fails the call
-     * whose result it follows.
+     * {@code tool_not_activated}, {@code tool_call_capped}, and the gated calls the
+     * HITL resume settles without running: {@code hitl_rejected},
+     * {@code hitl_not_executed}, {@code hitl_request_changed},
+     * {@code hitl_self_conversation}, {@code hitl_self_ungating},
+     * {@code hitl_outcome_unknown}) become calls of their own. A
+     * {@code tool_result_guardrail} that blocked the result fails the call whose
+     * result it follows.
      */
     private static List<ToolHistory.Call> callsOf(List<Map<String, Object>> trace) {
         List<TracedCall> calls = new ArrayList<>();
@@ -201,8 +205,10 @@ public class RestToolHistory {
                     String error = text(event.get("error"));
                     openCall(calls, byCallId, tool, callId).close(error != null ? error : type);
                 }
-                case "tool_repeat_refused", "tool_not_activated", "tool_call_capped" -> {
-                    TracedCall refused = new TracedCall(tool, callId, null);
+                case "tool_repeat_refused", "tool_not_activated", "tool_call_capped", "hitl_rejected", "hitl_not_executed",
+                        "hitl_request_changed", "hitl_self_conversation", "hitl_self_ungating", "hitl_outcome_unknown" -> {
+                    // hitl_rejected carries the declined arguments; the others carry none.
+                    TracedCall refused = new TracedCall(tool, callId, text(event.get("arguments")));
                     refused.close(type);
                     calls.add(refused);
                 }
@@ -213,8 +219,12 @@ public class RestToolHistory {
                     }
                 }
                 default -> {
-                    // Loop-level entries (cost ceilings, answer tool, HITL markers) are
-                    // not tool calls.
+                    // Loop-level entries (cost ceilings, answer tool, hitl_resume,
+                    // hitl_approved) are not tool calls. Known gaps: a
+                    // tool_call_guardrail refusal has no call id and one entry per
+                    // finding, refusing or not, so it cannot be told apart from a
+                    // finding that let the call run; hitl_replayed answers from the
+                    // journal and the trace keeps no result for it.
                 }
             }
         }

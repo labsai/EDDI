@@ -369,6 +369,33 @@ class RestToolHistoryTest {
         }
 
         @Test
+        @DisplayName("a gated call a human rejected, or that the resume refused, appears as a failed call; an approved one runs as usual")
+        void hitlSettledCallsAppear() throws Exception {
+            ToolHistory history = historyOf(
+                    Map.of("type", "hitl_resume", "transcriptRestored", true),
+                    Map.of("type", "hitl_rejected", "tool", "deploy", "callId", "c1", "arguments", "{\"env\":\"prod\"}"),
+                    Map.of("type", "hitl_approved", "tool", "search", "callId", "c2"),
+                    Map.of("type", "tool_call", "tool", "search", "callId", "c2", "arguments", "{}"),
+                    Map.of("type", "tool_result", "tool", "search", "callId", "c2", "result", "found"),
+                    Map.of("type", "hitl_not_executed", "tool", "upload", "callId", "c3"),
+                    Map.of("type", "hitl_request_changed", "tool", "http", "callId", "c4", "detail", "url"),
+                    Map.of("type", "hitl_self_conversation", "tool", "http", "callId", "c5", "detail", "self"),
+                    Map.of("type", "hitl_self_ungating", "tool", "http", "callId", "c6", "detail", "self"),
+                    Map.of("type", "hitl_outcome_unknown", "tool", "pay", "callId", "c7"));
+
+            assertEquals(List.of(
+                    new ToolHistory.Call("deploy", "c1", "{\"env\":\"prod\"}", null, false, "hitl_rejected"),
+                    new ToolHistory.Call("search", "c2", "{}", "found", true, null),
+                    new ToolHistory.Call("upload", "c3", null, null, false, "hitl_not_executed"),
+                    new ToolHistory.Call("http", "c4", null, null, false, "hitl_request_changed"),
+                    new ToolHistory.Call("http", "c5", null, null, false, "hitl_self_conversation"),
+                    new ToolHistory.Call("http", "c6", null, null, false, "hitl_self_ungating"),
+                    new ToolHistory.Call("pay", "c7", null, null, false, "hitl_outcome_unknown")),
+                    history.toolCalls());
+            assertTrue(history.hasErrors());
+        }
+
+        @Test
         @DisplayName("two calls of the same tool are paired with their results by call id, not by order")
         void sameToolCallsArePairedByCallId() throws Exception {
             ToolHistory history = historyOf(
@@ -392,9 +419,12 @@ class RestToolHistoryTest {
                     Map.of("type", "tool_result_guardrail", "tool", "scrape", "action", "block"),
                     Map.of("type", "tool_call", "tool", "scrape", "callId", "c2", "arguments", "{}"),
                     Map.of("type", "tool_result", "tool", "scrape", "callId", "c2", "result", "page"),
-                    Map.of("type", "tool_result_guardrail", "tool", "scrape", "action", "redact"));
+                    Map.of("type", "tool_result_guardrail", "tool", "scrape", "action", "redact"),
+                    Map.of("type", "tool_call", "tool", "scrape", "callId", "c3", "arguments", "{}"),
+                    Map.of("type", "tool_result", "tool", "scrape", "callId", "c3", "result", "page"),
+                    Map.of("type", "tool_result_guardrail", "tool", "scrape", "action", "warn"));
 
-            assertEquals(List.of(false, true), history.toolCalls().stream().map(ToolHistory.Call::success).toList());
+            assertEquals(List.of(false, true, true), history.toolCalls().stream().map(ToolHistory.Call::success).toList());
             assertEquals("blocked by tool-result guardrail", history.toolCalls().get(0).error());
         }
 

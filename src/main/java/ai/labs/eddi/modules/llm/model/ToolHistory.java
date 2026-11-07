@@ -45,8 +45,9 @@ public record ToolHistory(List<Call> toolCalls, boolean hasErrors) {
      * @param error
      *            why the call did not succeed: the trace's own error code or
      *            message, the refusal's trace type ({@code tool_repeat_refused},
-     *            {@code tool_not_activated}, {@code tool_call_capped}), the failed
-     *            result's outcome ({@code failed_retryable},
+     *            {@code tool_not_activated}, {@code tool_call_capped},
+     *            {@code hitl_rejected} and the other HITL resume refusals), the
+     *            failed result's outcome ({@code failed_retryable},
      *            {@code failed_terminal}, {@code not_executed}),
      *            {@code blocked by tool-result guardrail}, or {@code no_result} for
      *            a call the trace records no outcome for; null on success
