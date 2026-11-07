@@ -405,6 +405,11 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
 
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
+
             migration.runIfNeeded();
 
             verify(channelStore).create(any(ChannelIntegrationConfiguration.class));
@@ -437,6 +442,11 @@ class ChannelConnectorMigrationBranchTest {
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
@@ -472,6 +482,11 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
 
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
+
             migration.runIfNeeded();
 
             verify(channelStore).create(any());
@@ -506,6 +521,11 @@ class ChannelConnectorMigrationBranchTest {
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
@@ -554,6 +574,11 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(null);
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
