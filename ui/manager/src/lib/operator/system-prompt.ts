@@ -297,14 +297,32 @@ off and says so (\`X-Agent-Signing-Turned-Off\` on an import, \`warnings\` in a
 sync result; the manager's import dialog and Sync page show both). An agent with \`requirePeerVerification\` sees every message
 another agent wrote that does not verify (unsigned, edited, retyped, copied from
 another discussion or round, or signed with a revoked key or outside its key's
-validity window) as "[withheld: ...]"; its own messages are checked the same way when it
+validity window) as "[withheld: ...]", in every prompt it is given (role turns,
+task-force prompts and listGroupTasks included); its own messages are checked the same way when it
 signs (only a verifying agent that does not sign sees its own unchecked), a message no agent wrote is shown as "User", "System" or the name followed
-by "(not an agent, unverified)", and it is never given the stored window
-summary. So in such a group every agent that writes to the discussion should
-sign, a moderator or synthesizer that is not a member included, and member
-display names must be unique within the group (a save with two equal names is
-refused). When asked to turn signing on, say this and send the administrator to
-that section.`;
+by "(not an agent, unverified)" ("Anonymous (not an agent, unverified)" under
+ANONYMOUS scope), a synthesis under the engine's or the user's name is
+withheld, and it is never given the stored window summary. A task another
+member filed with its task tools is shown to it only while that member signs
+verifiably, and it gets no artifact tools (artifacts are not signed). A nested
+group's question is filtered when any of its agents (a member, its moderator or
+facilitator) verifies.
+Once any member, the moderator or the facilitator has requirePeerVerification
+on, the group's own records (vote options and ballots, the negotiation table,
+the SERVICE convergence judge, retrospective lessons, a standing team's cadence
+feedback) count only entries that verify for every reader, with no reader's own
+entries exempt. So an unsigned synthesis, or a verifying moderator that does not
+sign, makes a vote end with "The vote could not run: only 0 option(s) were
+available", and a verifying member's task whose text does not verify fails
+with "Its task text could not be verified, and this member requires peer
+verification". So in such a group every agent that writes to the discussion
+should sign, a moderator, synthesizer or facilitator that is not a member
+included, and an agent that verifies should sign too. Member display names
+must be unique within the group, and an agent member may not be named
+"Moderator" while the moderator is not a member, nor "Facilitator" while an
+enabled facilitator is another agent (each such save is refused with 400).
+When asked to turn signing on, or why a vote or task failed this way, say this
+and send the administrator to that section.`;
 
 /**
  * How to answer cluster questions with the read-only cluster endpoints.

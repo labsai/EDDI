@@ -66,6 +66,13 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
 
 Docs: [group-conversations.md](../group-conversations.md#signed-contributions) lists every prompt
 and record covered, and its "Not yet supported" row now names only what is still unsigned.
+[`architecture.md`](../architecture.md#cryptographic-agent-identity) item 8 describes the combined
+behaviour of this stack: every prompt filtered, own entries checked when the member signs, the
+reserved names, withheld engine-named syntheses, the ballot taken from the voter's view and the
+group-wide records rule; the "Not filtered yet" sentence is gone. The Platform Operator's prompt
+names the same rules and the two failure messages an admin will ask about (`The vote could not
+run: only 0 option(s) were available`, `Its task text could not be verified, and this member
+requires peer verification`); operator revision bumped.
 
 ### Design decisions
 
@@ -92,9 +99,5 @@ and record covered, and its "Not yet supported" row now names only what is still
 
 ### Not done
 
-- `docs/architecture.md` (item 8, "Not filtered yet: ...") and the Platform Operator prompt are
-  owned by another PR in flight; both need the role-prompt sentence replaced and the new failure
-  modes added (a vote that does not run, a task that fails unverified, the group-wide records rule,
-  no artifact tools for a verifying member).
 - Engine notes still quote a few short pieces of agent text (a task subject, rework feedback, the
   convergence check's reason). Listed in the docs.
