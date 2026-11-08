@@ -429,6 +429,9 @@ public class GroupSigningGuard {
      */
     static Set<String> readersOf(AgentGroupConfiguration config, GroupConversation gc) {
         Set<String> readers = new LinkedHashSet<>();
+        if (config == null) {
+            return readers;
+        }
         for (GroupMember member : GroupConversationService.rosterWithRecruits(config, gc)) {
             if (member != null && member.agentId() != null && member.memberType() != MemberType.HUMAN) {
                 readers.add(member.agentId());

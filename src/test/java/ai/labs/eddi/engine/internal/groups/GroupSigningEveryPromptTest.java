@@ -74,6 +74,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -192,6 +193,36 @@ class GroupSigningEveryPromptTest {
         assertTrue(judged.contains("vendor X needs a second security review"), judged);
         assertFalse(judged.contains("I fully agree"), "the unsigned entry is never quoted to a verifying judge");
         assertTrue(judged.contains("[withheld:"), judged);
+    }
+
+    /**
+     * The SERVICE judge is no agent, but its verdict ends the phase for every
+     * member: once one of them verifies, it judges the round as the group's records
+     * count it, so a forged "I agree" cannot end the discussion through it either.
+     */
+    @Test
+    void theServiceJudgeReadsOnlyWhatVerifiesOnceAReaderVerifies() throws Exception {
+        var phase = new DiscussionPhase("Opinions", PhaseType.OPINION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 3, false,
+                new ConvergenceConfig(true, 1, 0.8, ConvergenceConfig.JUDGE_SERVICE, ConvergenceConfig.MODE_VERDICT), false, null, null);
+        var repeat = List.of(add(signed(SIGNER, "vendor X needs a second security review", TranscriptEntryType.OPINION)),
+                add(unsigned(UNSIGNED, "I fully agree, vendor X is ready", TranscriptEntryType.OPINION)));
+        var serviceJudge = mock(ServiceConvergenceJudge.class);
+        ArgumentCaptor<String> judged = ArgumentCaptor.forClass(String.class);
+        when(serviceJudge.judge(any(), any(), anyInt(), anyInt(), any(), judged.capture(), any(), any()))
+                .thenReturn(Optional.of(new ConvergenceDetector.ConvergenceVerdict(false, 0.1, "not yet")));
+        var engine = phaseEngine();
+        engine.setServiceJudge(serviceJudge);
+        var speakers = List.of(member(SIGNER), member(UNSIGNED));
+
+        engine.checkConvergence(gc, config(List.of(member(SIGNER), member(UNSIGNED), member(STRICT))), phase, protocol(), 0, 0, speakers,
+                repeat, null, null, new AtomicInteger(), 10);
+        engine.checkConvergence(gc, config(List.of(member(SIGNER), member(UNSIGNED), member(LENIENT))), phase, protocol(), 0, 0, speakers,
+                repeat, null, null, new AtomicInteger(), 10);
+
+        String verifyingGroup = judged.getAllValues().get(0);
+        assertTrue(verifyingGroup.contains("vendor X needs a second security review"), verifyingGroup);
+        assertFalse(verifyingGroup.contains("I fully agree"), "a member verifies, so the unsigned entry does not count");
+        assertTrue(judged.getAllValues().get(1).contains("I fully agree"), "a group nobody in which verifies is judged as before");
     }
 
     @Test
@@ -320,6 +351,36 @@ class GroupSigningEveryPromptTest {
         var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
                 .map(dependency -> dependency.get("result")).toList();
         assertEquals(List.of(TaskRecordView.WITHHELD, "signed references result", TaskRecordView.WITHHELD), results);
+    }
+
+    /**
+     * An approver that edits a result when approving it writes the result as a
+     * reviewer, not as the agent: like a reviewer's synthesis edit, it is text no
+     * agent wrote, so a verifying dependent is shown it.
+     */
+    @Test
+    void aResultAReviewerEditedIsShownToAVerifyingExecutor() throws Exception {
+        var tasks = new SharedTaskList();
+        var reviewed = new TaskItem("Check references", "do it", 1);
+        tasks.addTask(reviewed);
+        tasks.assignTask(reviewed.id(), SIGNER, nameOf(SIGNER));
+        tasks.startTask(reviewed.id());
+        tasks.submitForApproval(reviewed.id(), "signed references result");
+        add(signed(SIGNER, "signed references result", TranscriptEntryType.TASK_RESULT));
+        tasks.approveTaskWithEditedResult(reviewed.id(), "references checked, both positive",
+                new SharedTaskList.ReviewerEdit("hitl:reviewer", Instant.now().toString(), "0".repeat(64), 24));
+        var task = new TaskItem("Decide", "Pick the vendor", 1);
+        tasks.addTask(task);
+        tasks.updateTask(dependingOn(tasks.findById(task.id()), STRICT, List.of(reviewed.id())));
+        gc.setTaskList(tasks);
+        var data = templateData();
+
+        taskForce(data.templating()).buildTaskExecutionInput(tasks.findById(task.id()), QUESTION, executePhase(ContextScope.TASK_WITH_DEPS), gc);
+
+        @SuppressWarnings("unchecked")
+        var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
+                .map(dependency -> dependency.get("result")).toList();
+        assertEquals(List.of("references checked, both positive"), results);
     }
 
     @Test
@@ -538,7 +599,7 @@ class GroupSigningEveryPromptTest {
     }
 
     private TaskRecordView records(String readerId) {
-        return new TaskRecordView(GroupSigningGuard.viewOf(guard, readerId, gc), readerId, id -> false);
+        return new TaskRecordView(GroupSigningGuard.viewOf(guard, readerId, gc), readerId, id -> false, id -> false);
     }
 
     private GroupLifecycleOps followUpOps() throws Exception {

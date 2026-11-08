@@ -29,7 +29,9 @@ import java.util.function.Predicate;
  * <ul>
  * <li>A <b>result</b> of an agent's task is shown when the reader is its
  * assignee, or a trusted entry of the assignee holds exactly that text. So a
- * result whose entry is unsigned, or a result edited in the store, is not.</li>
+ * result whose entry is unsigned, or a result edited in the store, is not. A
+ * result an approver replaced is the reviewer's text, which no agent wrote, and
+ * is shown as a reviewer's synthesis edit is.</li>
  * <li>A <b>subject and description</b> are withheld when another agent's task
  * tool wrote them, or when an untrusted {@code PLAN} entry parses to them and
  * no trusted one does. Configured tasks and the user's own are not
@@ -51,6 +53,7 @@ final class TaskRecordView {
     private final GroupSigningGuard.View view;
     private final String readerId;
     private final Predicate<String> isHuman;
+    private final Predicate<String> editedByReviewer;
     /** Trusted content by speaker id, built on first use. */
     private Map<String, Set<String>> trustedContents;
     private Set<List<String>> trustedPlans;
@@ -60,11 +63,16 @@ final class TaskRecordView {
      * @param isHuman
      *            whether an assignee id is a HUMAN member, whose result is not
      *            agent-authored
+     * @param editedByReviewer
+     *            whether a task id's result was replaced by an approver
+     *            ({@code SharedTaskList.reviewerEdits}), which makes it the
+     *            reviewer's text rather than the assignee's
      */
-    TaskRecordView(GroupSigningGuard.View view, String readerId, Predicate<String> isHuman) {
+    TaskRecordView(GroupSigningGuard.View view, String readerId, Predicate<String> isHuman, Predicate<String> editedByReviewer) {
         this.view = view;
         this.readerId = readerId;
         this.isHuman = isHuman;
+        this.editedByReviewer = editedByReviewer;
     }
 
     /** Whether the reader is shown every record as stored. */
@@ -99,7 +107,7 @@ final class TaskRecordView {
     private String result(TaskItem task) {
         String result = task.result();
         String assignee = task.assignedAgentId();
-        if (result == null || assignee == null || assignee.equals(readerId) || isHuman.test(assignee)) {
+        if (result == null || assignee == null || assignee.equals(readerId) || isHuman.test(assignee) || editedByReviewer.test(task.id())) {
             return result;
         }
         return trustedContents().getOrDefault(assignee, Set.of()).contains(result) ? result : WITHHELD;

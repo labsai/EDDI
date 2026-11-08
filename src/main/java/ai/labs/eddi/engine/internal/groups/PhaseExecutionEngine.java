@@ -274,7 +274,8 @@ public class PhaseExecutionEngine {
         }
 
         // The judge's input, built from the entries as the judge sees them: the
-        // moderator agent reads them through its own verification view.
+        // moderator agent reads them through its own verification view, the SERVICE
+        // judge through the group's records view.
         Function<UnaryOperator<List<TranscriptEntry>>, String> judgeInput = seen -> verdictMode
                 ? ConvergenceDetector.buildVerdictInput(currentQuestion(gc), seen.apply(repeatEntries))
                 : ConvergenceDetector.buildJudgeInput(seen.apply(previousRepeatEntries), seen.apply(repeatEntries));
@@ -764,10 +765,13 @@ public class PhaseExecutionEngine {
                                                             GroupDiscussionEventListener listener) {
         // SERVICE judge first: it needs no moderator, so it must run before the
         // no-moderator early return. Empty = run the moderator judge below. It is no
-        // agent and has no verification setting, so it reads the entries as stored.
-        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = serviceJudge != null
-                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input.apply(UnaryOperator.identity()), parser, listener)
-                : Optional.empty();
+        // agent, but its verdict ends the phase for every member, so it reads the
+        // entries as the group's records count them, like the vote tally does.
+        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = Optional.empty();
+        if (serviceJudge != null) {
+            var records = GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
+            serviceVerdict = serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input.apply(records::of), parser, listener);
+        }
         if (serviceVerdict.isPresent()) {
             return serviceVerdict.get();
         }

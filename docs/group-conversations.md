@@ -1413,7 +1413,8 @@ each of its turns:
 - **Every prompt, not only phase turns.** The prompts the engine writes for a
   role turn read the transcript the same way, as the agent taking the turn may
   see it: the convergence judge (the moderator; the `SERVICE` judge is no agent
-  and reads the round as stored), a dissenter, the facilitator's briefing, a
+  and reads the round as the engine's own records count it, below), a
+  dissenter, the facilitator's briefing, a
   follow-up's `groupTranscript`, and a nested group's question, which is
   filtered when any agent in the nested group (or in a group nested in it)
   verifies, since that prompt becomes the question each of them is asked. A
@@ -1423,7 +1424,9 @@ each of its turns:
   verifier or bidder is shown a task's result only when it is its own or a
   verified entry of the assignee holds exactly that text (an unsigned result,
   or one edited in the store, reads `[withheld: this text could not be
-  verified]`). A task's subject and description are withheld when they come
+  verified]`). A result an approver edited when approving it is the
+  reviewer's text, not the agent's, and is shown, as a reviewer's synthesis
+  edit is. A task's subject and description are withheld when they come
   from a plan that does not verify, or from another member's task tool (those
   writes are not signed); configured tasks and the user's own are shown. A
   verification note is withheld when it comes from a verifier entry that does
@@ -1432,8 +1435,8 @@ each of its turns:
   bidder is announced only the tasks whose text it may see.
 - **The engine's own records.** Once any member, the moderator or the
   facilitator requires verification, what the engine records for everyone
-  counts only entries that verify for all of them: the negotiation table
-  (proposals and concessions), the vote (its options and ballots: a synthesis
+  counts only entries that verify for all of them: the `SERVICE` convergence
+  judge's input, the negotiation table (proposals and concessions), the vote (its options and ballots: a synthesis
   that does not verify offers no options, so the vote does not run, and an
   unsigned ballot is not counted), an arbitration verdict, and the lessons a
   retrospective stores in team memory.

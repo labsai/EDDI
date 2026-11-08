@@ -20,13 +20,15 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   every engine reads the transcript for an agent. `PhaseExecutionEngine`, `FacilitatorEngine`,
   `TaskForceEngine` and `GroupLifecycleOps` get the guard by setter, as `GroupContextBuilder`
   already did; without one they read the transcript as stored.
-- **Role turns.** The moderator judge's input is built from the round as the moderator sees it
-  (the `SERVICE` judge is no agent and reads it as stored). Each dissenter reacts to the synthesis
+- **Role turns.** The moderator judge's input is built from the round as the moderator sees it;
+  the `SERVICE` judge, which is no agent but whose verdict ends the phase for everyone, reads it
+  through the group's records view (below). Each dissenter reacts to the synthesis
   as it sees it, and one for which this round's synthesis does not verify is not asked. The
   facilitator's excerpt is the latest contribution it may take as written.
 - **Task records** (`TaskRecordView`). A result is quoted to a verifying reader only when it is its
   own task or a trusted entry of the assignee holds exactly that text, so an unsigned result or one
-  edited in the store reads `[withheld: this text could not be verified]`. A subject and
+  edited in the store reads `[withheld: this text could not be verified]`; a result an approver
+  edited (`SharedTaskList.reviewerEdits`) is the reviewer's text and is shown. A subject and
   description are withheld when an untrusted `PLAN` entry parses to them and no trusted one does,
   or when another member's task tool wrote them. A verification note is withheld when an untrusted
   `VERIFICATION` entry holds it and no trusted agent entry does. A verifying member whose own
@@ -37,7 +39,8 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   agent member (nested groups included, through `GroupSigningGuard.setGroupMembers`), since its
   prompt becomes the question each of them is asked.
 - **The engine's records** (`GroupSigningGuard.recordView`, `recordedEntries`). Once any member,
-  the moderator or the facilitator requires verification, the negotiation table, an arbitration
+  the moderator or the facilitator requires verification, the `SERVICE` judge's input, the
+  negotiation table, an arbitration
   verdict, the vote's options and ballots and a retrospective's lessons count only entries that
   verify for every reader (no reader's own entries are exempt). The ballot prompt now takes its
   options from the voter's own view, which reverses the previous PR's choice of the stored

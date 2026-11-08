@@ -118,8 +118,10 @@ public class TaskForceEngine {
      * decides which assignees are human; {@code null} treats none as human.
      */
     private TaskRecordView taskRecords(String readerId, GroupConversation gc, AgentGroupConfiguration config) {
+        SharedTaskList taskList = gc.getTaskList();
         return new TaskRecordView(GroupSigningGuard.viewOf(signingGuard, readerId, gc), readerId,
-                assignee -> GroupHumanTasks.isHumanAssignee(config, assignee));
+                assignee -> GroupHumanTasks.isHumanAssignee(config, assignee),
+                taskId -> taskList != null && taskList.getReviewerEdits().containsKey(taskId));
     }
 
     /**
