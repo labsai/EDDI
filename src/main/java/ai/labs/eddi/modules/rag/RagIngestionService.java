@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
@@ -32,8 +34,10 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Async document ingestion into knowledge base vector stores. Uses virtual
- * threads. Ingestion status is held per instance (Caffeine, one-hour expiry),
- * so an id polled on another instance reports {@code unknown}.
+ * threads. Ingestion status is kept for one hour in the
+ * {@code rag-ingestion-status} cache, which a cluster shares between its nodes
+ * (see {@code CacheFactory.SHARED_BUCKETS}), so the instance that answers a
+ * poll need not be the one that runs the ingestion.
  */
 @ApplicationScoped
 public class RagIngestionService {
@@ -45,14 +49,24 @@ public class RagIngestionService {
 
     /**
      * What {@link #getStatus} answers for an id it holds no status for — never
-     * started on this instance, or expired.
+     * issued, or expired.
      */
     public static final String STATUS_UNKNOWN = "unknown";
 
     /**
-     * Bounded status tracking with 1-hour expiry to prevent memory leaks.
+     * The cache holding each ingestion's status and, for one that left a caveat,
+     * its warning — the two under different keys, see {@link #statusKey}.
      */
-    private final Cache<String, String> ingestionStatus = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
+    public static final String INGESTION_CACHE_NAME = "rag-ingestion-status";
+
+    /** How long a status, and its warning, can still be polled. */
+    static final Duration STATUS_TTL = Duration.ofHours(1);
+
+    /**
+     * Status and warning of every recent ingestion, under {@link #statusKey} and
+     * {@link #warningKey}. In a cluster, shared by every node.
+     */
+    private final ICache<String, String> ingestionState;
 
     /**
      * One lock per document being replaced, so two replacements of one name cannot
@@ -68,9 +82,6 @@ public class RagIngestionService {
     private record ReplaceKey(String kbId, String documentName) {
     }
 
-    /** Caveats on completed ingestions, kept exactly as long as their status. */
-    private final Cache<String, String> ingestionWarnings = Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(1)).maximumSize(10_000).build();
-
     /** Chunk metadata: the document name the chunk was ingested under. */
     static final String METADATA_SOURCE = "source";
     /** Chunk metadata: the knowledge base the chunk belongs to. */
@@ -79,9 +90,24 @@ public class RagIngestionService {
     static final String METADATA_INGESTION_ID = "ingestionId";
 
     @Inject
-    public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory) {
+    public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory,
+            ICacheFactory cacheFactory) {
         this.embeddingModelFactory = embeddingModelFactory;
         this.embeddingStoreFactory = embeddingStoreFactory;
+        this.ingestionState = cacheFactory.getCache(INGESTION_CACHE_NAME, STATUS_TTL);
+    }
+
+    /**
+     * An ingestion's status and its warning live in one cache — one shared bucket
+     * in a cluster — so each kind gets a prefix of its own: neither can overwrite
+     * the other, and an id polled as {@code warning:<id>} finds no status.
+     */
+    private static String statusKey(String ingestionId) {
+        return "status:" + ingestionId;
+    }
+
+    private static String warningKey(String ingestionId) {
+        return "warning:" + ingestionId;
     }
 
     /**
@@ -124,7 +150,7 @@ public class RagIngestionService {
         // addressed is refused to the caller rather than reported as "failed" later.
         String kbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, ragConfig);
         String ingestionId = UUID.randomUUID().toString();
-        ingestionStatus.put(ingestionId, "pending");
+        ingestionState.put(statusKey(ingestionId), "pending");
 
         Thread.startVirtualThread(() -> processIngestion(ragConfigId, kbId, ingestionId, documentContent, documentName, ragConfig, replace));
 
@@ -134,7 +160,7 @@ public class RagIngestionService {
     private void processIngestion(String ragConfigId, String kbId, String ingestionId, String documentContent, String documentName,
                                   RagConfiguration ragConfig, boolean replace) {
         try {
-            ingestionStatus.put(ingestionId, "processing");
+            ingestionState.put(statusKey(ingestionId), "processing");
             LOGGER.infof("Starting ingestion %s for KB '%s', document '%s' (replace=%b)", ingestionId, sanitize(kbId), sanitize(documentName),
                     replace);
 
@@ -171,11 +197,11 @@ public class RagIngestionService {
                 storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, false);
             }
 
-            ingestionStatus.put(ingestionId, "completed");
+            ingestionState.put(statusKey(ingestionId), "completed");
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
-            ingestionStatus.put(ingestionId, "failed: " + e.getMessage());
+            ingestionState.put(statusKey(ingestionId), "failed: " + e.getMessage());
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
     }
@@ -197,7 +223,7 @@ public class RagIngestionService {
             } catch (UnsupportedOperationException e) {
                 String warning = "The new version is stored, but this knowledge base's vector store cannot delete by metadata, "
                         + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
-                ingestionWarnings.put(ingestionId, warning);
+                ingestionState.put(warningKey(ingestionId), warning);
                 LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
             } catch (RuntimeException e) {
                 // The new chunks are already stored, so a failed delete (pgvector wraps
@@ -205,7 +231,7 @@ public class RagIngestionService {
                 // retrievable. Still a failure — the operator should retry, and a retry
                 // removes every version but its own — but the status says what state it
                 // left, rather than a bare "failed".
-                ingestionWarnings.put(ingestionId, "The new version of '" + documentName + "' is stored, but removing the previous "
+                ingestionState.put(warningKey(ingestionId), "The new version of '" + documentName + "' is stored, but removing the previous "
                         + "version failed, so both may be retrievable until the replacement is retried.");
                 throw e;
             }
@@ -217,7 +243,7 @@ public class RagIngestionService {
      * currently only a replacement the vector store could not carry out.
      */
     public String getWarning(String ingestionId) {
-        return ingestionWarnings.getIfPresent(ingestionId);
+        return ingestionState.get(warningKey(ingestionId));
     }
 
     /**
@@ -229,7 +255,7 @@ public class RagIngestionService {
      *         ...")
      */
     public String getStatus(String ingestionId) {
-        String status = ingestionStatus.getIfPresent(ingestionId);
-        return status != null ? status : "unknown";
+        String status = ingestionState.get(statusKey(ingestionId));
+        return status != null ? status : STATUS_UNKNOWN;
     }
 }

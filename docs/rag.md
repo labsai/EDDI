@@ -258,7 +258,7 @@ Response:
 }
 ```
 
-Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that is unknown, expired or held by another instance reports `unknown`: status is kept per instance for one hour, so in a cluster poll the instance that accepted the upload.
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that was never issued, or whose status has expired (statuses are kept for one hour), answers 404 with status `unknown`. In a cluster (`eddi.messaging.type=nats`) the status is shared through the `RAG_INGESTION` KV bucket, so the poll may reach any instance, not only the one that accepted the upload.
 
 **Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
 twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
@@ -334,7 +334,9 @@ Rules enforced when a knowledge base is saved:
   digits, `_`, `-`, `.`, not starting with `-`/`_`/`+`): Elasticsearch reads it as an index expression, so
   a wildcard (`*`), a list (`a,b`) or an exclusion would search indexes the check never compared. If the
   deployment holds more knowledge bases than the collision check can scan (20,000), an explicit location is
-  refused rather than saved unchecked. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
+  refused rather than saved unchecked. So is a save during which another knowledge base cannot be read: it
+  may be the one that owns the location, so the save fails with a server error and the server log names it.
+  Try again, or repair or delete that knowledge base. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.

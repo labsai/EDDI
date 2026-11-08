@@ -5,6 +5,12 @@
 package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.SharedKvCache;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.InMemorySharedKv;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
@@ -20,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -51,7 +58,7 @@ class RagIngestionServiceTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        service = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory);
+        service = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, new CacheFactory());
     }
 
     @Test
@@ -191,6 +198,53 @@ class RagIngestionServiceTest {
 
         assertTrue(service.getStatus(id).startsWith("failed"), service.getStatus(id));
         assertNotNull(service.getWarning(id), "the status must say the new version is stored alongside the old");
+    }
+
+    /**
+     * POST /ingest answers 202 on one node, and the poll that follows can land on
+     * any other: with the status in a node-local cache, N-1 of N polls in a cluster
+     * answered 404 for an ingestion that was running or done.
+     */
+    @Test
+    void statusAndWarning_writtenOnOneNode_areReadOnAnother() {
+        ISharedKv bucket = new InMemorySharedKv("RAG_INGESTION", Duration.ofHours(1));
+        var nodeA = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        var nodeB = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        wireRealStore(embeddingStore);
+        doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
+
+        String id = nodeA.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
+        assertNotEquals(RagIngestionService.STATUS_UNKNOWN, nodeB.getStatus(id), "the poll on the other node finds the ingestion");
+        long deadline = System.currentTimeMillis() + 5000;
+        while (!"completed".equals(nodeA.getStatus(id)) && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        // Status and warning share one bucket: neither may overwrite the other.
+        assertEquals("completed", nodeB.getStatus(id));
+        assertEquals(nodeA.getWarning(id), nodeB.getWarning(id));
+        assertNotNull(nodeB.getWarning(id), "the warning travels with the status");
+        assertNull(nodeB.getWarning("another-id"));
+        assertEquals(RagIngestionService.STATUS_UNKNOWN, nodeB.getStatus("warning:" + id), "a warning is never read as a status");
+    }
+
+    /**
+     * A node's cache factory in cluster mode: its own node-local cache, written
+     * through to the bucket every node shares.
+     */
+    private static ICacheFactory sharedThrough(ISharedKv bucket) {
+        var local = new CacheFactory();
+        return new ICacheFactory() {
+            @Override
+            public <K, V> ICache<K, V> getCache(String cacheName) {
+                return new SharedKvCache<>(local.getCache(cacheName), bucket, false);
+            }
+
+            @Override
+            public <K, V> ICache<K, V> getCache(String cacheName, Duration ttl) {
+                return new SharedKvCache<>(local.getCache(cacheName, ttl), bucket, false);
+            }
+        };
     }
 
     @Test
