@@ -663,6 +663,15 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      * resource moved on, the flag is taken off again — that version is ordinary
      * history of a live resource — and the caller gets a conflict.
      *
+     * <p>
+     * Known limit: unlike the PostgreSQL backend, a {@link #removeAllPermanently}
+     * that runs to completion after the caller read the resource but before the
+     * tombstone is written is not detected — without a transaction the tombstone
+     * write and the check that the row is still there cannot be one step, and "the
+     * row is gone" looks the same whether a concurrent delete or an erasure removed
+     * it. The tombstone is then an orphan history row carrying the erased
+     * resource's data; a repeated erasure removes it.
+     *
      * @see #storeHistoryAndUpdate(IHistoryResource, IResource, int) for why this is
      *      not a session transaction
      */

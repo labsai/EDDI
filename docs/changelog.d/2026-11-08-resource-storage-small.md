@@ -39,9 +39,27 @@
 - No new locking replaces the monitor. Two deletes of the same id are already
   settled by `storeHistoryAndRemove`'s version-conditioned delete on MongoDB and
   by one transaction on PostgreSQL.
+- **PostgreSQL `storeHistoryAndRemove` now deletes first and writes the tombstone
+  only if the delete removed the row.** The old order (tombstone, then delete)
+  let a `deleteAllPermanently` that finished between a delete's read and its
+  write be undone: the tombstone was upserted over the erased id, and the
+  "no live row, a concurrent delete won" branch committed it, leaving the erased
+  resource's data in `resources_history`. The monitor used to prevent that on
+  one node; ordering the statements prevents it on every node, because the
+  delete takes the row lock (an erasure waits for it and then also deletes the
+  tombstone, or it has run first and the delete writes nothing). The same
+  reordering means a refused delete (an update moved the resource on) never
+  writes a tombstone to roll back.
+- **MongoDB keeps tombstone-then-delete and has a known residual window.**
+  Without a transaction the tombstone write and the check that the row still
+  exists cannot be one step, and "row gone" cannot tell a concurrent delete from
+  an erasure. The `MongoResourceStorage.storeHistoryAndRemove` Javadoc states
+  the limit; a repeated erasure removes the orphan row.
 
 **Files:** [`MongoResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/mongo/MongoResourceStorage.java),
+[`PostgresResourceStorage.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorage.java),
 [`HistorizedResourceStore.java`](../../src/main/java/ai/labs/eddi/datastore/HistorizedResourceStore.java),
+[`PostgresResourceStorageTest.java`](../../src/test/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorageTest.java),
 [`MongoResourceStorageTest.java`](../../src/test/java/ai/labs/eddi/datastore/mongo/MongoResourceStorageTest.java),
 [`MongoResourceStorageBranchTest.java`](../../src/test/java/ai/labs/eddi/datastore/mongo/MongoResourceStorageBranchTest.java),
 [`HistorizedResourceStoreTest.java`](../../src/test/java/ai/labs/eddi/datastore/HistorizedResourceStoreTest.java)

@@ -24,7 +24,12 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * decided by the storage's version-checked writes
  * ({@link IResourceStorage#storeHistoryAndUpdate storeHistoryAndUpdate},
  * {@link IResourceStorage#storeHistoryAndRemove storeHistoryAndRemove},
- * {@link IResourceStorage#storeIfCurrentVersion storeIfCurrentVersion}).
+ * {@link IResourceStorage#storeIfCurrentVersion storeIfCurrentVersion}). A
+ * {@link #delete} racing a {@link #deleteAllPermanently} of the same id is
+ * settled the same way, in the storage: PostgreSQL writes the tombstone only if
+ * its delete removed the row, so an erasure is never undone; MongoDB cannot do
+ * that without a transaction (see
+ * {@link IResourceStorage#storeHistoryAndRemove}).
  *
  * @param <T>
  *            the resource document type
