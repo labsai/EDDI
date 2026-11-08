@@ -655,19 +655,7 @@ class RestImportServiceRollbackAndCleanupTest {
         void createdAgentDropsTheArchivedIdentity() throws Exception {
             var workflowStore = mock(IWorkflowStore.class);
             var agentStore = mock(IAgentStore.class);
-            stubAgentWithOneWorkflowZip();
-            var archived = new AgentConfiguration();
-            archived.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1")));
-            var identity = new AgentConfiguration.AgentIdentity();
-            identity.setKeys(List.of(AgentPublicKey.createCurrent(1, "MCowBQYDK2VwAyEAkeyOfTheExportedAgent")));
-            archived.setIdentity(identity);
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignInterAgentMessages(true);
-            security.setRequirePeerVerification(true);
-            archived.setSecurity(security);
-            when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(archived);
-            when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
-            when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+            stubSigningAgentArchive(workflowStore, agentStore);
 
             try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
                 stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
@@ -685,6 +673,56 @@ class RestImportServiceRollbackAndCleanupTest {
                 assertTrue(turnedOff.contains("has no signing key yet"), turnedOff);
             }
         }
+
+        /**
+         * A first promotion has no target agent, so it goes through this import, and
+         * the import's header is the only place the turned-off flag is reported. The
+         * sync answers an {@link UpgradeResult}, not that response, so the header has
+         * to be carried into its warnings — or the caller sees a plain success while
+         * the new agent runs with signing off.
+         */
+        @Test
+        @DisplayName("a first-promotion sync reports it in the result's warnings")
+        void firstPromotionSyncReportsSigningTurnedOff() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            stubSigningAgentArchive(workflowStore, agentStore);
+
+            Response response;
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class);
+                    MockedStatic<RemoteApiResourceSource> remote = mockStatic(RemoteApiResourceSource.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
+                remote.when(() -> RemoteApiResourceSource.exportAgentArchive(any(), any(), any(), any(), any(), any()))
+                        .thenReturn(new byte[0]);
+
+                response = importService.executeSync("https://203.0.113.10", AGENT_ORIGIN_ID, 1, null, null, null, null, true, null);
+            }
+
+            var result = (UpgradeResult) response.getEntity();
+            assertTrue(result.agentUpdated(), "the agent was created");
+            assertEquals(1, result.warnings().size(), String.valueOf(result.warnings()));
+            assertTrue(result.warnings().getFirst().contains("has no signing key yet"), result.warnings().getFirst());
+        }
+    }
+
+    /**
+     * An archive whose agent signs and verifies, with an identity of the instance
+     * it was exported from; the stores answer the ids the import creates.
+     */
+    private void stubSigningAgentArchive(IWorkflowStore workflowStore, IAgentStore agentStore) throws Exception {
+        stubAgentWithOneWorkflowZip();
+        var archived = new AgentConfiguration();
+        archived.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1")));
+        var identity = new AgentConfiguration.AgentIdentity();
+        identity.setKeys(List.of(AgentPublicKey.createCurrent(1, "MCowBQYDK2VwAyEAkeyOfTheExportedAgent")));
+        archived.setIdentity(identity);
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        security.setRequirePeerVerification(true);
+        archived.setSecurity(security);
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(archived);
+        when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+        when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
     }
 
     // ==================== H15 — archive limits ====================

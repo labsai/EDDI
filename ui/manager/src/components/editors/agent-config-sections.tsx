@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import type { Agent, AgentPublicKey, ChannelConnector } from "@/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -146,6 +146,24 @@ export interface SigningKeyAction {
   disabledReason?: string;
 }
 
+/** `AgentPublicKey.MAX_VERSION`: a declared version above it is malformed and never signs. */
+const MAX_KEY_VERSION = 1_000_000;
+
+/**
+ * The key the agent signs with, as the backend picks it: the highest version
+ * from 1 to {@link MAX_KEY_VERSION}, revoked or not. Undefined when there is
+ * none, and the legacy `identity.publicKey` signs.
+ */
+function newestSigningKey(keys: AgentPublicKey[]): AgentPublicKey | undefined {
+  let newest: AgentPublicKey | undefined;
+  for (const k of keys) {
+    const version = k.version ?? 0;
+    // `>`, not `>=`: of a version declared twice, the backend takes the first.
+    if (version >= 1 && version <= MAX_KEY_VERSION && version > (newest?.version ?? 0)) newest = k;
+  }
+  return newest;
+}
+
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   onChange,
@@ -154,10 +172,16 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   signingKeyAction,
 }: AgentSectionProps & { signingKeyAction?: SigningKeyAction }) {
   const { t } = useTranslation();
-  // The backend refuses a save with signing on unless the key that would sign
-  // is in the vault; with no key declared at all that refusal is certain.
-  const hasSigningKey = (agent.identity?.keys?.length ?? 0) > 0 || !!agent.identity?.publicKey;
-  const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasSigningKey;
+  const keys = agent.identity?.keys ?? [];
+  const legacyKey = agent.identity?.publicKey;
+  const hasSigningKey = keys.length > 0 || !!legacyKey;
+  // The backend refuses a save with signing on unless the key that would sign is
+  // usable. That refusal is certain when there is no such key, or when it is
+  // revoked: the agent signs with its newest key and never falls back to an
+  // older one (`AgentIdentity.signingKeyVersion()`).
+  const signingKey = newestSigningKey(keys);
+  const hasUsableKey = signingKey ? !signingKey.revoked : !!legacyKey;
+  const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasUsableKey;
   /** The key the admin asked to revoke, awaiting confirmation. */
   const [revokeVersion, setRevokeVersion] = useState<number | null>(null);
   const keyButtonsDisabled = disabled || !!signingKeyAction?.pending || !!signingKeyAction?.disabledReason;
@@ -231,14 +255,30 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </div>
         </div>
 
-        {/* Versioned keys (if any exist from multi-key rotation) */}
-        {(agent.identity?.keys?.length ?? 0) > 0 ? (
+        {/* The legacy key and the versioned ones side by side: generating a key
+            keeps the legacy one, which peers still trust for v0 signatures until
+            it is revoked. */}
+        {hasSigningKey && (
           <div className="space-y-1.5">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("agentDetail.publicKeys", "Public Keys")}
             </label>
             <div className="space-y-1">
-              {agent.identity!.keys!.map((k, ki) => (
+              {legacyKey && (
+                <div
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
+                  data-testid="signing-key-legacy"
+                >
+                  <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    {t("agentDetail.legacyKey", "Legacy key (v0)")}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+                    {legacyKey.slice(0, 24)}…
+                  </span>
+                  {revokeButton(0)}
+                </div>
+              )}
+              {keys.map((k, ki) => (
                 <div
                   key={ki}
                   className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
@@ -267,22 +307,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               ))}
             </div>
           </div>
-        ) : agent.identity?.publicKey ? (
-          <div className="space-y-1.5">
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("agentDetail.publicKeys", "Public Keys")}
-            </label>
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
-              <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                {t("agentDetail.legacyKey", "Legacy key (v0)")}
-              </span>
-              <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
-                {agent.identity.publicKey.slice(0, 24)}…
-              </span>
-              {revokeButton(0)}
-            </div>
-          </div>
-        ) : null}
+        )}
 
         {signingKeyAction && (
           <div className="flex items-start gap-2">
@@ -314,7 +339,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
           description={t(
             "agentDetail.revokeSigningKeyDesc",
-            "Peers will stop trusting every message signed with this key, whenever it was signed, and its private key is deleted from the vault. This cannot be undone. If it is the newest key, the agent stops signing until you generate a new one.",
+            "Peers will stop trusting every message signed with this key, whenever it was signed, and its private key is deleted from the vault. This cannot be undone. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
           )}
           confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
           cancelLabel={t("common.cancel", "Cancel")}
@@ -344,7 +369,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <p className="text-[11px] text-warn-800 dark:text-warn-300 leading-relaxed">
               {t(
                 "agentDetail.signingNeedsKey",
-                "This agent has no signing key, so a save with signing on is refused. An admin can generate one above.",
+                "This agent has no usable signing key (none is declared, or the newest one is revoked), so a save with signing on is refused. An admin can generate one above.",
               )}
             </p>
           </div>

@@ -80,7 +80,7 @@ describe("SecurityIdentitySection — Flag UX", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("security-flag-warning")).toBeInTheDocument();
-      expect(screen.getByText(/no signing key, so a save with signing on is refused/i)).toBeInTheDocument();
+      expect(screen.getByText(/no usable signing key .*, so a save with signing on is refused/i)).toBeInTheDocument();
     });
   });
 
