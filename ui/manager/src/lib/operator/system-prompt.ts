@@ -284,7 +284,9 @@ the agent signs its group-conversation messages with the newest one at once.
 Its own audit entries are signed by the agent version a conversation runs, so
 they stay unsigned until a version that declares the key and has signing on
 is deployed. An audit entry's \`agentSignature\` is
-\`v<keyVersion>:<signature>\`; the audit verify endpoints report one that does
+\`v<keyVersion>:<signature>\`, or plain Base64 on entries written before 6.7,
+which is checked against the legacy \`identity.publicKey\` (AGENT_KEY_UNAVAILABLE
+when that version declares none); the audit verify endpoints report one that does
 not verify as AGENT_SIGNATURE_INVALID (counted in \`invalid\`: tampering).
 AGENT_SIGNATURE_MISSING (none where the version would have signed),
 AGENT_KEY_REVOKED (key revoked since) and AGENT_KEY_UNAVAILABLE (agent

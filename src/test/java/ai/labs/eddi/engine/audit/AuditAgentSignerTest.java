@@ -331,10 +331,89 @@ class AuditAgentSignerTest {
     void aMalformedSignatureIsInvalid() throws Exception {
         agentVersion(1, signing(List.of(generate(1))));
         AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
-        String bare = signed.agentSignature().substring("v1:".length());
 
-        assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature(bare)));
         assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature("v1:not base64!")));
+        assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature("not base64!")));
+    }
+
+    // ---- signatures written before key versions (pre-6.7) ----
+
+    /**
+     * An agent version saved under the old instructions: its key in
+     * {@code identity.publicKey}, and signing off, because the ledger used to sign
+     * whenever the vault held the agent's unversioned key, whatever its settings.
+     */
+    private AgentPublicKey legacyAgentVersion(int version) throws Exception {
+        AgentPublicKey legacy = generate(3);
+        AgentConfiguration config = signing(List.of());
+        config.getSecurity().setSignInterAgentMessages(false);
+        config.getIdentity().setPublicKey(legacy.publicKeyB64());
+        agentVersion(version, config);
+        return legacy;
+    }
+
+    /**
+     * What the ledger stored before 6.7: Base64 with no key version, over the bare
+     * HMAC, by the key held under the agent's unversioned vault name.
+     */
+    private String legacySignatureBy(AgentPublicKey key, String hmac) throws Exception {
+        return signingService.sign(TENANT, AGENT, key.version(), hmac);
+    }
+
+    @Test
+    void aSignatureWrittenBeforeKeyVersionsVerifiesAgainstTheLegacyKey() throws Exception {
+        AgentPublicKey legacy = legacyAgentVersion(1);
+
+        assertEquals(Verdict.VALID, signer.verify(entry(1, HMAC).withAgentSignature(legacySignatureBy(legacy, HMAC))));
+    }
+
+    @Test
+    void aLegacySignatureThatDoesNotVerifyIsInvalid() throws Exception {
+        AgentPublicKey legacy = legacyAgentVersion(1);
+
+        assertEquals(Verdict.INVALID, signer.verify(entry(1, HMAC).withAgentSignature(legacySignatureBy(legacy, "v5:key-id:fedcba9876543210"))),
+                "over another HMAC");
+        assertEquals(Verdict.INVALID, signer.verify(entry(1, HMAC).withAgentSignature(legacySignatureBy(generate(7), HMAC))),
+                "by another key");
+        assertEquals(Verdict.INVALID,
+                signer.verify(entry(1, HMAC).withAgentSignature(
+                        signingService.sign(TENANT, AGENT, legacy.version(), AuditAgentSigner.SIGNED_PREFIX + HMAC))),
+                "the legacy form covers the bare HMAC, not the prefixed bytes");
+    }
+
+    /** Revoking the legacy key removes it from the agent's newest version. */
+    @Test
+    void aLegacySignatureByARevokedLegacyKeyVouchesForNothing() throws Exception {
+        AgentPublicKey legacy = legacyAgentVersion(1);
+        agentVersion(2, signing(List.of()));
+        newestVersion(2);
+
+        assertEquals(Verdict.KEY_REVOKED, signer.verify(entry(1, HMAC).withAgentSignature(legacySignatureBy(legacy, HMAC))));
+    }
+
+    /**
+     * The old ledger signed with the vault key whether or not its public half was
+     * declared as {@code identity.publicKey}: such a signature cannot be checked,
+     * which is no evidence of tampering.
+     */
+    @Test
+    void aLegacySignatureOnAVersionThatDeclaresNoLegacyKeyCannotBeChecked() throws Exception {
+        agentVersion(1, signing(List.of(generate(1))));
+        AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
+
+        assertEquals(Verdict.KEY_UNAVAILABLE, signer.verify(signed.withAgentSignature(signed.agentSignature().substring("v1:".length()))));
+    }
+
+    /** The old ledger signed entries that name no agent version too. */
+    @Test
+    void aLegacySignatureOnAnEntryWithoutAnAgentVersionCannotBeChecked() throws Exception {
+        AgentPublicKey legacy = legacyAgentVersion(1);
+        AuditEntry entry = new AuditEntry("entry-1", "conv-1", AGENT, null, "user-1", "production", 0, "task", "llm", 0, 10L,
+                Map.of("input", "hi"), Map.of("output", "hello"), null, null, List.of(), 0.0, Instant.EPOCH, HMAC, null, 0L);
+
+        assertEquals(Verdict.KEY_UNAVAILABLE, signer.verify(entry.withAgentSignature(legacySignatureBy(legacy, HMAC))));
+        assertEquals(Verdict.INVALID, signer.verify(entry.withAgentSignature("v0:" + legacySignatureBy(legacy, HMAC))),
+                "the ledger never writes the versioned form without an agent version");
     }
 
     /**

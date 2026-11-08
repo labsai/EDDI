@@ -536,6 +536,62 @@ class AuditLedgerServiceBranchTest {
         }
 
         /**
+         * A row written before 6.7 carries the agent's signature in the old form:
+         * Base64 with no key version, over the bare HMAC, by the key under the agent's
+         * unversioned vault name.
+         */
+        private AuditEntry legacySignedRow() throws Exception {
+            var legacy = signingService.generateKey("default", "agent1", 5);
+            config.getIdentity().setPublicKey(legacy.publicKeyB64());
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            return stored.withAgentSignature(signingService.sign("default", "agent1", legacy.version(), stored.hmac()));
+        }
+
+        @Test
+        @DisplayName("a row signed in the pre-6.7 form verifies VALID, also with agent signing off")
+        void legacySignatureVerifies() throws Exception {
+            AuditEntry legacyRow = legacySignedRow();
+            var unsignedLedger = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), false);
+
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(legacyRow));
+            assertEquals(AuditVerificationStatus.VALID, unsignedLedger.verifyEntry(legacyRow));
+            service.shutdown();
+            unsignedLedger.shutdown();
+        }
+
+        @Test
+        @DisplayName("an erasure re-signs a row signed in the pre-6.7 form in the current form")
+        void erasureResignsALegacyRow() throws Exception {
+            AuditEntry erased = erasedRow(legacySignedRow());
+
+            assertTrue(erased.agentSignature().startsWith("v1:"), erased.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * A pre-6.7 signature nothing can check is unproven, not tampering, and the
+         * erasure must not turn it into a genuine signature: someone holding the audit
+         * HMAC key could otherwise write a row with any Base64 in it and have the agent
+         * vouch for the row at the next erasure.
+         */
+        @Test
+        @DisplayName("an erasure does not give a row whose pre-6.7 signature cannot be checked a genuine one")
+        void erasureDoesNotVouchForAnUncheckableLegacySignature() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            AuditEntry uncheckable = stored.withAgentSignature(stored.agentSignature().substring("v1:".length()));
+            assertEquals(AuditVerificationStatus.AGENT_KEY_UNAVAILABLE, service.verifyEntry(uncheckable));
+
+            AuditEntry erased = erasedRow(uncheckable);
+
+            assertNull(erased.agentSignature());
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
          * Whether the row's signature is a finding cannot be told while the agent store
          * is down, so the reseal signs nothing rather than signing on trust.
          */

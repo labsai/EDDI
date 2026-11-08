@@ -1980,6 +1980,9 @@ public class AuditLedgerService implements UserErasureParticipant {
      * — a row forged by someone holding the HMAC key. A fresh signature would have
      * the agent vouch for a row it never signed, and remove the only trace of the
      * forgery; kept as it is, the entry reports the same verdict over its new HMAC.
+     * Nor does it sign a row whose old signature nothing could check
+     * ({@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}): any Base64 in the
+     * pre-6.7 form would otherwise become a genuine signature.
      */
     private AuditEntry reseal(AuditEntry entry) {
         AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
@@ -1998,6 +2001,9 @@ public class AuditLedgerService implements UserErasureParticipant {
         }
         return switch (agentStatus) {
             case AGENT_SIGNATURE_INVALID, AGENT_SIGNATURE_MISSING -> resealed;
+            // Nothing could check the old signature, so nothing shows the agent vouched
+            // for the row: it is dropped, being over the old HMAC, and not made afresh.
+            case AGENT_KEY_UNAVAILABLE -> resealed.withAgentSignature(null);
             default -> signAsAgent(resealed.withAgentSignature(null));
         };
     }

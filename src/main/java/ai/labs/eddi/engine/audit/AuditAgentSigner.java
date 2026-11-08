@@ -66,7 +66,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * substituted key. A signature under any other key, or one the ledger would not
  * have made, is {@link Verdict#INVALID}. A soft-deleted agent's versions are
  * still read: the delete flags them and leaves them unchanged, so the ledger
- * outlives the agent.
+ * outlives the agent. A plain Base64 signature with no key version is one the
+ * ledger wrote before 6.7, over the bare HMAC and whatever the agent's
+ * settings; it is checked against the legacy key the entry's agent version
+ * declares as {@code identity.publicKey}.
  * </p>
  *
  * <p>
@@ -92,7 +95,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * before the key's {@code validFromMs}, and the row reads
  * {@link Verdict#NOT_SIGNED}.</li>
  * <li>{@link Verdict#KEY_UNAVAILABLE} — the agent version that would check the
- * signature no longer exists (the agent was deleted permanently).</li>
+ * signature no longer exists (the agent was deleted permanently), or a pre-6.7
+ * signature has no declared legacy key, or no agent version, to be checked
+ * against.</li>
  * </ul>
  *
  * @since 6.7.0
@@ -112,6 +117,12 @@ public class AuditAgentSigner {
      */
     private static final Pattern STORED_FORM = Pattern.compile("v(0|[1-9]\\d{0,6}):([A-Za-z0-9+/]+=*)");
 
+    /**
+     * The form the ledger stored before 6.7: a plain Base64 signature, no key
+     * version. See {@link #verifyLegacy}.
+     */
+    private static final Pattern LEGACY_FORM = Pattern.compile("[A-Za-z0-9+/]+=*");
+
     /** What {@link #verify} found. */
     public enum Verdict {
         /**
@@ -129,7 +140,8 @@ public class AuditAgentSigner {
         INVALID,
         /**
          * The entry's agent version no longer exists, so the key to check it with is
-         * gone.
+         * gone; or the signature is in the pre-6.7 form and nothing declares the key
+         * that made it.
          */
         KEY_UNAVAILABLE,
         /**
@@ -250,8 +262,14 @@ public class AuditAgentSigner {
      */
     public Verdict verify(AuditEntry entry) {
         String stored = entry.agentSignature();
-        if (entry.hmac() == null || entry.agentId() == null || entry.agentVersion() == null) {
+        boolean legacy = stored != null && LEGACY_FORM.matcher(stored).matches();
+        if (entry.hmac() == null || entry.agentId() == null) {
             return stored == null ? Verdict.NOT_SIGNED : Verdict.INVALID;
+        }
+        if (entry.agentVersion() == null) {
+            // No version names a key. The ledger signs nothing then, but before 6.7 it
+            // did, and such a signature cannot be checked.
+            return stored == null ? Verdict.NOT_SIGNED : legacy ? Verdict.KEY_UNAVAILABLE : Verdict.INVALID;
         }
         AgentConfiguration config;
         try {
@@ -274,6 +292,9 @@ public class AuditAgentSigner {
             int keyVersion = identity.signingKeyVersion();
             return withdrawnSince(entry, keyVersion, identity.getKeyForVersion(keyVersion)) ? Verdict.KEY_REVOKED : Verdict.MISSING;
         }
+        if (legacy) {
+            return verifyLegacy(entry, config, stored);
+        }
         Matcher matcher = STORED_FORM.matcher(stored);
         if (identity == null || !matcher.matches() || Integer.parseInt(matcher.group(1)) != identity.signingKeyVersion()) {
             return Verdict.INVALID;
@@ -284,6 +305,26 @@ public class AuditAgentSigner {
             return Verdict.INVALID;
         }
         return withdrawnSince(entry, keyVersion, publicKey) ? Verdict.KEY_REVOKED : Verdict.VALID;
+    }
+
+    /**
+     * A signature in the form the ledger wrote before 6.7. It signed every entry of
+     * an agent whose vault held the unversioned key
+     * {@code agent-signing-key:{agentId}}, whatever the agent's settings, over the
+     * bare HMAC, so neither {@link #signingIdentity} nor {@link #SIGNED_PREFIX}
+     * applies: the signature is checked against the legacy key, version 0, that the
+     * entry's own agent version declares as {@code identity.publicKey}.
+     */
+    private Verdict verifyLegacy(AuditEntry entry, AgentConfiguration config, String stored) {
+        String legacyKey = config.getIdentity() != null ? config.getIdentity().getKeyForVersion(0) : null;
+        if (legacyKey == null) {
+            // The vault key signed whether or not its public half was ever declared.
+            return Verdict.KEY_UNAVAILABLE;
+        }
+        if (!signingService.verify(legacyKey, entry.hmac(), stored)) {
+            return Verdict.INVALID;
+        }
+        return withdrawnSince(entry, 0, legacyKey) ? Verdict.KEY_REVOKED : Verdict.VALID;
     }
 
     /**
