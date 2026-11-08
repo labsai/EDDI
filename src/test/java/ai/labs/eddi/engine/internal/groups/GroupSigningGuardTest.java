@@ -409,11 +409,12 @@ class GroupSigningGuardTest {
     }
 
     /**
-     * The placeholder keeps the entry's place, speaker, phase and type (window
-     * summaries are keyed on raw indices) and says why, but not what was said.
+     * The placeholder keeps the entry's place, speaker id, phase index and type
+     * (window summaries are keyed on raw indices) and says why, but none of its
+     * unverified text: not what was said, nor the stored name or phase name.
      */
     @Test
-    void visibleTo_withheldEntryKeepsItsPlaceButNotItsContent() throws Exception {
+    void visibleTo_withheldEntryKeepsItsPlaceButNotItsText() throws Exception {
         stubAgent(RECEIVER, verifyingAgent());
         stubAgent(AGENT_A, new AgentConfiguration());
         var unsigned = new TranscriptEntry(AGENT_A, "Agent A", "secret plan", 2, "Critique", TranscriptEntryType.CRITIQUE, Instant.now(),
@@ -422,9 +423,9 @@ class GroupSigningGuardTest {
         var placeholder = guard().visibleTo(RECEIVER, gc(), List.of(unsigned)).get(0);
 
         assertEquals(AGENT_A, placeholder.speakerAgentId());
-        assertEquals("Agent A", placeholder.speakerDisplayName());
+        assertEquals(AGENT_A, placeholder.speakerDisplayName());
         assertEquals(2, placeholder.phaseIndex());
-        assertEquals("Critique", placeholder.phaseName());
+        assertNull(placeholder.phaseName());
         assertEquals(TranscriptEntryType.CRITIQUE, placeholder.type());
         assertEquals("agent-b", placeholder.targetAgentId());
         assertEquals(GroupSigningGuard.WITHHELD_MARKER, placeholder.errorReason());

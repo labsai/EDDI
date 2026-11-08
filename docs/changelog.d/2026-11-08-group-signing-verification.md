@@ -17,7 +17,9 @@ never enforced.
   verification, every entry another agent wrote that does not verify is replaced, in place, by a
   `[withheld: ... because ...]` placeholder before that member's phase prompt
   (`GroupContextBuilder.buildPhaseInput`) and its `groupTranscript` context (`MemberTurnExecutor`)
-  are built. In place, so the raw indices window summaries are keyed on stay aligned. Each withheld
+  are built. In place, so the raw indices window summaries are keyed on stay aligned. The
+  placeholder names the speaker by its agent id and has no phase name, since the stored display
+  name and phase name are as unverified as the content. Each withheld
   entry is logged at ERROR the first time per conversation, then at DEBUG.
 - **The member's own entries** are not checked for it: they are in its own member conversation
   already, and a verifying member that does not sign (the validator allows it; a moderator is the

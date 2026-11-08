@@ -1404,7 +1404,9 @@ each of its turns:
 - **Fail-closed.** Every entry another agent wrote that does not verify, or
   that carries no signature, reaches a verifying member as
   `[withheld: this message could not be verified, because ...]` in its phase
-  prompt and its `groupTranscript` context. So every agent that writes to the
+  prompt and its `groupTranscript` context, named by the speaker's agent id and
+  with no phase name, since the stored display name and phase name are
+  unverified text too. So every agent that writes to the
   discussion should sign: each member, and the moderator or synthesizer too
   when it is not a member, or its synthesis is withheld from verifying
   members.

@@ -530,10 +530,17 @@ public class GroupSigningGuard {
                 entry.errorReason(), entry.targetAgentId());
     }
 
+    /**
+     * The placeholder for an entry that did not verify. It keeps what decides where
+     * the entry appears (speaker id, phase index, type, target) and drops every
+     * text field: the stored display name and phase name are as unverified as the
+     * content, so the speaker is named by its agent id (a store-generated id, since
+     * an id that names no agent is not withheld but relabelled).
+     */
     private static TranscriptEntry withheld(TranscriptEntry entry, Verdict verdict) {
-        return new TranscriptEntry(entry.speakerAgentId(), entry.speakerDisplayName(),
+        return new TranscriptEntry(entry.speakerAgentId(), entry.speakerAgentId(),
                 "[withheld: this message could not be verified, because " + verdict.reason + "]",
-                entry.phaseIndex(), entry.phaseName(), entry.type(), entry.timestamp(), WITHHELD_MARKER, entry.targetAgentId());
+                entry.phaseIndex(), null, entry.type(), entry.timestamp(), WITHHELD_MARKER, entry.targetAgentId());
     }
 
     private static TranscriptEntry unsignedBecause(TranscriptEntry entry, String why) {
