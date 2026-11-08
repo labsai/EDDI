@@ -27,6 +27,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -131,49 +136,84 @@ class StreamingLegacyChatExecutorTimeoutTest {
 
         /**
          * F11's "your timeout does not shorten the backstop" warning sits on the
-         * PER-REQUEST path — {@code resolveTimeoutSeconds} runs once per streaming turn
-         * and again per cascade step. Emitted unconditionally it fires on every single
-         * turn, forever, for a config that will never change. {@code ChatModelRegistry}
-         * makes the same distinction explicitly (build path only, never on a cache
-         * hit).
+         * PER-REQUEST path — {@code backstopSeconds} runs once per streaming turn, per
+         * cascade step and per streamed tool-loop turn. Emitted unconditionally it
+         * fires on every single turn, forever, for a config that will never change.
+         * {@code ChatModelRegistry} makes the same distinction explicitly (build path
+         * only, never on a cache hit).
          */
         @Test
         @DisplayName("the below-backstop warning is emitted once per task, not once per turn")
         void shortTimeoutWarningIsNotPerRequest() {
-            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
             var task = task("5000");
 
-            for (int turn = 0; turn < 20; turn++) {
-                assertEquals(120L, StreamingLegacyChatExecutor.resolveTimeoutSeconds(task));
-            }
+            var warnings = captureWarnings(() -> {
+                for (int turn = 0; turn < 20; turn++) {
+                    assertEquals(120L, executor.backstopSeconds(task));
+                }
+            });
 
-            assertEquals(1, StreamingLegacyChatExecutor.shortTimeoutWarningCount(),
-                    "20 turns of the same task must not produce 20 WARN lines");
+            assertEquals(1, warnings.size(), "20 turns of the same task must not produce 20 WARN lines: " + warnings);
         }
 
         @Test
         @DisplayName("a different task still gets its own warning")
         void eachTaskIsWarnedAboutSeparately() {
-            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
             var first = task("5000");
             var second = task("7000");
             second.setId("otherTask");
 
-            StreamingLegacyChatExecutor.resolveTimeoutSeconds(first);
-            StreamingLegacyChatExecutor.resolveTimeoutSeconds(first);
-            StreamingLegacyChatExecutor.resolveTimeoutSeconds(second);
-            StreamingLegacyChatExecutor.resolveTimeoutSeconds(second);
+            var warnings = captureWarnings(() -> {
+                executor.backstopSeconds(first);
+                executor.backstopSeconds(first);
+                executor.backstopSeconds(second);
+                executor.backstopSeconds(second);
+            });
 
-            assertEquals(2, StreamingLegacyChatExecutor.shortTimeoutWarningCount(),
-                    "suppression must be per task, not global");
+            assertEquals(2, warnings.size(), "suppression must be per task, not global: " + warnings);
         }
 
         @Test
         @DisplayName("a backstop-or-longer timeout is never warned about at all")
         void longTimeoutIsNotWarned() {
-            StreamingLegacyChatExecutor.resetShortTimeoutWarnings();
-            StreamingLegacyChatExecutor.resolveTimeoutSeconds(task("300000"));
-            assertEquals(0, StreamingLegacyChatExecutor.shortTimeoutWarningCount());
+            var warnings = captureWarnings(() -> assertEquals(300L, executor.backstopSeconds(task("300000"))));
+            assertTrue(warnings.isEmpty(), warnings.toString());
+        }
+
+        /**
+         * The static resolution is what the cascade calls to size a step's margin; the
+         * step itself then runs through {@code backstopSeconds}, which warns. Warning
+         * from both would repeat the line for a cascade's live step.
+         */
+        @Test
+        @DisplayName("the pure resolution never warns — only a request made through the executor does")
+        void staticResolutionDoesNotWarn() {
+            var warnings = captureWarnings(() -> assertEquals(120L, StreamingLegacyChatExecutor.resolveTimeoutSeconds(task("5000"))));
+            assertTrue(warnings.isEmpty(), warnings.toString());
+        }
+
+        /**
+         * The suppression set is bounded by clearing it, not by refusing new keys: a
+         * hard cap would silently stop warning about genuinely new misconfigurations.
+         * Past the bound an already-warned task may warn once more — noise, not
+         * silence.
+         */
+        @Test
+        @DisplayName("past its bound the suppression memory is cleared, so a new task is still warned about")
+        void suppressionMemoryIsBoundedByClearing() {
+            var first = task("5000");
+
+            var warnings = captureWarnings(() -> {
+                executor.backstopSeconds(first);
+                for (int i = 0; i < 1_000; i++) {
+                    var other = task("5000");
+                    other.setId("task-" + i);
+                    executor.backstopSeconds(other);
+                }
+                executor.backstopSeconds(first);
+            });
+
+            assertEquals(1_002, warnings.size(), "every new key warns, and the cleared memory warns about the first task again");
         }
 
         @Test
@@ -322,6 +362,44 @@ class StreamingLegacyChatExecutorTimeoutTest {
         }
 
         /**
+         * A failed attempt is abandoned before it is retried, exactly like a timed-out
+         * one: a provider that reports an error can still have a callback in flight,
+         * and its late token must not reach the sink the retry is streaming into.
+         */
+        @Test
+        @DisplayName("a retried error's late token must not interleave with the retry's output")
+        void lateTokenFromRetriedErrorAttempt_isNotEmitted() {
+            var failedAttempt = new AtomicReference<StreamingChatResponseHandler>();
+
+            StreamingChatModel model = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    if (failedAttempt.get() == null) {
+                        failedAttempt.set(handler);
+                        handler.onError(new IllegalStateException("provider 500"));
+                        return;
+                    }
+                    // The failed attempt's callback delivers a straggler while the retry runs.
+                    failedAttempt.get().onPartialResponse("LATE");
+                    handler.onPartialResponse("good");
+                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("good")).build());
+                }
+            };
+
+            var task = task(null);
+            var retry = new RetryConfiguration();
+            retry.setMaxAttempts(2);
+            retry.setBackoffDelayMs(1L);
+            task.setRetry(retry);
+
+            var result = executor.execute(model, messages(), eventSink, task);
+
+            assertEquals("good", result.response());
+            verify(eventSink, never()).onToken("LATE");
+            verify(eventSink, times(1)).onToken("good");
+        }
+
+        /**
          * C2: the abandoned flag was a check-then-act and the accumulating
          * StringBuilder was read without synchronization.
          * <p>
@@ -413,5 +491,42 @@ class StreamingLegacyChatExecutorTimeoutTest {
 
     private static List<ChatMessage> messages() {
         return List.of(UserMessage.from("Hi"));
+    }
+
+    /**
+     * Every WARN {@link StreamingLegacyChatExecutor} logs while {@code body} runs.
+     * {@code logging.properties} turns the whole {@code ai.labs.eddi} namespace OFF
+     * for plain unit tests, so the logger is opened explicitly and put back.
+     */
+    private static List<String> captureWarnings(Runnable body) {
+        List<String> captured = new CopyOnWriteArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    captured.add(String.valueOf(record.getMessage()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+
+        Logger julLogger = Logger.getLogger(StreamingLegacyChatExecutor.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            body.run();
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        return captured;
     }
 }

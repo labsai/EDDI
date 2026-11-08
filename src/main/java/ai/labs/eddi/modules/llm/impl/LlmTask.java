@@ -3746,7 +3746,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             return null;
         }
         return new ToolLoopStreamingChatModel(streamingModel, eventSink,
-                StreamingLegacyChatExecutor.resolveTimeoutSeconds(task), resolvedType);
+                streamingLegacyChatExecutor.backstopSeconds(task), resolvedType);
     }
 
     /**
