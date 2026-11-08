@@ -16,6 +16,7 @@ import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { PreviewNotices } from "@/components/agents/import-steps/preview-step";
+import { ResultWarnings } from "@/components/agents/result-warnings";
 import { PromotionCompatibilityPanel } from "@/components/agents/promotion-compatibility-panel";
 import { writesOverExistingAgent } from "@/lib/promotion-impact";
 import {
@@ -568,6 +569,11 @@ function SyncOutcome({
     0
   );
   const failedAgents = results.filter((r) => r.error || hasFailures(r.result));
+  // Written, but not as the source has it — signing turned off on a target that
+  // cannot sign, for one. Named per agent: a first promotion's text does not say which.
+  const warnings = results.flatMap((r) =>
+    (r.result?.warnings ?? []).map((w) => `${names.get(r.sourceAgentId) ?? r.sourceAgentId}: ${w}`)
+  );
 
   return (
     <div
@@ -613,6 +619,8 @@ function SyncOutcome({
             </li>
           ))}
       </ul>
+
+      <ResultWarnings warnings={warnings} />
 
       {wrote > 0 && (
         <p className="text-xs text-muted-foreground" data-testid="sync-redeploy-hint">

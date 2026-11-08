@@ -355,7 +355,8 @@ curl -X POST -H "Content-Type: application/zip" \
 An agent created this way gets no `identity` and `security.signInterAgentMessages` off, whatever
 the archive says: the archived keys belong to the agent that was exported, whose private halves
 are vault entries under its own id. When the archive had signing on, the response says so in an
-`X-Agent-Signing-Turned-Off` header carrying the reason. To have the new agent sign, an admin
+`X-Agent-Signing-Turned-Off` header carrying the reason, and the Manager's import dialog shows it
+before it closes. To have the new agent sign, an admin
 generates it a key (`POST /agentstore/agents/{id}/signing-keys`) and turns signing back on; see
 [architecture.md](architecture.md#cryptographic-agent-identity).
 
@@ -451,8 +452,8 @@ and the same count is logged at `INFO`. Omit the parameter to import the whole a
 A merge never replaces the local agent's `identity` — its signing keys are this instance's
 vault entries — so the archive's `security.signInterAgentMessages` is honoured only when the
 local agent's own newest key is usable. Otherwise the agent is written with signing off and the
-response carries `X-Agent-Signing-Turned-Off` with the reason, rather than the whole import
-being refused over a setting this instance cannot honour.
+response carries `X-Agent-Signing-Turned-Off` with the reason (shown by the Manager's import
+dialog), rather than the whole import being refused over a setting this instance cannot honour.
 
 > **Important:** The agent will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-agents.md).
 
