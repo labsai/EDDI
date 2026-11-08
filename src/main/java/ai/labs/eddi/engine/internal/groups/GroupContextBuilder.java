@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextWindowConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
@@ -57,6 +58,11 @@ public class GroupContextBuilder {
      * caller that never wires one) quotes nothing.
      */
     private volatile Function<String, String> outcomeDigestProvider;
+    /**
+     * Withholds unverified peer entries from members that require peer
+     * verification; {@code null} (callers that never wire one) shows every entry.
+     */
+    private volatile GroupSigningGuard signingGuard;
 
     public GroupContextBuilder(ITemplatingEngine templatingEngine) {
         this.templatingEngine = templatingEngine;
@@ -65,6 +71,14 @@ public class GroupContextBuilder {
     /** Wires the source of the real-world outcomes a RETRO phase quotes. */
     public void setOutcomeDigestProvider(Function<String, String> provider) {
         this.outcomeDigestProvider = provider;
+    }
+
+    /**
+     * Wires the guard that decides which transcript entries a member requiring peer
+     * verification may see (see {@link GroupSigningGuard#visibleTo}).
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
@@ -106,10 +120,19 @@ public class GroupContextBuilder {
      *            {@code null} falls back to the default cap — review finding: the
      *            template always quoted the DEFAULT, so a group configured above it
      *            could never obtain its configured number of lessons.
+     *            <p>
+     *            When a signing guard is wired and {@code gc} is given, an AGENT
+     *            speaker that requires peer verification is shown the transcript
+     *            with every unverified peer entry withheld, before anything else
+     *            reads it.
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc,
                                   AgentGroupConfiguration.RetroConfig retroConfig) {
+        GroupSigningGuard guard = signingGuard;
+        if (guard != null && gc != null && speaker.memberType() == MemberType.AGENT) {
+            transcript = guard.visibleTo(speaker.agentId(), gc, transcript);
+        }
 
         String template = phase.inputTemplate() != null
                 ? phase.inputTemplate()
@@ -502,7 +525,12 @@ public class GroupContextBuilder {
         String summary = scope == ContextScope.ANONYMOUS ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
         int summaryUpTo = scope == ContextScope.ANONYMOUS ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
 
-        if (summary != null && !summary.isBlank() && summaryUpTo > 0) {
+        // A summary is the summarizer's retelling of every entry it covers, unverified
+        // ones included, so a member from whom one of those entries was withheld
+        // gets the truncation marker instead.
+        boolean summaryRetellsWithheld = entries.subList(0, Math.min(summaryUpTo, entries.size())).stream()
+                .anyMatch(GroupSigningGuard::isWithheld);
+        if (summary != null && !summary.isBlank() && summaryUpTo > 0 && !summaryRetellsWithheld) {
             // Verbatim tail = everything the summary does not cover. Split on the raw
             // boundary rather than "last maxRecentEntries" so there is never a gap
             // (entries neither summarized nor shown) and never duplication (entries

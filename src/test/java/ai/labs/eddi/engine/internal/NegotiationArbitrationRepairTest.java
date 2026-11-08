@@ -63,7 +63,7 @@ class NegotiationArbitrationRepairTest {
         templatingEngine = mock(ITemplatingEngine.class);
         service = new GroupConversationService(mock(IAgentGroupStore.class), mock(IGroupConversationStore.class),
                 mock(IConversationService.class), mock(IAgentFactory.class), templatingEngine, mock(IJsonSerialization.class),
-                new SimpleMeterRegistry(), null, mock(IAgentStore.class), null, null, null, new CallerIdentityContext(null, null),
+                new SimpleMeterRegistry(), null, mock(IAgentStore.class), null, null, new CallerIdentityContext(null, null),
                 "default", 3);
     }
 

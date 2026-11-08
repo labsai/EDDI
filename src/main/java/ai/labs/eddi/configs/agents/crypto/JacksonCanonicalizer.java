@@ -26,10 +26,11 @@ import java.util.TreeMap;
  * </ol>
  * <p>
  * <strong>Note:</strong> This is NOT a full RFC 8785 (JCS) implementation —
- * Jackson's default numeric serialization is used. Since EDDI's signed payloads
- * contain only string fields, this is sufficient for inter-agent signature
- * verification. If numeric canonicalization becomes necessary, a dedicated JCS
- * library should be adopted.
+ * Jackson's default numeric serialization is used. EDDI's signed payloads hold
+ * only strings and integers, which Jackson writes in a single form, so this is
+ * sufficient for inter-agent signature verification. If numeric
+ * canonicalization becomes necessary, a dedicated JCS library should be
+ * adopted.
  * <p>
  * Strict duplicate key detection is enabled to prevent collision attacks where
  * different JSON payloads produce identical canonical output.

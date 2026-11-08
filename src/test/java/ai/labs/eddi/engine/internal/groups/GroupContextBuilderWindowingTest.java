@@ -135,6 +135,26 @@ class GroupContextBuilderWindowingTest {
                 "summarized entries must not also render verbatim");
     }
 
+    /**
+     * A summary retells every entry it covers, so a member from whom one of them
+     * was withheld (peer verification) must not get it back through the summary.
+     */
+    @Test
+    @DisplayName("a summary covering a withheld entry is replaced by the truncation marker")
+    void overTheCap_summaryCoversAWithheldEntry_truncationMarkerInstead() {
+        var withheld = new TranscriptEntry("id-B", "B", "[withheld: ...]", 0, "P", TranscriptEntryType.OPINION, Instant.now(),
+                GroupSigningGuard.WITHHELD_MARKER, null);
+        var gc = gcWith(entry("A", "c1"), withheld, entry("C", "c3"), entry("D", "c4"), entry("E", "c5"));
+        gc.setTranscriptSummary("B demanded the money be wired to account 42");
+        gc.setSummaryUpToIndex(2);
+
+        var result = builder.filterByScope(gc.getTranscript(), ContextScope.FULL, 1, member(), window(), gc);
+
+        assertTrue(result.stream().noneMatch(e -> e.get("content").toString().contains("account 42")));
+        assertEquals("[2 earlier entries omitted]", result.get(0).get("content"));
+        assertEquals(List.of("c3", "c4", "c5"), result.stream().skip(1).map(e -> e.get("content")).toList());
+    }
+
     @Test
     @DisplayName("ANONYMOUS scope windows with the anonymous summary and keeps Anonymous labels")
     void anonymousScope_usesAnonymousSummaryAndLabels() {

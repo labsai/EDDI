@@ -55,7 +55,7 @@ class GroupHitlCoordinatorLogInjectionTest {
     private GroupHitlCoordinator coordinator() {
         scheduleStore = mock(IScheduleStore.class);
         return new GroupHitlCoordinator(mock(IAgentGroupStore.class), mock(IGroupConversationStore.class), scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 new ConcurrentHashMap<>(), mock(ExecutorService.class), new CallerIdentityContext(null, null),
                 mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"),

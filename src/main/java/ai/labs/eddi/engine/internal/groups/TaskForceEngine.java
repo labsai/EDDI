@@ -1318,10 +1318,13 @@ public class TaskForceEngine {
                                 phaseIdx, phase, null, listener, cancellation);
                         if (reply != null && reply.content() != null && !reply.content().isBlank()) {
                             // Recorded as a BID entry — peer-hidden while the phase
-                            // runs (F4's blind-bid rule), auditable afterwards.
+                            // runs (F4's blind-bid rule), auditable afterwards. It keeps
+                            // the reply's signature, as a DISSENT does: the signature does
+                            // not cover the entry type, so it still verifies.
                             gc.getTranscript().add(new TranscriptEntry(member.agentId(), member.displayName(),
                                     reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
-                                    Instant.now(), null, null));
+                                    Instant.now(), null, null, reply.signature(), reply.signatureNonce(),
+                                    reply.signatureTimestampMs(), reply.signatureKeyVersion()));
                         }
                         return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
                     } catch (Exception e) {

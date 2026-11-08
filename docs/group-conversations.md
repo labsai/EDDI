@@ -195,7 +195,8 @@ next. Filing is the only agent-side write.
 A `FULL`- or `ANONYMOUS`-scope discussion phase re-feeds the transcript to every
 member every turn, so a long discussion grows roughly quadratically in prompt
 tokens. `contextWindow` bounds what each turn *renders* — the stored transcript
-is never modified, and signing verification still runs on the raw entries:
+is never modified, and [peer verification](#signed-contributions) still runs on
+the raw entries:
 
 ```json
 "contextWindow": {
@@ -1380,6 +1381,40 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
 
+## Signed contributions
+
+An agent with `security.signInterAgentMessages` signs every transcript entry it
+writes, once an admin has generated its signing key
+([architecture → Cryptographic Agent Identity](architecture.md#cryptographic-agent-identity)).
+A member with `security.requirePeerVerification` checks those signatures before
+each of its turns:
+
+```json
+"security": {
+  "signInterAgentMessages": true,
+  "requirePeerVerification": true
+}
+```
+
+- The signature covers the entry's content, speaker, target, phase and key
+  version, and the group conversation it belongs to. An entry edited in the
+  store, copied into another discussion, moved to another phase or repeated
+  within one does not verify.
+- **Fail-closed.** Every entry another agent wrote that does not verify, or
+  that carries no signature, reaches a verifying member as
+  `[withheld: this message could not be verified, because ...]` in its phase
+  prompt and its `groupTranscript` context. A window summary covering such an
+  entry is replaced by the truncation marker for that member. So in a group
+  where some members verify, every agent member should sign.
+- Entries no agent wrote are not signed and are shown as they are: the user's
+  question and follow-ups, a human member's turn, a reviewer's edit, the
+  engine's own notes and a nested group's answer.
+- The stored transcript is unchanged. Members that do not verify, the Manager,
+  SSE and the REST and MCP readers see every entry as stored.
+- Each withheld entry is logged at ERROR the first time, with its index and
+  the reason (`UNSIGNED`, `UNKNOWN_KEY`, `OUT_OF_WINDOW`, `BAD_SIGNATURE`,
+  `DUPLICATE`).
+
 ## Not yet supported
 
 Known bounds, so they are not discovered at runtime:
@@ -1390,6 +1425,7 @@ Known bounds, so they are not discovered at runtime:
 | **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
 | **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
 | **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
+| **Peer verification of engine-written prompts** | `requirePeerVerification` filters a member's phase prompt and `groupTranscript` context. The prompts the engine writes itself for role turns (convergence judge, facilitator briefing, vote tie-break, dissent round, task-force plan, execute, verify and bid) quote the round just run, task records or a short excerpt directly and are not filtered. Agent follow-up answers, facilitator interventions and the reformatted task-force verification entry are recorded unsigned, so a verifying member sees them withheld. |
 | **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
 
 ## Configuration

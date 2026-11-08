@@ -87,7 +87,7 @@ class GroupHitlCoordinatorTest {
         executorService = Mockito.mock(ExecutorService.class);
         groupConversationService = Mockito.mock(GroupConversationService.class);
         return new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 new ConcurrentHashMap<>(), executorService, new CallerIdentityContext(null, null),
                 groupConversationService,
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
@@ -314,7 +314,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
                 new SimpleMeterRegistry().counter("test.group.failure"));
@@ -346,7 +346,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
-                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
                 new SimpleMeterRegistry().counter("test.group.failure"));
@@ -668,7 +668,7 @@ class GroupHitlCoordinatorTest {
         executorService = mock(ExecutorService.class);
         groupConversationService = mock(GroupConversationService.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 new ConcurrentHashMap<>(), executorService, identityContext, groupConversationService,
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
                 new SimpleMeterRegistry().counter("test.hitl.resume"),
@@ -945,7 +945,7 @@ class GroupHitlCoordinatorTest {
         conversationStore = mock(IGroupConversationStore.class);
         var coordinator = new GroupHitlCoordinator(mock(IAgentGroupStore.class), conversationStore,
                 mock(IScheduleStore.class), mock(AuditLedgerService.class),
-                new GroupSigningGuard(null, null, null, "default"), tokens, mock(ExecutorService.class),
+                new GroupSigningGuard(null, null, "default"), tokens, mock(ExecutorService.class),
                 new CallerIdentityContext(null, null), mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"),
                 new SimpleMeterRegistry().counter("test.hitl.resume"),
@@ -972,7 +972,7 @@ class GroupHitlCoordinatorTest {
         groupStore = mock(IAgentGroupStore.class);
         scheduleStore = mock(IScheduleStore.class);
         var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
-                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, "default"),
                 activeTokens, executorService, new CallerIdentityContext(null, null),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.hitl.pause"),

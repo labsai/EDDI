@@ -412,6 +412,30 @@ class TaskForceEngineTest {
                 .filter(e -> e.type() == TranscriptEntryType.BID).count());
     }
 
+    /**
+     * A bid is a member-authored contribution, so its BID entry keeps the signature
+     * of the reply it records. Rebuilt bare, a peer requiring verification would
+     * withhold every bid once the phase completed.
+     */
+    @Test
+    void bidRound_theBidEntryKeepsTheReplysSignature() throws Exception {
+        var engine = engine();
+        String json = "{\"bids\": [{\"subject\": \"Task One\", \"confidence\": 0.9}]}";
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, json, 0, "Execution", TranscriptEntryType.TASK_RESULT, Instant.now(), null,
+                        null, "sig-a", "nonce-a", 1234L, 2));
+        var gc = gcWithUnassignedTasks("Task One", "Task Two");
+
+        engine.runBidRoundIfNeeded(gc, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
+                "Ship it", 0, null, new AtomicInteger(0), 50);
+
+        var bid = gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.BID).findFirst().orElseThrow();
+        assertEquals("sig-a", bid.signature());
+        assertEquals("nonce-a", bid.signatureNonce());
+        assertEquals(1234L, bid.signatureTimestampMs());
+        assertEquals(2, bid.signatureKeyVersion());
+    }
+
     @Test
     void bidRound_blindness_thePromptContainsTasksAndNeverPeerBids() throws Exception {
         var engine = engine();

@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -207,7 +206,6 @@ public class GroupConversationService implements IGroupConversationService, User
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
     private final IScheduleStore scheduleStore;
-    private final NonceCacheService nonceCacheService;
     private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
     private final GroupContextBuilder contextBuilder;
@@ -360,7 +358,7 @@ public class GroupConversationService implements IGroupConversationService, User
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
+            AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -374,11 +372,11 @@ public class GroupConversationService implements IGroupConversationService, User
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
         this.scheduleStore = scheduleStore;
-        this.nonceCacheService = nonceCacheService;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
+        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
-        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, nonceCacheService, defaultTenantId);
+        this.contextBuilder.setSigningGuard(signingGuard);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -2750,12 +2748,6 @@ public class GroupConversationService implements IGroupConversationService, User
     // a characterization test reaches it via reflection.
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
         return contextBuilder.buildPlainTextFallback(phase, speaker, question, transcript);
-    }
-
-    // Kept as a declared delegator (not inlined at its call site) since a
-    // characterization test reaches it via reflection.
-    private void verifyPriorEntriesIfRequired(String receivingAgentId, GroupConversation gc) {
-        signingGuard.verifyPriorEntriesIfRequired(receivingAgentId, gc);
     }
 
     // =================================================================
