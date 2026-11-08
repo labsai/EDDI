@@ -125,7 +125,12 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder(targetPolicy));
+    }
+
+    /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
+    StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
+        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
         applyTo(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         return builder.build();
     }

@@ -37,7 +37,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * provider.
  * <p>
  * Parameters are read once into a {@link Settings} and applied to the
- * synchronous and the streaming client alike, so the two cannot drift. Which of
+ * synchronous and the streaming client alike;
+ * {@code ProviderChatStreamingParityTest} fails when the two disagree. Which of
  * them a given <em>model</em> accepts is not decided here: the reasoning
  * families reject {@code temperature}, {@code topP}, the penalties and
  * {@code maxTokens}, and {@link ModelParameterCatalog} (consulted by
@@ -249,8 +250,14 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
+        return buildStreaming(parameters, customParameters, BoundedJdkHttpClient.builder(targetPolicy));
+    }
+
+    /** Streaming counterpart of {@link #build(Map, Map, HttpClientBuilder)}. */
+    StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters,
+                                      HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
+        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import com.azure.ai.openai.models.ReasoningEffortValue;
+import com.azure.core.http.HttpClientProvider;
 import dev.langchain4j.model.azure.AzureOpenAiChatModel;
 import dev.langchain4j.model.azure.AzureOpenAiStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
@@ -46,7 +47,9 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  * <p>
  * Parameters are read once into a {@link Settings} and applied to the
- * synchronous and the streaming client alike, so the two cannot drift.
+ * synchronous and the streaming client alike. The two client builders share no
+ * type, so each applies them in its own method;
+ * {@code ProviderChatStreamingParityTest} fails when the two disagree.
  * <p>
  * ⚠️ Native image: medium risk — Azure SDK uses Kotlin+Jackson reflection. Ship
  * for JVM mode, fix native config during Phase 12 CI/CD (native-image agent
@@ -134,8 +137,19 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
+        return build(parameters, null);
+    }
+
+    /**
+     * Seam for the unit tests: a fake {@link HttpClientProvider} runs the Azure
+     * SDK's real request mapping and shows what reaches the wire. {@code null},
+     * which production passes, keeps the SDK's own HTTP client.
+     */
+    ChatModel build(Map<String, String> parameters, HttpClientProvider httpClientProvider) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AzureOpenAiChatModel.builder();
+        if (httpClientProvider != null)
+            b.httpClientProvider(httpClientProvider);
         if (s.endpoint() != null)
             b.endpoint(s.endpoint());
         if (s.apiKey() != null)
@@ -185,8 +199,15 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+        return buildStreaming(parameters, null);
+    }
+
+    /** Streaming counterpart of {@link #build(Map, HttpClientProvider)}. */
+    StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientProvider httpClientProvider) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AzureOpenAiStreamingChatModel.builder();
+        if (httpClientProvider != null)
+            b.httpClientProvider(httpClientProvider);
         if (s.endpoint() != null)
             b.endpoint(s.endpoint());
         if (s.apiKey() != null)
