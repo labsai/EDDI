@@ -147,6 +147,12 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     public V get(Object key) {
         try {
             Optional<ISharedKv.Versioned> v = shared.get(key(key));
+            if (!localOnly.isEmpty() && localOnly.contains(key(key))) {
+                V newest = newerLocalCopy(key);
+                if (newest != null) {
+                    return newest;
+                }
+            }
             if (v.isEmpty() && !localOnly.isEmpty() && localOnly.contains(key(key))) {
                 // Written while the bucket was unreachable or refused it (a paginated tool
                 // response larger than the NATS payload limit): this node's copy is the only
@@ -162,6 +168,30 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             degraded(e);
             return local.get(key);
         }
+    }
+
+    /**
+     * The latest value this node wrote while the bucket would not take it, or
+     * {@code null} when there is none. That value is newer than whatever the bucket
+     * still holds (an earlier write that did reach it), so it answers the read; one
+     * attempt is made to publish it, and the marker is dropped once the bucket has
+     * it. Without this a status written {@code processing} while NATS was up and
+     * {@code completed} while it was down kept reading back {@code processing}
+     * after recovery, even on the node that wrote both.
+     */
+    private V newerLocalCopy(Object key) {
+        V mine = local.get(key);
+        if (mine == null) {
+            return null;
+        }
+        try {
+            shared.put(key(key), encode(mine));
+            localOnly.remove(key(key));
+        } catch (ClusterUnavailableException e) {
+            // still unreachable, or too large for the bucket: stays node-local
+            LOGGER.debugf("Shared cache %s still refuses a node-local value: %s", shared.bucket(), e.getMessage());
+        }
+        return mine;
     }
 
     @Override

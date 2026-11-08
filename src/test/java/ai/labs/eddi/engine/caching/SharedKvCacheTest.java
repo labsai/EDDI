@@ -256,6 +256,30 @@ class SharedKvCacheTest {
     }
 
     @Test
+    @DisplayName("a value written while NATS was down wins over the older shared value after recovery, and is republished")
+    void degradedWriteIsNotShadowedByOlderSharedValueAfterRecovery() {
+        var kv = new InMemorySharedKv("RAG_INGESTION", Duration.ofMinutes(5));
+        AtomicBoolean down = new AtomicBoolean();
+        ISharedKv flaky = spy(kv);
+        doAnswer(inv -> {
+            if (down.get()) {
+                throw new ClusterUnavailableException("down (test)");
+            }
+            return inv.callRealMethod();
+        }).when(flaky).put(any(), any());
+        ICache<String, String> node = new SharedKvCache<>(local("recover"), flaky, false);
+        ICache<String, String> other = new SharedKvCache<>(local("recover-other"), kv, false);
+
+        node.put("status:1", "processing");
+        down.set(true);
+        node.put("status:1", "completed"); // node-local only
+        down.set(false);
+
+        assertEquals("completed", node.get("status:1"), "the writing node must not read back the older shared value");
+        assertEquals("completed", other.get("status:1"), "the newer value was republished for the other nodes");
+    }
+
+    @Test
     @DisplayName("a putIfAbsent that loses the race reports the key as present even when the stored value cannot be read (fail-closed for nonces)")
     void lostRaceWithUnreadableValueIsStillPresent() {
         ISharedKv kv = mock(ISharedKv.class);

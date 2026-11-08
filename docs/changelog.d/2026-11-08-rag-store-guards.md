@@ -23,6 +23,11 @@ with this id is known" for an ingestion that was running or done. Both now live 
 ingestion), which `CacheFactory.SHARED_BUCKETS` maps to the new `RAG_INGESTION` KV bucket. A single node
 behaves exactly as before.
 
+**A value written while NATS was down no longer reads back as the older shared value.** `SharedKvCache.get()`
+only consulted the node-local copy when the bucket answered empty, so a key written `processing` with NATS up and
+`completed` during an outage kept reading `processing` after recovery, even on the writing node. A key remembered as
+node-local-only now answers from this node's copy and is republished once the bucket accepts it (all shared caches).
+
 ### Design decisions
 
 - **One cache and one bucket, two key kinds.** The status is kept under `status:` plus the ingestion id
