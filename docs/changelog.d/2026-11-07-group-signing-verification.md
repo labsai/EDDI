@@ -17,8 +17,9 @@ revoked key kept vouching for whatever it signed.
   not verify is replaced, in place, by a `[withheld: ... because ...]` placeholder before that
   member's phase prompt (`GroupContextBuilder.buildPhaseInput`, through the wired guard) and its
   `groupTranscript` context (`MemberTurnExecutor`) are built. In place, so the raw indices that
-  window summaries are keyed on stay aligned; and a window summary that covers a withheld entry is
-  replaced by the truncation marker for that member. If the member's own configuration cannot be
+  window summaries are keyed on stay aligned; and a window summary that retells a withheld entry is
+  replaced by the truncation marker for that member (a withheld entry the summarizer never reads,
+  such as a facilitator's intervention, leaves the summary in place). If the member's own configuration cannot be
   read, it is treated as requiring verification. Each withheld entry is logged at ERROR the first
   time per conversation, then at DEBUG.
 - **What the signature covers.** The payload is built in one place for signing and verification:
@@ -43,7 +44,10 @@ revoked key kept vouching for whatever it signed.
   self-verify mismatch) now logs at ERROR, since peers that verify will withhold the entry.
 - **Who must sign.** Only entries whose speaker is an agent in the agent store must verify. The
   user's question and follow-ups, a human member's turn, a reviewer's edit, the engine's own notes
-  and a nested group's answer carry no signature and are shown as they are.
+  and a nested group's answer carry no signature and are shown as they are. They are not
+  authenticated: whoever can write the group-conversation store can add one, or re-attribute an
+  agent's entry to a non-agent speaker id, under any display name. Verification is keyed on the
+  speaker id, while prompts show the display name; both docs say so.
 - **Docs, Manager, operator.** [`architecture.md`](../architecture.md#cryptographic-agent-identity)
   (signing, replay, peer verification; the RFC 8785 claim corrected) and a new
   [Signed contributions](../group-conversations.md#signed-contributions) section with the known

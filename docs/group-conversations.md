@@ -1403,12 +1403,16 @@ each of its turns:
 - **Fail-closed.** Every entry another agent wrote that does not verify, or
   that carries no signature, reaches a verifying member as
   `[withheld: this message could not be verified, because ...]` in its phase
-  prompt and its `groupTranscript` context. A window summary covering such an
+  prompt and its `groupTranscript` context. A window summary retelling such an
   entry is replaced by the truncation marker for that member. So in a group
   where some members verify, every agent member should sign.
 - Entries no agent wrote are not signed and are shown as they are: the user's
   question and follow-ups, a human member's turn, a reviewer's edit, the
-  engine's own notes and a nested group's answer.
+  engine's own notes and a nested group's answer. They are not
+  authenticated: whoever can write the group-conversation store can add one,
+  or re-attribute an agent's entry to a non-agent speaker id, under any
+  display name, a member agent's included. Verification is keyed on the
+  speaker id, while prompts show the display name.
 - The stored transcript is unchanged. Members that do not verify, the Manager,
   SSE and the REST and MCP readers see every entry as stored.
 - Each withheld entry is logged at ERROR the first time, with its index and
