@@ -258,7 +258,7 @@ Response:
 }
 ```
 
-Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that was never issued, whose status has expired (statuses are kept for one hour), or that belongs to a different knowledge base than the one in the path, answers 404 with status `unknown`. In a cluster (`eddi.messaging.type=nats`) the status is shared through the `RAG_INGESTION` KV bucket, so the poll may reach any instance, not only the one that accepted the upload.
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that was never issued, whose status has expired (statuses are kept for at most one hour), or that belongs to a different knowledge base than the one in the path, answers 404 with status `unknown`. In a cluster (`eddi.messaging.type=nats`) the status is shared through the `RAG_INGESTION` KV bucket, so the poll may reach any instance, not only the one that accepted the upload. That holds while NATS is reachable: during an outage `SharedKvCache` falls back to node-local values, so a poll on another instance can answer 404 for a valid ingestion until NATS is back (or, for a status written while it was down, until the one-hour TTL). That holds while NATS is reachable: during an outage `SharedKvCache` falls back to node-local values, so a poll on another instance can answer 404 for a valid ingestion until NATS is back (or, for a status written while it was down, until the one-hour TTL).
 
 **Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
 twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
