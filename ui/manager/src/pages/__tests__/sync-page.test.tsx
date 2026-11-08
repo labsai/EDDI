@@ -1116,6 +1116,39 @@ describe("SyncPage — failed and stale previews", () => {
       expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
     });
 
+    it("gets no preview when reconnecting listed a newer source version", async () => {
+      // Connect stays enabled during the preview. The reconnect lists the same
+      // agent at a new version, and Sync would send that version on the
+      // strength of a diff computed for the old one.
+      const preview = holdPreview();
+      renderPage();
+      const user = await connectAndWaitForMapping();
+      const checkboxes = screen.getAllByRole("checkbox");
+      for (const cb of checkboxes.slice(1)) await user.click(cb);
+
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(preview.sent).toHaveLength(1));
+      expect(preview.sent[0]![0]).toMatchObject({ sourceAgentId: "remote-agent1", sourceAgentVersion: 5 });
+
+      server.use(
+        http.get("*/backup/import/sync/agents", () =>
+          HttpResponse.json([
+            { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent1?version=6", name: "Support Agent", description: "", lastModifiedOn: new Date().toISOString() },
+          ])
+        )
+      );
+      await user.click(screen.getByTestId("sync-connect-btn"));
+      await waitFor(() => expect(row(0)).toHaveTextContent("v6"));
+
+      await act(async () => {
+        preview.release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(row(0)).not.toHaveTextContent(/changes/);
+      expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+    });
+
     it("does not mark a row ticked after the request as failed", async () => {
       // A row checked mid-flight was never sent, so the reply has nothing for it;
       // it used to be shown as "Preview failed".

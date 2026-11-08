@@ -21,9 +21,10 @@ become by then.
   next save goes against the new version.
 - **Agent sync** — a batch preview landed on rows whose target or "Create new"
   choice had changed during the request (a diff for one target shown under
-  another, with Sync armed to send the new one), and a row ticked mid-flight was
-  marked "Preview failed". A preview now applies only to a row still checked and
-  still naming the target it was sent with.
+  another, with Sync armed to send the new one), or that a reconnect had relisted
+  at a newer source version, and a row ticked mid-flight was marked "Preview
+  failed". A preview now applies only to a row still checked and still naming the
+  source version and target it was sent with.
 - **Team budget transfer** — Cancel always started a fresh `Idempotency-Key` and
   an empty form, so after a 5xx or network error (which may have moved the money)
   re-entering the same transfer could move it twice. After such an error, or when
