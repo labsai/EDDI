@@ -147,6 +147,30 @@ class AgentGroupStoreTest {
         assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
     }
 
+    /**
+     * A member that requires peer verification is shown an entry no agent wrote as
+     * "User", "System" or "&lt;name&gt; (not an agent, unverified)". An agent
+     * member under one of those names would let an entry under a non-agent speaker
+     * id pass for its message. Other member types are shown with the suffix
+     * themselves, so they may keep such a name.
+     */
+    @Test
+    void agentDisplayNameANonAgentEntryIsShownUnder_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", " system ", 1, null), new GroupMember("d", "Bob (Not an agent, unverified)", 2, null),
+                new GroupMember("e", "Systems", 3, null), new GroupMember("h", "User", 4, null, MemberType.HUMAN),
+                new GroupMember("g", "Ops (not an agent, unverified)", 5, null, MemberType.GROUP)));
+        var userAgent = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        userAgent.setMembers(List.of(new GroupMember("b", "USER", 1, null), new GroupMember("e", "Eve", 2, null)));
+
+        var problems = AgentGroupStore.memberAndLimitProblems(c);
+
+        assertEquals(List.of("members[0]", "members[1]"), problems.stream().map(p -> p.substring(0, p.indexOf(' '))).toList(), problems.toString());
+        assertTrue(problems.get(0).contains("'system'"), problems.get(0));
+        assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+        assertEquals(1, AgentGroupStore.memberAndLimitProblems(userAgent).size());
+    }
+
     @Test
     void duplicateMember_isRejectedAtSaveTime() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");

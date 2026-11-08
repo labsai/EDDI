@@ -43,8 +43,9 @@ never enforced.
 - **Non-agent entries.** Which entries must verify is decided by the speaker id, while a prompt
   shows the display name; a store writer could put any text under an agent's name by giving it a
   non-agent id. A verifying member now sees such entries as `User`, `System` or
-  `<name> (not an agent, unverified)`. Group saves refuse two members with the same display name
-  (ignoring case), so two verified voices never share one name either.
+  `<name> (not an agent, unverified)`, and a group save refuses those names for an agent member.
+  Group saves also refuse two members with the same display name (ignoring case), so two verified
+  voices never share one name either.
 - **Summary and ballots.** The stored window summary is free text no signature covers, so a
   verifying member gets the truncation marker instead. A ballot lists the options the tally counts,
   resolved from the stored transcript: a verifying voter from whom the synthesis was withheld got
@@ -78,7 +79,8 @@ of the signed bytes needs no migration.
 
 ### Upgrading
 
-A group whose members share a display name is refused on its next save until the names differ;
+A group whose members share a display name, or with an agent member named `User`, `System` or
+`... (not an agent, unverified)`, is refused on its next save until the names change;
 stored groups still load and run. A verifying member in a windowed discussion no longer gets the
 rolling summary.
 
@@ -101,5 +103,5 @@ withheld.
 [`SignedEnvelope.java`](../../src/main/java/ai/labs/eddi/configs/agents/crypto/SignedEnvelope.java),
 [`JacksonCanonicalizer.java`](../../src/main/java/ai/labs/eddi/configs/agents/crypto/JacksonCanonicalizer.java);
 tests `GroupSigningRoundTripTest` (real Ed25519), `GroupSigningGuardTest`, `MemberTurnExecutorTest`,
-`PhaseExecutionEngineTest`, `TaskForceEngineTest`, `GroupContextBuilderWindowingTest`,
+`PhaseExecutionEngineTest`, `TaskForceEngineTest`,
 `AgentGroupStoreTest`, `GroupConversationTest`.

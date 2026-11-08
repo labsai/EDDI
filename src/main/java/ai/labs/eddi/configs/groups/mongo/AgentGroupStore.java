@@ -51,6 +51,19 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     private static final Logger LOGGER = Logger.getLogger(AgentGroupStore.class);
 
     /**
+     * The speaker names a member that requires peer verification is shown for
+     * transcript entries no agent wrote ({@code GroupSigningGuard}): the user's,
+     * the engine's, and any other speaker's name followed by
+     * {@link #NOT_AN_AGENT_SUFFIX}. They are defined here because a group save
+     * refuses them as an agent member's display name.
+     */
+    public static final String USER_SPEAKER_NAME = "User";
+    /** See {@link #USER_SPEAKER_NAME}. */
+    public static final String SYSTEM_SPEAKER_NAME = "System";
+    /** See {@link #USER_SPEAKER_NAME}. */
+    public static final String NOT_AN_AGENT_SUFFIX = " (not an agent, unverified)";
+
+    /**
      * Field-injected so the constructor tests build stays as it was; null (a store
      * built by hand) skips the grant rule.
      */
@@ -171,6 +184,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         }
         problems.addAll(duplicateMemberProblems(members));
         problems.addAll(duplicateDisplayNameProblems(members));
+        problems.addAll(reservedDisplayNameProblems(members));
         if (config.getMaxRounds() < 0) {
             problems.add("maxRounds must not be negative");
         }
@@ -254,6 +268,34 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 problems.add("members[" + i + "] repeats members[" + first + "] ('" + members.get(i).agentId().trim()
                         + "') — a member can hold only one seat, because both seats would share one member conversation and "
                         + "see each other's answers. Use a second agent for a second seat");
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * An AGENT member named like an entry no agent wrote, as a member that requires
+     * peer verification is shown one ({@link #USER_SPEAKER_NAME},
+     * {@link #SYSTEM_SPEAKER_NAME}, or a name ending in
+     * {@link #NOT_AN_AGENT_SUFFIX}; ignoring case and surrounding blanks). Such an
+     * entry is not authenticated, so under that name a store writer could pass one
+     * off as the member's message. Members of other types are shown with the suffix
+     * themselves and may keep any name.
+     */
+    static List<String> reservedDisplayNameProblems(List<AgentGroupConfiguration.GroupMember> members) {
+        List<String> problems = new ArrayList<>();
+        String suffix = NOT_AN_AGENT_SUFFIX.trim().toLowerCase(Locale.ROOT);
+        for (int i = 0; i < members.size(); i++) {
+            var member = members.get(i);
+            if (member == null || member.memberType() != AgentGroupConfiguration.MemberType.AGENT || member.displayName() == null) {
+                continue;
+            }
+            String name = member.displayName().trim();
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.equals(USER_SPEAKER_NAME.toLowerCase(Locale.ROOT)) || lower.equals(SYSTEM_SPEAKER_NAME.toLowerCase(Locale.ROOT))
+                    || lower.endsWith(suffix)) {
+                problems.add("members[" + i + "] has the displayName '" + name + "', which members that require peer verification "
+                        + "are shown for entries no agent wrote. Give the agent another displayName");
             }
         }
         return problems;

@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.SecurityConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -399,7 +400,7 @@ class GroupSigningGuardTest {
         var visible = guard().visibleTo(RECEIVER, gc(), List.of(question, reviewerEdit, human, lookalike));
 
         assertSame(question, visible.get(0), "the user's question already carries its fixed label");
-        assertEquals(List.of("Reviewer" + GroupSigningGuard.NOT_AN_AGENT_SUFFIX, "Alice" + GroupSigningGuard.NOT_AN_AGENT_SUFFIX),
+        assertEquals(List.of("Reviewer" + AgentGroupStore.NOT_AN_AGENT_SUFFIX, "Alice" + AgentGroupStore.NOT_AN_AGENT_SUFFIX),
                 List.of(visible.get(1).speakerDisplayName(), visible.get(2).speakerDisplayName()));
         assertEquals(List.of("edited", "my view"), List.of(visible.get(1).content(), visible.get(2).content()));
         assertEquals(GroupReviewEditor.REVIEWER_EDIT_MARKER, visible.get(1).errorReason());

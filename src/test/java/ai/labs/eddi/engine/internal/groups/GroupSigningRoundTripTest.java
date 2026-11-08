@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -381,7 +382,7 @@ class GroupSigningRoundTripTest {
 
         assertEquals("System", visible.get(0).speakerDisplayName());
         assertEquals("User", visible.get(1).speakerDisplayName());
-        assertEquals("Speaker" + GroupSigningGuard.NOT_AN_AGENT_SUFFIX, visible.get(2).speakerDisplayName());
+        assertEquals("Speaker" + AgentGroupStore.NOT_AN_AGENT_SUFFIX, visible.get(2).speakerDisplayName());
         assertEquals(asStranger.content(), visible.get(2).content(), "the text itself is shown");
     }
 

@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -77,12 +78,6 @@ public class GroupSigningGuard {
      * an entry that did not verify.
      */
     public static final String WITHHELD_MARKER = "peer-verification:withheld";
-
-    /**
-     * Appended, for a receiver that requires verification, to the display name of
-     * an entry no agent authored, so it cannot pass for a member agent's message.
-     */
-    static final String NOT_AN_AGENT_SUFFIX = " (not an agent, unverified)";
 
     /**
      * Clock difference tolerated between the node that generated a key or created
@@ -509,10 +504,11 @@ public class GroupSigningGuard {
     }
 
     /**
-     * {@code entry} under a name that cannot be taken for a member agent's. Which
-     * entries must verify is decided by the speaker id, while a prompt names the
-     * speaker by its stored display name; without this, a store writer could put
-     * any text under an agent's name by giving the entry a non-agent speaker id.
+     * {@code entry} under a name that cannot be taken for a member agent's (a group
+     * save refuses these names for agent members). Which entries must verify is
+     * decided by the speaker id, while a prompt names the speaker by its stored
+     * display name; without this, a store writer could put any text under an
+     * agent's name by giving the entry a non-agent speaker id.
      */
     private static TranscriptEntry asNonAgent(TranscriptEntry entry) {
         if (entry.content() == null) {
@@ -521,11 +517,11 @@ public class GroupSigningGuard {
         String speakerId = entry.speakerAgentId();
         String name;
         if (speakerId == null || "system".equals(speakerId)) {
-            name = "System";
+            name = AgentGroupStore.SYSTEM_SPEAKER_NAME;
         } else if ("user".equals(speakerId)) {
-            name = "User";
+            name = AgentGroupStore.USER_SPEAKER_NAME;
         } else {
-            name = (entry.speakerDisplayName() != null ? entry.speakerDisplayName() : speakerId) + NOT_AN_AGENT_SUFFIX;
+            name = (entry.speakerDisplayName() != null ? entry.speakerDisplayName() : speakerId) + AgentGroupStore.NOT_AN_AGENT_SUFFIX;
         }
         if (name.equals(entry.speakerDisplayName())) {
             return entry;

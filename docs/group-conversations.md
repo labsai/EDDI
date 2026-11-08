@@ -1420,8 +1420,9 @@ each of its turns:
   group-conversation store can add one, or re-attribute an agent's entry to a
   non-agent speaker id. A verifying member is therefore shown them under a
   name no member agent has: `User`, `System`, or the stored name followed by
-  `(not an agent, unverified)`. Member display names must be unique within a
-  group (a save with two equal names, ignoring case, is refused with 400), so
+  `(not an agent, unverified)`. A group save refuses those names for an agent
+  member (400, ignoring case). Member display names must also be unique within
+  a group (a save with two equal names, ignoring case, is refused with 400), so
   two verified voices never share one name either.
 - The stored window summary is free text no signature covers, so a verifying
   member never gets it: in a windowed discussion it is shown the truncation
