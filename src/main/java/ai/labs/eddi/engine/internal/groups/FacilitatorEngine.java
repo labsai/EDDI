@@ -119,6 +119,7 @@ public class FacilitatorEngine {
      * applies (M-A1). {@code null} skips it.
      */
     private final BiPredicate<String, String> useCheck;
+    private GroupSigningGuard signingGuard;
 
     public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry) {
@@ -190,6 +191,14 @@ public class FacilitatorEngine {
      */
     public record CheckpointContext(int phaseIdx, int repeat, boolean repeatCheckpoint, boolean moreRepeatsScheduled,
             boolean phaseEndedBySignal, boolean escalationResumeTargetExists) {
+    }
+
+    /**
+     * Wires the guard the facilitator's briefing reads the transcript through.
+     * Without it the briefing quotes the transcript as stored.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     /**
@@ -510,8 +519,9 @@ public class FacilitatorEngine {
         gc.setFacilitatorMoveCount(gc.getFacilitatorMoveCount() + 1);
         String content = "Facilitator " + summary
                 + (parsed.reason() != null && !parsed.reason().isBlank() ? " — " + parsed.reason().trim() : "");
-        gc.getTranscript().add(new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(), phase.name(),
-                TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId));
+        // Signed for the facilitator: the move and its reason are its own.
+        gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(),
+                phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId)));
         meterRegistry.counter("eddi_group_facilitator_moves_total",
                 "move", parsed.move().name(), "outcome", "executed").increment();
         auditMove(gc, parsed, ctx, "EXECUTED", null);
@@ -528,8 +538,8 @@ public class FacilitatorEngine {
                                  CheckpointContext ctx, String attemptedMove, String reason, String why) {
         String content = "Facilitator attempted " + attemptedMove + " — rejected: " + why
                 + (reason != null && !reason.isBlank() ? ". Facilitator's reason: " + reason.trim() : "");
-        gc.getTranscript().add(new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(), phase.name(),
-                TranscriptEntryType.FACILITATION, Instant.now(), null, null));
+        gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(),
+                phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null)));
         // Review finding: the raw LLM-authored move string as a metric tag value
         // is unbounded label cardinality — every hallucinated name became a new
         // Prometheus time series for the JVM's lifetime. The tag is bounded to
@@ -681,28 +691,28 @@ public class FacilitatorEngine {
             }
         }
 
-        Map<TranscriptEntryType, Long> phaseCounts;
+        // The transcript as the facilitator may see it: the excerpt is the latest
+        // contribution it can take as written, never an unverified one.
+        List<TranscriptEntry> transcript = GroupSigningGuard.viewOf(signingGuard, fc.agentId(), gc).transcript();
+        Map<TranscriptEntryType, Long> phaseCounts = transcript.stream()
+                .filter(e -> e.phaseIndex() == ctx.phaseIdx())
+                .collect(Collectors.groupingBy(TranscriptEntry::type, LinkedHashMap::new, Collectors.counting()));
         String latestConvergence = null;
         String latestExcerpt = null;
-        synchronized (gc.getTranscript()) {
-            phaseCounts = gc.getTranscript().stream()
-                    .filter(e -> e.phaseIndex() == ctx.phaseIdx())
-                    .collect(Collectors.groupingBy(TranscriptEntry::type, LinkedHashMap::new, Collectors.counting()));
-            for (int i = gc.getTranscript().size() - 1; i >= 0; i--) {
-                TranscriptEntry entry = gc.getTranscript().get(i);
-                if (latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
-                        && entry.content() != null) {
-                    latestConvergence = truncate(entry.content(), 200);
-                }
-                if (latestExcerpt == null && entry.content() != null
-                        && (entry.type() == TranscriptEntryType.SYNTHESIS
-                                || entry.type() == TranscriptEntryType.OPINION
-                                || entry.type() == TranscriptEntryType.REVISION)) {
-                    latestExcerpt = truncate(entry.content(), BRIEFING_EXCERPT_LENGTH);
-                }
-                if (latestConvergence != null && latestExcerpt != null) {
-                    break;
-                }
+        for (int i = transcript.size() - 1; i >= 0; i--) {
+            TranscriptEntry entry = transcript.get(i);
+            if (latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
+                    && entry.content() != null) {
+                latestConvergence = truncate(entry.content(), 200);
+            }
+            if (latestExcerpt == null && entry.content() != null && !GroupSigningGuard.isWithheld(entry)
+                    && (entry.type() == TranscriptEntryType.SYNTHESIS
+                            || entry.type() == TranscriptEntryType.OPINION
+                            || entry.type() == TranscriptEntryType.REVISION)) {
+                latestExcerpt = truncate(entry.content(), BRIEFING_EXCERPT_LENGTH);
+            }
+            if (latestConvergence != null && latestExcerpt != null) {
+                break;
             }
         }
         if (!phaseCounts.isEmpty()) {

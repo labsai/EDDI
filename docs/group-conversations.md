@@ -1410,6 +1410,38 @@ each of its turns:
   discussion should sign: each member, and the moderator or synthesizer too
   when it is not a member, or its synthesis is withheld from verifying
   members.
+- **Every prompt, not only phase turns.** The prompts the engine writes for a
+  role turn read the transcript the same way, as the agent taking the turn may
+  see it: the convergence judge (the moderator; the `SERVICE` judge is no agent
+  and reads the round as stored), a dissenter, the facilitator's briefing, a
+  follow-up's `groupTranscript`, and a nested group's question, which is
+  filtered when any agent in the nested group (or in a group nested in it)
+  verifies, since that prompt becomes the question each of them is asked. A
+  dissenter that verifies is not asked to react to a synthesis that does not
+  verify for it.
+- **Task forces.** The task records are agent text too: a verifying executor,
+  verifier or bidder is shown a task's result only when it is its own or a
+  verified entry of the assignee holds exactly that text (an unsigned result,
+  or one edited in the store, reads `[withheld: this text could not be
+  verified]`). A task's subject and description are withheld when they come
+  from a plan that does not verify, or from another member's task tool (those
+  writes are not signed); configured tasks and the user's own are shown. A
+  verification note is withheld when it comes from a verifier entry that does
+  not verify. A verifying member whose own task's text does not verify is not
+  asked to do it: the task fails with "Its task text could not be verified". A
+  bidder is announced only the tasks whose text it may see.
+- **The engine's own records.** Once any member, the moderator or the
+  facilitator requires verification, what the engine records for everyone
+  counts only entries that verify for all of them: the negotiation table
+  (proposals and concessions), the vote (its options and ballots: a synthesis
+  that does not verify offers no options, so the vote does not run, and an
+  unsigned ballot is not counted), an arbitration verdict, and the lessons a
+  retrospective stores in team memory.
+- **Entries the engine writes for an agent are signed for it.** A follow-up
+  answer, the readable summary of a task-force verification, and the
+  facilitator's notes are signed with the agent's key when it signs, so a
+  verifying member sees them. A task-failure note is the engine's own and is
+  recorded as such, with the member as its target.
 - A member's own entries are not checked for it: a verifying member that does
   not sign is still shown its own answer to revise or defend.
 - A revoked key vouches for nothing, whenever an entry claims to have been
@@ -1429,9 +1461,9 @@ each of its turns:
 - The stored window summary is free text no signature covers, so a verifying
   member never gets it: in a windowed discussion it is shown the truncation
   marker instead.
-- A ballot lists the options the tally counts, taken from the stored
-  transcript, even when the synthesis they come from is withheld from the
-  voter.
+- A ballot lists the options in the latest synthesis as the voter sees it, so
+  a verifying voter is offered none from a synthesis that does not verify for
+  it.
 - If a member's configuration cannot be read, the setting this node last read
   for it applies; if it never read one, the member's turn is recorded
   `SKIPPED`.
@@ -1456,7 +1488,7 @@ Known bounds, so they are not discovered at runtime:
 | **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
 | **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
 | **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
-| **Peer verification of engine-written prompts** | `requirePeerVerification` filters a member's phase prompt and `groupTranscript` context. The prompts the engine writes itself for role turns (convergence judge, facilitator briefing, vote tie-break, dissent round, task-force plan, execute, verify and bid) quote the round just run, task records or a short excerpt directly and are not filtered. Agent follow-up answers, facilitator interventions and the reformatted task-force verification entry are recorded unsigned, so a verifying member sees them withheld. |
+| **Peer verification: what is not signed** | Every prompt a verifying member receives is filtered (see [Signed contributions](#signed-contributions)), but a few short texts reach it without a signature of their own. The engine's notes quote some agent text: a task's subject in a rework or task-failure note, the verifier's feedback in a rework note, and the convergence check's one-line reason. Tasks a member adds with its task tools are not signed, so their text is withheld from other verifying members. A recruitment note is recorded under the recruiting member and not signed, so a verifying synthesizer sees it withheld. Lessons a retrospective stored while no reader required verification are read back as stored. A nested group's answer is shown relabelled, not verified. |
 | **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
 
 ## Configuration

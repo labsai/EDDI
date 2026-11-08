@@ -377,6 +377,7 @@ public class GroupConversationService implements IGroupConversationService, User
         this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
         this.contextBuilder.setSigningGuard(signingGuard);
+        this.signingGuard.setGroupMembers(this::membersOfGroup);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -400,14 +401,17 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        this.phaseExecutionEngine.setSigningGuard(signingGuard);
         this.phaseExecutionEngine
                 .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
                 this::discussionOwnerMayUse);
+        this.facilitatorEngine.setSigningGuard(signingGuard);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 discussionControls, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
+        this.taskForceEngine.setSigningGuard(signingGuard);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
         // for the executeDiscussion/resolvePhases/cleanupEphemeralAgents callbacks
         // resumeDiscussion and cleanupAfterTerminalState make back into the facade.
@@ -1198,9 +1202,11 @@ public class GroupConversationService implements IGroupConversationService, User
                     // ends the phase's repeats early through the same outcome
                     // plumbing convergence uses. Applied BEFORE the persist below so
                     // the table and the turns that produced it share one write.
+                    // Once any reader requires peer verification, the table every member is
+                    // shown is built only from moves that verify for all of them.
                     if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
-                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat,
-                                config.getNegotiationConfig());
+                        NegotiationEngine.applyRepeat(gc, GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                transcriptSizeBeforeRepeat, repeat, config.getNegotiationConfig());
                         if (phase.type() == PhaseType.BARGAIN
                                 && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
                             outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
@@ -1304,7 +1310,8 @@ public class GroupConversationService implements IGroupConversationService, User
                         boolean arbitrated = false;
                         if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED) {
                             boolean hadDecision = gc.getDecision() != null;
-                            NegotiationEngine.recordArbitration(gc, repeatEntries, phase.name());
+                            NegotiationEngine.recordArbitration(gc, GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                    phase.name());
                             arbitrated = !hadDecision && gc.getDecision() != null;
                         }
                         if (config.isRecordDissents()) {
@@ -1336,7 +1343,11 @@ public class GroupConversationService implements IGroupConversationService, User
                     // not the retrospective — and BEFORE the persist below, so a
                     // crash cannot lose lessons a stored document claims were taken.
                     if (phase.type() == PhaseType.RETRO && lastRepeat) {
-                        RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
+                        // Lessons become team memory every later discussion reads, so only
+                        // retrospectives that verify for every reader are harvested once
+                        // any reader requires it.
+                        RetroEngine.harvest(gc, config.getRetroConfig(), GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                userMemoryStore, phase.name(), listener);
                     }
 
                     // Overview dashboard: refresh the one-line member stances from
@@ -1410,14 +1421,15 @@ public class GroupConversationService implements IGroupConversationService, User
                                                                 || !gc.getTaskList().findExecutableTasks().isEmpty())));
                                 if (boundaryGateWillPause) {
                                     var suppressed = deferredFacilitatorAction.escalation();
-                                    gc.getTranscript().add(new TranscriptEntry(
+                                    // Signed for the facilitator: the question is its own.
+                                    gc.getTranscript().add(signingGuard.sign(gc, new TranscriptEntry(
                                             config.getFacilitator().agentId(), "Facilitator",
                                             "Facilitator escalation to " + suppressed.principalId()
                                                     + " suppressed — this phase requires human approval, which takes "
                                                     + "precedence. The facilitator's question for the approver: "
                                                     + suppressed.question(),
                                             phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(),
-                                            null, null));
+                                            null, null)));
                                     LOGGER.infof("Facilitator escalation for group %s suppressed at phase %d — the "
                                             + "phase's own approval gate takes precedence", LogSanitizer.sanitize(gc.getGroupId()), phaseIdx);
                                     // fall through to the HITL gate below
@@ -2107,9 +2119,11 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     private GroupLifecycleOps lifecycleOps() {
-        return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
+        var ops = new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
                 deploymentStore, sharedArtifactStore, attachmentStore, operationsInProgress, discussionControls, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
+        ops.setSigningGuard(signingGuard);
+        return ops;
     }
 
     public static void propagateDynamicAgentTracking(
@@ -2276,6 +2290,26 @@ public class GroupConversationService implements IGroupConversationService, User
      * points into, and move the denominator I2's convergence check and I4's
      * unanimity test already computed for the round in flight.
      */
+    /**
+     * The configured members of group {@code groupId}, for the signing guard to
+     * learn how strictly a nested group reads its parent's transcript; {@code null}
+     * when the id names no group.
+     */
+    private List<GroupMember> membersOfGroup(String groupId) {
+        try {
+            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
+            if (current == null) {
+                return null;
+            }
+            AgentGroupConfiguration group = groupStore.read(groupId, current.getVersion());
+            return group != null ? group.getMembers() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
     public static List<GroupMember> rosterWithRecruits(AgentGroupConfiguration config, GroupConversation gc) {
         List<GroupMember> configured = config.getMembers() != null ? config.getMembers() : List.of();
         if (gc == null || gc.getDynamicMembers() == null || gc.getDynamicMembers().isEmpty()) {

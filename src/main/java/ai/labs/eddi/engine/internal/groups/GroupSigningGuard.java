@@ -11,10 +11,14 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -25,13 +29,17 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * Signs the group-transcript entries of agents with
@@ -55,12 +63,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * does not verify (unsigned, tampered, copied, moved to another round,
  * duplicated, signed with an unknown or revoked key or with a key outside its
  * validity window) by a {@code [withheld: ...]} placeholder, before the
- * receiver's prompt and context are built. Entries no agent authored (the
- * user's question, a human member's turn, a reviewer's edit, the engine's own
- * notes, a nested group's answer) carry no signature and pass through, but
- * under a name that cannot pass for a member agent's: signatures authenticate
- * agents, not the engine's own record. The receiver's own entries pass as they
- * are.
+ * receiver's prompt and context are built. Every prompt the engine composes for
+ * an agent reads the transcript through a {@link View} from here: a phase turn,
+ * a role turn (judge, dissenter, facilitator, task executor, verifier, bidder),
+ * a follow-up and a nested group's question; so do the task records it quotes
+ * ({@link TaskRecordView}) and the records it keeps for every reader (the
+ * negotiation table, the vote tally, a retrospective's lessons; see
+ * {@link #recordView}). Entries no agent authored (the user's question, a human
+ * member's turn, a reviewer's edit, the engine's own notes, a nested group's
+ * answer) carry no signature and pass through, but under a name that cannot
+ * pass for a member agent's: signatures authenticate agents, not the engine's
+ * own record. The receiver's own entries pass as they are.
  * <p>
  * Holds only caches: agent configurations by version (immutable), the outcome
  * of each Ed25519 check (a pure function of key, signature and signed bytes),
@@ -99,6 +112,7 @@ public class GroupSigningGuard {
     private final AgentConfigurationCache agentConfigs;
     private final AgentSigningService agentSigningService;
     private final String defaultTenantId;
+    private volatile Function<String, List<GroupMember>> groupMembers;
 
     /**
      * Outcome of an Ed25519 check by the SHA-256 of what was checked (public key,
@@ -134,7 +148,8 @@ public class GroupSigningGuard {
                                 "it was signed outside its key's validity window or before this conversation began"), BAD_SIGNATURE(
                                         "its signature does not match its content, this conversation or its position in it"), WRONG_ROUND(
                                                 "it was signed in another round of this discussion"), DUPLICATE(
-                                                        "its signature already appears earlier in this conversation");
+                                                        "its signature already appears earlier in this conversation"), NOT_IN_TRANSCRIPT(
+                                                                "it is not part of this conversation's transcript");
 
         private final String reason;
 
@@ -156,10 +171,91 @@ public class GroupSigningGuard {
     }
 
     /**
-     * What a receiver may see of a transcript, and whether it asked to see only
-     * verified entries.
+     * What a reader may see of a transcript, and whether it asked to see only
+     * verified entries. Every prompt the engine composes for an agent, and every
+     * record it keeps from the transcript, quotes the transcript through one of
+     * these: {@link #transcript()} as a whole, or a stored entry through
+     * {@link #of} and {@link #trusts}.
      */
-    record View(Requirement requirement, List<TranscriptEntry> transcript) {
+    static final class View {
+        private final Requirement requirement;
+        private final List<TranscriptEntry> transcript;
+        private final List<TranscriptEntry> stored;
+        /**
+         * Each stored entry's position, by identity: a copy of a signed entry is equal
+         * to it but is a duplicate. {@code null} when nothing was filtered.
+         */
+        private final Map<TranscriptEntry, Integer> positions;
+        private final List<Verdict> verdicts;
+
+        /** A view that shows {@code transcript} as it is. */
+        View(Requirement requirement, List<TranscriptEntry> transcript) {
+            this.requirement = requirement;
+            this.transcript = transcript;
+            this.stored = transcript;
+            this.positions = null;
+            this.verdicts = null;
+        }
+
+        private View(Requirement requirement, List<TranscriptEntry> stored, List<TranscriptEntry> visible, List<Verdict> verdicts) {
+            this.requirement = requirement;
+            this.transcript = visible;
+            this.stored = stored;
+            this.verdicts = verdicts;
+            this.positions = new IdentityHashMap<>(stored.size());
+            for (int i = 0; i < stored.size(); i++) {
+                positions.putIfAbsent(stored.get(i), i);
+            }
+        }
+
+        Requirement requirement() {
+            return requirement;
+        }
+
+        /** The whole transcript as the reader may see it. */
+        List<TranscriptEntry> transcript() {
+            return transcript;
+        }
+
+        /** The transcript this view was taken of, as stored. */
+        List<TranscriptEntry> stored() {
+            return stored;
+        }
+
+        /** Whether the reader sees only what verifies (or its setting is unknown). */
+        boolean verifying() {
+            return requirement != Requirement.NOT_REQUIRED;
+        }
+
+        /**
+         * {@code stored} as the reader may see it: itself, relabelled, or a
+         * {@code [withheld: ...]} placeholder. An entry that is not part of the
+         * transcript this view was taken of is withheld.
+         */
+        TranscriptEntry of(TranscriptEntry stored) {
+            if (positions == null || stored == null) {
+                return stored;
+            }
+            Integer position = positions.get(stored);
+            return position != null ? transcript.get(position) : withheld(stored, Verdict.NOT_IN_TRANSCRIPT);
+        }
+
+        /** Each of {@code stored} as the reader may see it, in order. */
+        List<TranscriptEntry> of(List<TranscriptEntry> stored) {
+            return stored == null || positions == null ? stored : stored.stream().map(this::of).toList();
+        }
+
+        /**
+         * Whether the reader may take {@code stored}'s text as what its speaker wrote:
+         * it verified, it is the reader's own, or no agent wrote it.
+         */
+        boolean trusts(TranscriptEntry stored) {
+            if (positions == null) {
+                return true;
+            }
+            Integer position = stored != null ? positions.get(stored) : null;
+            return position != null && verdicts.get(position).trusted();
+        }
     }
 
     /**
@@ -268,10 +364,87 @@ public class GroupSigningGuard {
         if (requirement == Requirement.NOT_REQUIRED) {
             return new View(requirement, transcript);
         }
-        List<TranscriptEntry> snapshot;
-        synchronized (transcript) {
-            snapshot = List.copyOf(transcript);
+        return filtered(requirement, receiverAgentId, "receiver '" + receiverAgentId + "'", gc, snapshotOf(transcript));
+    }
+
+    /**
+     * The stored transcript of {@code gc} as {@code readerId} may see it: an agent
+     * member, or a nested group, which reads as strictly as its strictest member.
+     * {@code guard} is {@code null} where an engine was wired without one, which
+     * shows every entry.
+     */
+    static View viewOf(GroupSigningGuard guard, String readerId, GroupConversation gc) {
+        List<TranscriptEntry> snapshot = snapshotOf(gc.getTranscript());
+        return guard != null ? guard.viewFor(readerId, gc, snapshot) : new View(Requirement.NOT_REQUIRED, snapshot);
+    }
+
+    /**
+     * The stored transcript of {@code gc} as the engine's own records may count it:
+     * the negotiation table, the vote tally and the lessons a retrospective stores,
+     * which every reader then sees. When any of {@code readerIds} requires peer
+     * verification (or its setting is unknown), only entries that verify for every
+     * reader count, so no reader's own entries are exempt; otherwise every entry
+     * does.
+     */
+    static View recordView(GroupSigningGuard guard, GroupConversation gc, Collection<String> readerIds) {
+        List<TranscriptEntry> snapshot = snapshotOf(gc.getTranscript());
+        if (guard == null || guard.agentStore == null || guard.agentSigningService == null) {
+            return new View(Requirement.NOT_REQUIRED, snapshot);
         }
+        Requirement strictest = Requirement.NOT_REQUIRED;
+        for (String readerId : readerIds) {
+            Requirement requirement = guard.requirementOf(readerId);
+            if (requirement == Requirement.REQUIRED) {
+                strictest = requirement;
+                break;
+            }
+            if (requirement == Requirement.UNKNOWN) {
+                strictest = requirement;
+            }
+        }
+        if (strictest == Requirement.NOT_REQUIRED) {
+            return new View(strictest, snapshot);
+        }
+        return guard.filtered(strictest, null, "the group's own records", gc, snapshot);
+    }
+
+    /**
+     * {@code entries} (a slice of {@code gc}'s transcript) as the engine's records
+     * may count them (see {@link #recordView}): each entry, or {@code null} in
+     * place of one that does not verify for every reader, so positions hold.
+     */
+    public static List<TranscriptEntry> recordedEntries(GroupSigningGuard guard, GroupConversation gc, AgentGroupConfiguration config,
+                                                        List<TranscriptEntry> entries) {
+        View records = recordView(guard, gc, readersOf(config, gc));
+        if (entries == null || !records.verifying()) {
+            return entries;
+        }
+        return entries.stream().map(entry -> records.trusts(entry) ? entry : null).toList();
+    }
+
+    /**
+     * Everyone whose verification setting decides what the engine's records count:
+     * the members (recruits included, humans excluded), the moderator and the
+     * facilitator.
+     */
+    static Set<String> readersOf(AgentGroupConfiguration config, GroupConversation gc) {
+        Set<String> readers = new LinkedHashSet<>();
+        for (GroupMember member : GroupConversationService.rosterWithRecruits(config, gc)) {
+            if (member != null && member.agentId() != null && member.memberType() != MemberType.HUMAN) {
+                readers.add(member.agentId());
+            }
+        }
+        if (config.getModeratorAgentId() != null && !config.getModeratorAgentId().isBlank()) {
+            readers.add(config.getModeratorAgentId());
+        }
+        if (config.getFacilitator() != null && config.getFacilitator().agentId() != null) {
+            readers.add(config.getFacilitator().agentId());
+        }
+        return readers;
+    }
+
+    private View filtered(Requirement requirement, String receiverAgentId, String readerLabel, GroupConversation gc,
+                          List<TranscriptEntry> snapshot) {
         List<Verdict> verdicts = verify(gc, snapshot, receiverAgentId);
         List<TranscriptEntry> visible = new ArrayList<>(snapshot.size());
         for (int i = 0; i < snapshot.size(); i++) {
@@ -282,11 +455,28 @@ public class GroupSigningGuard {
             } else if (verdict.trusted()) {
                 visible.add(entry);
             } else {
-                report(receiverAgentId, gc, i, entry, verdict);
+                report(readerLabel, gc, i, entry, verdict);
                 visible.add(withheld(entry, verdict));
             }
         }
-        return new View(requirement, List.copyOf(visible));
+        return new View(requirement, snapshot, List.copyOf(visible), verdicts);
+    }
+
+    private static List<TranscriptEntry> snapshotOf(List<TranscriptEntry> transcript) {
+        synchronized (transcript) {
+            return List.copyOf(transcript);
+        }
+    }
+
+    /**
+     * Wires how a nested group's members are found, so a {@code GROUP} member reads
+     * the parent transcript as strictly as its strictest agent member: its prompt
+     * becomes the question every one of them is asked. {@code resolver} returns
+     * {@code null} for an id that names no group. Unwired, a group requires
+     * nothing.
+     */
+    public void setGroupMembers(Function<String, List<GroupMember>> resolver) {
+        this.groupMembers = resolver;
     }
 
     /** Whether {@code entry} is a placeholder {@link #visibleTo} put in. */
@@ -421,10 +611,14 @@ public class GroupSigningGuard {
     }
 
     private Requirement requirementOf(String receiverAgentId) {
+        return requirementOf(receiverAgentId, new HashSet<>());
+    }
+
+    private Requirement requirementOf(String receiverAgentId, Set<String> groupsVisited) {
         try {
             var resourceId = agentStore.getCurrentResourceId(receiverAgentId);
             if (resourceId == null) {
-                return Requirement.NOT_REQUIRED;
+                return groupRequirement(receiverAgentId, groupsVisited);
             }
             AgentConfiguration config = agentConfigs.read(receiverAgentId, resourceId.getVersion());
             var security = config.getSecurity();
@@ -432,7 +626,7 @@ public class GroupSigningGuard {
             lastKnownRequirement.put(receiverAgentId, required);
             return required ? Requirement.REQUIRED : Requirement.NOT_REQUIRED;
         } catch (ResourceNotFoundException e) {
-            return Requirement.NOT_REQUIRED;
+            return groupRequirement(receiverAgentId, groupsVisited);
         } catch (Exception e) {
             Boolean lastKnown = lastKnownRequirement.getIfPresent(receiverAgentId);
             LOGGER.warnf("Could not read agent '%s' to learn whether it requires peer verification (%s) — %s",
@@ -443,6 +637,40 @@ public class GroupSigningGuard {
             }
             return lastKnown ? Requirement.REQUIRED : Requirement.NOT_REQUIRED;
         }
+    }
+
+    /**
+     * The requirement of an id that names no agent: for a nested group, that of its
+     * strictest agent member (nested groups included, each visited once); otherwise
+     * none. A group whose members cannot be read is {@code UNKNOWN}.
+     */
+    private Requirement groupRequirement(String groupId, Set<String> groupsVisited) {
+        Function<String, List<GroupMember>> resolver = groupMembers;
+        if (resolver == null || !groupsVisited.add(groupId)) {
+            return Requirement.NOT_REQUIRED;
+        }
+        List<GroupMember> members;
+        try {
+            members = resolver.apply(groupId);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read group '%s' to learn whether its members require peer verification (%s)",
+                    LogSanitizer.sanitize(groupId), e.getMessage());
+            return Requirement.UNKNOWN;
+        }
+        Requirement strictest = Requirement.NOT_REQUIRED;
+        for (GroupMember member : members != null ? members : List.<GroupMember>of()) {
+            if (member == null || member.agentId() == null || member.memberType() == MemberType.HUMAN) {
+                continue;
+            }
+            Requirement requirement = requirementOf(member.agentId(), groupsVisited);
+            if (requirement == Requirement.REQUIRED) {
+                return requirement;
+            }
+            if (requirement == Requirement.UNKNOWN) {
+                strictest = requirement;
+            }
+        }
+        return strictest;
     }
 
     /**
@@ -600,13 +828,13 @@ public class GroupSigningGuard {
      * conversation, and at DEBUG after that: every member that requires
      * verification sees the same entry on every turn.
      */
-    private void report(String receiverAgentId, GroupConversation gc, int index, TranscriptEntry entry, Verdict verdict) {
+    private void report(String reader, GroupConversation gc, int index, TranscriptEntry entry, Verdict verdict) {
         boolean first = gc.getId() == null
                 || reported.get(gc.getId(), ignored -> ConcurrentHashMap.newKeySet()).add(index + ":" + verdict);
-        String message = "Withheld transcript entry %d from agent '%s' in group conversation '%s' from receiver '%s', "
+        String message = "Withheld transcript entry %d from agent '%s' in group conversation '%s' from %s, "
                 + "which requires peer verification: %s (keyV=%s, nonce=%s)";
         Object[] args = {index, LogSanitizer.sanitize(entry.speakerAgentId()), LogSanitizer.sanitize(gc.getId()),
-                LogSanitizer.sanitize(receiverAgentId), verdict, entry.signatureKeyVersion(), LogSanitizer.sanitize(entry.signatureNonce())};
+                LogSanitizer.sanitize(reader), verdict, entry.signatureKeyVersion(), LogSanitizer.sanitize(entry.signatureNonce())};
         if (first) {
             LOGGER.errorf(message, args);
         } else {

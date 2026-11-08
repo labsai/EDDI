@@ -90,6 +90,7 @@ public class TaskForceEngine {
     private final Map<String, DiscussionControlToken> discussionControls;
     private final int defaultAgentTimeoutSeconds;
     private final int memberTurnCancelDrainSeconds;
+    private GroupSigningGuard signingGuard;
 
     public TaskForceEngine(MemberTurnExecutor memberTurnExecutor, ITemplatingEngine templatingEngine,
             IJsonSerialization jsonSerialization, ExecutorService executorService, CallerIdentityContext callerIdentityContext,
@@ -102,6 +103,23 @@ public class TaskForceEngine {
         this.discussionControls = discussionControls;
         this.defaultAgentTimeoutSeconds = defaultAgentTimeoutSeconds;
         this.memberTurnCancelDrainSeconds = memberTurnCancelDrainSeconds;
+    }
+
+    /**
+     * Wires the guard every task prompt (execute, verify, bid) reads the transcript
+     * and the task records through. Without it they read them as stored.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
+    }
+
+    /**
+     * The task records as {@code readerId} may be shown them. {@code config}
+     * decides which assignees are human; {@code null} treats none as human.
+     */
+    private TaskRecordView taskRecords(String readerId, GroupConversation gc, AgentGroupConfiguration config) {
+        return new TaskRecordView(GroupSigningGuard.viewOf(signingGuard, readerId, gc), readerId,
+                assignee -> GroupHumanTasks.isHumanAssignee(config, assignee));
     }
 
     /**
@@ -460,10 +478,16 @@ public class TaskForceEngine {
                                         member.agentId(), member.displayName(), phaseIdx, phase.name()));
                             }
 
-                            // Build task-specific input
-                            String taskInput = buildTaskExecutionInput(task, question, phase, gc);
-                            TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null,
-                                    listener, cancellation);
+                            // Build task-specific input from the records as the member may
+                            // see them. A member that verifies is not asked to do a task
+                            // whose own text does not verify for it: the task fails instead.
+                            var records = taskRecords(member.agentId(), gc, config);
+                            TranscriptEntry entry = records.showsTask(task)
+                                    ? memberTurnExecutor.executeAgentTurn(member, gc,
+                                            buildTaskExecutionInput(task, question, phase, gc, records), protocol, phaseIdx, phase, null,
+                                            listener, cancellation)
+                                    : new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                                            TranscriptEntryType.SKIPPED, Instant.now(), UNVERIFIED_TASK_REASON, null);
 
                             // The orchestrator owns the group document from the moment it
                             // cancels this wave: publish the result only if the wave is
@@ -673,6 +697,12 @@ public class TaskForceEngine {
      *            values below 1 are treated as 1
      */
     /** What the planner is told about a HUMAN member, ahead of their role. */
+    /**
+     * Why a task failed without running: its assignee requires peer verification
+     * and the task's own text does not verify for it.
+     */
+    static final String UNVERIFIED_TASK_REASON = "Its task text could not be verified, and this member requires peer verification";
+
     static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
 
     /**
@@ -686,7 +716,10 @@ public class TaskForceEngine {
         }
         var task = GroupHumanTasks.nextHumanTask(config, gc.getTaskList()).orElse(null);
         GroupMember member = task != null ? findMember(config.getMembers(), task.assignedAgentId()) : null;
-        return member != null ? GroupHumanTasks.humanTurnFor(member, task, buildTaskExecutionInput(task, question, phase, gc)) : null;
+        return member != null
+                ? GroupHumanTasks.humanTurnFor(member, task,
+                        buildTaskExecutionInput(task, question, phase, gc, taskRecords(member.agentId(), gc, config)))
+                : null;
     }
 
     static long waveBudgetSeconds(ProtocolConfig protocol, int maxTasksPerAgent) {
@@ -822,7 +855,7 @@ public class TaskForceEngine {
 
         GroupMember verifier = speakers.getFirst();
         List<TaskItem> verified = completedTasks;
-        runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+        runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
 
         // E2 maxReworks: a task that failed this pass goes back to its member with the
         // verifier's feedback and is checked again, up to maxReworks times per task.
@@ -873,7 +906,7 @@ public class TaskForceEngine {
                     || (maxTurns > 0 && turnCounter.get() >= maxTurns)) {
                 return;
             }
-            runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+            runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
         }
     }
 
@@ -936,7 +969,8 @@ public class TaskForceEngine {
      * One verifier turn over {@code completedTasks}: the verdict is parsed and
      * applied, and the transcript shows it in readable form.
      */
-    private void runVerificationPass(GroupConversation gc, GroupMember verifier, List<TaskItem> completedTasks, DiscussionPhase phase,
+    private void runVerificationPass(GroupConversation gc, AgentGroupConfiguration config, GroupMember verifier, List<TaskItem> completedTasks,
+                                     DiscussionPhase phase,
                                      String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
                                      AtomicInteger turnCounter)
             throws GroupDiscussionException {
@@ -947,12 +981,13 @@ public class TaskForceEngine {
                     new GroupConversationEventSink.SpeakerStartEvent(verifier.agentId(), verifier.displayName(), phaseIdx, phase.name()));
         }
 
-        // Build verification input
+        // Build verification input from the records as the verifier may see them
+        var records = taskRecords(verifier.agentId(), gc, config);
         String verifyTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.VERIFY);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("displayName", verifier.displayName());
-        List<Map<String, Object>> taskData = completedTasks.stream().map(t -> {
+        List<Map<String, Object>> taskData = completedTasks.stream().map(records::seen).map(t -> {
             Map<String, Object> td = new LinkedHashMap<>();
             td.put("subject", t.subject());
             td.put("description", t.description());
@@ -977,12 +1012,15 @@ public class TaskForceEngine {
         // Replace raw JSON with a human-readable summary for the transcript.
         // The JSON was needed for parseAndApplyVerification above; users should
         // see formatted pass/fail results, not raw JSON.
+        // Signed for the verifier, as a DISSENT or BID is: the summary is its own
+        // verdict in readable form, and unsigned it would be withheld from every peer
+        // that verifies, though the verifier signs.
         String formattedContent = formatVerificationForDisplay(verifyEntry.content());
-        TranscriptEntry displayEntry = new TranscriptEntry(
+        TranscriptEntry displayEntry = memberTurnExecutor.sign(gc, new TranscriptEntry(
                 verifyEntry.speakerAgentId(), verifyEntry.speakerDisplayName(),
                 formattedContent, verifyEntry.phaseIndex(), verifyEntry.phaseName(),
                 verifyEntry.type(), verifyEntry.timestamp(), verifyEntry.errorReason(),
-                verifyEntry.targetAgentId());
+                verifyEntry.targetAgentId()));
         gc.getTranscript().add(displayEntry);
 
         if (listener != null) {
@@ -996,6 +1034,16 @@ public class TaskForceEngine {
      * configured context scope.
      */
     public String buildTaskExecutionInput(TaskItem task, String question, DiscussionPhase phase, GroupConversation gc) {
+        return buildTaskExecutionInput(task, question, phase, gc, taskRecords(task.assignedAgentId(), gc, null));
+    }
+
+    /**
+     * As above, quoting the task, its dependencies' results and the reviewer's
+     * feedback as {@code records}' reader may see them.
+     */
+    private String buildTaskExecutionInput(TaskItem storedTask, String question, DiscussionPhase phase, GroupConversation gc,
+                                           TaskRecordView records) {
+        TaskItem task = records.seen(storedTask);
         String template = DiscussionStylePresets.templateFor(phase, PhaseType.EXECUTE);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
@@ -1005,7 +1053,7 @@ public class TaskForceEngine {
         // Add dependency results if scope is TASK_WITH_DEPS
         if (phase.contextScope() == ContextScope.TASK_WITH_DEPS && gc.getTaskList() != null) {
             List<Map<String, Object>> depResults = task.dependsOnIds().stream()
-                    .map(depId -> gc.getTaskList().findById(depId))
+                    .map(depId -> records.seen(gc.getTaskList().findById(depId)))
                     .filter(dep -> dep != null && dep.result() != null)
                     .map(dep -> {
                         Map<String, Object> dr = new LinkedHashMap<>();
@@ -1313,7 +1361,13 @@ public class TaskForceEngine {
         List<CompletableFuture<List<TaskBidEngine.Bid>>> futures = bidders.stream()
                 .map(member -> CompletableFuture.supplyAsync(callerIdentityContext.withIdentitySupplying(bidCaller, () -> {
                     try {
-                        String prompt = TaskBidEngine.buildBidPrompt(unassigned, member, question);
+                        // Each bidder is announced only the tasks whose text it may see.
+                        var records = taskRecords(member.agentId(), gc, config);
+                        List<TaskItem> announced = unassigned.stream().filter(records::showsTask).toList();
+                        if (announced.isEmpty()) {
+                            return List.<TaskBidEngine.Bid>of();
+                        }
+                        String prompt = TaskBidEngine.buildBidPrompt(announced, member, question);
                         TranscriptEntry reply = memberTurnExecutor.executeAgentTurn(member, gc, prompt, protocol,
                                 phaseIdx, phase, null, listener, cancellation);
                         if (reply != null && reply.content() != null && !reply.content().isBlank()) {
@@ -1480,11 +1534,13 @@ public class TaskForceEngine {
 
         // Add error transcript entry
         synchronized (gc.getTranscript()) {
+            // The engine's note, not the member's result: recorded as the engine's, so a
+            // peer that verifies is not shown it as an unsigned entry of the member.
             gc.getTranscript().add(new TranscriptEntry(
-                    member.agentId(), member.displayName(),
+                    "system", member.displayName(),
                     "[ERROR] Task '%s' failed: %s".formatted(task.subject(), errorMessage),
                     phaseIdx, phase.name(), TranscriptEntryType.TASK_RESULT,
-                    Instant.now(), null, null));
+                    Instant.now(), null, member.agentId()));
         }
 
         errors.add(ex);

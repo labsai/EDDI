@@ -44,6 +44,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * Runs the debate-style phase turn orders (sequential, parallel, and
@@ -68,6 +69,7 @@ public class PhaseExecutionEngine {
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
     private ServiceConvergenceJudge serviceJudge;
+    private GroupSigningGuard signingGuard;
 
     /**
      * The {@code memberConversationIds} key the convergence judge's own private
@@ -100,6 +102,15 @@ public class PhaseExecutionEngine {
      */
     public void setServiceJudge(ServiceConvergenceJudge serviceJudge) {
         this.serviceJudge = serviceJudge;
+    }
+
+    /**
+     * Wires the guard every prompt this engine composes for a role turn (judge,
+     * dissenter, tie-breaker) and the vote tally read the transcript through.
+     * Without it they read the transcript as stored.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     /**
@@ -262,11 +273,14 @@ public class PhaseExecutionEngine {
             turnCounter.incrementAndGet();
         }
 
+        // The judge's input, built from the entries as the judge sees them: the
+        // moderator agent reads them through its own verification view.
+        Function<UnaryOperator<List<TranscriptEntry>>, String> judgeInput = seen -> verdictMode
+                ? ConvergenceDetector.buildVerdictInput(currentQuestion(gc), seen.apply(repeatEntries))
+                : ConvergenceDetector.buildJudgeInput(seen.apply(previousRepeatEntries), seen.apply(repeatEntries));
         var verdict = verdictMode
-                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
-                        ConvergenceDetector.buildVerdictInput(currentQuestion(gc), repeatEntries), ConvergenceDetector::parseVerdict, listener)
-                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
-                        ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries),
+                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence, judgeInput, ConvergenceDetector::parseVerdict, listener)
+                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence, judgeInput,
                         output -> ConvergenceDetector.parseJudgeVerdict(output, convergence.threshold()), listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
         return verdict.converged() ? PhaseOutcome.endRepeats(verdict.summary()) : PhaseOutcome.cont();
@@ -294,7 +308,6 @@ public class PhaseExecutionEngine {
                                int phaseIdx, List<GroupMember> synthesizers, GroupDiscussionEventListener listener,
                                AtomicInteger turnCounter, int maxTurns) {
 
-        String synthesis = latestSynthesis(gc);
         Set<String> synthesizerIds = synthesizers == null
                 ? Set.of()
                 : synthesizers.stream().map(GroupMember::agentId).filter(Objects::nonNull).collect(Collectors.toSet());
@@ -318,16 +331,26 @@ public class PhaseExecutionEngine {
             return 0;
         }
 
-        // I3: after a judged debate the transcript entry holds the judge's JSON.
-        // Asking members to disagree with a serialization format produces DISSENT
-        // entries — public, SSE-streamed, and recorded on the DecisionRecord — that
-        // argue with braces. The rendered outcome is what a human would have been
-        // shown, so it is what the minority reacts to.
-        DecisionRecord decision = gc.getDecision();
-        String reactTo = DebateVerdictParser.isRenderedFrom(decision, synthesis) ? decision.outcome() : synthesis;
-        String input = AbstentionDetector.buildDissentInput(reactTo);
         List<Dissent> collected = new ArrayList<>();
         for (GroupMember member : dissenters) {
+            // Each dissenter reacts to the synthesis as it sees it. A verifying member
+            // for whom this round's synthesis does not verify has nothing it may react
+            // to, so it is not asked.
+            var view = GroupSigningGuard.viewOf(signingGuard, member.agentId(), gc);
+            String synthesis = latestSynthesis(gc, view);
+            if (synthesis == null && view.verifying()) {
+                LOGGER.infof("Group %s: no dissent turn for '%s' — this round's synthesis does not verify for it",
+                        LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()));
+                continue;
+            }
+            // I3: after a judged debate the transcript entry holds the judge's JSON.
+            // Asking members to disagree with a serialization format produces DISSENT
+            // entries — public, SSE-streamed, and recorded on the DecisionRecord — that
+            // argue with braces. The rendered outcome is what a human would have been
+            // shown, so it is what the minority reacts to.
+            DecisionRecord decision = gc.getDecision();
+            String reactTo = DebateVerdictParser.isRenderedFrom(decision, synthesis) ? decision.outcome() : synthesis;
+            String input = AbstentionDetector.buildDissentInput(reactTo);
             if (maxTurns > 0 && turnCounter != null && turnCounter.get() >= maxTurns) {
                 break;
             }
@@ -416,9 +439,18 @@ public class PhaseExecutionEngine {
         return (int) (((long) n * m) - selfPairs);
     }
 
-    /** The most recent synthesis text, which is what dissenters are reacting to. */
+    /** The most recent synthesis text of this round, as stored. */
     private static String latestSynthesis(GroupConversation gc) {
-        List<TranscriptEntry> transcript = gc.getTranscript();
+        return latestSynthesis(gc, new GroupSigningGuard.View(GroupSigningGuard.Requirement.NOT_REQUIRED, gc.getTranscript()));
+    }
+
+    /**
+     * The most recent synthesis text of this round as {@code view}'s reader sees
+     * it, which is what a dissenter reacts to; {@code null} when there is none, or
+     * when the reader verifies and the latest synthesis does not verify for it.
+     */
+    private static String latestSynthesis(GroupConversation gc, GroupSigningGuard.View view) {
+        List<TranscriptEntry> transcript = view.transcript();
         // THIS round's entries only. A continuation re-runs every phase from index 0
         // against a transcript that still holds the previous round's, and an entry
         // carries no round — so an unscoped scan let a round whose synthesis
@@ -432,13 +464,14 @@ public class PhaseExecutionEngine {
             for (int i = transcript.size() - 1; i >= from; i--) {
                 TranscriptEntry e = transcript.get(i);
                 if (e != null && e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null) {
-                    return e.content();
+                    return GroupSigningGuard.isWithheld(e) ? null : e.content();
                 }
             }
         }
         // Only a first round may fall back to the answer field: there is no earlier
-        // round for it to have come from.
-        return from == 0 ? gc.getSynthesizedAnswer() : null;
+        // round for it to have come from. It is free text no signature covers, so
+        // never for a verifying reader.
+        return from == 0 && !view.verifying() ? gc.getSynthesizedAnswer() : null;
     }
 
     /**
@@ -522,11 +555,15 @@ public class PhaseExecutionEngine {
                                                                   AtomicInteger turnCounter, int maxTurns) {
         HumanTieBreakEngine.PendingTieBreak pendingTieBreak = null;
         var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new AgentGroupConfiguration.VoteConfig();
+        // Options and ballots as the group's records may count them: once any reader
+        // requires peer verification, only what verifies for every reader, so the
+        // options a tie-breaker is shown and the ballots counted are verified text.
+        var records = GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
+        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, records.transcript());
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
             transcriptSnapshot = List.copyOf(gc.getTranscript());
         }
-        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, transcriptSnapshot);
         if (options.size() < 2) {
             LOGGER.warnf("Group %s: VOTE phase '%s' resolved %d option(s) — a vote needs at least two; recording NONE",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phase.name()), options.size());
@@ -537,7 +574,9 @@ public class PhaseExecutionEngine {
             return null;
         }
 
-        List<TranscriptEntry> ballots = repeatEntries.stream().filter(e -> e != null && e.type() == TranscriptEntryType.VOTE).toList();
+        List<TranscriptEntry> ballots = repeatEntries.stream()
+                .filter(e -> e != null && e.type() == TranscriptEntryType.VOTE && records.trusts(e))
+                .toList();
         int participants = speakers != null ? speakers.size() : ballots.size();
         var outcome = VoteTallyEngine.tally(ballots, participants, options, voteConfig, phase.name());
 
@@ -720,12 +759,14 @@ public class PhaseExecutionEngine {
 
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
                                                             ProtocolConfig protocol, int phaseIdx, int repeat, ConvergenceConfig convergence,
-                                                            String input, Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
+                                                            Function<UnaryOperator<List<TranscriptEntry>>, String> input,
+                                                            Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
                                                             GroupDiscussionEventListener listener) {
         // SERVICE judge first: it needs no moderator, so it must run before the
-        // no-moderator early return. Empty = run the moderator judge below.
+        // no-moderator early return. Empty = run the moderator judge below. It is no
+        // agent and has no verification setting, so it reads the entries as stored.
         Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = serviceJudge != null
-                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input, parser, listener)
+                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input.apply(UnaryOperator.identity()), parser, listener)
                 : Optional.empty();
         if (serviceVerdict.isPresent()) {
             return serviceVerdict.get();
@@ -743,8 +784,9 @@ public class PhaseExecutionEngine {
             // moderator AGENT but must not share the moderator's CONVERSATION, or its
             // "reply with ONLY this JSON" prompts become the recent history a later
             // SYNTHESIS turn (same agent) reads — and the synthesis comes back as JSON.
-            TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input, protocol, phaseIdx, phase, null, listener,
-                    null, JUDGE_CONVERSATION_KEY);
+            var view = GroupSigningGuard.viewOf(signingGuard, moderatorAgentId, gc);
+            TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input.apply(view::of), protocol, phaseIdx, phase,
+                    null, listener, null, JUDGE_CONVERSATION_KEY);
             return parser.apply(judgeEntry != null ? judgeEntry.content() : null);
         } catch (Exception e) {
             LOGGER.warnf("Convergence judge failed for phase '%s' — continuing without an early exit: %s", phase.name(), e.getMessage());

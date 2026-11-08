@@ -83,6 +83,9 @@ class TaskForceEngineReworkTest {
         var templatingEngine = mock(ITemplatingEngine.class);
         when(templatingEngine.processTemplate(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         memberTurnExecutor = mock(MemberTurnExecutor.class);
+        // The verification summary is signed for the verifier; signing is the guard's
+        // business.
+        when(memberTurnExecutor.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         when(memberTurnExecutor.executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any())).thenAnswer(inv -> {
             GroupMember member = inv.getArgument(0);
             verifierCalls++;

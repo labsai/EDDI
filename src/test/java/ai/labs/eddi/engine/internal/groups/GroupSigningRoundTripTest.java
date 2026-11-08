@@ -487,20 +487,27 @@ class GroupSigningRoundTripTest {
     }
 
     /**
-     * A ballot is counted against the options the tally resolves from the stored
-     * transcript, so a verifying voter is shown those options even when the
-     * synthesis they come from is withheld from it.
+     * A ballot's options are agent text like any other: a verifying voter is
+     * offered none from a synthesis that does not verify for it (and the tally,
+     * which counts only what verifies once a reader verifies, has none either), and
+     * the options of one that does.
      */
     @Test
-    void aVerifyingVoterIsShownTheOptionsItsBallotIsCountedAgainst() throws Exception {
-        gc.getTranscript().add(new TranscriptEntry(SPEAKER, "Speaker", "Option A: ship now\nOption B: wait a week", 0, "Synthesis",
-                TranscriptEntryType.SYNTHESIS, Instant.now(), null, null));
+    void aVerifyingVoterIsOfferedOnlyOptionsFromASynthesisThatVerifies() throws Exception {
+        provisionKeyAndEnableSigning();
+        var unsigned = new TranscriptEntry(SPEAKER, "Speaker", "Option A: ship now\nOption B: wait a week", 0, "Synthesis",
+                TranscriptEntryType.SYNTHESIS, Instant.now(), null, null);
+        gc.getTranscript().add(unsigned);
         var prompts = renderedPrompts();
+        var voter = new GroupMember(RECEIVER, "Receiver", 2, null);
+        var vote = new DiscussionPhase("Vote", PhaseType.VOTE);
 
-        prompts.builder().buildPhaseInput(new DiscussionPhase("Vote", PhaseType.VOTE), new GroupMember(RECEIVER, "Receiver", 2, null), "q",
-                gc.getTranscript(), 1, null, List.of(), null, gc, null);
+        prompts.builder().buildPhaseInput(vote, voter, "q", gc.getTranscript(), 1, null, List.of(), null, gc, null);
+        gc.getTranscript().set(0, guard.sign(gc, unsigned));
+        prompts.builder().buildPhaseInput(vote, voter, "q", gc.getTranscript(), 1, null, List.of(), null, gc, null);
 
-        assertEquals(List.of("ship now", "wait a week"), prompts.data().getValue().get("options"));
+        assertEquals(List.of(), prompts.data().getAllValues().get(0).get("options"));
+        assertEquals(List.of("ship now", "wait a week"), prompts.data().getAllValues().get(1).get("options"));
     }
 
     /** Provisions through the REST method and turns signing on through a save. */

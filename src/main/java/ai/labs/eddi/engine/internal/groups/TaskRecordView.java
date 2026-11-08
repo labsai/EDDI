@@ -1,0 +1,162 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.internal.groups;
+
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.engine.internal.TaskListParser;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Predicate;
+
+/**
+ * The task records of a task-force discussion as one reader may be shown them.
+ * A task's text is agent-authored: its subject and description come from the
+ * planner's {@code PLAN} entry or a member's task tool, its result from the
+ * assignee's {@code TASK_RESULT} entry, its verification note from the
+ * verifier's {@code VERIFICATION} entry. The records themselves carry no
+ * signature, so for a reader that requires peer verification each field is
+ * shown only when the entry it comes from is one the reader trusts (see
+ * {@link GroupSigningGuard.View#trusts}), and is {@link #WITHHELD} otherwise.
+ * <ul>
+ * <li>A <b>result</b> of an agent's task is shown when the reader is its
+ * assignee, or a trusted entry of the assignee holds exactly that text. So a
+ * result whose entry is unsigned, or a result edited in the store, is not.</li>
+ * <li>A <b>subject and description</b> are withheld when another agent's task
+ * tool wrote them, or when an untrusted {@code PLAN} entry parses to them and
+ * no trusted one does. Configured tasks and the user's own are not
+ * agent-authored.</li>
+ * <li>A <b>verification note</b> is withheld when an untrusted
+ * {@code VERIFICATION} entry holds it and no trusted agent entry does.</li>
+ * </ul>
+ * For a reader that does not verify, every record is shown as stored.
+ *
+ * @author ginccc
+ */
+final class TaskRecordView {
+
+    /** What a reader is shown in place of task text it may not take as written. */
+    static final String WITHHELD = "[withheld: this text could not be verified]";
+
+    private static final Set<String> ENGINE_SPEAKERS = Set.of("user", "system");
+
+    private final GroupSigningGuard.View view;
+    private final String readerId;
+    private final Predicate<String> isHuman;
+    /** Trusted content by speaker id, built on first use. */
+    private Map<String, Set<String>> trustedContents;
+    private Set<List<String>> trustedPlans;
+    private Set<List<String>> untrustedPlans;
+
+    /**
+     * @param isHuman
+     *            whether an assignee id is a HUMAN member, whose result is not
+     *            agent-authored
+     */
+    TaskRecordView(GroupSigningGuard.View view, String readerId, Predicate<String> isHuman) {
+        this.view = view;
+        this.readerId = readerId;
+        this.isHuman = isHuman;
+    }
+
+    /** Whether the reader is shown every record as stored. */
+    boolean showsEverything() {
+        return !view.verifying();
+    }
+
+    /** Whether the reader may be shown {@code task}'s subject and description. */
+    boolean showsTask(TaskItem task) {
+        if (showsEverything() || task == null) {
+            return true;
+        }
+        if (task.createdByAgentId() != null) {
+            return task.createdByAgentId().equals(readerId);
+        }
+        List<String> parsed = List.of(Objects.toString(task.subject(), ""), Objects.toString(task.description(), ""));
+        indexPlans();
+        return !untrustedPlans.contains(parsed) || trustedPlans.contains(parsed);
+    }
+
+    /** {@code task} with every text field the reader may not be shown withheld. */
+    TaskItem seen(TaskItem task) {
+        if (showsEverything() || task == null) {
+            return task;
+        }
+        boolean showsTask = showsTask(task);
+        return new TaskItem(task.id(), showsTask ? task.subject() : WITHHELD, showsTask ? task.description() : WITHHELD, task.status(),
+                task.assignedAgentId(), task.assignedDisplayName(), task.dependsOnIds(), result(task), note(task), task.verified(),
+                task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
+    }
+
+    private String result(TaskItem task) {
+        String result = task.result();
+        String assignee = task.assignedAgentId();
+        if (result == null || assignee == null || assignee.equals(readerId) || isHuman.test(assignee)) {
+            return result;
+        }
+        return trustedContents().getOrDefault(assignee, Set.of()).contains(result) ? result : WITHHELD;
+    }
+
+    private String note(TaskItem task) {
+        String note = task.verificationNote();
+        if (note == null || note.isBlank()) {
+            return note;
+        }
+        boolean fromUntrustedEntry = false;
+        List<TranscriptEntry> stored = view.stored();
+        for (TranscriptEntry entry : stored) {
+            if (entry == null || entry.type() != TranscriptEntryType.VERIFICATION || entry.content() == null
+                    || !entry.content().contains(note)) {
+                continue;
+            }
+            if (!view.trusts(entry)) {
+                fromUntrustedEntry = true;
+            } else if (entry.speakerAgentId() != null && !ENGINE_SPEAKERS.contains(entry.speakerAgentId())) {
+                // An agent's own entry vouches for it; an engine note quoting it does not.
+                return note;
+            }
+        }
+        return fromUntrustedEntry ? WITHHELD : note;
+    }
+
+    private Map<String, Set<String>> trustedContents() {
+        if (trustedContents == null) {
+            trustedContents = new HashMap<>();
+            for (TranscriptEntry entry : view.stored()) {
+                if (entry != null && entry.content() != null && entry.speakerAgentId() != null && view.trusts(entry)) {
+                    trustedContents.computeIfAbsent(entry.speakerAgentId(), id -> new HashSet<>()).add(entry.content());
+                }
+            }
+        }
+        return trustedContents;
+    }
+
+    /**
+     * Parses every {@code PLAN} entry as the planning phase did, so a task can be
+     * traced to the plan it came from.
+     */
+    private void indexPlans() {
+        if (untrustedPlans != null) {
+            return;
+        }
+        trustedPlans = new HashSet<>();
+        untrustedPlans = new HashSet<>();
+        for (TranscriptEntry entry : view.stored()) {
+            if (entry == null || entry.type() != TranscriptEntryType.PLAN || entry.content() == null) {
+                continue;
+            }
+            Set<List<String>> into = view.trusts(entry) ? trustedPlans : untrustedPlans;
+            for (TaskListParser.ParsedTask task : TaskListParser.parse(entry.content(), List.of())) {
+                into.add(List.of(Objects.toString(task.subject(), ""), Objects.toString(task.description(), "")));
+            }
+        }
+    }
+}

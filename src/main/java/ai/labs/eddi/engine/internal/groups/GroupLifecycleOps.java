@@ -116,6 +116,7 @@ public class GroupLifecycleOps {
     private final Counter counterGroupContinue;
     private final Counter counterGroupClose;
     private final Counter counterGroupFailure;
+    private GroupSigningGuard signingGuard;
 
     public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -149,6 +150,15 @@ public class GroupLifecycleOps {
         this.counterGroupContinue = counterGroupContinue;
         this.counterGroupClose = counterGroupClose;
         this.counterGroupFailure = counterGroupFailure;
+    }
+
+    /**
+     * Wires the guard a follow-up reads the transcript through and signs the
+     * agent's answer with. Without it the follow-up sees the transcript as stored
+     * and its answer is recorded unsigned.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     public GroupConversation readGroupConversation(String groupConversationId)
@@ -321,11 +331,10 @@ public class GroupLifecycleOps {
                 Map<String, Context> context = new LinkedHashMap<>();
                 // Snapshot, never the live list: the member conversation serialises this
                 // context on its own thread while this one keeps appending to the
-                // transcript (see the same hand-off in executeAgentTurn).
-                List<TranscriptEntry> followUpTranscript;
-                synchronized (gc.getTranscript()) {
-                    followUpTranscript = List.copyOf(gc.getTranscript());
-                }
+                // transcript (see the same hand-off in executeAgentTurn). As the agent may
+                // see it: a member that requires peer verification gets every unverified
+                // peer entry withheld, as in a phase turn.
+                List<TranscriptEntry> followUpTranscript = GroupSigningGuard.viewOf(signingGuard, resolvedAgentId, gc).transcript();
                 context.put("groupTranscript", new Context(Context.ContextType.object, followUpTranscript));
                 context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
@@ -368,10 +377,12 @@ public class GroupLifecycleOps {
                     throw new GroupExecutionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
                 }
 
-                // Record the agent's response on the transcript
-                gc.getTranscript().add(new TranscriptEntry(
+                // Record the agent's response on the transcript, signed if the agent signs,
+                // so a peer that verifies sees it in a later continuation
+                TranscriptEntry answer = new TranscriptEntry(
                         resolvedAgentId, displayName, response, -1, "Follow-up",
-                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null));
+                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null);
+                gc.getTranscript().add(signingGuard != null ? signingGuard.sign(gc, answer) : answer);
 
                 // Transition back to COMPLETED — atomically (CAS on IN_PROGRESS) so a
                 // follow-up that races a cancel cannot resurrect a CANCELLED terminal
