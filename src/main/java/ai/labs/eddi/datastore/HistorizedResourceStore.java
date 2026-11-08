@@ -19,6 +19,12 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * <li>Read - try current, fall back to history</li>
  * </ul>
  * This class has <b>zero</b> database-specific dependencies.
+ * <p>
+ * No method holds a lock: concurrent writers, on this node or another, are
+ * decided by the storage's version-checked writes
+ * ({@link IResourceStorage#storeHistoryAndUpdate storeHistoryAndUpdate},
+ * {@link IResourceStorage#storeHistoryAndRemove storeHistoryAndRemove},
+ * {@link IResourceStorage#storeIfCurrentVersion storeIfCurrentVersion}).
  *
  * @param <T>
  *            the resource document type
@@ -84,7 +90,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public synchronized void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
+    public void delete(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
 
         checkNotNull(id, "id");
         checkNotNull(version, "version");
@@ -116,7 +122,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
     }
 
     @Override
-    public synchronized void deleteAllPermanently(String id) {
+    public void deleteAllPermanently(String id) {
         resourceStorage.removeAllPermanently(id);
     }
 

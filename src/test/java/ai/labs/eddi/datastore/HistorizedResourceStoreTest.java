@@ -7,6 +7,13 @@ package ai.labs.eddi.datastore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.*;
 import org.mockito.InOrder;
 
@@ -216,5 +223,81 @@ class HistorizedResourceStoreTest {
         store.deleteAllPermanently("id1");
 
         verify(storage).removeAllPermanently("id1");
+    }
+
+    /**
+     * The store is one instance per resource type, so a lock on it made every
+     * delete of that type on this node queue behind the one in progress, each
+     * holding it across several majority-acknowledged round trips (the GDPR erasure
+     * loop deletes one conversation descriptor after another). It protected
+     * nothing: update was never locked, other nodes do not share the monitor, and
+     * the storage's version-checked write already decides two deletes of the same
+     * id.
+     */
+    @Test
+    void deletesOfDifferentResourcesDoNotWaitForEachOther() throws Exception {
+        when(storage.read("a", 1)).thenReturn(mock(IResourceStorage.IResource.class));
+        when(storage.read("b", 1)).thenReturn(mock(IResourceStorage.IResource.class));
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            release.await(10, SECONDS);
+            return null;
+        }).when(storage).storeHistoryAndRemove(any(), eq("a"), eq(1));
+
+        assertRunsWhileAnotherIsInsideTheStorage(() -> {
+            store.delete("a", 1);
+            return null;
+        }, entered, release, () -> {
+            store.delete("b", 1);
+            return null;
+        });
+
+        verify(storage).storeHistoryAndRemove(any(), eq("b"), eq(1));
+    }
+
+    @Test
+    void permanentDeletesOfDifferentResourcesDoNotWaitForEachOther() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            release.await(10, SECONDS);
+            return null;
+        }).when(storage).removeAllPermanently("a");
+
+        assertRunsWhileAnotherIsInsideTheStorage(() -> {
+            store.deleteAllPermanently("a");
+            return null;
+        }, entered, release, () -> {
+            store.deleteAllPermanently("b");
+            return null;
+        });
+
+        verify(storage).removeAllPermanently("b");
+    }
+
+    /**
+     * Starts {@code blocked}, waits until it is inside the storage call that holds
+     * on {@code release}, then requires {@code other} to finish while it is still
+     * there. Latches, no sleeps: with a lock on the store the second call cannot
+     * start and its {@code get} times out.
+     */
+    private static void assertRunsWhileAnotherIsInsideTheStorage(Callable<Void> blocked, CountDownLatch entered, CountDownLatch release,
+                                                                 Callable<Void> other)
+            throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Void> first = pool.submit(blocked);
+            assertTrue(entered.await(5, SECONDS), "the first call never reached the storage");
+            Future<Void> second = pool.submit(other);
+            assertDoesNotThrow(() -> second.get(5, SECONDS), "the second call waited for the first one to leave the storage");
+            release.countDown();
+            first.get(5, SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
     }
 }

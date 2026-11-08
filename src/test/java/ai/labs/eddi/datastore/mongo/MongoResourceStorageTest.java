@@ -17,6 +17,7 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.ReplaceOptions;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -203,8 +204,6 @@ class MongoResourceStorageTest {
     @Test
     @DisplayName("readHistoryLatest — matches by nested id and sorts on the nested version")
     void readHistoryLatestCoversVersionZero() {
-        when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
-
         Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 0);
         Document doc = new Document("_id", idDoc).append("data", "archived at v0");
         FindIterable<Document> iterable = mock(FindIterable.class);
@@ -279,8 +278,6 @@ class MongoResourceStorageTest {
     @Test
     @DisplayName("readHistoryLatest — returns latest history")
     void readHistoryLatest() {
-        when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
-
         Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 3);
         Document doc = new Document("_id", idDoc).append("data", "latest");
         FindIterable<Document> iterable = mock(FindIterable.class);
@@ -294,11 +291,20 @@ class MongoResourceStorageTest {
     }
 
     @Test
-    @DisplayName("readHistoryLatest — returns null when no history")
+    @DisplayName("readHistoryLatest — returns null when no history, from the one sorted find without a count first")
     void readHistoryLatestEmpty() {
-        when(historyCollection.countDocuments(any(Document.class))).thenReturn(0L);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.sort(any(Document.class))).thenReturn(iterable);
+        when(iterable.limit(1)).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
 
         assertNull(storage.readHistoryLatest(VALID_ID));
+
+        // The limit-1 find already answers null for an id without history; a
+        // countDocuments first only added a round trip to every lookup.
+        verify(historyCollection).find(any(Document.class));
+        verify(historyCollection, never()).countDocuments(any(Bson.class));
     }
 
     // ==================== newHistoryResourceFor ====================
@@ -333,9 +339,12 @@ class MongoResourceStorageTest {
         Document doc = new Document("_version", 3);
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
         when(iterable.first()).thenReturn(doc);
 
         assertEquals(3, storage.getCurrentVersion(VALID_ID));
+        // Only the version crosses the wire, not the whole document it belongs to.
+        assertProjection("{\"_version\": 1}", iterable);
     }
 
     @Test
@@ -343,9 +352,21 @@ class MongoResourceStorageTest {
     void getCurrentVersionNotFound() {
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
         when(iterable.first()).thenReturn(null);
 
         assertEquals(-1, storage.getCurrentVersion(VALID_ID));
+        assertProjection("{\"_version\": 1}", iterable);
+    }
+
+    /**
+     * The id lookups only read {@code _id} and {@code _version}, so they ask the
+     * server for no more than that; {@code _id} is returned unless excluded.
+     */
+    private static void assertProjection(String expectedJson, FindIterable<Document> iterable) {
+        ArgumentCaptor<Bson> projection = ArgumentCaptor.forClass(Bson.class);
+        verify(iterable).projection(projection.capture());
+        assertEquals(BsonDocument.parse(expectedJson), projection.getValue().toBsonDocument());
     }
 
     // ==================== store(IHistoryResource) ====================
@@ -368,6 +389,7 @@ class MongoResourceStorageTest {
     void findResourcesExactFilterIsEquality() {
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
         when(iterable.sort(any(Bson.class))).thenReturn(iterable);
         when(iterable.limit(anyInt())).thenReturn(iterable);
         when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -389,6 +411,7 @@ class MongoResourceStorageTest {
     void findResourcesSortStaysIndexable() {
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
         when(iterable.sort(any(Bson.class))).thenReturn(iterable);
         when(iterable.limit(anyInt())).thenReturn(iterable);
         when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -399,6 +422,36 @@ class MongoResourceStorageTest {
         verify(iterable).sort(sort.capture());
         Document order = (Document) sort.getValue();
         assertEquals(List.of("lastModifiedOn"), List.copyOf(order.keySet()));
+    }
+
+    /**
+     * Every caller of findResources reads the listed documents again by id, so
+     * returning whole documents here (whole transcripts, for group conversations)
+     * decoded each match twice. Filtering and sorting stay on the server, which
+     * applies the projection only to what it returns.
+     */
+    @Test
+    @DisplayName("findResources — fetches only _id and _version of each match")
+    void findResourcesProjectsIdAndVersion() {
+        Document match = new Document("_id", new ObjectId(VALID_ID)).append("_version", 4);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        when(iterable.skip(anyInt())).thenReturn(iterable);
+        doAnswer(inv -> {
+            Consumer<Document> consumer = inv.getArgument(0);
+            consumer.accept(match);
+            return null;
+        }).when(iterable).forEach(any(Consumer.class));
+
+        List<IResourceStore.IResourceId> result = storage.findResources(new IResourceFilter.QueryFilters[0], "lastModifiedOn", 0, 10);
+
+        assertEquals(1, result.size());
+        assertEquals(VALID_ID, result.getFirst().getId());
+        assertEquals(4, result.getFirst().getVersion());
+        assertProjection("{\"_version\": 1}", iterable);
     }
 
     @Test
@@ -694,6 +747,7 @@ class MongoResourceStorageTest {
         Document doc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.projection(any(Bson.class))).thenReturn(iterable);
 
         doAnswer(inv -> {
             Consumer<Document> consumer = inv.getArgument(0);
@@ -704,6 +758,8 @@ class MongoResourceStorageTest {
         List<IResourceStore.IResourceId> result = storage.findResourceIdsContaining("field.path", "value");
         assertEquals(1, result.size());
         assertEquals(VALID_ID, result.getFirst().getId());
+        assertEquals(1, result.getFirst().getVersion());
+        assertProjection("{\"_version\": 1}", iterable);
     }
 
     // ==================== Resource.getData ====================
@@ -814,6 +870,7 @@ class MongoResourceStorageTest {
         when(historyCollection.withReadPreference(ReadPreference.primary())).thenReturn(primaryHistory);
         FindIterable<Document> found = mock(FindIterable.class);
         when(primaryCurrent.find(any(Document.class))).thenReturn(found);
+        when(found.projection(any(Bson.class))).thenReturn(found);
         when(found.first())
                 .thenReturn(new Document(MongoResourceStorage.ID_FIELD, new ObjectId(VALID_ID)).append(MongoResourceStorage.VERSION_FIELD, 7));
 
