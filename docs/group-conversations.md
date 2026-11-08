@@ -1425,14 +1425,18 @@ each of its turns:
   in that member's own conversation history, which its model is shown again on
   later turns until the history window drops it; to keep a leaked key's text
   away from the members, start a new discussion.
-- An agent that has been deleted vouches for nothing either: every entry
-  under its id is withheld from a verifying member, signed or not, whether it
-  was deleted for good or can still be restored. An entry counts as an
-  agent's when it carries a signature, which only agents give, or when an
-  agent turn of this discussion ran under its speaker id; other ids that name
-  no agent (a human member, a nested group, a reviewer) are shown labelled as
-  below. So revoking a compromised agent's key and then deleting the agent
-  keeps its entries withheld.
+- An agent that has been deleted vouches for nothing either, whether it was
+  deleted for good or can still be restored. An entry under its id is withheld
+  from a verifying member, signed or not, when the discussion shows an agent
+  wrote it: the entry carries a signature, which only agents give, or an agent
+  turn of this discussion ran under its speaker id. Its placeholder is named
+  by that id followed by `(not an agent, unverified)`, since no agent store
+  vouches for the id any more. Other ids that name no agent (a human member,
+  a nested group, a reviewer) are shown labelled as below. So revoking a compromised agent's key and then deleting the agent
+  keeps its entries withheld. The one deleted agent this does not recognise is
+  a facilitator that was never a member: its turns run under a conversation
+  of their own and its notes are unsigned, so after the delete they are shown
+  labelled as a non-agent's.
 - Entries no agent wrote are not signed: the user's question and follow-ups, a
   human member's turn, a reviewer's edit, the engine's own notes and a nested
   group's answer. They are not authenticated: whoever can write the

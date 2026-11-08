@@ -55,7 +55,10 @@ never enforced.
   put its revoked entries back in front of verifying members. Now an entry under an id with no
   current agent is withheld (`NO_SUCH_AGENT`) when it carries a signature, which only agents give,
   or when an agent turn of the discussion ran under that id (its member conversation is recorded
-  under it); a human member's or a nested group's entry still passes labelled. A deleted agent's
+  under it); a human member's or a nested group's entry still passes labelled. The placeholder
+  names the id followed by `(not an agent, unverified)`: the id is whatever the entry was stored
+  under, which no agent store vouches for, so a planted one cannot put unlabelled text in the
+  speaker's place. A deleted agent's
   genuine signed entries are withheld too: the trust anchor is the speaker's current
   configuration, and a deleted agent has none.
 - **Non-agent entries.** Which entries must verify is decided by the speaker id, while a prompt

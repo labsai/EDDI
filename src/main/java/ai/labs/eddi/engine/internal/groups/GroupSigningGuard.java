@@ -584,14 +584,17 @@ public class GroupSigningGuard {
      * The placeholder for an entry that did not verify. It keeps what decides where
      * the entry appears (speaker id, phase index, type, target) and drops every
      * text field: the stored display name and phase name are as unverified as the
-     * content, so the speaker is named by its speaker id (an agent's
-     * store-generated id; for {@link Verdict#NO_SUCH_AGENT}, whatever id the entry
-     * was stored under, with no text of its own), or for a synthesis under the
-     * engine's or the user's name, by that fixed label.
+     * content, so the speaker is named by its agent id, which the agent store
+     * vouches for, or for a synthesis under the engine's or the user's name, by
+     * that fixed label. For {@link Verdict#NO_SUCH_AGENT} no store vouches for the
+     * id, which is whatever the entry was stored under, so it gets the non-agent
+     * label: a planted id cannot put unlabelled text in the speaker's place.
      */
     private static TranscriptEntry withheld(TranscriptEntry entry, Verdict verdict) {
         String speakerId = entry.speakerAgentId();
-        String name = speakerId == null || ENGINE_SPEAKERS.contains(speakerId) ? engineSpeakerName(speakerId) : speakerId;
+        String name = speakerId == null || ENGINE_SPEAKERS.contains(speakerId)
+                ? engineSpeakerName(speakerId)
+                : verdict == Verdict.NO_SUCH_AGENT ? speakerId + AgentGroupStore.NOT_AN_AGENT_SUFFIX : speakerId;
         return new TranscriptEntry(speakerId, name,
                 "[withheld: this message could not be verified, because " + verdict.reason + "]",
                 entry.phaseIndex(), null, entry.type(), entry.timestamp(), WITHHELD_MARKER, entry.targetAgentId());
