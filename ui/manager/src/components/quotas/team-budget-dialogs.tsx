@@ -98,39 +98,39 @@ export function AdjustBudgetDialog({ snapshot, onClose }: { snapshot: TeamBudget
   );
 }
 
-/** Admin: move part of this month's cap from one team to another (idempotent per opening). */
-export function TransferBudgetDialog({
-  open,
-  teams,
-  initialFromId,
-  onClose,
-}: {
-  open: boolean;
-  teams: TeamBudgetSnapshot[];
-  initialFromId?: string;
-  onClose: () => void;
-}) {
+/** Admin: move part of this month's cap from one team to another (idempotent per transfer, across reopenings). */
+export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; teams: TeamBudgetSnapshot[]; onClose: () => void }) {
   const { t } = useTranslation();
   const mutation = useTransferTeamBudget();
-  const [from, setFrom] = useState(initialFromId ?? "");
+  const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // One key per opening: a retry after a timeout cannot move the money twice.
+  // One key per transfer: a retry after a timeout cannot move the money twice.
   const [key, setKey] = useState(() => newIdempotencyKey());
+  // The last attempt failed with a 5xx or a network error, so it may have been applied.
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const source = useMemo(() => teams.find((s) => s.groupId === from), [teams, from]);
   const amountValue = parseUsd(amount);
   const valid =
     from !== "" && to !== "" && from !== to && amountValue !== null && amountValue <= (source?.remainingUsd ?? 0) && reason.trim() !== "";
 
-  function close() {
-    setFrom(initialFromId ?? "");
+  function reset() {
+    setFrom("");
     setTo("");
     setAmount("");
     setReason("");
     setError(null);
     setKey(newIdempotencyKey());
+    setOutcomeUnknown(false);
+  }
+
+  function close() {
+    // After an attempt that may have been applied, keep it — values, key and
+    // error — so reopening and retrying sends the same key, which the server
+    // deduplicates. A fresh key here made the same transfer a new one.
+    if (!outcomeUnknown) reset();
     onClose();
   }
 
@@ -141,7 +141,8 @@ export function TransferBudgetDialog({
       {
         onSuccess: () => {
           toast.success(t("teamBudget.transferred", "Budget transferred"));
-          close();
+          reset();
+          onClose();
         },
         onError: (e) => {
           setError(getErrorMessage(e));
@@ -149,7 +150,9 @@ export function TransferBudgetDialog({
           // asks to start again), so the next attempt is a new transfer with a new key.
           // A 5xx or a network error may have debited: keep the key so a retry stays
           // idempotent; the server refuses that key for an edited request.
-          if (isApiError(e) && e.status >= 400 && e.status < 500) setKey(newIdempotencyKey());
+          const refused = isApiError(e) && e.status >= 400 && e.status < 500;
+          if (refused) setKey(newIdempotencyKey());
+          setOutcomeUnknown(!refused);
         },
       },
     );

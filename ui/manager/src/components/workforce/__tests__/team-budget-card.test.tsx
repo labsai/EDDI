@@ -209,6 +209,119 @@ describe("TeamBudgetsTable", () => {
     expect(keys[2]).not.toBe(keys[1]); // after the 400: nothing was applied, a new transfer
   });
 
+  describe("closing the transfer dialog and opening it again", () => {
+    /** Answers each transfer with the next status in `statuses` (then 200), recording its key. */
+    function answerTransfers(statuses: number[]) {
+      const keys: (string | null)[] = [];
+      server.use(
+        http.post("*/administration/team-budgets/transfers", ({ request }) => {
+          keys.push(request.headers.get("Idempotency-Key"));
+          const status = statuses[keys.length - 1] ?? 200;
+          return status === 200
+            ? HttpResponse.json({ from: {}, to: {}, transferId: "t" })
+            : HttpResponse.json({ error: `failed ${status}` }, { status });
+        }),
+      );
+      return keys;
+    }
+
+    async function openTransfer() {
+      fireEvent.click(await screen.findByTestId("team-budget-open-transfer"));
+      return screen.findByTestId("team-budget-transfer-dialog");
+    }
+
+    function fillTransfer(dialog: HTMLElement) {
+      fireEvent.change(within(dialog).getByTestId("team-budget-from"), { target: { value: "studio" } });
+      fireEvent.change(within(dialog).getByTestId("team-budget-to"), { target: { value: "radar" } });
+      fireEvent.change(within(dialog).getByTestId("team-budget-amount"), { target: { value: "5" } });
+      fireEvent.change(within(dialog).getByTestId("team-budget-transfer-reason"), { target: { value: "radar needs it" } });
+    }
+
+    async function cancel(dialog: HTMLElement) {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByTestId("team-budget-transfer-dialog")).toBeNull());
+    }
+
+    it("keeps the attempt after a 5xx, so the retry reuses its Idempotency-Key", async () => {
+      // A 5xx or a network error may have moved the money. Cancel used to start
+      // a fresh key and an empty form, so re-entering the same transfer sent it
+      // as a new one and could move the money twice.
+      const keys = answerTransfers([503]);
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      let dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await within(dialog).findByTestId("team-budget-error");
+      await cancel(dialog);
+
+      dialog = await openTransfer();
+      // The open question stays on screen, and so does the transfer it is about.
+      expect(within(dialog).getByTestId("team-budget-error")).toHaveTextContent("failed 503");
+      expect(within(dialog).getByTestId("team-budget-amount")).toHaveValue("5");
+      expect(within(dialog).getByTestId("team-budget-to")).toHaveValue("radar");
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(2));
+      expect(keys[1]).toBe(keys[0]);
+    });
+
+    it("starts a new transfer after a 4xx, with an empty form and a new key", async () => {
+      const keys = answerTransfers([400]);
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      let dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await within(dialog).findByTestId("team-budget-error");
+      await cancel(dialog);
+
+      dialog = await openTransfer();
+      expect(within(dialog).queryByTestId("team-budget-error")).toBeNull();
+      expect(within(dialog).getByTestId("team-budget-amount")).toHaveValue("");
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(2));
+      expect(keys[1]).not.toBe(keys[0]);
+    });
+
+    it("starts a new transfer after a success, even one that followed a 5xx", async () => {
+      // The retry that succeeds still has the 5xx's "may have been applied" flag
+      // behind it; the success settles it, so nothing of that attempt is kept.
+      const keys = answerTransfers([503]);
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      let dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await within(dialog).findByTestId("team-budget-error");
+      await waitFor(() => expect(within(dialog).getByTestId("team-budget-transfer-save")).toBeEnabled());
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(screen.queryByTestId("team-budget-transfer-dialog")).toBeNull());
+      expect(keys[1]).toBe(keys[0]);
+
+      dialog = await openTransfer();
+      expect(within(dialog).queryByTestId("team-budget-error")).toBeNull();
+      expect(within(dialog).getByTestId("team-budget-amount")).toHaveValue("");
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(3));
+      expect(keys[2]).not.toBe(keys[1]);
+    });
+
+    it("starts a new transfer after a success", async () => {
+      const keys = answerTransfers([]);
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      let dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(screen.queryByTestId("team-budget-transfer-dialog")).toBeNull());
+
+      dialog = await openTransfer();
+      expect(within(dialog).getByTestId("team-budget-amount")).toHaveValue("");
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(2));
+      expect(keys[1]).not.toBe(keys[0]);
+    });
+  });
+
   it("shows a budget-read failure with a retry instead of hiding the table", async () => {
     let calls = 0;
     server.use(

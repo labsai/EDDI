@@ -758,6 +758,64 @@ describe("ConnectionDetailPage", () => {
     );
   });
 
+  it("keeps an edit made while the save was in flight, across the version switch", async () => {
+    // The fields stay editable during the PUT. Its success used to put the sent
+    // document back into the form, and following the new version then reset and
+    // re-seeded it from the cache: either way, text typed in the meantime was
+    // gone and the page read as clean.
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    let stored: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/connectionstore/connections/:id", async ({ request, params }) => {
+        stored = (await request.json()) as Record<string, unknown>;
+        sent.push({ url: request.url, body: stored });
+        if (sent.length === 1) await held;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: { Location: `/connectionstore/connections/${params.id}?version=${sent.length + 1}` },
+        });
+      }),
+      http.get("*/connectionstore/connections/:id", ({ request }) => {
+        if (new URL(request.url).pathname.endsWith("/descriptors")) return;
+        if (stored) return HttpResponse.json(stored);
+        return undefined;
+      }),
+    );
+    renderDetail("conn1");
+    await screen.findByTestId("connection-name-input");
+
+    const description = screen.getByTestId("connection-description-input");
+    await user.clear(description);
+    await user.type(description, "sent");
+    await user.click(screen.getByTestId("save-connection-btn"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+
+    await user.type(description, " then more");
+    release();
+
+    await waitFor(() => expect(screen.getByText(/^v2$/)).toBeInTheDocument());
+    // Settle past the version switch's reset/seed effects and the refetch.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent[0]!.body.description).toBe("sent");
+    expect(screen.getByTestId("connection-description-input")).toHaveValue("sent then more");
+
+    // Still unsaved, so still guarded...
+    await user.click(screen.getByTestId("back-to-list"));
+    expect(await screen.findByTestId("unsaved-confirm")).toBeInTheDocument();
+    await user.click(screen.getByTestId("unsaved-cancel"));
+
+    // ...and the next save sends it against the version the first one created.
+    await user.click(screen.getByTestId("save-connection-btn"));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(new URL(sent[1]!.url).searchParams.get("version")).toBe("2");
+    expect(sent[1]!.body.description).toBe("sent then more");
+  });
+
   it("keeps both rows when a parameter is renamed onto an existing name", async () => {
     // Deriving the rows from Object.entries meant `fromEntries` merged the
     // collision as it was typed: the row count dropped by one and the other

@@ -195,6 +195,11 @@ export function SyncPage() {
     // its old preview.
     setMappings((prev) => prev.map((m) => ({ ...m, preview: null })));
 
+    // The rows stay editable while the preview runs. A preview describes the
+    // target a row was sent with, so it is applied only to a row that is still
+    // checked and still names that target; any other row is left unpreviewed.
+    const sentFor = new Map(syncMappings.map((s) => [s.sourceAgentId, s]));
+
     previewBatchMutation.mutate(
       { sourceUrl: syncUrl, mappings: syncMappings, sourceAuth: syncAuth },
       {
@@ -202,7 +207,15 @@ export function SyncPage() {
           // Match previews back to mappings
           setMappings((prev) =>
             prev.map((m) => {
-              if (!m.checked) return m;
+              const sent = sentFor.get(m.remoteId);
+              if (
+                !m.checked ||
+                !sent ||
+                sent.targetAgentId !== m.localTargetId ||
+                sent.createNew !== m.createNew
+              ) {
+                return m;
+              }
               const p = previews.find(
                 (pr) => pr.sourceAgentId === m.remoteId
               );
