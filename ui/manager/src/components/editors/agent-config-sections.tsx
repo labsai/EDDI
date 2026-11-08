@@ -132,14 +132,17 @@ function DraftNumberInput({
 type SecurityFlag = "signInterAgentMessages" | "requirePeerVerification";
 
 /**
- * The page's "Generate signing key" action. Absent hides the button: the
- * endpoint is admin-only, since whoever can mint a key can sign as the agent.
+ * The page's "Generate signing key" and "Revoke" actions. Absent hides the
+ * buttons: both endpoints are admin-only, since whoever can mint or retire a
+ * key decides what signs as the agent.
  */
 export interface SigningKeyAction {
   onGenerate: () => void;
-  /** True while the key is being generated. */
+  /** Revokes key `keyVersion` (0 = the legacy `identity.publicKey`). */
+  onRevoke: (keyVersion: number) => void;
+  /** True while a key is being generated or revoked. */
   pending: boolean;
-  /** Why generating is not possible right now; the button is disabled while set. */
+  /** Why changing keys is not possible right now; the buttons are disabled while set. */
   disabledReason?: string;
 }
 
@@ -155,6 +158,25 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   // is in the vault; with no key declared at all that refusal is certain.
   const hasSigningKey = (agent.identity?.keys?.length ?? 0) > 0 || !!agent.identity?.publicKey;
   const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasSigningKey;
+  /** The key the admin asked to revoke, awaiting confirmation. */
+  const [revokeVersion, setRevokeVersion] = useState<number | null>(null);
+  const keyButtonsDisabled = disabled || !!signingKeyAction?.pending || !!signingKeyAction?.disabledReason;
+
+  function revokeButton(keyVersion: number) {
+    if (!signingKeyAction) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setRevokeVersion(keyVersion)}
+        disabled={keyButtonsDisabled}
+        title={signingKeyAction.disabledReason}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+        data-testid={`revoke-signing-key-${keyVersion}`}
+      >
+        {t("agentDetail.revokeSigningKey", "Revoke")}
+      </button>
+    );
+  }
 
   function toggle(field: SecurityFlag) {
     onChange({
@@ -185,17 +207,14 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <DraftInput
+            {/* Read-only: the identity is engine-owned, and a save keeps the stored one. */}
+            <input
               type="text"
               value={agent.identity?.agentDid ?? ""}
-              onCommit={(v) =>
-                onChange({
-                  ...agent,
-                  identity: { ...agent.identity, agentDid: v || undefined },
-                })
-              }
+              readOnly
               placeholder="did:eddi:agent:..."
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
+              data-testid="identity-agent-did"
             />
           </div>
           <div>
@@ -230,10 +249,19 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
                   <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
                     {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
                   </span>
-                  {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
-                    <span className="text-[9px] text-destructive font-medium">
-                      {t("agentDetail.keyExpired", "Expired")}
+                  {k.revoked ? (
+                    <span className="text-[9px] text-destructive font-medium" data-testid={`signing-key-revoked-${k.version}`}>
+                      {t("agentDetail.keyRevoked", "Revoked")}
                     </span>
+                  ) : (
+                    <>
+                      {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
+                        <span className="text-[9px] text-destructive font-medium">
+                          {t("agentDetail.keyExpired", "Expired")}
+                        </span>
+                      )}
+                      {k.version != null && revokeButton(k.version)}
+                    </>
                   )}
                 </div>
               ))}
@@ -251,6 +279,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
                 {agent.identity.publicKey.slice(0, 24)}…
               </span>
+              {revokeButton(0)}
             </div>
           </div>
         ) : null}
@@ -260,7 +289,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <button
               type="button"
               onClick={signingKeyAction.onGenerate}
-              disabled={disabled || signingKeyAction.pending || !!signingKeyAction.disabledReason}
+              disabled={keyButtonsDisabled}
               className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
               data-testid="generate-signing-key"
             >
@@ -277,6 +306,26 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </div>
         )}
       </div>
+
+      {signingKeyAction && (
+        <AlertDialog
+          open={revokeVersion !== null}
+          onOpenChange={(open) => !open && setRevokeVersion(null)}
+          title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
+          description={t(
+            "agentDetail.revokeSigningKeyDesc",
+            "Peers will stop trusting every message signed with this key, whenever it was signed, and its private key is deleted from the vault. This cannot be undone. If it is the newest key, the agent stops signing until you generate a new one.",
+          )}
+          confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
+          cancelLabel={t("common.cancel", "Cancel")}
+          variant="destructive"
+          onConfirm={() => {
+            if (revokeVersion !== null) signingKeyAction.onRevoke(revokeVersion);
+            setRevokeVersion(null);
+          }}
+          isPending={signingKeyAction.pending}
+        />
+      )}
 
       {/* Security toggles */}
       <div className="space-y-2 border-t border-border pt-3" data-testid="security-toggles">

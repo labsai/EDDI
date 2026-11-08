@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.agents;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -170,9 +171,13 @@ public class AgentSigningService {
      *             {@value #MAX_FREE_VERSION_ATTEMPTS} versions in a row were taken
      */
     public GeneratedKey generateKey(String tenantId, String agentId, int fromVersion) throws AgentSigningException {
-        if (fromVersion < 1) {
-            throw new IllegalArgumentException("A generated key is versioned: fromVersion must be 1 or higher, was " + fromVersion);
+        if (fromVersion < 1 || fromVersion > AgentPublicKey.MAX_VERSION) {
+            throw new IllegalArgumentException(
+                    "A generated key is versioned: fromVersion must be 1 to " + AgentPublicKey.MAX_VERSION + ", was " + fromVersion);
         }
+        // Never past MAX_VERSION, and computed in a range where "+ attempts" cannot
+        // overflow.
+        int lastVersion = Math.min(fromVersion + MAX_FREE_VERSION_ATTEMPTS - 1, AgentPublicKey.MAX_VERSION);
         KeyPair keyPair;
         try {
             keyPair = KeyPairGenerator.getInstance(ALGORITHM).generateKeyPair();
@@ -180,7 +185,7 @@ public class AgentSigningService {
             throw new AgentSigningException("Ed25519 is not available in this JVM", e);
         }
         String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
-        for (int version = fromVersion; version < fromVersion + MAX_FREE_VERSION_ATTEMPTS; version++) {
+        for (int version = fromVersion; version <= lastVersion; version++) {
             boolean stored;
             try {
                 stored = secretProvider.storeIfAbsent(new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version)), privateKeyB64,
@@ -198,22 +203,47 @@ public class AgentSigningService {
             LOGGER.warnf("Signing key v%d of agent '%s' is already in the vault but was not declared; trying the next version", version,
                     sanitize(agentId));
         }
-        throw new AgentSigningException("Signing key versions " + fromVersion + " to " + (fromVersion + MAX_FREE_VERSION_ATTEMPTS - 1)
+        throw new AgentSigningException("Signing key versions " + fromVersion + " to " + lastVersion
                 + " of agent " + agentId + " are all taken in the vault", null);
     }
 
     /**
-     * Removes one versioned key that {@link #generateKey} stored, when the agent
-     * configuration that was to declare it could not be written. Best effort: a
-     * failure is logged, and the key is then swept by the agent's permanent delete
-     * only while some later version is declared.
+     * Removes one key from the vault: a key {@link #generateKey} stored for an
+     * agent configuration that could not be written, or a key an admin revoked.
+     * Best effort: a failure is logged, and the key is then swept by the agent's
+     * permanent delete only while some later version is declared.
+     *
+     * @param keyVersion
+     *            the rotated key version, or {@code <= 0} for the legacy
+     *            unversioned key
      */
     public void discardKey(String tenantId, String agentId, int keyVersion) {
         DeleteTally tally = new DeleteTally();
-        deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, keyVersion), versionedCacheKey(tenantId, agentId, keyVersion), tally);
+        if (keyVersion > 0) {
+            deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, keyVersion), versionedCacheKey(tenantId, agentId, keyVersion), tally);
+        } else {
+            deleteVaultKey(tenantId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
+        }
         if (tally.failed > 0) {
-            LOGGER.warnf("Could not remove the undeclared signing key v%d of agent '%s' from the vault: %s", keyVersion, sanitize(agentId),
+            LOGGER.warnf("Could not remove signing key v%d of agent '%s' from the vault: %s", keyVersion, sanitize(agentId),
                     sanitize(tally.firstFailure));
+        }
+    }
+
+    /**
+     * Whether {@code publicKeyB64} is a Base64 X.509 Ed25519 public key — the form
+     * {@code identity.keys[].publicKeyB64} must have. Checks the shape only;
+     * whether the vault holds the matching private key is {@link #checkSigningKey}.
+     */
+    public static boolean isEd25519PublicKey(String publicKeyB64) {
+        if (publicKeyB64 == null) {
+            return false;
+        }
+        try {
+            KeyFactory.getInstance(ALGORITHM).generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)));
+            return true;
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            return false;
         }
     }
 

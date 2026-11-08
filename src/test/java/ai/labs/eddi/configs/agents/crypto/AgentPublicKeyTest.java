@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.crypto;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,47 @@ class AgentPublicKeyTest {
             assertEquals(key.version(), expired.version());
             assertEquals(key.publicKeyB64(), expired.publicKeyB64());
             assertTrue(expired.validUntilMs() > 0);
+        }
+    }
+
+    /**
+     * A revoked key is valid at no time at all: revocation answers "this key may be
+     * compromised", so whatever time a signature claims, it proves nothing.
+     */
+    @Nested
+    @DisplayName("revoked")
+    class RevocationTests {
+
+        @Test
+        @DisplayName("a revoked key is valid at no time, inside its window or not")
+        void revokedKeyIsNeverValid() {
+            var revoked = new AgentPublicKey(1, "pubkey", 1000, 0).revoke();
+
+            assertTrue(revoked.revoked());
+            assertFalse(revoked.isValidAt(1000));
+            assertFalse(revoked.isValidAt(Long.MAX_VALUE));
+            assertEquals(1, revoked.version());
+            assertEquals("pubkey", revoked.publicKeyB64());
+            assertEquals(1000, revoked.validFromMs());
+        }
+
+        @Test
+        @DisplayName("a key is not revoked unless it says so")
+        void notRevokedByDefault() {
+            assertFalse(new AgentPublicKey(1, "pubkey", 1000, 0).revoked());
+            assertFalse(AgentPublicKey.createCurrent(1, "pubkey").revoked());
+        }
+
+        @Test
+        @DisplayName("a stored key without the field reads as not revoked, and the flag survives a round trip")
+        void jsonRoundTrip() throws Exception {
+            var mapper = new ObjectMapper();
+
+            var legacy = mapper.readValue("{\"version\":2,\"publicKeyB64\":\"pk\",\"validFromMs\":5,\"validUntilMs\":0}", AgentPublicKey.class);
+            assertEquals(new AgentPublicKey(2, "pk", 5, 0), legacy);
+
+            var revoked = new AgentPublicKey(2, "pk", 5, 0).revoke();
+            assertEquals(revoked, mapper.readValue(mapper.writeValueAsString(revoked), AgentPublicKey.class));
         }
     }
 

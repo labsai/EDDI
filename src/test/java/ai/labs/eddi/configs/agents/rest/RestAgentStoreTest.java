@@ -78,6 +78,7 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.BadRequestException;
@@ -895,7 +896,17 @@ class RestAgentStoreTest {
             when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
         }
 
-        private AgentConfiguration signingAgent(AgentConfiguration.AgentIdentity identity) {
+        /**
+         * An agent saved with signing on, whose STORED version declares
+         * {@code identity}: the identity is engine-owned, so the one the save checks is
+         * the stored one, not the body's.
+         */
+        private AgentConfiguration signingAgent(AgentConfiguration.AgentIdentity identity) throws Exception {
+            var stored = new AgentConfiguration();
+            stored.setWorkflows(new ArrayList<>());
+            stored.setIdentity(identity);
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored);
+
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
             security.setSignInterAgentMessages(true);
@@ -941,7 +952,7 @@ class RestAgentStoreTest {
 
         @Test
         @DisplayName("updateAgent refuses signing with no key declared")
-        void updateAgent_rejectsSigningWithoutAKey() {
+        void updateAgent_rejectsSigningWithoutAKey() throws Exception {
             assertRefused(signingAgent(null), "declares none");
         }
 
@@ -980,6 +991,96 @@ class RestAgentStoreTest {
 
             var e = assertThrows(BadRequestException.class, () -> store.updateAgent(AGENT_ID, 1, signingAgent(identity), false));
             assertTrue(e.getMessage().contains("The legacy signing key (identity.publicKey) has no private key"), e.getMessage());
+        }
+
+        /**
+         * The signer does not sign with a revoked newest key and does not fall back to
+         * an older one, so "signing on" with it would be the state this validator
+         * exists to refuse.
+         */
+        @Test
+        @DisplayName("updateAgent refuses signing when the newest key is revoked")
+        void updateAgent_rejectsARevokedNewestKey() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+            var v2 = signing.generateKey("default", AGENT_ID, 2);
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, v1.publicKeyB64()),
+                    AgentPublicKey.createCurrent(2, v2.publicKeyB64()).revoke())), "Signing key v2 is revoked");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses signing when the newest key has expired")
+        void updateAgent_rejectsAnExpiredNewestKey() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+
+            assertRefused(signingAgent(identityWith(new AgentPublicKey(1, v1.publicKeyB64(), 0, System.currentTimeMillis() - 60_000))),
+                    "Signing key v1 is outside its validity window");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses signing when the newest key is not valid yet")
+        void updateAgent_rejectsANewestKeyNotValidYet() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+
+            assertRefused(signingAgent(identityWith(new AgentPublicKey(1, v1.publicKeyB64(), System.currentTimeMillis() + 3_600_000, 0))),
+                    "Signing key v1 is outside its validity window");
+        }
+
+        /**
+         * A peer trusts every key the agent declares, not only the newest: a second v1
+         * placed first wins the version lookup, so checking the newest key alone let it
+         * through.
+         */
+        @Test
+        @DisplayName("updateAgent refuses an identity that declares a version twice")
+        void updateAgent_rejectsADuplicateVersion() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+            var v2 = signing.generateKey("default", AGENT_ID, 2);
+            String planted = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, planted), AgentPublicKey.createCurrent(1, v1.publicKeyB64()),
+                    AgentPublicKey.createCurrent(2, v2.publicKeyB64()))), "Signing key v1 is declared more than once");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses an older key that is not an Ed25519 public key")
+        void updateAgent_rejectsAMalformedOlderKey() throws Exception {
+            var v2 = signing.generateKey("default", AGENT_ID, 2);
+
+            assertRefused(
+                    signingAgent(identityWith(AgentPublicKey.createCurrent(1, "not-a-key"), AgentPublicKey.createCurrent(2, v2.publicKeyB64()))),
+                    "Signing key v1 is not a Base64 X.509 Ed25519 public key");
+        }
+
+        @Test
+        @DisplayName("updateAgent refuses a key version outside 1 to MAX_VERSION")
+        void updateAgent_rejectsAnOutOfRangeVersion() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+
+            assertRefused(signingAgent(identityWith(AgentPublicKey.createCurrent(1, v1.publicKeyB64()),
+                    AgentPublicKey.createCurrent(Integer.MAX_VALUE, v1.publicKeyB64()))), "has a version outside 1 to 1000000");
+        }
+
+        @Test
+        @DisplayName("updateAgent ignores a malformed key once it is revoked")
+        void updateAgent_ignoresARevokedMalformedKey() throws Exception {
+            var v2 = signing.generateKey("default", AGENT_ID, 2);
+
+            Response response = store.updateAgent(AGENT_ID, 1, signingAgent(identityWith(AgentPublicKey.createCurrent(1, "not-a-key").revoke(),
+                    AgentPublicKey.createCurrent(2, v2.publicKeyB64()))), false);
+
+            assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("signingKeyProblem reads the stored identity: null when it can sign, the reason when it cannot")
+        void signingKeyProblem_readsTheStoredIdentity() throws Exception {
+            var v1 = signing.generateKey("default", AGENT_ID, 1);
+            signingAgent(identityWith(AgentPublicKey.createCurrent(1, v1.publicKeyB64())));
+            assertNull(store.signingKeyProblem(AGENT_ID));
+
+            signingAgent(identityWith(AgentPublicKey.createCurrent(1, v1.publicKeyB64()).revoke()));
+            assertTrue(store.signingKeyProblem(AGENT_ID).contains("Signing key v1 is revoked"));
         }
 
         @Test
@@ -1112,8 +1213,28 @@ class RestAgentStoreTest {
                     mock(AgentCascadeService.class));
             stored = new AgentConfiguration();
             stored.setWorkflows(new ArrayList<>());
-            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored);
+            // A fresh copy per read, as the real store deserializes one: the endpoint
+            // edits what it reads, and that must not change what the store holds.
+            when(AgentStore.read(AGENT_ID, 1)).thenAnswer(invocation -> storedCopy());
             when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
+            descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=1"));
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(descriptor);
+        }
+
+        private DocumentDescriptor descriptor;
+
+        private AgentConfiguration storedCopy() {
+            var copy = new AgentConfiguration();
+            copy.setWorkflows(new ArrayList<>(stored.getWorkflows()));
+            copy.setDescription(stored.getDescription());
+            copy.setSecurity(stored.getSecurity());
+            if (stored.getIdentity() != null) {
+                var identity = new AgentConfiguration.AgentIdentity(stored.getIdentity().getAgentDid(), stored.getIdentity().getPublicKey());
+                identity.setKeys(new ArrayList<>(stored.getIdentity().getKeys()));
+                copy.setIdentity(identity);
+            }
+            return copy;
         }
 
         private String vaultKey(int version) throws Exception {
@@ -1126,12 +1247,110 @@ class RestAgentStoreTest {
             return captor.getValue();
         }
 
+        /**
+         * The key is written in process, so the descriptor filter never moves the
+         * descriptor; and a POST answered 201 is what that filter takes for a creation:
+         * it tried to create a second descriptor for the agent, failed on the duplicate
+         * key, and answered 500 — with the agent already at the new version and its
+         * descriptor left behind, so every later save of it answered 404.
+         */
+        @Test
+        @DisplayName("moves the agent's descriptor to the new version and answers 200, not 201")
+        void advancesTheDescriptorAndAnswers200() throws Exception {
+            Response response = store.createSigningKey(AGENT_ID, 1);
+
+            assertEquals(200, response.getStatus(), "201 makes DocumentDescriptorFilter create a second descriptor");
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=2"), descriptor.getResource());
+            assertNotNull(descriptor.getLastModifiedOn());
+            verify(documentDescriptorStore, never()).createDescriptor(anyString(), anyInt(), any());
+        }
+
+        /**
+         * A socket error or a lost commit acknowledgement can arrive after the write
+         * was applied. Discarding the key then left an agent declaring a key its vault
+         * no longer held: it could not sign, and every later save was refused.
+         */
+        @Test
+        @DisplayName("keeps the key, and carries on, when a write that reported a failure landed after all")
+        void keepsTheKeyWhenAnAmbiguousWriteLanded() throws Exception {
+            var landed = new AtomicReference<AgentConfiguration>();
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenAnswer(invocation -> {
+                landed.set(invocation.getArgument(2));
+                throw new IllegalStateException("socket closed after the write");
+            });
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenAnswer(invocation -> resourceId(AGENT_ID, landed.get() == null ? 1 : 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenAnswer(invocation -> landed.get());
+
+            Response response = store.createSigningKey(AGENT_ID, 1);
+
+            assertEquals(200, response.getStatus());
+            assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=2"), response.getLocation().toString());
+            assertNotNull(vaultKey(1), "the declared key's private half is kept");
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+        }
+
+        @Test
+        @DisplayName("discards the key when a write that reported a failure did not land")
+        void discardsTheKeyWhenAnAmbiguousWriteDidNotLand() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IllegalStateException("socket closed"));
+
+            var e = assertThrows(IllegalStateException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertEquals("socket closed", e.getMessage());
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey(1), "no undeclared private key is left behind");
+        }
+
+        @Test
+        @DisplayName("keeps the key when it cannot tell whether a failed write landed")
+        void keepsTheKeyWhenTheOutcomeCannotBeRead() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IllegalStateException("socket closed"));
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1))
+                    .thenThrow(new IllegalStateException("store down"));
+
+            assertThrows(IllegalStateException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertNotNull(vaultKey(1), "a key left in the vault is swept later; a declared key that is gone breaks signing");
+        }
+
+        /**
+         * A version near Integer.MAX_VALUE made "highest + 1" wrap: the new key came
+         * out as v1 while the bogus entry stayed the one that signs. Versions outside 1
+         * to MAX_VERSION are not keys the engine signs with, so numbering ignores them.
+         */
+        @Test
+        @DisplayName("numbers the new key past the highest well-formed version, ignoring one out of range")
+        void ignoresAnOutOfRangeVersionWhenNumbering() throws Exception {
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, "k1"), AgentPublicKey.createCurrent(Integer.MAX_VALUE, "kx"))));
+            stored.setIdentity(identity);
+
+            var key = (AgentPublicKey) store.createSigningKey(AGENT_ID, 1).getEntity();
+
+            assertEquals(2, key.version());
+            assertEquals(2, written().getIdentity().signingKeyVersion(), "the new key is the one that signs");
+        }
+
+        @Test
+        @DisplayName("refuses with 409, before touching the vault, once every key version is used")
+        void refusesWhenEveryVersionIsUsed() throws Exception {
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(AgentPublicKey.MAX_VERSION, "k"))));
+            stored.setIdentity(identity);
+
+            var e = assertThrows(WebApplicationException.class, () -> store.createSigningKey(AGENT_ID, 1));
+
+            assertEquals(409, e.getResponse().getStatus());
+            verify(vault, never()).storeIfAbsent(any(), anyString(), any(), any());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
         @Test
         @DisplayName("stores the private key in the vault and appends the public key as a new, compatible version")
         void storesTheVaultEntryAndAppendsThePublicKey() throws Exception {
             Response response = store.createSigningKey(AGENT_ID, 1);
 
-            assertEquals(201, response.getStatus());
+            assertEquals(200, response.getStatus());
             assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=2"), response.getLocation().toString());
             var key = (AgentPublicKey) response.getEntity();
             assertEquals(1, key.version());
@@ -1223,6 +1442,155 @@ class RestAgentStoreTest {
             var method = IRestAgentStore.class.getMethod("createSigningKey", String.class, Integer.class);
 
             assertEquals("/{id}/signing-keys", method.getAnnotation(Path.class).value());
+            assertEquals(List.of("eddi-admin"), List.of(method.getAnnotation(RolesAllowed.class).value()));
+        }
+    }
+
+    /**
+     * {@code POST /agentstore/agents/{id}/signing-keys/{keyVersion}/revoke},
+     * against a REAL {@link AgentSigningService} and an in-memory vault. Revoking
+     * used to mean editing {@code validUntilMs} through {@code PUT}, which is now
+     * impossible — and which any editor could undo.
+     */
+    @Nested
+    @DisplayName("revokeSigningKey")
+    class SigningKeyRevocation {
+
+        private ISecretProvider vault;
+        private AgentSigningService signing;
+        private RestAgentStore store;
+        private AgentConfiguration stored;
+        private DocumentDescriptor descriptor;
+        private AgentSigningService.GeneratedKey v1;
+        private AgentSigningService.GeneratedKey v2;
+
+        @BeforeEach
+        void setUpAnAgentWithTwoKeys() throws Exception {
+            vault = SigningTestSupport.inMemoryVault();
+            signing = SigningTestSupport.signingService(vault, new SimpleMeterRegistry());
+            store = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                    capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), signing, agentFactory, "default",
+                    mock(AgentCascadeService.class));
+            v1 = signing.generateKey("default", AGENT_ID, 1);
+            v2 = signing.generateKey("default", AGENT_ID, 2);
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()), AgentPublicKey.createCurrent(2,
+                    v2.publicKeyB64()))));
+            stored = new AgentConfiguration();
+            stored.setWorkflows(new ArrayList<>());
+            stored.setIdentity(identity);
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
+            descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=1"));
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(descriptor);
+        }
+
+        private String vaultKey(String name) throws Exception {
+            return vault.resolve(new SecretReference("default", name));
+        }
+
+        private AgentConfiguration written() throws Exception {
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(true));
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("marks the key revoked in a new compatible version, moves the descriptor, and deletes the private key")
+        void revokesTheKey() throws Exception {
+            Response response = store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            assertEquals(200, response.getStatus());
+            assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=2"), response.getLocation().toString());
+            assertTrue(((AgentPublicKey) response.getEntity()).revoked());
+            var keys = written().getIdentity().getKeys();
+            assertTrue(keys.get(0).revoked(), "v1 is revoked");
+            assertFalse(keys.get(1).revoked(), "v2 is untouched");
+            assertEquals(v1.publicKeyB64(), keys.get(0).publicKeyB64(), "the entry stays, so entries it signed are recognised and refused");
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v2"));
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=2"), descriptor.getResource());
+        }
+
+        @Test
+        @DisplayName("revokes every entry of a version that is declared twice")
+        void revokesEveryEntryOfAVersion() throws Exception {
+            String planted = signing.generateKey("default", "someone-else", 1).publicKeyB64();
+            var keys = new ArrayList<>(stored.getIdentity().getKeys());
+            keys.add(0, AgentPublicKey.createCurrent(1, planted));
+            stored.getIdentity().setKeys(keys);
+
+            store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            assertEquals(List.of(true, true, false), written().getIdentity().getKeys().stream().map(AgentPublicKey::revoked).toList());
+        }
+
+        @Test
+        @DisplayName("revoking the legacy key (v0) removes it, with its vault entry")
+        void revokesTheLegacyKey() throws Exception {
+            stored.getIdentity().setPublicKey(v1.publicKeyB64());
+            vault.storeIfAbsent(new SecretReference("default", "agent-signing-key:" + AGENT_ID), "legacy-private-key", null, null);
+
+            Response response = store.revokeSigningKey(AGENT_ID, 0, 1);
+
+            assertEquals(200, response.getStatus());
+            assertNull(written().getIdentity().getPublicKey());
+            assertEquals(2, written().getIdentity().getKeys().size(), "the versioned keys are untouched");
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID));
+        }
+
+        @Test
+        @DisplayName("a key already revoked writes nothing")
+        void alreadyRevokedWritesNothing() throws Exception {
+            stored.getIdentity().setKeys(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()).revoke()));
+
+            Response response = store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            assertEquals(200, response.getStatus());
+            assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=1"), response.getLocation().toString());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a version the agent does not declare is a 404, and nothing is written")
+        void unknownVersionIs404() throws Exception {
+            assertThrows(NotFoundException.class, () -> store.revokeSigningKey(AGENT_ID, 7, 1));
+            assertThrows(NotFoundException.class, () -> store.revokeSigningKey(AGENT_ID, 0, 1), "no legacy key declared");
+
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+        }
+
+        @Test
+        @DisplayName("refuses a stale version with 409, and keeps the key")
+        void refusesAStaleVersion() throws Exception {
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 3));
+
+            var e = assertThrows(WebApplicationException.class, () -> store.revokeSigningKey(AGENT_ID, 1, 1));
+
+            assertEquals(409, e.getResponse().getStatus());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+        }
+
+        @Test
+        @DisplayName("keeps the private key when the configuration cannot be written")
+        void keepsTheKeyWhenTheWriteFails() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IResourceStore.ResourceModifiedException("changed"));
+
+            assertThrows(IResourceStore.ResourceModifiedException.class, () -> store.revokeSigningKey(AGENT_ID, 1, 1));
+
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"), "still declared unrevoked, so still needed");
+        }
+
+        @Test
+        @DisplayName("is admin only")
+        void isAdminOnly() throws Exception {
+            var method = IRestAgentStore.class.getMethod("revokeSigningKey", String.class, Integer.class, Integer.class);
+
+            assertEquals("/{id}/signing-keys/{keyVersion}/revoke", method.getAnnotation(Path.class).value());
             assertEquals(List.of("eddi-admin"), List.of(method.getAnnotation(RolesAllowed.class).value()));
         }
     }
@@ -1469,6 +1837,85 @@ class RestAgentStoreTest {
             var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
             verify(AgentStore).create(captor.capture());
             assertNull(captor.getValue().getDynamicOrigin());
+        }
+    }
+
+    /**
+     * {@code identity} holds the public keys peers verify the agent's signatures
+     * with. Writable through {@code PUT}, it let any editor plant a key whose
+     * private half they hold, delete the revocation an admin made, or shrink the
+     * list a permanent delete sizes its vault sweep from — so it is kept from the
+     * stored version, like {@code dynamicOrigin}, and only the admin-only
+     * signing-key endpoints change it.
+     */
+    @Nested
+    @DisplayName("identity is engine-owned")
+    class IdentityIsEngineOwned {
+
+        private AgentConfiguration.AgentIdentity storedIdentity;
+
+        @BeforeEach
+        void storeAnAgentWithKeys() throws Exception {
+            storedIdentity = new AgentConfiguration.AgentIdentity();
+            storedIdentity
+                    .setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, "stored-v1"), AgentPublicKey.createCurrent(2, "stored-v2"))));
+            AgentConfiguration stored = new AgentConfiguration();
+            stored.setWorkflows(new ArrayList<>());
+            stored.setIdentity(storedIdentity);
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(stored);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenReturn(2);
+        }
+
+        private AgentConfiguration persistedByUpdate() throws Exception {
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).update(eq(AGENT_ID), eq(1), captor.capture(), eq(false));
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("an update whose body declares other keys keeps the stored ones")
+        void updateCannotPlantAKey() throws Exception {
+            var planted = new AgentConfiguration.AgentIdentity();
+            planted.setPublicKey("planted-legacy-key");
+            planted.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, "planted-v1"))));
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+            body.setIdentity(planted);
+
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
+
+            assertSame(storedIdentity, persistedByUpdate().getIdentity());
+        }
+
+        /**
+         * A permanent delete sizes its vault sweep from the identity of the version it
+         * deletes, and skipped the sweep for none at all: an identity an editor could
+         * drop left every private key in the vault.
+         */
+        @Test
+        @DisplayName("an update whose body has no identity keeps the stored one, so a permanent delete still finds the keys")
+        void updateCannotDropTheIdentity() throws Exception {
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+
+            restAgentStore.updateAgent(AGENT_ID, 1, body, false);
+
+            assertSame(storedIdentity, persistedByUpdate().getIdentity());
+        }
+
+        @Test
+        @DisplayName("a created agent gets no identity, whatever the body declares")
+        void createIgnoresTheBodysIdentity() throws Exception {
+            when(AgentStore.create(any())).thenReturn(resourceId(AGENT_ID, 1));
+            AgentConfiguration body = new AgentConfiguration();
+            body.setWorkflows(new ArrayList<>());
+            body.setIdentity(storedIdentity);
+
+            restAgentStore.createAgent(body);
+
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(AgentStore).create(captor.capture());
+            assertNull(captor.getValue().getIdentity());
         }
     }
 }
