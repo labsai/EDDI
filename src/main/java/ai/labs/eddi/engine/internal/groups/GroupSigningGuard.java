@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -59,8 +60,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * user's question, a human member's turn, a reviewer's edit, the engine's own
  * notes, a nested group's answer) carry no signature and pass through, but
  * under a name that cannot pass for a member agent's: signatures authenticate
- * agents, not the engine's own record. The receiver's own entries pass as they
- * are.
+ * agents, not the engine's own record. A synthesis under the engine's or the
+ * user's name is withheld: the engine never records one there. The receiver's
+ * own entries are checked like a peer's when it signs; when it does not, it has
+ * nothing to check them against and they pass as they are.
  * <p>
  * Holds only caches: agent configurations by version (immutable), the outcome
  * of each Ed25519 check (a pure function of key, signature and signed bytes),
@@ -134,7 +137,9 @@ public class GroupSigningGuard {
                                 "it was signed outside its key's validity window or before this conversation began"), BAD_SIGNATURE(
                                         "its signature does not match its content, this conversation or its position in it"), WRONG_ROUND(
                                                 "it was signed in another round of this discussion"), DUPLICATE(
-                                                        "its signature already appears earlier in this conversation");
+                                                        "its signature already appears earlier in this conversation"), ENGINE_SYNTHESIS(
+                                                                "it is a synthesis under the engine's or the user's name, "
+                                                                        + "under which none is ever recorded");
 
         private final String reason;
 
@@ -248,11 +253,12 @@ public class GroupSigningGuard {
     /**
      * {@code transcript} as the agent {@code receiverAgentId} may see it. Unchanged
      * when the receiver does not require peer verification. Otherwise a copy in
-     * which every entry another agent authored that does not verify is replaced, in
-     * place, by a {@code [withheld: ...]} placeholder (see {@link #isWithheld}),
-     * and every entry no agent authored is renamed so it cannot pass for a member
-     * agent's. In place, so transcript indices (which window summaries are keyed
-     * on) stay aligned.
+     * which every agent-authored entry that must verify and does not (another
+     * agent's, or its own when it signs) is replaced, in place, by a
+     * {@code [withheld: ...]} placeholder (see {@link #isWithheld}), and every
+     * entry no agent authored is renamed so it cannot pass for a member agent's. In
+     * place, so transcript indices (which window summaries are keyed on) stay
+     * aligned.
      * <p>
      * When the receiver's configuration cannot be read, the setting this node last
      * read for it applies. If there is none, the requirement is
@@ -318,15 +324,22 @@ public class GroupSigningGuard {
 
     private Verdict verdict(GroupConversation gc, int index, TranscriptEntry entry, String receiverAgentId, Pass pass) {
         String speakerId = entry.speakerAgentId();
-        if (entry.content() == null || speakerId == null || ENGINE_SPEAKERS.contains(speakerId)) {
+        if (entry.content() == null) {
             return Verdict.NOT_AGENT_AUTHORED;
         }
-        // The receiver's own replies are in its own member conversation already;
-        // withholding them would only blank the answer it is asked to revise or defend.
-        if (speakerId.equals(receiverAgentId)) {
-            return Verdict.RECEIVERS_OWN;
+        if (speakerId == null || ENGINE_SPEAKERS.contains(speakerId)) {
+            // The engine records no synthesis under its own name or the user's, and a
+            // synthesis is looked up by type and quoted as the group's conclusion.
+            return entry.type() == TranscriptEntryType.SYNTHESIS ? Verdict.ENGINE_SYNTHESIS : Verdict.NOT_AGENT_AUTHORED;
         }
         Speaker speaker = pass.speakers.computeIfAbsent(speakerId, this::lookUpSpeaker);
+        // A receiver that signs has its own entries checked like a peer's, since every
+        // honest one is signed: it is quoted them as the answer it revises or defends.
+        // One that does not sign has nothing to check them against, and withholding
+        // them would only blank that answer.
+        if (speakerId.equals(receiverAgentId) && !speaker.signs()) {
+            return Verdict.RECEIVERS_OWN;
+        }
         if (!speaker.isAgent()) {
             return Verdict.NOT_AGENT_AUTHORED;
         }
@@ -399,7 +412,8 @@ public class GroupSigningGuard {
     /**
      * The speaker as the agent store knows it. An id that names no agent (a human
      * member, a nested group, a reviewer) is not agent-authored; an agent whose
-     * configuration cannot be read is, with no key, so its entries are withheld.
+     * configuration cannot be read is, with no key, and counts as signing, so its
+     * entries are withheld, the receiver's own included.
      */
     private Speaker lookUpSpeaker(String speakerId) {
         try {
@@ -407,17 +421,19 @@ public class GroupSigningGuard {
             if (resourceId == null) {
                 return Speaker.NOT_AN_AGENT;
             }
-            return new Speaker(true, agentConfigs.read(speakerId, resourceId.getVersion()).getIdentity());
+            AgentConfiguration config = agentConfigs.read(speakerId, resourceId.getVersion());
+            var security = config.getSecurity();
+            return new Speaker(true, config.getIdentity(), security != null && security.isSignInterAgentMessages());
         } catch (ResourceNotFoundException e) {
             return Speaker.NOT_AN_AGENT;
         } catch (Exception e) {
             LOGGER.warnf("Could not read agent '%s' to verify its group messages: %s", LogSanitizer.sanitize(speakerId), e.getMessage());
-            return new Speaker(true, null);
+            return new Speaker(true, null, true);
         }
     }
 
-    private record Speaker(boolean isAgent, AgentIdentity identity) {
-        static final Speaker NOT_AN_AGENT = new Speaker(false, null);
+    private record Speaker(boolean isAgent, AgentIdentity identity, boolean signs) {
+        static final Speaker NOT_AN_AGENT = new Speaker(false, null, false);
     }
 
     private Requirement requirementOf(String receiverAgentId) {
@@ -515,14 +531,9 @@ public class GroupSigningGuard {
             return entry;
         }
         String speakerId = entry.speakerAgentId();
-        String name;
-        if (speakerId == null || "system".equals(speakerId)) {
-            name = AgentGroupStore.SYSTEM_SPEAKER_NAME;
-        } else if ("user".equals(speakerId)) {
-            name = AgentGroupStore.USER_SPEAKER_NAME;
-        } else {
-            name = (entry.speakerDisplayName() != null ? entry.speakerDisplayName() : speakerId) + AgentGroupStore.NOT_AN_AGENT_SUFFIX;
-        }
+        String name = speakerId == null || ENGINE_SPEAKERS.contains(speakerId)
+                ? engineSpeakerName(speakerId)
+                : (entry.speakerDisplayName() != null ? entry.speakerDisplayName() : speakerId) + AgentGroupStore.NOT_AN_AGENT_SUFFIX;
         if (name.equals(entry.speakerDisplayName())) {
             return entry;
         }
@@ -530,15 +541,35 @@ public class GroupSigningGuard {
                 entry.errorReason(), entry.targetAgentId());
     }
 
+    /** The fixed label of the user ({@code user}) or the engine (any other). */
+    private static String engineSpeakerName(String speakerId) {
+        return "user".equals(speakerId) ? AgentGroupStore.USER_SPEAKER_NAME : AgentGroupStore.SYSTEM_SPEAKER_NAME;
+    }
+
+    /**
+     * Whether {@code entry} is shown under a name that says no agent wrote it: one
+     * {@link #asNonAgent} gives, which a group save refuses for agent members. A
+     * view that hides who wrote what (ANONYMOUS scope) keeps that much, so such an
+     * entry cannot read like a verified peer's there either.
+     */
+    static boolean isShownAsNonAgent(TranscriptEntry entry) {
+        String name = entry.speakerDisplayName();
+        return name != null && (name.equals(AgentGroupStore.SYSTEM_SPEAKER_NAME) || name.equals(AgentGroupStore.USER_SPEAKER_NAME)
+                || name.endsWith(AgentGroupStore.NOT_AN_AGENT_SUFFIX));
+    }
+
     /**
      * The placeholder for an entry that did not verify. It keeps what decides where
      * the entry appears (speaker id, phase index, type, target) and drops every
      * text field: the stored display name and phase name are as unverified as the
      * content, so the speaker is named by its agent id (a store-generated id, since
-     * an id that names no agent is not withheld but relabelled).
+     * an id that names no agent is not withheld but relabelled), or for a synthesis
+     * under the engine's or the user's name, by that fixed label.
      */
     private static TranscriptEntry withheld(TranscriptEntry entry, Verdict verdict) {
-        return new TranscriptEntry(entry.speakerAgentId(), entry.speakerAgentId(),
+        String speakerId = entry.speakerAgentId();
+        String name = speakerId == null || ENGINE_SPEAKERS.contains(speakerId) ? engineSpeakerName(speakerId) : speakerId;
+        return new TranscriptEntry(speakerId, name,
                 "[withheld: this message could not be verified, because " + verdict.reason + "]",
                 entry.phaseIndex(), null, entry.type(), entry.timestamp(), WITHHELD_MARKER, entry.targetAgentId());
     }

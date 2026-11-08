@@ -13,17 +13,20 @@ never enforced.
 
 - **Fail-closed.** `GroupSigningGuard.viewFor` gives one verdict per transcript entry
   (`VERIFIED`, `NOT_AGENT_AUTHORED`, `RECEIVERS_OWN`, `UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`,
-  `OUT_OF_WINDOW`, `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`). For a member that requires peer
-  verification, every entry another agent wrote that does not verify is replaced, in place, by a
+  `OUT_OF_WINDOW`, `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`). For a member
+  that requires peer verification, every agent entry that must verify and does not is replaced, in place, by a
   `[withheld: ... because ...]` placeholder before that member's phase prompt
   (`GroupContextBuilder.buildPhaseInput`) and its `groupTranscript` context (`MemberTurnExecutor`)
   are built. In place, so the raw indices window summaries are keyed on stay aligned. The
   placeholder names the speaker by its agent id and has no phase name, since the stored display
   name and phase name are as unverified as the content. Each withheld
   entry is logged at ERROR the first time per conversation, then at DEBUG.
-- **The member's own entries** are not checked for it: they are in its own member conversation
-  already, and a verifying member that does not sign (the validator allows it; a moderator is the
-  usual case) was being asked to revise or defend a placeholder.
+- **The member's own entries** are checked like a peer's when it signs: every honest one is signed,
+  and REVISION and DEFENSE quote its latest entry from the group transcript as the answer it revises
+  or defends, so an answer planted under its id, or its own signed answer edited in the store, is
+  withheld instead. A verifying member that does not sign (the validator allows it; a moderator is
+  the usual case) has nothing to check them against and is shown them as stored, `RECEIVERS_OWN`;
+  without that it was being asked to revise or defend a placeholder.
 - **What the signature covers.** The payload is built in one place for signing and verification:
   the group conversation id, the round (stored on the entry as the new `signatureRound`), the phase
   index and name, the entry type, the content, the speaker's display name, the target agent, the
@@ -46,8 +49,18 @@ never enforced.
   shows the display name; a store writer could put any text under an agent's name by giving it a
   non-agent id. A verifying member now sees such entries as `User`, `System` or
   `<name> (not an agent, unverified)`, and a group save refuses those names for an agent member.
-  Group saves also refuse two members with the same display name (ignoring case), so two verified
-  voices never share one name either.
+  Under `ANONYMOUS` scope (Delphi's later rounds), where every speaker is `Anonymous`, such an entry
+  is `Anonymous (not an agent, unverified)` in the prompt and in `groupTranscript`; before, the
+  scope dropped the label and a store writer's `system` opinion read like a verified peer's.
+  Group saves also refuse two members with the same display name (ignoring case), and an agent
+  member named `Moderator` while the moderator is not a member or `Facilitator` while an enabled
+  facilitator is another agent, the names the engine signs those roles' entries under; so two
+  verified voices never share one name either.
+- **Synthesis under the engine's name.** A synthesis is looked up by its type and quoted without its
+  speaker (the dissent prompt, the vote's options), so the relabelling did not reach it. The engine
+  never records one under `system`, `user` or no speaker, and a verifying member now has such an
+  entry withheld (`ENGINE_SYNTHESIS`). A reviewer's edit and a human or nested-group moderator's
+  synthesis are unsigned by nature and still shown.
 - **Summary and ballots.** The stored window summary is free text no signature covers, so a
   verifying member gets the truncation marker instead. A ballot lists the options the tally counts,
   resolved from the stored transcript: a verifying voter from whom the synthesis was withheld got
@@ -55,7 +68,8 @@ never enforced.
 - **Unreadable receiver.** If a member's configuration cannot be read, the setting this node last
   read for it applies; if it never read one, the member's turn is recorded `SKIPPED` instead of
   running on a transcript filtered for a setting nobody knows. Before, every member, verifying or
-  not, was treated as verifying.
+  not, was treated as verifying. The check runs before the member conversation is started, since
+  the first turn with a conversation is the one that is given the discussion's attachments.
 - **Cost.** Each Ed25519 check is remembered (Caffeine, by SHA-256 of key, signature and signed
   bytes), so a verifying member no longer re-runs it over the whole transcript twice per turn; the
   revocation and window are re-checked each time. Agent configurations are read per version through
@@ -82,9 +96,11 @@ of the signed bytes needs no migration.
 ### Upgrading
 
 A group whose members share a display name, or with an agent member named `User`, `System` or
-`... (not an agent, unverified)`, is refused on its next save until the names change;
-stored groups still load and run. A verifying member in a windowed discussion no longer gets the
-rolling summary.
+`... (not an agent, unverified)`, or `Moderator` / `Facilitator` as above, is refused on its next
+save until the names change; stored groups still load and run. A verifying member in a windowed
+discussion no longer gets the rolling summary. A member that both signs and verifies has its own
+unsigned entries (a signing failure, or answers from before signing was switched on) withheld from
+itself, as its verifying peers already do.
 
 ### Not filtered yet
 

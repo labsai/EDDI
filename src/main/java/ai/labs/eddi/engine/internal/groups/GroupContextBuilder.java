@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
@@ -51,6 +52,15 @@ import java.util.stream.Stream;
 public class GroupContextBuilder {
 
     private static final Logger LOGGER = Logger.getLogger(GroupContextBuilder.class);
+
+    /** The speaker every entry is shown under in ANONYMOUS scope. */
+    private static final String ANONYMOUS_SPEAKER_NAME = "Anonymous";
+    /**
+     * The ANONYMOUS name of an entry shown under a non-agent name
+     * ({@link GroupSigningGuard#isShownAsNonAgent}): it says no agent wrote it, and
+     * nothing about who did.
+     */
+    private static final String ANONYMOUS_NON_AGENT_NAME = ANONYMOUS_SPEAKER_NAME + AgentGroupStore.NOT_AN_AGENT_SUFFIX;
 
     private final ITemplatingEngine templatingEngine;
     /**
@@ -582,7 +592,7 @@ public class GroupContextBuilder {
         return entries.stream().map(e -> {
             Map<String, Object> entry = new LinkedHashMap<>();
             if (scope == ContextScope.ANONYMOUS) {
-                entry.put("speaker", "Anonymous");
+                entry.put("speaker", GroupSigningGuard.isShownAsNonAgent(e) ? ANONYMOUS_NON_AGENT_NAME : ANONYMOUS_SPEAKER_NAME);
             } else {
                 entry.put("speaker", e.speakerDisplayName());
             }
@@ -766,7 +776,7 @@ public class GroupContextBuilder {
             if (!isSummarizable(e)) {
                 continue;
             }
-            String label = anonymous ? "Anonymous" : e.speakerDisplayName();
+            String label = anonymous ? ANONYMOUS_SPEAKER_NAME : e.speakerDisplayName();
             sb.append("- ").append(label);
             if (e.phaseName() != null) {
                 sb.append(" (").append(e.phaseName()).append(')');
@@ -803,7 +813,9 @@ public class GroupContextBuilder {
      * {@code SYNTHESIS} and {@code RETRO} keep the whole transcript, as their
      * rendered prompts do. Under {@code FULL} the raw entries are kept (error and
      * skip records included, as before) minus those not yet visible to peers.
-     * {@code ANONYMOUS} entries lose speaker, target and signature fields.
+     * {@code ANONYMOUS} entries lose speaker, target and signature fields; one
+     * shown under a non-agent name is named "Anonymous (not an agent, unverified)",
+     * as in the rendered prompt.
      */
     public List<TranscriptEntry> scopedTranscript(List<TranscriptEntry> snapshot, DiscussionPhase phase, int currentPhaseIdx,
                                                   GroupMember speaker) {
@@ -823,7 +835,8 @@ public class GroupContextBuilder {
                 continue;
             }
             scoped.add(scope == ContextScope.ANONYMOUS
-                    ? new TranscriptEntry(null, null, e.content(), e.phaseIndex(), e.phaseName(), e.type(), e.timestamp(), null, null)
+                    ? new TranscriptEntry(null, GroupSigningGuard.isShownAsNonAgent(e) ? ANONYMOUS_NON_AGENT_NAME : null, e.content(),
+                            e.phaseIndex(), e.phaseName(), e.type(), e.timestamp(), null, null)
                     : e);
         }
         return List.copyOf(scoped);

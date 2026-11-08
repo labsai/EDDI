@@ -1410,8 +1410,13 @@ each of its turns:
   discussion should sign: each member, and the moderator or synthesizer too
   when it is not a member, or its synthesis is withheld from verifying
   members.
-- A member's own entries are not checked for it: a verifying member that does
-  not sign is still shown its own answer to revise or defend.
+- A member that signs has its own entries checked like a peer's, since every
+  honest one is signed: an answer planted under its id, or its own answer
+  edited in the store, is withheld rather than quoted back to it as the answer
+  it revises or defends. So is its own entry that went out unsigned (a signing
+  failure, or an answer from before signing was switched on), as it already is
+  for every verifying peer. A verifying member that does not sign has nothing
+  to check its own entries against: it is shown them as stored, unchecked.
 - A revoked key vouches for nothing, whenever an entry claims to have been
   signed. A key's `validFromMs`/`validUntilMs` window is checked against the
   time the signer wrote into the entry, so it limits honest use but does not
@@ -1422,10 +1427,20 @@ each of its turns:
   group-conversation store can add one, or re-attribute an agent's entry to a
   non-agent speaker id. A verifying member is therefore shown them under a
   name no member agent has: `User`, `System`, or the stored name followed by
-  `(not an agent, unverified)`. A group save refuses those names for an agent
-  member (400, ignoring case). Member display names must also be unique within
-  a group (a save with two equal names, ignoring case, is refused with 400), so
-  two verified voices never share one name either.
+  `(not an agent, unverified)`. Under `ANONYMOUS` scope, where every speaker
+  is `Anonymous`, such an entry is `Anonymous (not an agent, unverified)`. A
+  group save refuses those names for an agent member (400, ignoring case).
+  Member display names must also be unique within a group (a save with two
+  equal names, ignoring case, is refused with 400), and an agent member may not
+  be named `Moderator` while the moderator is not a member, nor `Facilitator`
+  while an enabled facilitator is another agent: the engine signs those roles'
+  entries under these names. So two verified voices never share one name
+  either.
+- A synthesis under the engine's or the user's name (speaker id `system`,
+  `user` or none) is withheld from a verifying member: the engine never
+  records one there, and a synthesis is quoted by its type, without its
+  speaker. Other unsigned syntheses (a reviewer's edit, a human or nested-group
+  moderator's) are shown, labelled as above, and stay unauthenticated.
 - The stored window summary is free text no signature covers, so a verifying
   member never gets it: in a windowed discussion it is shown the truncation
   marker instead.
@@ -1439,7 +1454,7 @@ each of its turns:
   SSE and the REST and MCP readers see every entry as stored.
 - Each withheld entry is logged at ERROR the first time, with its index and
   the reason (`UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`, `OUT_OF_WINDOW`,
-  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`).
+  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`).
 - **Cost.** A verifying member checks every agent entry before each turn, but
   each Ed25519 check is remembered on the node, so an entry costs one check
   per node, not one per turn. Each pass still reads each distinct speaker's
