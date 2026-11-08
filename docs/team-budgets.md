@@ -211,8 +211,8 @@ Metrics Reference dashboard under **Team Budgets**.
 - An administrator gets **Adjust this month** (cap and a required reason; refused below the spend) and **Transfer
   budget** (from, to, amount, reason; one `Idempotency-Key` per transfer, replaced after a success or a 4xx answer,
   which applied nothing, and kept after a 5xx or network error, so the retry stays idempotent). Cancelling after a
-  5xx or network error keeps the attempt: reopening the dialog shows the same values, the error and the same key, so
-  retrying it cannot move the money twice. Other roles do not see the buttons; the server enforces it regardless.
+  5xx or network error, or while the transfer is still running, keeps the attempt: reopening the dialog shows the same
+  values, the error and the same key, so retrying it cannot move the money twice. Other roles do not see the buttons; the server enforces it regardless.
 
 ## Agents proposing budget changes
 

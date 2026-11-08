@@ -320,6 +320,42 @@ describe("TeamBudgetsTable", () => {
       await waitFor(() => expect(keys).toHaveLength(2));
       expect(keys[1]).not.toBe(keys[0]);
     });
+
+    it("keeps the attempt when closed while the transfer is still running", async () => {
+      // Closing mid-request is the same open question as a 5xx: the money may
+      // move. Resetting there replaced the key the request carried, so the 5xx
+      // that followed left a retry with a new key that could move it twice.
+      const keys: (string | null)[] = [];
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      server.use(
+        http.post("*/administration/team-budgets/transfers", async ({ request }) => {
+          keys.push(request.headers.get("Idempotency-Key"));
+          if (keys.length > 1) return HttpResponse.json({ from: {}, to: {}, transferId: "t" });
+          await held;
+          return HttpResponse.json({ error: "failed 503" }, { status: 503 });
+        }),
+      );
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      let dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(1));
+      await cancel(dialog);
+      await act(async () => {
+        release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      dialog = await openTransfer();
+      expect(within(dialog).getByTestId("team-budget-error")).toHaveTextContent("failed 503");
+      expect(within(dialog).getByTestId("team-budget-amount")).toHaveValue("5");
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(2));
+      expect(keys[1]).toBe(keys[0]);
+    });
   });
 
   it("shows a budget-read failure with a retry instead of hiding the table", async () => {

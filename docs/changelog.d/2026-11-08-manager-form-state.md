@@ -26,9 +26,9 @@ become by then.
   still naming the target it was sent with.
 - **Team budget transfer** — Cancel always started a fresh `Idempotency-Key` and
   an empty form, so after a 5xx or network error (which may have moved the money)
-  re-entering the same transfer could move it twice. After such an error, closing
-  keeps the values, the error and the key; a success or a 4xx starts a new
-  transfer. The table's dead `initialFromId` prop is gone (its only opener passed
+  re-entering the same transfer could move it twice. After such an error, or when
+  the dialog is closed while the transfer is still running, closing keeps the
+  values, the error and the key; a success or a 4xx starts a new transfer. The table's dead `initialFromId` prop is gone (its only opener passed
   `""`), and its open state is a boolean.
 
 ### Design decisions

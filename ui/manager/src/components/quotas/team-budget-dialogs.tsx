@@ -129,8 +129,9 @@ export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; 
   function close() {
     // After an attempt that may have been applied, keep it — values, key and
     // error — so reopening and retrying sends the same key, which the server
-    // deduplicates. A fresh key here made the same transfer a new one.
-    if (!outcomeUnknown) reset();
+    // deduplicates. A fresh key here made the same transfer a new one. An
+    // attempt still running is as open as a 5xx: its reply settles it later.
+    if (!outcomeUnknown && !mutation.isPending) reset();
     onClose();
   }
 
