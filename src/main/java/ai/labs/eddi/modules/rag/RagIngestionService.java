@@ -101,13 +101,21 @@ public class RagIngestionService {
      * An ingestion's status and its warning live in one cache — one shared bucket
      * in a cluster — so each kind gets a prefix of its own: neither can overwrite
      * the other, and an id polled as {@code warning:<id>} finds no status.
+     * <p>
+     * The key also names the knowledge base (its RAG configuration id) the
+     * ingestion ran for. The ingestion id alone is global, and the status endpoint
+     * checks access on the configuration in its <i>path</i>: without the binding,
+     * an editor of knowledge base B who holds an ingestion id of knowledge base A
+     * could poll it through B and read A's document name or failure message — on
+     * any node, now that the cache is shared. With it, an id polled through any
+     * other knowledge base finds nothing and is answered as unknown.
      */
-    private static String statusKey(String ingestionId) {
-        return "status:" + ingestionId;
+    private static String statusKey(String ragConfigId, String ingestionId) {
+        return "status:" + ragConfigId + ":" + ingestionId;
     }
 
-    private static String warningKey(String ingestionId) {
-        return "warning:" + ingestionId;
+    private static String warningKey(String ragConfigId, String ingestionId) {
+        return "warning:" + ragConfigId + ":" + ingestionId;
     }
 
     /**
@@ -150,7 +158,7 @@ public class RagIngestionService {
         // addressed is refused to the caller rather than reported as "failed" later.
         String kbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, ragConfig);
         String ingestionId = UUID.randomUUID().toString();
-        ingestionState.put(statusKey(ingestionId), "pending");
+        ingestionState.put(statusKey(ragConfigId, ingestionId), "pending");
 
         Thread.startVirtualThread(() -> processIngestion(ragConfigId, kbId, ingestionId, documentContent, documentName, ragConfig, replace));
 
@@ -160,7 +168,7 @@ public class RagIngestionService {
     private void processIngestion(String ragConfigId, String kbId, String ingestionId, String documentContent, String documentName,
                                   RagConfiguration ragConfig, boolean replace) {
         try {
-            ingestionState.put(statusKey(ingestionId), "processing");
+            ingestionState.put(statusKey(ragConfigId, ingestionId), "processing");
             LOGGER.infof("Starting ingestion %s for KB '%s', document '%s' (replace=%b)", ingestionId, sanitize(kbId), sanitize(documentName),
                     replace);
 
@@ -189,25 +197,25 @@ public class RagIngestionService {
                 ReentrantLock replaceLock = replaceLocks.get(new ReplaceKey(ragConfigId + "|" + kbId, documentName), key -> new ReentrantLock());
                 replaceLock.lock();
                 try {
-                    storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, true);
+                    storeAndReplace(ingestor, document, store, ragConfigId, kbId, documentName, ingestionId, true);
                 } finally {
                     replaceLock.unlock();
                 }
             } else {
-                storeAndReplace(ingestor, document, store, kbId, documentName, ingestionId, false);
+                storeAndReplace(ingestor, document, store, ragConfigId, kbId, documentName, ingestionId, false);
             }
 
-            ingestionState.put(statusKey(ingestionId), "completed");
+            ingestionState.put(statusKey(ragConfigId, ingestionId), "completed");
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
-            ingestionState.put(statusKey(ingestionId), "failed: " + e.getMessage());
+            ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + e.getMessage());
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
     }
 
-    private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String kbId,
-                                 String documentName, String ingestionId, boolean replace) {
+    private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String ragConfigId,
+                                 String kbId, String documentName, String ingestionId, boolean replace) {
         ingestor.ingest(document);
 
         // 4. Replace: remove what the document had before, AFTER the new version is
@@ -223,7 +231,7 @@ public class RagIngestionService {
             } catch (UnsupportedOperationException e) {
                 String warning = "The new version is stored, but this knowledge base's vector store cannot delete by metadata, "
                         + "so the previous version of '" + documentName + "' is still retrievable alongside it.";
-                ingestionState.put(warningKey(ingestionId), warning);
+                ingestionState.put(warningKey(ragConfigId, ingestionId), warning);
                 LOGGER.warnf("Ingestion %s for KB '%s': %s", ingestionId, sanitize(kbId), sanitize(warning));
             } catch (RuntimeException e) {
                 // The new chunks are already stored, so a failed delete (pgvector wraps
@@ -231,8 +239,9 @@ public class RagIngestionService {
                 // retrievable. Still a failure — the operator should retry, and a retry
                 // removes every version but its own — but the status says what state it
                 // left, rather than a bare "failed".
-                ingestionState.put(warningKey(ingestionId), "The new version of '" + documentName + "' is stored, but removing the previous "
-                        + "version failed, so both may be retrievable until the replacement is retried.");
+                ingestionState.put(warningKey(ragConfigId, ingestionId),
+                        "The new version of '" + documentName + "' is stored, but removing the previous "
+                                + "version failed, so both may be retrievable until the replacement is retried.");
                 throw e;
             }
         }
@@ -240,22 +249,29 @@ public class RagIngestionService {
 
     /**
      * A caveat on an ingestion that completed, or {@code null} when there is none —
-     * currently only a replacement the vector store could not carry out.
+     * currently only a replacement the vector store could not carry out. Also
+     * {@code null} when the ingestion belongs to another knowledge base.
+     *
+     * @param ragConfigId
+     *            the RAG configuration the ingestion was started for
      */
-    public String getWarning(String ingestionId) {
-        return ingestionState.get(warningKey(ingestionId));
+    public String getWarning(String ragConfigId, String ingestionId) {
+        return ingestionState.get(warningKey(ragConfigId, ingestionId));
     }
 
     /**
      * Get the status of an ingestion operation.
      *
+     * @param ragConfigId
+     *            the RAG configuration the ingestion was started for; an ingestion
+     *            of any other knowledge base is {@link #STATUS_UNKNOWN}
      * @param ingestionId
      *            the ingestion ID returned by {@link #ingest}
      * @return status string ("pending", "processing", "completed", or "failed:
      *         ...")
      */
-    public String getStatus(String ingestionId) {
-        String status = ingestionState.get(statusKey(ingestionId));
+    public String getStatus(String ragConfigId, String ingestionId) {
+        String status = ingestionState.get(statusKey(ragConfigId, ingestionId));
         return status != null ? status : STATUS_UNKNOWN;
     }
 }

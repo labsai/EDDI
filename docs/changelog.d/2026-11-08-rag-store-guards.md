@@ -29,6 +29,14 @@ behaves exactly as before.
   and the warning under `warning:` plus the id, so neither can overwrite the other in the bucket, and an id
   polled as `warning:<id>` finds no status. Two caches in two buckets would add a JetStream stream for a
   handful of strings per ingestion.
+- **A status is bound to its knowledge base.** The status endpoint checks access on the RAG configuration
+  in its path, but an ingestion id is global, so an editor of knowledge base B holding an id of A could poll
+  it through B and read A's document name or failure message (on any node, once the cache is shared). Both
+  keys now carry the RAG configuration id (`status:<ragConfigId>:<id>`), so an id polled through another
+  knowledge base is unknown (404). No extra NATS writes.
+- **Not retried after a NATS outage.** If NATS is unreachable while the terminal status is written, that
+  write stays on the originating node, like every other non-fail-closed shared cache (`SharedKvCache`
+  falls back to the node-local copy); there is no retry mechanism and none is added here.
 - **500, not 400, for an unreadable neighbour.** The request is not wrong; the server could not check it.
   It matches the listing-failure path right beside it, and a retry succeeds once the store answers.
 - **Not in this PR:** serialising the check and the write (two editors saving the same new location at the
