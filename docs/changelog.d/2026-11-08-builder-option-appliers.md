@@ -57,7 +57,7 @@ library only accepts there.
 - **Ollama**: the two hand-kept `applyTo` twins are gone; the parameters are read once into a `Settings` record whose
   `OllamaChatRequestParameters` carries the sampling and context options, `think` and `truncate`.
 - **Gemini**: the two `applyExtras` twins are replaced by one `read` into a `Settings` record, so the thinking-config and
-  media-resolution parsing (and their warnings) run once per build instead of once per twin. Model, sampling, token limit,
+  media-resolution parsing (and their warnings) is written once instead of twice. Model, sampling, token limit,
   stop and the cached-content name travel as `GoogleAiGeminiChatRequestParameters`; the rest (seed, thinking config,
   tools, safety settings, media resolution) are options only the client builders take.
 - **Azure OpenAI**: Azure has no request-parameter type of its own, so the common sampling settings travel as
