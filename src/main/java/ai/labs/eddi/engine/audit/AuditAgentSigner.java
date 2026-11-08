@@ -67,7 +67,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * have made, is {@link Verdict#INVALID}. A soft-deleted agent's versions are
  * still read: the delete flags them and leaves them unchanged, so the ledger
  * outlives the agent. A plain Base64 signature with no key version is one the
- * ledger wrote before 6.7, over the bare HMAC and whatever the agent's
+ * ledger of 6.7.0 or earlier wrote, over the bare HMAC and whatever the agent's
  * settings; it is checked against the legacy key the entry's agent version
  * declares as {@code identity.publicKey}.
  * </p>
@@ -95,12 +95,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * before the key's {@code validFromMs}, and the row reads
  * {@link Verdict#NOT_SIGNED}.</li>
  * <li>{@link Verdict#KEY_UNAVAILABLE} — the agent version that would check the
- * signature no longer exists (the agent was deleted permanently), or a pre-6.7
- * signature has no declared legacy key, or no agent version, to be checked
- * against.</li>
+ * signature no longer exists (the agent was deleted permanently), or a
+ * signature in the old plain form has no declared legacy key, or no agent
+ * version, to be checked against.</li>
  * </ul>
  *
- * @since 6.7.0
+ * @since 6.8.0
  */
 @ApplicationScoped
 public class AuditAgentSigner {
@@ -118,8 +118,8 @@ public class AuditAgentSigner {
     private static final Pattern STORED_FORM = Pattern.compile("v(0|[1-9]\\d{0,6}):([A-Za-z0-9+/]+=*)");
 
     /**
-     * The form the ledger stored before 6.7: a plain Base64 signature, no key
-     * version. See {@link #verifyLegacy}.
+     * The form the ledger of 6.7.0 and earlier stored: a plain Base64 signature, no
+     * key version. See {@link #verifyLegacy}.
      */
     private static final Pattern LEGACY_FORM = Pattern.compile("[A-Za-z0-9+/]+=*");
 
@@ -140,7 +140,7 @@ public class AuditAgentSigner {
         INVALID,
         /**
          * The entry's agent version no longer exists, so the key to check it with is
-         * gone; or the signature is in the pre-6.7 form and nothing declares the key
+         * gone; or the signature is in the old plain form and nothing declares the key
          * that made it.
          */
         KEY_UNAVAILABLE,
@@ -267,7 +267,7 @@ public class AuditAgentSigner {
             return stored == null ? Verdict.NOT_SIGNED : Verdict.INVALID;
         }
         if (entry.agentVersion() == null) {
-            // No version names a key. The ledger signs nothing then, but before 6.7 it
+            // No version names a key. The ledger signs nothing then, but up to 6.7.0 it
             // did, and such a signature cannot be checked.
             return stored == null ? Verdict.NOT_SIGNED : legacy ? Verdict.KEY_UNAVAILABLE : Verdict.INVALID;
         }
@@ -308,8 +308,8 @@ public class AuditAgentSigner {
     }
 
     /**
-     * A signature in the form the ledger wrote before 6.7. It signed every entry of
-     * an agent whose vault held the unversioned key
+     * A signature in the form the ledger of 6.7.0 and earlier wrote. It signed
+     * every entry of an agent whose vault held the unversioned key
      * {@code agent-signing-key:{agentId}}, whatever the agent's settings, over the
      * bare HMAC, so neither {@link #signingIdentity} nor {@link #SIGNED_PREFIX}
      * applies: the signature is checked against the legacy key, version 0, that the

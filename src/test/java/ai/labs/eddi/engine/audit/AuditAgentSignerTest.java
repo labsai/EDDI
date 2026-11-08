@@ -336,7 +336,7 @@ class AuditAgentSignerTest {
         assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature("not base64!")));
     }
 
-    // ---- signatures written before key versions (pre-6.7) ----
+    // ---- signatures written before key versions (6.7.0 and earlier) ----
 
     /**
      * An agent version saved under the old instructions: its key in
@@ -353,8 +353,8 @@ class AuditAgentSignerTest {
     }
 
     /**
-     * What the ledger stored before 6.7: Base64 with no key version, over the bare
-     * HMAC, by the key held under the agent's unversioned vault name.
+     * What the ledger of 6.7.0 and earlier stored: Base64 with no key version, over
+     * the bare HMAC, by the key held under the agent's unversioned vault name.
      */
     private String legacySignatureBy(AgentPublicKey key, String hmac) throws Exception {
         return signingService.sign(TENANT, AGENT, key.version(), hmac);

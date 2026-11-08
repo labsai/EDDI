@@ -1982,7 +1982,8 @@ public class AuditLedgerService implements UserErasureParticipant {
      * forgery; kept as it is, the entry reports the same verdict over its new HMAC.
      * Nor does it sign a row whose old signature nothing could check
      * ({@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}): any Base64 in the
-     * pre-6.7 form would otherwise become a genuine signature.
+     * plain form 6.7.0 and earlier wrote would otherwise become a genuine
+     * signature.
      */
     private AuditEntry reseal(AuditEntry entry) {
         AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
