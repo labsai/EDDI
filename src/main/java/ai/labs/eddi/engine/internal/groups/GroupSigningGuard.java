@@ -161,8 +161,10 @@ public class GroupSigningGuard {
             LOGGER.debugf("Agent '%s' not found — sending unsigned", LogSanitizer.sanitize(agentId));
             return entry;
         } catch (Exception e) {
-            LOGGER.errorf("Agent '%s' is configured to sign its group messages but signing failed (%s) — "
-                    + "sending unsigned; peers that require verification will withhold this entry",
+            // Also reached when the agent's own config cannot be read, so the message does
+            // not claim the agent is configured to sign.
+            LOGGER.errorf("Could not sign a group message of agent '%s' (%s) — sending it unsigned; "
+                    + "peers that require verification will withhold this entry",
                     LogSanitizer.sanitize(agentId), e.getMessage());
             return entry;
         }

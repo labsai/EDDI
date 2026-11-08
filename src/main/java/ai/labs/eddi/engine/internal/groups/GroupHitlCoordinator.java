@@ -364,8 +364,9 @@ public class GroupHitlCoordinator {
         // Only the persist itself may revert the in-memory state. Past the commit
         // below, CANCELLED is durable, and reverting memory to the paused state
         // would make executeDiscussion's finally block read the wrong state: it
-        // skips signingGuard.forgetConversation for paused states (leaking the
-        // verification cursor) and only runs cleanupEphemeralAgents for
+        // skips signingGuard.forgetConversation for paused states (leaking its
+        // record of the withheld entries logged) and only runs cleanupEphemeralAgents
+        // for
         // FAILED/CANCELLED — so dynamically created agents would stay deployed.
         // The realistic post-commit thrower is the listener: an SSE sink on a closed
         // stream. It used to sit inside this try.
@@ -1659,8 +1660,9 @@ public class GroupHitlCoordinator {
      * terminal state OUTSIDE the executeDiscussion finally block (cancel-of-paused,
      * REJECTED resume). executeDiscussion skips cleanup while AWAITING_APPROVAL —
      * without this, ephemeral dynamic agents stay deployed and the signing guard's
-     * verification cursor (see {@link GroupSigningGuard#forgetConversation}) leaks
-     * forever on every paused-then-terminal path.
+     * record of the withheld entries it logged (see
+     * {@link GroupSigningGuard#forgetConversation}) leaks forever on every
+     * paused-then-terminal path.
      */
     public void cleanupAfterTerminalState(GroupConversation gc) {
         signingGuard.forgetConversation(gc.getId());

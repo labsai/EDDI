@@ -1743,9 +1743,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
             // removed token so a cancel that raced this remove is not silently dropped.
             removeTokenAndConvertIfSignalled(gc, listener);
-            // Drop the incremental verification cursor once this leg ends, but keep
-            // it across ANY pause (approval or a human turn, I6) so a resume
-            // continues from where it left off.
+            // Drop the signing guard's record of the withheld entries already logged
+            // once this leg ends, but keep it across ANY pause (approval or a human
+            // turn, I6) so a resume does not log the same entries at ERROR again.
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL
                     && gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
                 signingGuard.forgetConversation(gc.getId());
