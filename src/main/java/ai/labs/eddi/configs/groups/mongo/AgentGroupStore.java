@@ -64,6 +64,18 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     public static final String NOT_AN_AGENT_SUFFIX = " (not an agent, unverified)";
 
     /**
+     * The speaker name the engine gives a moderator that is not a member. A group
+     * save refuses it for an agent member while such a moderator is configured.
+     */
+    public static final String MODERATOR_SPEAKER_NAME = "Moderator";
+    /**
+     * The speaker name the engine signs the facilitator's entries under. A group
+     * save refuses it for an agent member other than the facilitator while one is
+     * enabled.
+     */
+    public static final String FACILITATOR_SPEAKER_NAME = "Facilitator";
+
+    /**
      * Field-injected so the constructor tests build stays as it was; null (a store
      * built by hand) skips the grant rule.
      */
@@ -185,6 +197,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         problems.addAll(duplicateMemberProblems(members));
         problems.addAll(duplicateDisplayNameProblems(members));
         problems.addAll(reservedDisplayNameProblems(members));
+        problems.addAll(engineRoleNameProblems(config, members));
         if (config.getMaxRounds() < 0) {
             problems.add("maxRounds must not be negative");
         }
@@ -296,6 +309,40 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     || lower.endsWith(suffix)) {
                 problems.add("members[" + i + "] has the displayName '" + name + "', which members that require peer verification "
                         + "are shown for entries no agent wrote. Give the agent another displayName");
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * An AGENT member named like a role the engine speaks under for another agent:
+     * {@link #MODERATOR_SPEAKER_NAME} while the moderator is not a member, or
+     * {@link #FACILITATOR_SPEAKER_NAME} while an enabled facilitator is another
+     * agent (ignoring case and surrounding blanks). Both roles sign their entries,
+     * so a member that requires peer verification would be shown two verified
+     * voices under one name, as {@link #duplicateDisplayNameProblems} prevents
+     * among members. A role held by a member speaks under its own name, which
+     * leaves the role's name free.
+     */
+    static List<String> engineRoleNameProblems(AgentGroupConfiguration config, List<AgentGroupConfiguration.GroupMember> members) {
+        String moderator = config.getModeratorAgentId();
+        boolean nonMemberModerator = moderator != null
+                && members.stream().noneMatch(member -> member != null && moderator.equals(member.agentId()));
+        var facilitator = config.getFacilitator();
+        String facilitatorId = facilitator != null && facilitator.enabled() ? facilitator.agentId() : null;
+        List<String> problems = new ArrayList<>();
+        for (int i = 0; i < members.size(); i++) {
+            var member = members.get(i);
+            if (member == null || member.memberType() != AgentGroupConfiguration.MemberType.AGENT || member.displayName() == null) {
+                continue;
+            }
+            String name = member.displayName().trim();
+            if (nonMemberModerator && name.equalsIgnoreCase(MODERATOR_SPEAKER_NAME)) {
+                problems.add("members[" + i + "] has the displayName '" + name + "', which the engine gives the moderator '" + moderator
+                        + "', since it is not a member. Give the agent another displayName");
+            } else if (facilitatorId != null && name.equalsIgnoreCase(FACILITATOR_SPEAKER_NAME) && !facilitatorId.equals(member.agentId())) {
+                problems.add("members[" + i + "] has the displayName '" + name + "', under which the facilitator '" + facilitatorId
+                        + "' speaks. Give the agent another displayName");
             }
         }
         return problems;

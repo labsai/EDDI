@@ -39,6 +39,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -2330,7 +2331,7 @@ public class GroupConversationService implements IGroupConversationService, User
                 return List.of(new GroupMember(rosterModerator.agentId(), rosterModerator.displayName(), 0, "MODERATOR",
                         rosterModerator.memberType()));
             }
-            return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
+            return List.of(new GroupMember(moderatorAgentId, AgentGroupStore.MODERATOR_SPEAKER_NAME, 0, "MODERATOR"));
         }
 
         if (participants.toUpperCase().startsWith("ROLE:")) {
