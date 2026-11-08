@@ -91,7 +91,36 @@ describe("SecurityIdentitySection", () => {
       <SecurityIdentitySection agent={agentWithFlag} onChange={mockOnChange} />
     );
     // Section auto-opens since defaultOpen depends on security flags being set
-    expect(screen.getByTestId("security-flag-warning")).toHaveTextContent(/no signing key/);
+    expect(screen.getByTestId("security-flag-warning")).toHaveTextContent(/no usable signing key/);
+  });
+
+  // The agent signs with its newest key and never falls back to an older one, so
+  // once that key is revoked every save with signing on is refused (400).
+  it("warns when the newest key is revoked, even with an older key still live", () => {
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{
+          ...baseAgent,
+          security: { signInterAgentMessages: true },
+          identity: {
+            keys: [
+              { version: 1, publicKeyB64: "ABCDEF1234567890ABCDEF1234567890" },
+              { version: 2, publicKeyB64: "GHIJKL1234567890ABCDEF1234567890", revoked: true },
+            ],
+          },
+        }}
+        onChange={mockOnChange}
+      />
+    );
+    expect(screen.getByTestId("security-flag-warning")).toHaveTextContent(/newest one is revoked/);
+  });
+
+  it("does not warn when only an older key is revoked", () => {
+    renderWithProviders(
+      <SecurityIdentitySection agent={{ ...agentWithTwoKeys, security: { signInterAgentMessages: true } }} onChange={mockOnChange} />
+    );
+    expect(screen.getByTestId("security-toggles")).toBeInTheDocument();
+    expect(screen.queryByTestId("security-flag-warning")).not.toBeInTheDocument();
   });
 
   it("does not warn when signing is on and the agent has a key", () => {
@@ -192,6 +221,30 @@ describe("SecurityIdentitySection", () => {
       />
     );
 
+    await user.click(screen.getByTestId("revoke-signing-key-0"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke" }));
+
+    expect(onRevoke).toHaveBeenCalledWith(0);
+  });
+
+  // Generating a key keeps the legacy publicKey, and peers keep trusting it for
+  // v0 signatures, so it has to stay revocable once generated keys exist.
+  it("keeps the legacy key and its Revoke next to generated keys", async () => {
+    const user = userEvent.setup();
+    const onRevoke = vi.fn();
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{
+          ...baseAgent,
+          identity: { publicKey: "legacyPubKey123456789012345678", keys: [{ version: 1, publicKeyB64: "ABCDEF1234567890ABCDEF1234567890" }] },
+        }}
+        onChange={mockOnChange}
+        signingKeyAction={{ onGenerate: vi.fn(), onRevoke, pending: false }}
+      />
+    );
+
+    expect(screen.getByTestId("signing-key-legacy")).toHaveTextContent(/Legacy key \(v0\)/);
+    expect(screen.getByTestId("revoke-signing-key-1")).toBeInTheDocument();
     await user.click(screen.getByTestId("revoke-signing-key-0"));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke" }));
 
