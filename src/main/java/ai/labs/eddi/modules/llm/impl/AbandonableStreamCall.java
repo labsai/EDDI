@@ -50,7 +50,8 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
     interface TokenForwarder {
         /**
          * @param token
-         *            the partial text, already recorded in {@link #forwardedText()}
+         *            the partial text, already recorded in
+         *            {@link AbandonableStreamCall#forwardedText()}
          * @param firstOfCall
          *            {@code true} when nothing had been recorded for this call before
          *            this token

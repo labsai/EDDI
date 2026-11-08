@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.utils.LogCaptureSupport.CapturedRecord;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -28,11 +29,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -494,39 +492,15 @@ class StreamingLegacyChatExecutorTimeoutTest {
     }
 
     /**
-     * Every WARN {@link StreamingLegacyChatExecutor} logs while {@code body} runs.
-     * {@code logging.properties} turns the whole {@code ai.labs.eddi} namespace OFF
-     * for plain unit tests, so the logger is opened explicitly and put back.
+     * Every below-backstop {@code timeout} WARN {@link StreamingLegacyChatExecutor}
+     * logs while {@code body} runs — matched on its wording, so an unrelated
+     * warning can neither satisfy nor spoil a count.
      */
     private static List<String> captureWarnings(Runnable body) {
-        List<String> captured = new CopyOnWriteArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
-                    captured.add(String.valueOf(record.getMessage()));
-                }
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-
-        Logger julLogger = Logger.getLogger(StreamingLegacyChatExecutor.class.getName());
-        Level previousLevel = julLogger.getLevel();
-        julLogger.setLevel(Level.ALL);
-        julLogger.addHandler(handler);
-        try {
-            body.run();
-        } finally {
-            julLogger.removeHandler(handler);
-            julLogger.setLevel(previousLevel);
-        }
-        return captured;
+        return captureRecordsOf(StreamingLegacyChatExecutor.class, body).stream()
+                .filter(CapturedRecord::isWarning)
+                .map(CapturedRecord::message)
+                .filter(message -> message.contains("SHORTER than the 120s streaming backstop"))
+                .toList();
     }
 }
