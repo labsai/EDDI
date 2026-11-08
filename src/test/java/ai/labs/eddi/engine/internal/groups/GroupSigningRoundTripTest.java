@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
@@ -67,7 +68,7 @@ class GroupSigningRoundTripTest {
     void setUp() throws Exception {
         AgentSigningService signing = SigningTestSupport.signingService(SigningTestSupport.inMemoryVault(), new SimpleMeterRegistry());
         IAgentStore agentStore = inMemoryAgentStore();
-        restAgentStore = new RestAgentStore(agentStore, mock(IRestWorkflowStore.class), mock(IDocumentDescriptorStore.class),
+        restAgentStore = new RestAgentStore(agentStore, mock(IRestWorkflowStore.class), descriptorStore(),
                 mock(IJsonSchemaCreator.class), mock(IScheduleStore.class), mock(CapabilityRegistryService.class), mock(IDeploymentStore.class),
                 mock(ResourceAccessGuard.class), signing, mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
         guard = new GroupSigningGuard(agentStore, signing, "default");
@@ -245,7 +246,7 @@ class GroupSigningRoundTripTest {
 
     /** Provisions through the REST method and turns signing on through a save. */
     private void provisionKeyAndEnableSigning() throws Exception {
-        assertEquals(201, restAgentStore.createSigningKey(SPEAKER, currentVersion(SPEAKER)).getStatus());
+        assertEquals(200, restAgentStore.createSigningKey(SPEAKER, currentVersion(SPEAKER)).getStatus());
         int version = currentVersion(SPEAKER);
         AgentConfiguration config = agents.get(SPEAKER).get(version - 1);
         var security = new AgentConfiguration.SecurityConfig();
@@ -316,6 +317,13 @@ class GroupSigningRoundTripTest {
             return currentVersion(id);
         });
         return store;
+    }
+
+    /** A descriptor for every agent version: generating a key moves it along. */
+    private static IDocumentDescriptorStore descriptorStore() throws Exception {
+        IDocumentDescriptorStore descriptors = mock(IDocumentDescriptorStore.class);
+        when(descriptors.readDescriptor(anyString(), anyInt())).thenAnswer(invocation -> new DocumentDescriptor());
+        return descriptors;
     }
 
     private static IResourceStore.IResourceId resourceId(String id, int version) {

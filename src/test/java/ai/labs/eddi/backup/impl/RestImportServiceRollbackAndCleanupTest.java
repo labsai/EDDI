@@ -672,13 +672,17 @@ class RestImportServiceRollbackAndCleanupTest {
             try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
                 stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
 
-                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
 
                 var created = ArgumentCaptor.forClass(AgentConfiguration.class);
                 verify(agentStore).create(created.capture());
                 assertNull(created.getValue().getIdentity());
                 assertFalse(created.getValue().getSecurity().isSignInterAgentMessages());
                 assertTrue(created.getValue().getSecurity().isRequirePeerVerification(), "verifying peers needs no key of the agent's own");
+                // ... and the answer says so: the archive had signing on.
+                String turnedOff = response.getHeaderString(RestImportService.HEADER_SIGNING_TURNED_OFF);
+                assertNotNull(turnedOff, "the caller learns that signing was turned off");
+                assertTrue(turnedOff.contains("has no signing key yet"), turnedOff);
             }
         }
     }

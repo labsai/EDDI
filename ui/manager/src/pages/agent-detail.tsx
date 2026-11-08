@@ -58,6 +58,7 @@ import {
   useDeleteAgent,
   useDuplicateAgent,
   useGenerateAgentSigningKey,
+  useRevokeAgentSigningKey,
   useAgentVersions,
   useUpdateAgent,
   useUpdateAgentDescriptor,
@@ -224,7 +225,9 @@ export function AgentDetailPage() {
   const duplicateMutation = useDuplicateAgent();
   const updateAgentMutation = useUpdateAgent();
   const generateSigningKeyMutation = useGenerateAgentSigningKey();
-  // The endpoint is eddi-admin only: whoever can mint a key can sign as the agent.
+  const revokeSigningKeyMutation = useRevokeAgentSigningKey();
+  // Both endpoints are eddi-admin only: whoever can mint or retire a key decides
+  // what signs as the agent.
   const mayGenerateSigningKey = useIsAdminOrUnknown();
   const startConversationMutation = useStartConversation();
 
@@ -498,6 +501,18 @@ export function AgentDetailPage() {
           version: result?.version,
         }),
       );
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    }
+  }
+
+  /** Revokes a signing key; the backend saves that as a new version, which the page then follows. */
+  async function handleRevokeSigningKey(keyVersion: number) {
+    try {
+      const result = await revokeSigningKeyMutation.mutateAsync({ id: id!, keyVersion, version: resolvedVersion });
+      const created = parseVersionFromLocation(result?.location);
+      if (created !== null) setVersion(created);
+      toast.success(t("agentDetail.signingKeyRevoked", "Signing key v{{version}} revoked.", { version: keyVersion }));
     } catch (err) {
       toast.error(getErrorMessage(err));
     }
@@ -1090,7 +1105,8 @@ export function AgentDetailPage() {
           mayGenerateSigningKey
             ? {
                 onGenerate: () => void handleGenerateSigningKey(),
-                pending: generateSigningKeyMutation.isPending,
+                onRevoke: (keyVersion) => void handleRevokeSigningKey(keyVersion),
+                pending: generateSigningKeyMutation.isPending || revokeSigningKeyMutation.isPending,
                 // The key lands as a new version of the CURRENT one: unsaved edits
                 // would then conflict with it, and an older version is refused.
                 disabledReason: isDirty
