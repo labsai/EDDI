@@ -9,7 +9,7 @@
   evaluated on each of its ratings and failed turns. New property
   `eddi.alerts.max-rules-per-agent` (default `50`, at least `1`): a create or update that
   would give an agent more rules listing it — enabled or not — is refused with 409
-  `RULE_LIMIT_REACHED`, naming the agent and the property. The rules over every agent
+  `RULE_LIMIT_REACHED`, naming the agent (an every-agent rule: the every-agent count) and the property. The rules over every agent
   have a limit of the same size of their own (`IAlertRuleStore.countAllAgents`, in the
   MongoDB and PostgreSQL stores), so at most twice the limit watch one agent.
 - **Only what a save adds is counted.** An agent the stored rule already listed, or an

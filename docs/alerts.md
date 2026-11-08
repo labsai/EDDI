@@ -405,7 +405,7 @@ most 10,000 of each, without naming anybody else.
 - **Rule limit.** Every rule watching an agent is evaluated on each of its ratings
   and failed turns, so the rules per agent are capped. A create or update that would
   give an agent more than `eddi.alerts.max-rules-per-agent` rules listing it — enabled
-  or not — is refused with 409 `RULE_LIMIT_REACHED`, naming the agent; the rules over
+  or not — is refused with 409 `RULE_LIMIT_REACHED`, naming the agent (an every-agent rule is refused with the every-agent count instead); the rules over
   every agent have a limit of the same size of their own, so at most twice the limit
   watch one agent. Only what a save adds is counted: an agent the rule already listed,
   or an every-agent rule that already was one, is not counted again, so after the
