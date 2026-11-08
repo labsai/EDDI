@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.utils.EndpointParameters;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
@@ -33,7 +34,6 @@ import software.amazon.awssdk.regions.Region;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -92,14 +92,6 @@ public class EmbeddingModelFactory {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
-
-    /**
-     * The parameter keys the providers below read an editor-chosen endpoint from. A
-     * configuration with neither uses the provider's own endpoint, which an editor
-     * cannot choose, so there is nothing to check — as in
-     * {@link ChatModelRegistry}.
-     */
-    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint");
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -231,7 +223,10 @@ public class EmbeddingModelFactory {
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
-     * name the configured endpoint, before any reference is resolved.
+     * name the configured endpoint, before any reference is resolved. A
+     * configuration with no endpoint parameter ({@link EndpointParameters}) uses
+     * the provider's own endpoint, which an editor cannot choose, so there is
+     * nothing to check — as in {@link ChatModelRegistry}.
      *
      * @param params
      *            the embedding parameters with global variables resolved and vault
@@ -244,9 +239,9 @@ public class EmbeddingModelFactory {
         // Every key present, not the first: which one a provider reads is the
         // builder's business (Azure reads endpoint, OpenAI baseUrl), and a config
         // carrying both must not pass on the one that is ignored.
-        for (String key : ENDPOINT_KEYS) {
-            String endpoint = params.get(key);
-            if (!isBlank(endpoint)) {
+        for (Map.Entry<String, String> parameter : params.entrySet()) {
+            String endpoint = parameter.getValue();
+            if (EndpointParameters.isEndpointKey(parameter.getKey()) && !isBlank(endpoint)) {
                 vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
             }
         }
