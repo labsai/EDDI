@@ -523,9 +523,10 @@ export const READ_ENDPOINTS: readonly string[] = [
  * for the same document-integrity reason as `PUT`. Also excluded: any
  * schedule verb but disable (creating one is attacker persistence — see
  * above), every `DELETE` (no undo exists in any of these stores), and
- * `POST /agentstore/agents/{id}/signing-keys`: it is eddi-admin only on the
- * backend because whoever mints an agent's signing key can sign as that agent,
- * and the system prompt sends the administrator to the Manager instead.
+ * `POST /agentstore/agents/{id}/signing-keys` and its `/{keyVersion}/revoke`:
+ * both are eddi-admin only on the backend because whoever mints or retires an
+ * agent's signing key decides what signs as that agent, and the system prompt
+ * sends the administrator to the Manager instead.
  *
  * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
  * unconditionally, anything added here is gated the moment it is added — the

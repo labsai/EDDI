@@ -14,7 +14,7 @@ unsigned transcript entry while the configuration said the agent signed.
   `AgentSigningService.generateKey`, which creates an Ed25519 key pair and stores the private key
   under `agent-signing-key:{id}:v{n}` with `storeIfAbsent`, never an upsert, skipping to the next
   version if one is taken. The endpoint appends the public key to `identity.keys` as version
-  `max + 1` and saves a new, compatible agent version (201, Location = that version, body = the
+  `max + 1` and saves a new, compatible agent version (200, Location = that version, body = the
   new key). A stale `version` is refused with 409 before the vault is touched; a failed config write
   takes the key back out of the vault (`discardKey`); a vault failure answers 503 and writes nothing.
   Older keys stay, so entries they signed still verify by the version they declare.
@@ -31,8 +31,8 @@ unsigned transcript entry while the configuration said the agent signed.
   that creates a new agent** (`RestImportService.createNewAgent`). The original's keys live under
   the original's id, so the new agent could never sign with them and would have published the
   original's public keys as its own; with the honest validator, every later save of it (a workflow
-  cascade included) would also have been refused. An import *merge* still writes the archive's
-  identity onto the local agent, as before.
+  cascade included) would also have been refused. An import *merge* keeps the local agent's
+  identity (see the 2026-11-08 entry: `identity` is engine-owned).
 - **The crypto inventory lists `KeyPairGenerator` `Ed25519` again** (`CryptoInventoryTest`,
   [`cryptography.md`](../cryptography.md)): the base branch dropped it with the unused generators,
   and `generateKey` uses it.

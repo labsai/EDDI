@@ -113,7 +113,11 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Update agent.")
+    @Operation(description = "Update agent. identity (the agent's signing keys) and dynamicOrigin are engine-owned: the stored "
+            + "values are kept whatever the body says. Keys change only through POST /{id}/signing-keys and "
+            + "/{id}/signing-keys/{keyVersion}/revoke (eddi-admin). With security.signInterAgentMessages on, the save is "
+            + "refused (400) unless the agent can sign with its newest key, and answers 503 if the secrets vault cannot be "
+            + "asked.")
     Response updateAgent(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,
@@ -126,6 +130,11 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Path("/{id}/updateResourceUri")
     @Consumes(MediaType.TEXT_PLAIN)
     @Operation(description = "Update references to other resources within this Agent resource.")
+    @APIResponse(responseCode = "200", description = "Updated; Location is the new agent version.")
+    @APIResponse(responseCode = "400", description = "resourceURI carries no version, the agent references no such resource, or the "
+            + "save is refused — for example signInterAgentMessages is on and the agent's signing key is not usable.")
+    @APIResponse(responseCode = "503", description = "The secrets vault could not be asked about a signing agent's key. Nothing was "
+            + "written.")
     Response updateResourceInAgent(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
                                    @QueryParam("version") Integer version,
@@ -156,9 +165,13 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @APIResponse(responseCode = "200", description = "Cascaded. Carries the new agent version, the workflow versions written, and the "
             + "deployment outcome when redeploy was requested.")
     @APIResponse(responseCode = "400", description = "A mapping is malformed, names different kinds of resource, or its oldUri is not "
-            + "referenced by the agent. Nothing was written.")
+            + "referenced by the agent. Nothing was written. Also when the agent save itself is refused after the new workflow "
+            + "versions were written — for example signInterAgentMessages is on and the agent's signing key is not usable. The "
+            + "agent was then NOT changed, and the message names the workflow versions written, which nothing references.")
     @APIResponse(responseCode = "404", description = "Agent version not found.")
     @APIResponse(responseCode = "409", description = "version is not the agent's current version. Nothing was written.")
+    @APIResponse(responseCode = "503", description = "A store could not answer while saving — for a signing agent, the secrets vault "
+            + "its key is checked against. The agent was NOT changed; the message names any workflow versions already written.")
     AgentCascadeResult cascadeAgentChanges(@PathParam("id") String id,
                                            @Parameter(name = "version", required = true, example = "1")
                                            @QueryParam("version") Integer version,
@@ -180,17 +193,51 @@ public interface IRestAgentStore extends IRestVersionInfo {
                        + "version. From then on the agent signs with key n — no redeploy needed — once "
                        + "security.signInterAgentMessages is on, which a save accepts only while the newest key's private half "
                        + "is in the vault. Older keys stay in identity.keys so the entries they signed still verify. Admin only: "
-                       + "whoever can mint a key can sign as this agent.")
-    @APIResponse(responseCode = "201", description = "Key generated. The body is the new identity.keys entry (version, publicKeyB64, "
-            + "validFromMs, validUntilMs); Location is the new agent version.")
+                       + "whoever can mint a key can sign as this agent. identity is engine-owned: a PUT of the agent keeps the "
+                       + "stored identity whatever its body says, so keys change only here and through the revoke operation.")
+    @APIResponse(responseCode = "200", description = "Key generated. The body is the new identity.keys entry (version, publicKeyB64, "
+            + "validFromMs, validUntilMs, revoked); Location is the new agent version. 200, not 201: the agent already existed.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
-    @APIResponse(responseCode = "409", description = "version is not the agent's current version. Nothing was written.")
+    @APIResponse(responseCode = "409", description = "version is not the agent's current version, or the agent has used every key "
+            + "version up to 1000000. Nothing was written.")
     @APIResponse(responseCode = "503", description = "The secrets vault is not configured or could not store the key. Nothing was "
             + "written.")
     Response createSigningKey(@PathParam("id") String id,
                               @Parameter(name = "version", required = true, example = "1",
                                          description = "The agent's current version; 0 means current.")
                               @QueryParam("version") Integer version);
+
+    @POST
+    @Path("/{id}/signing-keys/{keyVersion}/revoke")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(operationId = "revokeAgentSigningKey", summary = "Revoke one of this agent's signing keys",
+               description = "Marks identity.keys entry keyVersion revoked (every entry of that version, if it is declared twice) and "
+                       + "saves the agent as a new, compatible version; the private key is then deleted from the secrets vault. A "
+                       + "revoked key is valid at no time, so a signature under it proves nothing, however old it claims to be. "
+                       + "keyVersion 0 is the legacy unversioned key (identity.publicKey), which has no revoked flag and is removed "
+                       + "instead; an identity.keys entry declared as version 0 is revoked with it. Revoking the newest key stops the agent signing — it does not fall back to an older key — so "
+                       + "generate its replacement first; until then a save with signInterAgentMessages on is refused. Revoking a key "
+                       + "that is already revoked writes nothing. Admin only, like generating one.")
+    @APIResponse(responseCode = "200", description = "Key revoked. The body is the revoked entry; Location is the agent version "
+            + "that records it.")
+    @APIResponse(responseCode = "404", description = "Agent not found, or it declares no key of that version.")
+    @APIResponse(responseCode = "409", description = "version is not the agent's current version. Nothing was written.")
+    Response revokeSigningKey(@PathParam("id") String id,
+                              @PathParam("keyVersion") Integer keyVersion,
+                              @Parameter(name = "version", required = true, example = "1",
+                                         description = "The agent's current version; 0 means current.")
+                              @QueryParam("version") Integer version);
+
+    /**
+     * Not an endpoint (no HTTP method). Why the agent, as stored at its current
+     * version, could not sign right now — the reason a save with
+     * {@code signInterAgentMessages} on would be refused — or {@code null} when it
+     * can. Import and sync ask before they write that flag onto an agent whose
+     * identity, which they never replace, cannot sign. An agent that does not exist
+     * is a 404, and a secrets vault that cannot answer a 503.
+     */
+    String signingKeyProblem(String id);
 
     @POST
     @Path("/{id}")

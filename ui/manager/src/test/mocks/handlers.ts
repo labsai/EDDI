@@ -1467,16 +1467,33 @@ export const handlers = [
     });
   }),
 
-  // Generate a signing key: the backend answers 201 with the new identity.keys
-  // entry, and Location names the agent version it was saved as.
+  // Generate a signing key: the backend answers 200 (the agent already existed)
+  // with the new identity.keys entry, and Location names the agent version it
+  // was saved as.
   http.post("*/agentstore/agents/:id/signing-keys", ({ request, params }) => {
     const version = Number(new URL(request.url).searchParams.get("version") ?? "1");
     return HttpResponse.json(
-      { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=", validFromMs: Date.now(), validUntilMs: 0 },
+      { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=", validFromMs: Date.now(), validUntilMs: 0, revoked: false },
       {
-        status: 201,
+        status: 200,
         headers: { Location: `eddi://ai.labs.agent/agentstore/agents/${String(params.id)}?version=${version + 1}` },
       },
+    );
+  }),
+
+  // Revoke a signing key: 200 with the revoked entry; Location names the agent
+  // version that records it.
+  http.post("*/agentstore/agents/:id/signing-keys/:keyVersion/revoke", ({ request, params }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? "1");
+    return HttpResponse.json(
+      {
+        version: Number(params.keyVersion),
+        publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=",
+        validFromMs: 0,
+        validUntilMs: 0,
+        revoked: true,
+      },
+      { status: 200, headers: { Location: `eddi://ai.labs.agent/agentstore/agents/${String(params.id)}?version=${version + 1}` } },
     );
   }),
 
@@ -4440,7 +4457,8 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 60000).toISOString(),
     hmac: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678",
-    agentSignature: "ed25519:sig_test_audit1",
+    // The backend's form: "v<key version>:<Base64 Ed25519 signature>".
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0xLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTEtYWdlbnQtc2lnbg==",
   },
   {
     id: "audit-2",
@@ -4462,7 +4480,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 59000).toISOString(),
     hmac: "b2c3d4e5f6a1789012345678901234567890abcdef1234567890abcdef12345678",
-    agentSignature: "ed25519:sig_test_audit2",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0yLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTItYWdlbnQtc2lnbg==",
   },
   {
     id: "audit-3",
@@ -4499,7 +4517,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0.003,
     timestamp: new Date(Date.now() - 57000).toISOString(),
     hmac: "c3d4e5f6a1b2789012345678901234567890abcdef1234567890abcdef12345678",
-    agentSignature: "ed25519:sig_test_audit3",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0zLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTMtYWdlbnQtc2lnbg==",
   },
   {
     id: "audit-4",
@@ -4521,7 +4539,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 55000).toISOString(),
     hmac: "d4e5f6a1b2c3789012345678901234567890abcdef1234567890abcdef12345678",
-    agentSignature: "ed25519:sig_test_audit4",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS00LWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTQtYWdlbnQtc2lnbg==",
   },
 ];
 

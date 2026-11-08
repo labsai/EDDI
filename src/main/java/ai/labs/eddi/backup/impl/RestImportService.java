@@ -153,6 +153,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * refused the document. Absent when every one landed.
      */
     static final String HEADER_CONNECTIONS_SKIPPED = "X-Connections-Skipped";
+    /**
+     * Why the imported agent was written with {@code signInterAgentMessages} off
+     * although the archive had it on: the agent it was written to cannot sign — a
+     * new agent has no key yet, and a merged one keeps its own identity, whose
+     * newest key is not usable. Absent when the flag was written as archived.
+     */
+    static final String HEADER_SIGNING_TURNED_OFF = "X-Agent-Signing-Turned-Off";
 
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
@@ -957,6 +964,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // answer rather than from the server log.
                 created.header(HEADER_CONNECTIONS_SKIPPED, connectionsNotImported);
             }
+            if (transaction.signingTurnedOff != null) {
+                // And so is a security setting the import could not carry over.
+                created.header(HEADER_SIGNING_TURNED_OFF, transaction.signingTurnedOff.replaceAll("[\\r\\n]+", " "));
+            }
             return created.build();
         }
         // Nothing was imported. Answering 200 with an empty resourceUri is how a
@@ -1426,6 +1437,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
+                // The local agent keeps its own identity (updateAgent never takes one from
+                // the body), so the archive's signing flag is only carried over when THAT
+                // identity can sign. Otherwise the save would be refused and the whole
+                // import rolled back over a setting this instance cannot honour.
+                var security = agentConfiguration.getSecurity();
+                if (security != null && security.isSignInterAgentMessages()) {
+                    String problem = restAgentStore.signingKeyProblem(localResId.getId());
+                    if (problem != null) {
+                        security.setSignInterAgentMessages(false);
+                        turnedSigningOff(transaction, problem);
+                    }
+                }
                 // Breaking unless the operator declared the import compatible: an imported
                 // configuration comes from elsewhere, and nobody has judged it against the
                 // conversations running here until they say so.
@@ -1713,6 +1736,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return (IResourceStore<T>) CDI.current().select(storeClass).get();
     }
 
+    /**
+     * Records that the agent is written with {@code signInterAgentMessages} off
+     * although the archive had it on, and why — for the response header and the
+     * log.
+     */
+    private static void turnedSigningOff(ImportTransaction transaction, String why) {
+        transaction.signingTurnedOff = "signInterAgentMessages was turned off: " + why;
+        LOGGER.warnf("Import: %s", LogSanitizer.sanitize(transaction.signingTurnedOff));
+    }
+
     private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
         // dynamicOrigin names a conversation on the instance the ZIP came from; the
         // imported agent gets a fresh id and was provisioned by an import, not by
@@ -1725,8 +1758,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // be refused for signing with a key it does not hold. It signs once an admin
         // generates it a key of its own and turns signing back on — as a duplicate.
         agentConfiguration.setIdentity(null);
-        if (agentConfiguration.getSecurity() != null) {
+        if (agentConfiguration.getSecurity() != null && agentConfiguration.getSecurity().isSignInterAgentMessages()) {
             agentConfiguration.getSecurity().setSignInterAgentMessages(false);
+            turnedSigningOff(transaction, "the imported agent is new and has no signing key yet. Generate one with POST "
+                    + "/agentstore/agents/{id}/signing-keys (eddi-admin), then turn signInterAgentMessages on.");
         }
         URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
         registerCapabilities(createdAgentUri, agentConfiguration);
@@ -2998,6 +3033,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
 
         /**
+         * Why this import wrote the agent with {@code signInterAgentMessages} off
+         * although the archive had it on, or {@code null} when it did not. Reported in
+         * {@link #HEADER_SIGNING_TURNED_OFF}.
+         */
+        private String signingTurnedOff;
+
+        /**
          * Undo actions for things this import created that are not
          * {@code IResourceStore} resources — a schedule, for instance, lives in
          * {@link IScheduleStore} and has no version or descriptor.
@@ -3887,7 +3929,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // A create writes every document in the archive, so there is nothing to
             // report as updated or skipped — and no per-resource failures either: the
             // importer rolls the whole archive back rather than leaving part of it.
-            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of());
+            // What the import wrote differently from the source is still worth saying.
+            String signingTurnedOff = imported.getHeaderString(HEADER_SIGNING_TURNED_OFF);
+            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of(), null, null,
+                    signingTurnedOff == null ? List.of() : List.of(signingTurnedOff));
             metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(), 0);
             return result;
         } catch (WebApplicationException e) {

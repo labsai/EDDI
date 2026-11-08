@@ -760,15 +760,31 @@ public class AgentConfiguration {
         }
 
         /**
-         * The key version this agent signs with: the highest one in {@link #keys}, or 0
-         * — the legacy {@code publicKey} — when there are none. The next generated key
-         * takes this plus one. Not a getter, so it stays out of the stored JSON.
+         * The key version this agent signs with: the highest one in {@link #keys}
+         * between 1 and {@link AgentPublicKey#MAX_VERSION}, revoked or not, or 0 — the
+         * legacy {@code publicKey} — when there is none. A revoked newest key is not
+         * skipped: the agent then cannot sign until a new key is generated, rather than
+         * falling back to an older one. The next generated key takes this plus one. Not
+         * a getter, so it stays out of the stored JSON.
          */
         public int signingKeyVersion() {
             if (keys == null || keys.isEmpty()) {
                 return 0;
             }
-            return keys.stream().mapToInt(AgentPublicKey::version).max().orElse(0);
+            return keys.stream().mapToInt(AgentPublicKey::version).filter(v -> v >= 1 && v <= AgentPublicKey.MAX_VERSION).max().orElse(0);
+        }
+
+        /**
+         * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
+         * would sign with the legacy {@code publicKey}. Not a getter, so it stays out
+         * of the stored JSON.
+         */
+        public AgentPublicKey signingKey() {
+            int version = signingKeyVersion();
+            if (version == 0) {
+                return null;
+            }
+            return keys.stream().filter(k -> k.version() == version).findFirst().orElse(null);
         }
 
         /**

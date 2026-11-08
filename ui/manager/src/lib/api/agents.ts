@@ -126,6 +126,10 @@ export interface StrictWriteDiscipline {
   onFailure?: string; // "digest" | "exclude_all" | "keep_all"
 }
 
+/**
+ * Engine-owned: a save keeps the stored identity whatever the draft holds. Keys
+ * change only through `generateAgentSigningKey` and `revokeAgentSigningKey`.
+ */
 export interface AgentIdentity {
   agentDid?: string;
   publicKey?: string;
@@ -138,6 +142,8 @@ export interface AgentPublicKey {
   publicKeyB64?: string;
   validFromMs?: number;
   validUntilMs?: number;
+  /** Revoked by an admin: valid at no time, whatever its window says. */
+  revoked?: boolean;
 }
 
 export interface SecurityConfig {
@@ -446,6 +452,22 @@ export function generateAgentSigningKey(
 ): Promise<AgentPublicKey & { location?: string }> {
   return api.post<AgentPublicKey & { location?: string }>(
     `/agentstore/agents/${seg(id)}/signing-keys?version=${version}`
+  );
+}
+
+/**
+ * Revokes one of the agent's signing keys (eddi-admin only): the backend marks
+ * it revoked in a NEW agent version, named by `location`, and deletes its
+ * private key. `keyVersion` 0 is the legacy `identity.publicKey`, which is
+ * removed. `version` must be the current one or the call is refused with 409.
+ */
+export function revokeAgentSigningKey(
+  id: string,
+  keyVersion: number,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys/${keyVersion}/revoke?version=${version}`
   );
 }
 

@@ -14,6 +14,7 @@ import {
   deleteAgent,
   duplicateAgent,
   generateAgentSigningKey,
+  revokeAgentSigningKey,
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
@@ -383,6 +384,18 @@ export function useGenerateAgentSigningKey() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, version }: { id: string; version: number }) => generateAgentSigningKey(id, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/** Revokes a signing key, which the backend saves as a new agent version. */
+export function useRevokeAgentSigningKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, keyVersion, version }: { id: string; keyVersion: number; version: number }) =>
+      revokeAgentSigningKey(id, keyVersion, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },

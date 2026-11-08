@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   SecurityIdentitySection,
@@ -121,7 +121,7 @@ describe("SecurityIdentitySection", () => {
       <SecurityIdentitySection
         agent={{ ...baseAgent, security: { signInterAgentMessages: true } }}
         onChange={mockOnChange}
-        signingKeyAction={{ onGenerate, pending: false }}
+        signingKeyAction={{ onGenerate, onRevoke: vi.fn(), pending: false }}
       />
     );
     await user.click(screen.getByTestId("generate-signing-key"));
@@ -135,11 +135,87 @@ describe("SecurityIdentitySection", () => {
       <SecurityIdentitySection
         agent={{ ...baseAgent, security: { signInterAgentMessages: true } }}
         onChange={mockOnChange}
-        signingKeyAction={{ onGenerate: vi.fn(), pending: false, disabledReason: "Save or discard your changes first" }}
+        signingKeyAction={{ onGenerate: vi.fn(), onRevoke: vi.fn(), pending: false, disabledReason: "Save or discard your changes first" }}
       />
     );
     expect(screen.getByTestId("generate-signing-key")).toBeDisabled();
     expect(screen.getByTestId("generate-signing-key-hint")).toHaveTextContent("Save or discard your changes first");
+  });
+
+  const agentWithTwoKeys: Agent = {
+    ...baseAgent,
+    identity: {
+      publicKey: "legacyPubKey123456789012345678",
+      keys: [
+        { version: 1, publicKeyB64: "ABCDEF1234567890ABCDEF1234567890", revoked: true },
+        { version: 2, publicKeyB64: "GHIJKL1234567890ABCDEF1234567890" },
+      ],
+    },
+  };
+
+  it("revokes a key through the page's action, only after confirmation", async () => {
+    const user = userEvent.setup();
+    const onRevoke = vi.fn();
+    renderWithProviders(
+      <SecurityIdentitySection agent={agentWithTwoKeys} onChange={mockOnChange} signingKeyAction={{ onGenerate: vi.fn(), onRevoke, pending: false }} />
+    );
+
+    await user.click(screen.getByTestId("revoke-signing-key-2"));
+    expect(onRevoke).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(/Revoke signing key v2\?/);
+    await user.click(within(dialog).getByRole("button", { name: "Revoke" }));
+
+    expect(onRevoke).toHaveBeenCalledWith(2);
+    // Revoking saves on the server; it is not a draft edit.
+    expect(mockOnChange).not.toHaveBeenCalled();
+  });
+
+  it("marks a revoked key and offers no Revoke for it", () => {
+    renderWithProviders(
+      <SecurityIdentitySection agent={agentWithTwoKeys} onChange={mockOnChange} signingKeyAction={{ onGenerate: vi.fn(), onRevoke: vi.fn(), pending: false }} />
+    );
+
+    expect(screen.getByTestId("signing-key-revoked-1")).toHaveTextContent("Revoked");
+    expect(screen.queryByTestId("revoke-signing-key-1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("revoke-signing-key-2")).toBeEnabled();
+  });
+
+  it("offers Revoke for the legacy key as version 0", async () => {
+    const user = userEvent.setup();
+    const onRevoke = vi.fn();
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{ ...baseAgent, identity: { publicKey: "legacyPubKey123456789012345678" } }}
+        onChange={mockOnChange}
+        signingKeyAction={{ onGenerate: vi.fn(), onRevoke, pending: false }}
+      />
+    );
+
+    await user.click(screen.getByTestId("revoke-signing-key-0"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke" }));
+
+    expect(onRevoke).toHaveBeenCalledWith(0);
+  });
+
+  it("disables Revoke while the page cannot change keys", () => {
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={agentWithTwoKeys}
+        onChange={mockOnChange}
+        signingKeyAction={{ onGenerate: vi.fn(), onRevoke: vi.fn(), pending: false, disabledReason: "Save or discard your changes first" }}
+      />
+    );
+
+    expect(screen.getByTestId("revoke-signing-key-2")).toBeDisabled();
+  });
+
+  it("shows the DID read-only: the identity is engine-owned, so a save would not keep an edit", () => {
+    renderWithProviders(
+      <SecurityIdentitySection agent={{ ...baseAgent, identity: { agentDid: "did:eddi:agent:123" } }} onChange={mockOnChange} />
+    );
+
+    expect(screen.getByTestId("identity-agent-did")).toHaveAttribute("readonly");
   });
 
   it("shows versioned keys when identity has keys array", () => {

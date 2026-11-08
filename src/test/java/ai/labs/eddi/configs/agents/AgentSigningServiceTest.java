@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents;
 
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -836,6 +837,22 @@ class AgentSigningServiceTest {
         assertTrue(e.getMessage().contains("Secrets Vault is not available"), e.getMessage());
     }
 
+    /**
+     * "fromVersion + attempts" overflowed for a version near Integer.MAX_VALUE: the
+     * loop never ran and a declared bogus version turned Generate into a 503 that
+     * blamed the vault. Versions now stop at MAX_VERSION.
+     */
+    @Test
+    void generateKey_neverGoesPastTheHighestVersion() throws Exception {
+        provisionKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION);
+
+        var e = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION));
+        assertTrue(e.getMessage().contains("versions 1000000 to 1000000"), e.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION + 1));
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", Integer.MAX_VALUE));
+    }
+
     @Test
     void discardKey_removesTheVersionFromTheVault() throws Exception {
         var generated = signingService.generateKey("tenant-1", "agent-1", 1);
@@ -843,6 +860,28 @@ class AgentSigningServiceTest {
         signingService.discardKey("tenant-1", "agent-1", generated.version());
 
         assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"));
+    }
+
+    @Test
+    void discardKey_ofVersionZeroRemovesTheLegacyKey() throws Exception {
+        provisionKey("tenant-1", "agent-1");
+        signingService.generateKey("tenant-1", "agent-1", 1);
+
+        signingService.discardKey("tenant-1", "agent-1", 0);
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "only the legacy key goes");
+    }
+
+    @Test
+    void isEd25519PublicKey_acceptsOnlyAnEd25519PublicKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+        String rsaPublicKey = Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("RSA").generateKeyPair().getPublic().getEncoded());
+
+        assertTrue(AgentSigningService.isEd25519PublicKey(generated.publicKeyB64()));
+        assertFalse(AgentSigningService.isEd25519PublicKey(rsaPublicKey));
+        assertFalse(AgentSigningService.isEd25519PublicKey("not base64 !"));
+        assertFalse(AgentSigningService.isEd25519PublicKey(null));
     }
 
     @Test

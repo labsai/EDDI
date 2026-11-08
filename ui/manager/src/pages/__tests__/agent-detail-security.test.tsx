@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +10,7 @@ import { server } from "@/test/mocks/server";
 import { renderPage } from "@/test/test-utils";
 import { AgentDetailPage } from "@/pages/agent-detail";
 import { http, HttpResponse } from "msw";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
 
 /** The page's draft setter; a section only ever reports an edit through it. */
 const onChange = vi.fn();
@@ -141,7 +142,7 @@ describe("AgentDetailPage — Generate signing key", () => {
         postedVersion = new URL(request.url).searchParams.get("version");
         return HttpResponse.json(
           { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAnewKey", validFromMs: 1, validUntilMs: 0 },
-          { status: 201, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" } },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" } },
         );
       }),
       // Records which versions the page loads, then falls through to the default handler.
@@ -160,5 +161,78 @@ describe("AgentDetailPage — Generate signing key", () => {
 
     await waitFor(() => expect(postedVersion).toBe(versionOnScreen));
     await waitFor(() => expect(loadedVersions).toContain("9"));
+  });
+
+  it("revokes a key after confirmation, for the version on screen, then follows the version that records it", async () => {
+    let revokeUrl: URL | null = null;
+    const loadedVersions: string[] = [];
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys/:keyVersion/revoke", ({ request }) => {
+        revokeUrl = new URL(request.url);
+        return HttpResponse.json(
+          { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef", validFromMs: 1, validUntilMs: 0, revoked: true },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=12" } },
+        );
+      }),
+      http.get("*/agentstore/agents/:id", ({ request }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        if (version) loadedVersions.push(version);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+
+    const revoke = await screen.findByTestId("revoke-signing-key-1");
+    await waitFor(() => expect(revoke).toBeEnabled());
+    const versionOnScreen = loadedVersions[loadedVersions.length - 1];
+    await user.click(revoke);
+    // Nothing is sent before the admin confirms: revocation cannot be undone.
+    expect(revokeUrl).toBeNull();
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Revoke" }));
+
+    await waitFor(() => expect(revokeUrl?.pathname).toMatch(/\/agentstore\/agents\/agent1\/signing-keys\/1\/revoke$/));
+    expect(revokeUrl!.searchParams.get("version")).toBe(versionOnScreen);
+    await waitFor(() => expect(loadedVersions).toContain("12"));
+  });
+});
+
+/**
+ * The signing-key endpoints are eddi-admin only. Without the page-level gate a
+ * user whose token shows EDDI roles but not eddi-admin was offered buttons that
+ * always answer 403 — and no test noticed when the gate went.
+ */
+describe("AgentDetailPage — signing-key buttons for a known non-admin", () => {
+  function as(roles: string[]): AuthContextValue {
+    return { ...GUEST_CONTEXT, method: "keycloak", roles, user: null };
+  }
+
+  it.each([["eddi-editor"], ["eddi-viewer"]])("offers %s neither Generate nor Revoke", async (role) => {
+    renderPage(
+      "/manage/agentview/agent1",
+      <AuthContext.Provider value={as([role])}>
+        <AgentDetailPage />
+      </AuthContext.Provider>,
+      "/manage/agentview/:id",
+    );
+
+    // The identity, with its key, is on screen ...
+    expect(await screen.findByTestId("identity-section")).toBeInTheDocument();
+    expect(screen.getByText(/Key v1/)).toBeInTheDocument();
+    // ... and nothing that would call an admin-only endpoint.
+    expect(screen.queryByTestId("generate-signing-key")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("revoke-signing-key-1")).not.toBeInTheDocument();
+  });
+
+  it("offers an admin both", async () => {
+    renderPage(
+      "/manage/agentview/agent1",
+      <AuthContext.Provider value={as(["eddi-admin"])}>
+        <AgentDetailPage />
+      </AuthContext.Provider>,
+      "/manage/agentview/:id",
+    );
+
+    expect(await screen.findByTestId("generate-signing-key")).toBeInTheDocument();
+    expect(screen.getByTestId("revoke-signing-key-1")).toBeInTheDocument();
   });
 });
