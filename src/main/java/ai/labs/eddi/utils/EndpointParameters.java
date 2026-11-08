@@ -10,16 +10,18 @@ import java.util.Set;
 /**
  * The one answer to "does this configuration parameter name an endpoint?".
  * <p>
- * Three places ask it, and each used to keep its own list: the LLM registry
- * (which checks a vault secret's {@code allowedHosts} against every endpoint
- * the configuration sets), the embedding parameters (which refuse an endpoint
- * the provider would ignore), and the export merge (which keeps a hidden
- * credential out of a config whose destination changed). The lists had already
- * drifted — Vertex's {@code apiEndpoint} was an endpoint to the registry and
- * not to the merge, {@code apiBase} only to the embedding check — and a key one
- * of them misses is a key through which a credential can follow an
- * editor-chosen host. A builder that starts reading a new endpoint key adds it
- * here, and all three learn it.
+ * Several places ask it, and each used to keep its own list: the LLM registry
+ * and the embedding model factory (which check a vault secret's
+ * {@code allowedHosts} against every endpoint the configuration sets), the
+ * embedding parameters (which refuse an endpoint the provider would ignore),
+ * the export merge (which keeps a hidden credential out of a config whose
+ * destination changed) and the conversation summary (which never inherits the
+ * task provider's endpoint on another provider). The lists had already drifted
+ * — Vertex's {@code apiEndpoint} was an endpoint to the registry and not to the
+ * merge, {@code apiBase} only to the embedding check — and a key one of them
+ * misses is a key through which a credential can follow an editor-chosen host.
+ * A builder that starts reading a new endpoint key adds it here, and all of
+ * them learn it.
  * <p>
  * Compared case-insensitively ({@code baseURL} is {@code baseUrl}). Any key
  * ending in {@code url} counts, which covers {@code baseUrl},
