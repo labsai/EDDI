@@ -228,6 +228,9 @@ class ProviderChatStreamingParityTest {
     // ==================== the parameter maps ====================
 
     private static Map<String, String> params(String... keyValues) {
+        if (keyValues.length % 2 != 0) {
+            throw new IllegalArgumentException("params() takes key/value pairs, but got " + keyValues.length + " arguments");
+        }
         Map<String, String> map = new HashMap<>();
         for (int i = 0; i < keyValues.length; i += 2) {
             map.put(keyValues[i], keyValues[i + 1]);
