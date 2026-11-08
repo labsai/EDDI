@@ -1597,6 +1597,26 @@ class RestAgentStoreTest {
             verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
         }
 
+        /**
+         * Deleting the private key is best effort and comes after the write, so a vault
+         * that failed then leaves a revoked key's private half behind — and an older
+         * deployed version that still declares the key unrevoked keeps signing with it.
+         * Revoking again is the obvious retry, so it must delete it.
+         */
+        @Test
+        @DisplayName("revoking a key already revoked still deletes a private key left in the vault")
+        void alreadyRevokedStillDeletesThePrivateKey() throws Exception {
+            stored.getIdentity().setKeys(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()).revoke(), AgentPublicKey.createCurrent(2,
+                    v2.publicKeyB64())));
+
+            Response response = store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            assertEquals(200, response.getStatus());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v2"), "the other key is untouched");
+        }
+
         @Test
         @DisplayName("a version the agent does not declare is a 404, and nothing is written")
         void unknownVersionIs404() throws Exception {
