@@ -9,6 +9,7 @@ import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.mistralai.MistralAiChatModel;
+import dev.langchain4j.model.mistralai.MistralAiChatRequestParameters;
 import dev.langchain4j.model.mistralai.MistralAiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -100,6 +101,20 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
                 stringMap(p, KEY_CUSTOM_HEADERS));
     }
 
+    /**
+     * The request-level settings as langchain4j's request parameters, handed to the
+     * synchronous and the streaming client alike: every request starts from them. A
+     * {@code null} leaves the provider default. What stays on the client builders
+     * is not part of a request: endpoint, credentials, timeout, logging, headers
+     * and {@code strictJsonSchema}, which langchain4j only takes there.
+     */
+    private static MistralAiChatRequestParameters requestParameters(Settings s) {
+        return MistralAiChatRequestParameters.builder().modelName(s.modelName()).temperature(s.temperature()).topP(s.topP())
+                .maxOutputTokens(s.maxTokens()).randomSeed(s.randomSeed()).safePrompt(s.safePrompt()).stopSequences(s.stop())
+                .frequencyPenalty(s.frequencyPenalty()).presencePenalty(s.presencePenalty()).returnThinking(s.returnThinking())
+                .sendThinking(s.sendThinking()).build();
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));
@@ -111,35 +126,13 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = MistralAiChatModel.builder().httpClientBuilder(httpClientBuilder);
+        var b = MistralAiChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
-        if (s.randomSeed() != null)
-            b.randomSeed(s.randomSeed());
-        if (s.safePrompt() != null)
-            b.safePrompt(s.safePrompt());
-        if (s.stop() != null)
-            b.stopSequences(s.stop());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
         if (s.strictJsonSchema() != null)
             b.strictJsonSchema(s.strictJsonSchema());
-        if (s.returnThinking() != null)
-            b.returnThinking(s.returnThinking());
-        if (s.sendThinking() != null)
-            b.sendThinking(s.sendThinking());
         if (s.timeoutMs() != null)
             b.timeout(Duration.ofMillis(s.timeoutMs()));
         if (s.logRequests() != null)
@@ -163,35 +156,14 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
     StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
+        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder)
+                .defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
-        if (s.randomSeed() != null)
-            b.randomSeed(s.randomSeed());
-        if (s.safePrompt() != null)
-            b.safePrompt(s.safePrompt());
-        if (s.stop() != null)
-            b.stopSequences(s.stop());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
         if (s.strictJsonSchema() != null)
             b.strictJsonSchema(s.strictJsonSchema());
-        if (s.returnThinking() != null)
-            b.returnThinking(s.returnThinking());
-        if (s.sendThinking() != null)
-            b.sendThinking(s.sendThinking());
         if (s.timeoutMs() != null)
             b.timeout(Duration.ofMillis(s.timeoutMs()));
         if (s.logRequests() != null)

@@ -11,6 +11,8 @@ import dev.langchain4j.model.azure.AzureOpenAiChatModel;
 import dev.langchain4j.model.azure.AzureOpenAiStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequestParameters;
+import dev.langchain4j.model.chat.request.DefaultChatRequestParameters;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -46,10 +48,10 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * parameters the model accepts) and is <em>never sent</em> to Azure.</li>
  * </ul>
  * <p>
- * Parameters are read once into a {@link Settings} and applied to the
- * synchronous and the streaming client alike. The two client builders share no
- * type, so each applies them in its own method;
- * {@code ProviderChatStreamingParityTest} fails when the two disagree.
+ * Parameters are read once into a {@link Settings}. The sampling settings reach
+ * both clients as one set of request parameters ({@link #requestParameters});
+ * the rest are applied to each client builder, which share no type, and
+ * {@code ProviderChatStreamingParityTest} fails when the two clients disagree.
  * <p>
  * ⚠️ Native image: medium risk — Azure SDK uses Kotlin+Jackson reflection. Ship
  * for JVM mode, fix native config during Phase 12 CI/CD (native-image agent
@@ -135,6 +137,20 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
                 stringMap(p, KEY_CUSTOM_HEADERS));
     }
 
+    /**
+     * The request-level settings as langchain4j's request parameters, handed to the
+     * synchronous and the streaming client alike: every request starts from them. A
+     * {@code null} leaves the provider default. Azure has no request-parameter type
+     * of its own, so its own settings ({@code seed}, {@code user},
+     * {@code reasoningEffort}, {@code logitBias}, {@code maxCompletionTokens}) stay
+     * on the client builders, as does the deployment, which names the endpoint
+     * path.
+     */
+    private static ChatRequestParameters requestParameters(Settings s) {
+        return DefaultChatRequestParameters.builder().temperature(s.temperature()).topP(s.topP()).maxOutputTokens(s.maxTokens())
+                .stopSequences(s.stop()).frequencyPenalty(s.frequencyPenalty()).presencePenalty(s.presencePenalty()).build();
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, null);
@@ -147,7 +163,7 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, HttpClientProvider httpClientProvider) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = AzureOpenAiChatModel.builder();
+        var b = AzureOpenAiChatModel.builder().defaultRequestParameters(requestParameters(s));
         if (httpClientProvider != null)
             b.httpClientProvider(httpClientProvider);
         if (s.endpoint() != null)
@@ -160,22 +176,10 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
             b.deploymentName(s.deploymentName());
         if (s.serviceVersion() != null)
             b.serviceVersion(s.serviceVersion());
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
         if (s.maxCompletionTokens() != null)
             b.maxCompletionTokens(s.maxCompletionTokens());
-        if (s.stop() != null)
-            b.stop(s.stop());
         if (s.seed() != null)
             b.seed(s.seed());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
         if (s.user() != null)
             b.user(s.user());
         if (s.reasoningEffort() != null)
@@ -205,7 +209,7 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
     /** Streaming counterpart of {@link #build(Map, HttpClientProvider)}. */
     StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientProvider httpClientProvider) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = AzureOpenAiStreamingChatModel.builder();
+        var b = AzureOpenAiStreamingChatModel.builder().defaultRequestParameters(requestParameters(s));
         if (httpClientProvider != null)
             b.httpClientProvider(httpClientProvider);
         if (s.endpoint() != null)
@@ -218,22 +222,10 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
             b.deploymentName(s.deploymentName());
         if (s.serviceVersion() != null)
             b.serviceVersion(s.serviceVersion());
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
         if (s.maxCompletionTokens() != null)
             b.maxCompletionTokens(s.maxCompletionTokens());
-        if (s.stop() != null)
-            b.stop(s.stop());
         if (s.seed() != null)
             b.seed(s.seed());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
         if (s.user() != null)
             b.user(s.user());
         if (s.reasoningEffort() != null)
