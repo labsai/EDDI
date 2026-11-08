@@ -440,6 +440,48 @@ class MemberTurnExecutorTest {
         verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
+    /**
+     * A first turn skipped because the member's peer-verification setting cannot be
+     * read starts no member conversation. The discussion's attachments are shared
+     * on a member's first turn only, and that is decided by whether its member
+     * conversation exists, so starting one for a skipped turn would cost the member
+     * the attachments for the rest of the discussion.
+     */
+    @Test
+    void executeAgentTurn_firstTurnSkippedForAnUnknownSetting_theNextTurnStillGetsTheAttachments() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        var gc = newGc();
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any())).thenReturn(
+                new GroupSigningGuard.View(GroupSigningGuard.Requirement.UNKNOWN, List.of()),
+                new GroupSigningGuard.View(GroupSigningGuard.Requirement.NOT_REQUIRED, List.of()));
+        when(signingGuard.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        var facade = Mockito.mock(GroupConversationService.class);
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null), facade,
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var skipped = executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, skipped.type());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        assertTrue(gc.getMemberConversationIds().isEmpty(), "no member conversation is recorded for a skipped turn");
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        verify(facade).grantAndInjectAttachments(eq(gc), eq("conv-1"), any());
+    }
+
     // =================================================================
     // member_tool_call (WS8a)
     // =================================================================

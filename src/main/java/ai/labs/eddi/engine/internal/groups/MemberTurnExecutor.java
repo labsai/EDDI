@@ -318,6 +318,32 @@ public class MemberTurnExecutor {
                     Instant.now(), "Agent unavailable: " + e.getMessage(), targetAgentId);
         }
 
+        // Snapshot instead of handing out the live list: the groupTranscript context
+        // is serialised on the member conversation's own thread while the
+        // orchestrator keeps appending entries. Collections.synchronizedList makes
+        // add() safe but NOT iteration — publishing it by reference produced
+        // intermittent ConcurrentModificationExceptions that failed a member turn at
+        // random.
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        // For a member that requires peer verification, every agent entry that does
+        // not verify is replaced by a [withheld] placeholder (see
+        // GroupSigningGuard.viewFor). Its rendered prompt went through the same filter
+        // in GroupContextBuilder.buildPhaseInput.
+        var view = signingGuard.viewFor(member.agentId(), gc, transcriptSnapshot);
+        if (view.requirement() == GroupSigningGuard.Requirement.UNKNOWN) {
+            // Neither a fully withheld transcript (wrong if the member never asked
+            // for verification) nor an unverified one (wrong if it did) is a fair
+            // basis for a reply that stays in the transcript. Checked before the member
+            // conversation is started: a skipped turn must not use up the first turn,
+            // which is the one that is given the discussion's attachments.
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Its peer-verification setting could not be read", targetAgentId);
+        }
+        transcriptSnapshot = view.transcript();
+
         // Get or create private conversation
         String convKey = conversationKey != null ? conversationKey : member.agentId();
         String privateConvId = gc.getMemberConversationIds().get(convKey);
@@ -343,28 +369,6 @@ public class MemberTurnExecutor {
         InputData inputData = new InputData();
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
-        // Snapshot instead of handing out the live list: this context is serialised
-        // on the member conversation's own thread while the orchestrator keeps
-        // appending entries. Collections.synchronizedList makes add() safe but NOT
-        // iteration — publishing it by reference produced intermittent
-        // ConcurrentModificationExceptions that failed a member turn at random.
-        List<TranscriptEntry> transcriptSnapshot;
-        synchronized (gc.getTranscript()) {
-            transcriptSnapshot = List.copyOf(gc.getTranscript());
-        }
-        // For a member that requires peer verification, every entry another agent
-        // wrote that does not verify is replaced by a [withheld] placeholder. Its
-        // rendered prompt went through the same filter in
-        // GroupContextBuilder.buildPhaseInput.
-        var view = signingGuard.viewFor(member.agentId(), gc, transcriptSnapshot);
-        if (view.requirement() == GroupSigningGuard.Requirement.UNKNOWN) {
-            // Neither a fully withheld transcript (wrong if the member never asked
-            // for verification) nor an unverified one (wrong if it did) is a fair
-            // basis for a reply that stays in the transcript.
-            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    Instant.now(), "Its peer-verification setting could not be read", targetAgentId);
-        }
-        transcriptSnapshot = view.transcript();
         // Scoped like the rendered prompt: this key reaches every template in the
         // member's workflow, so it may not show what the phase's contextScope hides.
         context.put("groupTranscript", new Context(Context.ContextType.object,
