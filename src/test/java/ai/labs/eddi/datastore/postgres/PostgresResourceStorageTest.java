@@ -568,7 +568,17 @@ class PostgresResourceStorageTest {
         when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"value1\"}");
         var resource = storage.newResource("11111111-1111-1111-1111-111111111111", 1, config);
         var history = storage.newHistoryResourceFor(resource, true);
+        PreparedStatement deleteStatement = mock(PreparedStatement.class);
+        PreparedStatement tombstoneStatement = mock(PreparedStatement.class);
+        when(deleteStatement.executeUpdate()).thenReturn(1);
+        when(tombstoneStatement.executeUpdate()).thenReturn(1);
         when(preparedStatement.executeUpdate()).thenReturn(1);
+        // the delete is version-checked; the tombstone is the upsert that sets deleted
+        when(connection.prepareStatement(
+                argThat((String sql) -> sql != null && sql.startsWith("DELETE FROM resources ") && sql.contains("AND version = ?"))))
+                .thenReturn(deleteStatement);
+        when(connection.prepareStatement(argThat((String sql) -> sql != null && sql.contains("DO UPDATE SET deleted = TRUE"))))
+                .thenReturn(tombstoneStatement);
 
         storage.storeHistoryAndRemove(history, "11111111-1111-1111-1111-111111111111", 1);
 
@@ -578,11 +588,13 @@ class PostgresResourceStorageTest {
         verify(connection, never()).rollback();
         // The delete comes first: it takes the row lock and decides whether there is
         // anything to tombstone (see storeHistoryAndRemove_writesNoTombstone...).
-        InOrder statements = inOrder(connection);
-        statements.verify(connection)
-                .prepareStatement(argThat((String sql) -> sql.startsWith("DELETE FROM resources ") && sql.contains("AND version = ?")));
+        // Each statement is its own mock, so each one's close is verified.
+        InOrder statements = inOrder(deleteStatement, tombstoneStatement);
+        statements.verify(deleteStatement).executeUpdate();
         // The tombstone must set the flag even over a row an update already archived.
-        statements.verify(connection).prepareStatement(argThat((String sql) -> sql.contains("DO UPDATE SET deleted = TRUE")));
+        statements.verify(tombstoneStatement).executeUpdate();
+        verify(deleteStatement).close();
+        verify(tombstoneStatement).close();
     }
 
     @Test
