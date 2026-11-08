@@ -294,10 +294,16 @@ a usable key or the flag is off. A ZIP import or a
 sync never carries signing onto an agent that cannot sign: it turns the flag
 off and says so (\`X-Agent-Signing-Turned-Off\` on an import, \`warnings\` in a
 sync result). An agent with \`requirePeerVerification\` sees every message
-another agent wrote that does not verify (unsigned, edited, copied from another
-discussion, or signed outside its key's validity window) as "[withheld: ...]",
-so in such a group every agent member should sign. When asked to turn signing
-on, say this and send the administrator to that section.`;
+another agent wrote that does not verify (unsigned, edited, retyped, copied from
+another discussion or round, or signed with a revoked key or outside its key's
+validity window) as "[withheld: ...]"; its own messages are never withheld from
+it, a message no agent wrote is shown as "User", "System" or the name followed
+by "(not an agent, unverified)", and it is never given the stored window
+summary. So in such a group every agent that writes to the discussion should
+sign, a moderator or synthesizer that is not a member included, and member
+display names must be unique within the group (a save with two equal names is
+refused). When asked to turn signing on, say this and send the administrator to
+that section.`;
 
 /**
  * How to answer cluster questions with the read-only cluster endpoints.
