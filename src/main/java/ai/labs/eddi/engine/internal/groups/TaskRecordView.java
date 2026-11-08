@@ -4,8 +4,11 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.engine.internal.TaskListParser;
 
@@ -77,6 +80,18 @@ final class TaskRecordView {
         this.readerId = readerId;
         this.isHuman = isHuman;
         this.editedByReviewer = editedByReviewer;
+    }
+
+    /**
+     * The task records of {@code gc} as {@code view}'s reader may be shown them.
+     * {@code config} decides which assignees are human; {@code null} treats none as
+     * human. A result an approver replaced ({@code SharedTaskList.reviewerEdits})
+     * is the reviewer's text.
+     */
+    static TaskRecordView of(GroupSigningGuard.View view, String readerId, GroupConversation gc, AgentGroupConfiguration config) {
+        SharedTaskList taskList = gc.getTaskList();
+        return new TaskRecordView(view, readerId, assignee -> GroupHumanTasks.isHumanAssignee(config, assignee),
+                taskId -> taskList != null && taskList.getReviewerEdits().containsKey(taskId));
     }
 
     /** Whether the reader is shown every record as stored. */

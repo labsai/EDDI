@@ -24,6 +24,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -520,8 +521,9 @@ public class FacilitatorEngine {
         String content = "Facilitator " + summary
                 + (parsed.reason() != null && !parsed.reason().isBlank() ? " — " + parsed.reason().trim() : "");
         // Signed for the facilitator: the move and its reason are its own.
-        gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(),
-                phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId)));
+        gc.getTranscript()
+                .add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME, content, ctx.phaseIdx(),
+                        phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId)));
         meterRegistry.counter("eddi_group_facilitator_moves_total",
                 "move", parsed.move().name(), "outcome", "executed").increment();
         auditMove(gc, parsed, ctx, "EXECUTED", null);
@@ -538,8 +540,9 @@ public class FacilitatorEngine {
                                  CheckpointContext ctx, String attemptedMove, String reason, String why) {
         String content = "Facilitator attempted " + attemptedMove + " — rejected: " + why
                 + (reason != null && !reason.isBlank() ? ". Facilitator's reason: " + reason.trim() : "");
-        gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(),
-                phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null)));
+        gc.getTranscript()
+                .add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME, content, ctx.phaseIdx(),
+                        phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null)));
         // Review finding: the raw LLM-authored move string as a metric tag value
         // is unbounded label cardinality — every hallucinated name became a new
         // Prometheus time series for the JVM's lifetime. The tag is bounded to

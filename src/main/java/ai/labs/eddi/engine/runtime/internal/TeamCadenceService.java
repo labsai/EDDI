@@ -490,9 +490,13 @@ public class TeamCadenceService {
                             memberStats(workspace, outcome.assignedAgentId()).getTasksVerified() + 1);
                 }
             } else {
-                String feedback = outcome != null && outcome.verificationNote() != null
-                        ? outcome.verificationNote()
-                        : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
+                // The next run shows this description as configured task text, so it carries
+                // the feedback as the group's records count it: text that does not verify
+                // for a member that requires peer verification is withheld, not laundered.
+                TaskItem recorded = outcome != null ? groupConversationService.recordedTask(gc, outcome) : null;
+                String feedback = recorded != null && recorded.verificationNote() != null
+                        ? recorded.verificationNote()
+                        : (recorded != null && recorded.result() != null ? recorded.result() : "not completed this run");
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,

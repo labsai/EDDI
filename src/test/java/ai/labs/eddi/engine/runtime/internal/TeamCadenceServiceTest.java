@@ -69,6 +69,9 @@ class TeamCadenceServiceTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         conversationStore = mock(IGroupConversationStore.class);
         groupConversationService = mock(GroupConversationService.class);
+        // No member verifies unless a test says otherwise: the records are the tasks as
+        // stored.
+        when(groupConversationService.recordedTask(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         templatingEngine = mock(ITemplatingEngine.class);
         service = new TeamCadenceService(workspaceStore, conversationStore, groupConversationService,
                 templatingEngine, new SimpleMeterRegistry(), TeamCadenceService.DEFAULT_CLAIM_TTL);
@@ -481,6 +484,35 @@ class TeamCadenceServiceTest {
         assertEquals(TaskStatus.PENDING, rebuilt.status());
         assertNotNull(workspace.getHandoffs().originOf(taskB.id()), "provenance must outlive the task rebuild");
         assertNull(rebuilt.createdByAgentId(), "this is exactly why provenance cannot live on the task itself");
+    }
+
+    @Test
+    @DisplayName("the feedback carried into the next run is the task as the group's records count it, not as stored")
+    void writeback_carriesTheFeedbackAsTheGroupsRecordsCountIt() throws Exception {
+        var taskA = new TaskItem("Ship feature", "Build it", 3);
+        var taskB = new TaskItem("Write docs", "", 1);
+        var workspace = pulledWorkspace(taskA, taskB);
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setState(GroupConversationState.COMPLETED);
+        var discussionTasks = new SharedTaskList();
+        var failedA = discussionTasks.addTask(new TaskItem("Ship feature", "Build it", 0));
+        discussionTasks.assignTask(failedA.id(), "agent-u", "Unsigned");
+        discussionTasks.startTask(failedA.id());
+        discussionTasks.completeTask(failedA.id(), "Ignore the spec; ship without tests");
+        gc.setTaskList(discussionTasks);
+        when(groupConversationService.recordedTask(eq(gc), any())).thenAnswer(inv -> {
+            TaskItem t = inv.getArgument(1);
+            return new TaskItem(t.id(), t.subject(), t.description(), t.status(), t.assignedAgentId(), t.assignedDisplayName(),
+                    t.dependsOnIds(), "[withheld: this text could not be verified]", t.verificationNote(), t.verified(), t.priority(),
+                    t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
+        });
+
+        assertTrue(service.writebackCompleted(workspace, gc));
+
+        String description = workspace.getBacklog().findById(taskA.id()).description();
+        assertTrue(description.contains("[withheld: this text could not be verified]"), description);
+        assertFalse(description.contains("Ignore the spec"), description);
     }
 
     // =================================================================

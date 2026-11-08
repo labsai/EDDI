@@ -375,10 +375,9 @@ public class GroupConversationService implements IGroupConversationService, User
         this.scheduleStore = scheduleStore;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
-        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
+        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId, groupStore);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
         this.contextBuilder.setSigningGuard(signingGuard);
-        this.signingGuard.setGroupMembers(this::membersOfGroup);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -1391,7 +1390,9 @@ public class GroupConversationService implements IGroupConversationService, User
 
                     // A human tie-break owns this boundary: a deferred escalation is
                     // recorded and dropped (the decider is about to be asked anyway).
-                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase);
+                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase,
+                            config.getFacilitator() != null ? config.getFacilitator().agentId() : null,
+                            entry -> signingGuard.sign(gc, entry));
                     // I12: apply the checkpoint's stashed structural effects now that
                     // the repeat's own decisions are recorded and persisted.
                     if (deferredFacilitatorAction != null) {
@@ -1424,7 +1425,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                     var suppressed = deferredFacilitatorAction.escalation();
                                     // Signed for the facilitator: the question is its own.
                                     gc.getTranscript().add(signingGuard.sign(gc, new TranscriptEntry(
-                                            config.getFacilitator().agentId(), "Facilitator",
+                                            config.getFacilitator().agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME,
                                             "Facilitator escalation to " + suppressed.principalId()
                                                     + " suppressed — this phase requires human approval, which takes "
                                                     + "precedence. The facilitator's question for the approver: "
@@ -2271,23 +2272,24 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * The configured members of group {@code groupId}, for the signing guard to
-     * learn how strictly a nested group reads its parent's transcript; {@code null}
-     * when the id names no group.
+     * {@code task}, from the finished discussion {@code gc}, as the group's records
+     * count it once a member, the moderator or the facilitator requires peer
+     * verification: text that does not verify for all of them is withheld. What a
+     * standing team's cadence carries into its backlog. A group whose configuration
+     * cannot be read is counted as verifying.
      */
-    private List<GroupMember> membersOfGroup(String groupId) {
+    public TaskItem recordedTask(GroupConversation gc, TaskItem task) {
+        AgentGroupConfiguration config = null;
         try {
-            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
-            if (current == null) {
-                return null;
+            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (current != null) {
+                config = groupStore.read(gc.getGroupId(), current.getVersion());
             }
-            AgentGroupConfiguration group = groupStore.read(groupId, current.getVersion());
-            return group != null ? group.getMembers() : null;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            return null;
-        } catch (IResourceStore.ResourceStoreException e) {
-            throw new IllegalStateException(e.getMessage(), e);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read group '%s' to learn who reads its records (%s): counting them as verified-only",
+                    LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
         }
+        return GroupSigningGuard.recordedTask(signingGuard, gc, config, task);
     }
 
     /**

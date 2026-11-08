@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
@@ -41,7 +42,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
@@ -118,7 +118,7 @@ public class GroupSigningGuard {
     private final AgentConfigurationCache agentConfigs;
     private final AgentSigningService agentSigningService;
     private final String defaultTenantId;
-    private volatile Function<String, List<GroupMember>> groupMembers;
+    private final IAgentGroupStore groupStore;
 
     /**
      * Outcome of an Ed25519 check by the SHA-256 of what was checked (public key,
@@ -136,11 +136,26 @@ public class GroupSigningGuard {
     /** Group conversation id to the withheld entries already logged at ERROR. */
     private final Cache<String, Set<String>> reported = boundedCache();
 
+    /**
+     * A guard that reads no nested group: a group id as a reader requires nothing.
+     */
     public GroupSigningGuard(IAgentStore agentStore, AgentSigningService agentSigningService, String defaultTenantId) {
+        this(agentStore, agentSigningService, defaultTenantId, null);
+    }
+
+    /**
+     * @param groupStore
+     *            where a nested group (a {@code GROUP} member, which reads the
+     *            parent transcript as its question) is read, to learn how strictly
+     *            it reads: as its strictest agent
+     */
+    public GroupSigningGuard(IAgentStore agentStore, AgentSigningService agentSigningService, String defaultTenantId,
+            IAgentGroupStore groupStore) {
         this.agentStore = agentStore;
         this.agentConfigs = new AgentConfigurationCache(agentStore);
         this.agentSigningService = agentSigningService;
         this.defaultTenantId = defaultTenantId;
+        this.groupStore = groupStore;
     }
 
     /**
@@ -457,8 +472,28 @@ public class GroupSigningGuard {
      * own prompts withhold from it.
      */
     public static List<String> taskSubjectsSeenBy(GroupSigningGuard guard, String readerId, GroupConversation gc, List<TaskItem> tasks) {
-        var records = new TaskRecordView(viewOf(guard, readerId, gc), readerId, assignee -> false, taskId -> false);
+        var records = TaskRecordView.of(viewOf(guard, readerId, gc), readerId, gc, null);
         return tasks.stream().map(task -> records.showsTask(task) ? task.subject() : TaskRecordView.WITHHELD).toList();
+    }
+
+    /**
+     * {@code task} (from {@code gc}'s task list) as the engine's records may carry
+     * it beyond this discussion, for instance into a standing team's backlog: see
+     * {@link #recordView} and {@link TaskRecordView}. {@code config} is the group's
+     * configuration; {@code null} means it could not be read, and the task is then
+     * counted as for a reader that requires verification. {@code guard} is
+     * {@code null} where none was wired, which carries the task as stored.
+     */
+    public static TaskItem recordedTask(GroupSigningGuard guard, GroupConversation gc, AgentGroupConfiguration config, TaskItem task) {
+        if (guard == null || task == null) {
+            return task;
+        }
+        View records = config != null
+                ? recordView(guard, gc, readersOf(config, gc))
+                : guard.agentStore == null || guard.agentSigningService == null
+                        ? new View(Requirement.NOT_REQUIRED, snapshotOf(gc.getTranscript()))
+                        : guard.filtered(Requirement.UNKNOWN, null, "the group's own records", gc, snapshotOf(gc.getTranscript()));
+        return TaskRecordView.of(records, null, gc, config).seen(task);
     }
 
     /**
@@ -513,14 +548,12 @@ public class GroupSigningGuard {
     }
 
     /**
-     * Wires how a nested group's members are found, so a {@code GROUP} member reads
-     * the parent transcript as strictly as its strictest agent member: its prompt
-     * becomes the question every one of them is asked. {@code resolver} returns
-     * {@code null} for an id that names no group. Unwired, a group requires
-     * nothing.
+     * Whether the agent {@code agentId} sees only what verifies: it requires peer
+     * verification, or its setting cannot be read (and was never read on this
+     * node). A tool that would hand it text no signature covers is not given to it.
      */
-    public void setGroupMembers(Function<String, List<GroupMember>> resolver) {
-        this.groupMembers = resolver;
+    public boolean requiresVerification(String agentId) {
+        return agentStore != null && agentSigningService != null && requirementOf(agentId) != Requirement.NOT_REQUIRED;
     }
 
     /** Whether {@code entry} is a placeholder {@link #visibleTo} put in. */
@@ -711,28 +744,31 @@ public class GroupSigningGuard {
 
     /**
      * The requirement of an id that names no agent: for a nested group, that of its
-     * strictest agent member (nested groups included, each visited once); otherwise
-     * none. A group whose members cannot be read is {@code UNKNOWN}.
+     * strictest reader as {@link #readersOf} counts them (its agent members, its
+     * moderator and its facilitator; groups nested in it included, each visited
+     * once); otherwise none. A group that cannot be read is {@code UNKNOWN}.
      */
     private Requirement groupRequirement(String groupId, Set<String> groupsVisited) {
-        Function<String, List<GroupMember>> resolver = groupMembers;
-        if (resolver == null || !groupsVisited.add(groupId)) {
+        if (groupStore == null || !groupsVisited.add(groupId)) {
             return Requirement.NOT_REQUIRED;
         }
-        List<GroupMember> members;
+        AgentGroupConfiguration group;
         try {
-            members = resolver.apply(groupId);
+            var resourceId = groupStore.getCurrentResourceId(groupId);
+            if (resourceId == null) {
+                return Requirement.NOT_REQUIRED;
+            }
+            group = groupStore.read(groupId, resourceId.getVersion());
+        } catch (ResourceNotFoundException e) {
+            return Requirement.NOT_REQUIRED;
         } catch (Exception e) {
-            LOGGER.warnf("Could not read group '%s' to learn whether its members require peer verification (%s)",
+            LOGGER.warnf("Could not read group '%s' to learn whether its agents require peer verification (%s)",
                     LogSanitizer.sanitize(groupId), e.getMessage());
             return Requirement.UNKNOWN;
         }
         Requirement strictest = Requirement.NOT_REQUIRED;
-        for (GroupMember member : members != null ? members : List.<GroupMember>of()) {
-            if (member == null || member.agentId() == null || member.memberType() == MemberType.HUMAN) {
-                continue;
-            }
-            Requirement requirement = requirementOf(member.agentId(), groupsVisited);
+        for (String readerId : readersOf(group, null)) {
+            Requirement requirement = requirementOf(readerId, groupsVisited);
             if (requirement == Requirement.REQUIRED) {
                 return requirement;
             }

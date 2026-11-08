@@ -91,6 +91,15 @@ class ArtifactToolsProvider implements ToolSourceProvider {
         if (config == null || !config.allowArtifactTools()) {
             return ToolContribution.empty();
         }
+        // Artifacts are not signed: their content is any member's text as stored. A
+        // member that requires peer verification (or whose setting cannot be read)
+        // would be handed exactly what the transcript withholds from it.
+        var signingGuard = liveDiscussionRegistry.signingGuard(groupConversationId);
+        if (signingGuard.isPresent() && signingGuard.get().requiresVerification(ctx.agentId())) {
+            LOGGER.debugf("Group artifact tools withheld from agent '%s': it requires peer verification and artifacts are not signed",
+                    sanitize(ctx.agentId()));
+            return ToolContribution.empty();
+        }
 
         var tools = List.<Object>of(new ArtifactTools(liveDiscussionRegistry, groupConversationId, config, ctx.agentId(),
                 artifactStore));

@@ -4,12 +4,16 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -100,6 +104,43 @@ class ArtifactToolsProviderTest {
         for (String tool : List.of("createArtifact", "readArtifact", "proposeArtifactUpdate", "listArtifacts")) {
             assertTrue(contribution.specs().stream().anyMatch(spec -> spec.name().equals(tool)), tool);
         }
+    }
+
+    /**
+     * Artifacts are not signed, so a member that requires peer verification (or
+     * whose setting cannot be read) is not given tools that would hand it a peer's
+     * unverified text.
+     */
+    @Test
+    void memberThatRequiresPeerVerification_isNotGivenTheArtifactTools() throws Exception {
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(groupWith(new ArtifactConfig(true, 5, List.of())));
+        var gc = registry.get(GC_ID).orElseThrow();
+
+        registry.register(gc, guardFor(agentStoreReporting(true)));
+        assertTrue(provider().contribute(ctx(GC_ID)).specs().isEmpty(), "a verifying member");
+
+        IAgentStore unreadable = mock(IAgentStore.class);
+        when(unreadable.getCurrentResourceId("agent-a")).thenThrow(new IllegalStateException("store down"));
+        registry.register(gc, guardFor(unreadable));
+        assertTrue(provider().contribute(ctx(GC_ID)).specs().isEmpty(), "a member whose setting cannot be read");
+
+        registry.register(gc, guardFor(agentStoreReporting(false)));
+        assertEquals(4, provider().contribute(ctx(GC_ID)).specs().size(), "a member that does not verify");
+    }
+
+    private static GroupSigningGuard guardFor(IAgentStore agentStore) {
+        return new GroupSigningGuard(agentStore, mock(AgentSigningService.class), "default");
+    }
+
+    private IAgentStore agentStoreReporting(boolean requirePeerVerification) throws Exception {
+        IAgentStore agentStore = mock(IAgentStore.class);
+        when(agentStore.getCurrentResourceId("agent-a")).thenReturn(resourceId());
+        var agent = new AgentConfiguration();
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setRequirePeerVerification(requirePeerVerification);
+        agent.setSecurity(security);
+        when(agentStore.read("agent-a", 1)).thenReturn(agent);
+        return agentStore;
     }
 
     @Test
