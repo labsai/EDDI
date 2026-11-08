@@ -1541,6 +1541,50 @@ class RestAgentStoreTest {
             assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID));
         }
 
+        /**
+         * The save-time check names a key with a version below 1 and says to revoke it.
+         * No vault entry can exist for such a version, and discarding "version
+         * {@code <= 0}" meant the legacy key: revoking the malformed entry deleted the
+         * private half of the legacy key the agent still declares.
+         */
+        @Test
+        @DisplayName("revoking a key with a negative version leaves the legacy key's vault entry alone")
+        void revokingANegativeVersionKeepsTheLegacyVaultKey() throws Exception {
+            stored.getIdentity().setPublicKey(v1.publicKeyB64());
+            vault.storeIfAbsent(new SecretReference("default", "agent-signing-key:" + AGENT_ID), "legacy-private-key", null, null);
+            var keys = new ArrayList<>(stored.getIdentity().getKeys());
+            keys.add(AgentPublicKey.createCurrent(-5, "planted"));
+            stored.getIdentity().setKeys(keys);
+
+            Response response = store.revokeSigningKey(AGENT_ID, -5, 1);
+
+            assertEquals(200, response.getStatus());
+            assertTrue(written().getIdentity().getKeys().get(2).revoked(), "the malformed entry is revoked");
+            assertEquals(v1.publicKeyB64(), written().getIdentity().getPublicKey(), "the legacy key stays declared");
+            assertEquals("legacy-private-key", vaultKey("agent-signing-key:" + AGENT_ID), "and keeps its private half");
+        }
+
+        /**
+         * An identity.keys entry declared as version 0 is what peers check a v0
+         * signature against (it wins over the legacy publicKey), and the save-time
+         * check refuses it as malformed and says to revoke it. Revoking v0 only looked
+         * at the legacy publicKey, so with none declared the entry could never be
+         * retired and signing could never be turned back on.
+         */
+        @Test
+        @DisplayName("revoking v0 also revokes an identity.keys entry declared as version 0")
+        void revokesAVersionZeroEntry() throws Exception {
+            var keys = new ArrayList<>(stored.getIdentity().getKeys());
+            keys.add(0, AgentPublicKey.createCurrent(0, "planted"));
+            stored.getIdentity().setKeys(keys);
+
+            Response response = store.revokeSigningKey(AGENT_ID, 0, 1);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(List.of(true, false, false), written().getIdentity().getKeys().stream().map(AgentPublicKey::revoked).toList());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"), "the other keys are untouched");
+        }
+
         @Test
         @DisplayName("a key already revoked writes nothing")
         void alreadyRevokedWritesNothing() throws Exception {

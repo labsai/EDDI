@@ -214,10 +214,15 @@ public class AgentSigningService {
      * permanent delete only while some later version is declared.
      *
      * @param keyVersion
-     *            the rotated key version, or {@code <= 0} for the legacy
-     *            unversioned key
+     *            the rotated key version, or {@code 0} for the legacy unversioned
+     *            key. A negative version removes nothing: no vault entry can exist
+     *            for one, and reading it as "legacy" would delete the private half
+     *            of a key the agent may still declare
      */
     public void discardKey(String tenantId, String agentId, int keyVersion) {
+        if (keyVersion < 0) {
+            return;
+        }
         DeleteTally tally = new DeleteTally();
         if (keyVersion > 0) {
             deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, keyVersion), versionedCacheKey(tenantId, agentId, keyVersion), tally);

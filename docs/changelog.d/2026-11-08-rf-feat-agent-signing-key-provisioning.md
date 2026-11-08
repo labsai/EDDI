@@ -24,7 +24,10 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
   (`eddi-admin`). Marks every entry of that version `revoked: true` (a new field on
   `AgentPublicKey`, default `false`; a revoked key is valid at no time) in a new compatible version,
   moves the descriptor, then deletes the private key from the vault. `keyVersion` 0 removes the
-  legacy `identity.publicKey` and its vault entry. Already revoked: `200`, nothing written.
+  legacy `identity.publicKey` and its vault entry, and revokes an `identity.keys` entry declared as
+  version 0 (malformed, but what a peer checks a v0 signature against). A negative version, which
+  no vault entry can have, deletes nothing: it used to be read as the legacy key, whose private half
+  the agent may still need. Already revoked: `200`, nothing written.
 - **The save-time check covers every declared key.** With `signInterAgentMessages` on, a save is
   refused (400) when a key that is not revoked is malformed (version outside 1 to 1 000 000, a
   version declared twice, not an Ed25519 public key), or when the newest key is revoked or outside
@@ -62,15 +65,17 @@ the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) o
 off. Find them with a query on `security.signInterAgentMessages: true` in the agents collection
 (or table). An import or a sync onto such an agent turns the flag off and reports it, rather than
 failing. Any `identity.keys` entry a person pasted before this branch stays trusted by peers until it
-is revoked: review the keys of agents that use `requirePeerVerification` peers, and revoke every
-entry EDDI did not generate.
+is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
+every entry EDDI did not generate.
 
 ### Design decisions
 
 - Identity is kept for **every** caller, admins included, not only for non-admins: one rule, and the
   endpoints that change keys are where the audit trail and the vault write are.
 - Revocation is a flag, not a deletion of the entry: a verifier must recognise and refuse an entry
-  signed under the key, which an unknown version would only report as "unknown key".
+  signed under the key, which an unknown version would only report as "unknown key". The group
+  verifier on this branch does not read the flag yet (that is the group-signing verification work);
+  until it does, the deleted private key is what stops anything new being signed with it.
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
   signer's rule for a key outside its window.
 - A malformed key that is revoked no longer blocks a save, so revoking is the way out for an agent

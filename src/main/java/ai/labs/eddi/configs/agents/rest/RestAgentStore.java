@@ -926,30 +926,29 @@ public class RestAgentStore implements IRestAgentStore {
         AgentConfiguration config = currentVersionForKeyChange(id, version);
         var identity = config.getIdentity();
 
-        AgentPublicKey revoked;
-        if (keyVersion == 0) {
-            // The legacy unversioned key has no revoked flag to set, so revoking it
-            // removes it: an entry signed as v0 then names no key and is not trusted.
-            if (identity == null || identity.getPublicKey() == null || identity.getPublicKey().isBlank()) {
-                throw new NotFoundException("Agent " + id + " declares no legacy signing key (identity.publicKey)");
-            }
-            revoked = new AgentPublicKey(0, identity.getPublicKey(), 0, 0, true);
-            identity.setPublicKey(null);
-        } else {
-            List<AgentPublicKey> keys = identity != null && identity.getKeys() != null ? identity.getKeys() : List.of();
-            if (keys.stream().noneMatch(k -> k.version() == keyVersion)) {
-                throw new NotFoundException("Agent " + id + " declares no signing key v" + keyVersion);
-            }
-            revoked = keys.stream().filter(k -> k.version() == keyVersion).findFirst().orElseThrow().revoke();
-            if (keys.stream().filter(k -> k.version() == keyVersion).allMatch(AgentPublicKey::revoked)) {
-                // Already revoked: nothing to write, and the answer names the version
-                // that says so.
-                return keyChangeResponse(id, version, revoked);
-            }
-            // Every entry of that version: a list that names a version twice must not
-            // keep a trusted copy of it.
-            identity.setKeys(keys.stream().map(k -> k.version() == keyVersion ? k.revoke() : k).toList());
+        // The legacy unversioned key (keyVersion 0) has no revoked flag to set, so
+        // revoking it removes it: an entry signed as v0 then names no key and is not
+        // trusted. An identity.keys entry that is itself declared as v0 — malformed,
+        // but what a peer checks a v0 signature against — is revoked with it.
+        boolean legacy = keyVersion == 0 && identity != null && identity.getPublicKey() != null && !identity.getPublicKey().isBlank();
+        List<AgentPublicKey> keys = identity != null && identity.getKeys() != null ? identity.getKeys() : List.of();
+        List<AgentPublicKey> entries = keys.stream().filter(k -> k.version() == keyVersion).toList();
+        if (!legacy && entries.isEmpty()) {
+            throw new NotFoundException("Agent " + id + " declares no signing key v" + keyVersion
+                    + (keyVersion == 0 ? " and no legacy signing key (identity.publicKey)" : ""));
         }
+        AgentPublicKey revoked = legacy ? new AgentPublicKey(0, identity.getPublicKey(), 0, 0, true) : entries.get(0).revoke();
+        if (!legacy && entries.stream().allMatch(AgentPublicKey::revoked)) {
+            // Already revoked: nothing to write, and the answer names the version that
+            // says so.
+            return keyChangeResponse(id, version, revoked);
+        }
+        if (legacy) {
+            identity.setPublicKey(null);
+        }
+        // Every entry of that version: a list that names a version twice must not
+        // keep a trusted copy of it.
+        identity.setKeys(keys.stream().map(k -> k.version() == keyVersion ? k.revoke() : k).toList());
 
         Integer newVersion;
         try {

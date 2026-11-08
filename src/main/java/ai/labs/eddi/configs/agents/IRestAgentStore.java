@@ -216,7 +216,7 @@ public interface IRestAgentStore extends IRestVersionInfo {
                        + "saves the agent as a new, compatible version; the private key is then deleted from the secrets vault. A "
                        + "revoked key is valid at no time, so a signature under it proves nothing, however old it claims to be. "
                        + "keyVersion 0 is the legacy unversioned key (identity.publicKey), which has no revoked flag and is removed "
-                       + "instead. Revoking the newest key stops the agent signing — it does not fall back to an older key — so "
+                       + "instead; an identity.keys entry declared as version 0 is revoked with it. Revoking the newest key stops the agent signing — it does not fall back to an older key — so "
                        + "generate its replacement first; until then a save with signInterAgentMessages on is refused. Revoking a key "
                        + "that is already revoked writes nothing. Admin only, like generating one.")
     @APIResponse(responseCode = "200", description = "Key revoked. The body is the revoked entry; Location is the agent version "
