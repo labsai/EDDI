@@ -39,6 +39,14 @@ final class GuardText {
      * {@code update_resource} carries the document as a JSON string).
      */
     private static final int MAX_NESTED_JSON_DEPTH = 4;
+    /**
+     * The characters a document {@link #LENIENT} accepts can start with: a bracket,
+     * a quote of either kind, or a comment ({@code /*}, {@code //}, {@code #}).
+     * Text starting with anything else is not parsed; one that starts with a
+     * comment must be, or a lenient receiver reads an escaped id the test never
+     * decodes.
+     */
+    private static final String DOCUMENT_STARTS = "{[\"'/#";
     private static final char SEPARATOR = ' ';
 
     private GuardText() {
@@ -101,7 +109,7 @@ final class GuardText {
             return;
         }
         String trimmed = text.strip();
-        if (trimmed.isEmpty() || "{[\"".indexOf(trimmed.charAt(0)) < 0) {
+        if (trimmed.isEmpty() || DOCUMENT_STARTS.indexOf(trimmed.charAt(0)) < 0) {
             return;
         }
         JsonNode tree;

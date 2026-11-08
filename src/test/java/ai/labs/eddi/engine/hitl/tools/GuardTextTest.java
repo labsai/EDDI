@@ -104,7 +104,10 @@ class GuardTextTest {
                 "{\"config\":\"{" + BACKSLASH + "\"id" + BACKSLASH + "\":" + BACKSLASH + "\"0123" + BACKSLASH + BACKSLASH
                         + "u003456789abcdef01234567" + BACKSLASH + "\"}\"}",
                 // non-standard JSON a lenient receiver still reads
-                "{'id':'0123" + ESCAPED_FOUR + "56789abcdef01234567'}"})
+                "{'id':'0123" + ESCAPED_FOUR + "56789abcdef01234567'}",
+                // a lenient document that starts with a comment rather than a bracket
+                "/* note */ {\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}",
+                "# note\n{\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}"})
         @DisplayName("an escaped or encoded id is seen by both guards")
         void bothSeeTheId(String rawArguments) {
             assertEquals(SelfUngatingGuard.OWN_AGENT_REASON, SelfUngatingGuard.refusalFromArguments(rawArguments, ID), "SelfUngatingGuard");
@@ -113,7 +116,7 @@ class GuardTextTest {
 
         @ParameterizedTest(name = "{index}: {0}")
         @ValueSource(strings = {"{\"id\":\"" + OTHER_ID + "\"}", "{\"config\":\"{" + BACKSLASH + "\"id" + BACKSLASH + "\":" + BACKSLASH + "\""
-                + OTHER_ID + BACKSLASH + "\"}\"}", "not json, " + OTHER_ID})
+                + OTHER_ID + BACKSLASH + "\"}\"}", "not json, " + OTHER_ID, "/agents/" + OTHER_ID})
         @DisplayName("another id is seen by neither")
         void neitherSeesAnotherId(String rawArguments) {
             assertNull(SelfUngatingGuard.refusalFromArguments(rawArguments, ID), "SelfUngatingGuard");
