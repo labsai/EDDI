@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -136,7 +136,9 @@ export function ConnectionDetailPage() {
   draftRef.current = draft;
   /** Everything a save is built from, serialised: compared after an await to see whether the user typed meanwhile. */
   const formStateRef = useRef("");
-  formStateRef.current = JSON.stringify([draft, pendingScope, pendingOrigin]);
+  useLayoutEffect(() => {
+    formStateRef.current = JSON.stringify([draft, pendingScope, pendingOrigin]);
+  }, [draft, pendingScope, pendingOrigin]);
   /**
    * `id@version` of the version a save created while the user kept editing.
    *
