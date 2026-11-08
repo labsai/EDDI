@@ -403,7 +403,7 @@
     "publicKeys": "공개 키",
     "recallOrder": "리콜 순서",
     "requirePeer": "피어 검증 요구",
-    "requirePeerDesc": "그룹 대화에서 이 에이전트가 응답하기 전에 앞선 발언자 메시지의 서명을 검증합니다. 실패는 기록되지만 차단되지는 않습니다",
+    "requirePeerDesc": "그룹 대화에서 이 에이전트가 응답하기 전에 앞선 발언자 메시지의 서명을 검증합니다. 검증되지 않는 다른 에이전트의 메시지는 이 에이전트에게 전달되지 않습니다",
     "securityFlags": "서명 및 검증",
     "securityIdentity": "보안 및 신원",
     "sessionManagement": "세션 관리",

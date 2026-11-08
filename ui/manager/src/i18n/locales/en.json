@@ -432,7 +432,7 @@
     "publicKeys": "Public Keys",
     "recallOrder": "Recall Order",
     "requirePeer": "Require peer verification",
-    "requirePeerDesc": "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked",
+    "requirePeerDesc": "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it",
     "securityFlags": "Signing & Verification",
     "securityIdentity": "Security & Identity",
     "sessionManagement": "Session Management",

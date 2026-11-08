@@ -403,7 +403,7 @@
     "publicKeys": "Öffentliche Schlüssel",
     "recallOrder": "Abrufreihenfolge",
     "requirePeer": "Peer-Verifizierung erforderlich",
-    "requirePeerDesc": "Prüft die Signaturen der Nachrichten früherer Sprecher, bevor dieser Agent in einer Gruppenunterhaltung antwortet. Fehler werden protokolliert, nicht blockiert",
+    "requirePeerDesc": "Prüft die Signaturen der Nachrichten früherer Sprecher, bevor dieser Agent in einer Gruppenunterhaltung antwortet. Nachrichten anderer Agenten, die sich nicht verifizieren lassen, werden ihm vorenthalten",
     "securityFlags": "Signierung & Verifizierung",
     "securityIdentity": "Sicherheit & Identität",
     "sessionManagement": "Sitzungsverwaltung",

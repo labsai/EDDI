@@ -404,7 +404,7 @@
     "publicKeys": "Clés publiques",
     "recallOrder": "Ordre de rappel",
     "requirePeer": "Exiger la vérification des pairs",
-    "requirePeerDesc": "Vérifie les signatures des messages des intervenants précédents avant que cet agent ne réponde dans une conversation de groupe. Les échecs sont journalisés, pas bloqués",
+    "requirePeerDesc": "Vérifie les signatures des messages des intervenants précédents avant que cet agent ne réponde dans une conversation de groupe. Les messages d'autres agents qui ne peuvent pas être vérifiés lui sont masqués",
     "securityFlags": "Signature et vérification",
     "securityIdentity": "Sécurité et identité",
     "sessionManagement": "Gestion de session",

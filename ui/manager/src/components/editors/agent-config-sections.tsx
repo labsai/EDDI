@@ -303,7 +303,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input

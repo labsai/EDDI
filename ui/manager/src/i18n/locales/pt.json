@@ -404,7 +404,7 @@
     "publicKeys": "Chaves públicas",
     "recallOrder": "Ordem de recuperação",
     "requirePeer": "Exigir verificação de pares",
-    "requirePeerDesc": "Verifica as assinaturas das mensagens dos participantes anteriores antes de este agente responder numa conversa de grupo. As falhas são registadas, não bloqueadas",
+    "requirePeerDesc": "Verifica as assinaturas das mensagens dos participantes anteriores antes de este agente responder numa conversa de grupo. As mensagens de outros agentes que não podem ser verificadas são-lhe ocultadas",
     "securityFlags": "Assinatura e verificação",
     "securityIdentity": "Segurança e identidade",
     "sessionManagement": "Gerenciamento de sessão",

@@ -279,10 +279,13 @@ to the agent's \`identity.keys\` as a new agent version, and the agent signs its
 group-conversation messages with the newest one. A save with
 \`security.signInterAgentMessages\` on is refused (400) until the newest key's
 private half is in the vault, and a new agent cannot be created with it on;
-\`requirePeerVerification\` needs no key of the agent's own. Peer verification
-logs a failed or unsigned message but does not yet keep it from the receiving
-agent. When asked to turn signing on, say this and send the administrator to
-that section.`;
+\`requirePeerVerification\` needs no key of the agent's own. An agent with
+\`requirePeerVerification\` sees every message another agent wrote that does not
+verify (unsigned, edited, copied from another discussion, or signed outside its
+key's validity window) as "[withheld: ...]", so in such a group every agent
+member should sign. To revoke a key, generate a new one, then set the old
+key's \`validUntilMs\` in \`identity.keys\`. When asked to turn signing on, say
+this and send the administrator to that section.`;
 
 /**
  * How to answer cluster questions with the read-only cluster endpoints.
