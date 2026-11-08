@@ -1391,7 +1391,17 @@ public class AuditLedgerService implements UserErasureParticipant {
      * @return the verification outcome for that entry
      */
     public AuditVerificationStatus verifyEntry(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
-        AuditVerificationStatus hmacStatus = verifyHmac(entry, recoveryBudget);
+        return withAgentSignature(entry, verifyHmac(entry, recoveryBudget));
+    }
+
+    /**
+     * {@code hmacStatus} refined by the entry's agent signature, the second half of
+     * {@link #verifyEntry}.
+     *
+     * @throws IllegalStateException
+     *             if the agent store could not be read
+     */
+    private AuditVerificationStatus withAgentSignature(AuditEntry entry, AuditVerificationStatus hmacStatus) {
         boolean hmacVerified = hmacStatus == AuditVerificationStatus.VALID || hmacStatus == AuditVerificationStatus.VALID_RECOVERED;
         if (!hmacVerified || agentSigner == null || entry.agentSignature() == null && !agentSigningEnabled) {
             return hmacStatus;
@@ -1410,8 +1420,8 @@ public class AuditLedgerService implements UserErasureParticipant {
     /**
      * The HMAC half of {@link #verifyEntry}. A GDPR erasure decides with it whether
      * a row may be re-signed: that question is whether the content is intact, which
-     * only the HMAC answers, and the agent signature is re-made by the reseal
-     * anyway.
+     * only the HMAC answers. The reseal then decides about the agent signature
+     * itself (see {@link #reseal}).
      */
     private AuditVerificationStatus verifyHmac(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
         if (entry == null) {
@@ -1963,13 +1973,33 @@ public class AuditLedgerService implements UserErasureParticipant {
         return signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
     }
 
-    /** Re-sign an entry this service vouches for, with the current key. */
+    /**
+     * Re-sign an entry whose HMAC this service verified, with the current key. The
+     * agent signs the new HMAC afresh, unless the entry's agent signature is itself
+     * the finding: one that does not verify, or none where its agent version signs
+     * — a row forged by someone holding the HMAC key. A fresh signature would have
+     * the agent vouch for a row it never signed, and remove the only trace of the
+     * forgery; kept as it is, the entry reports the same verdict over its new HMAC.
+     */
     private AuditEntry reseal(AuditEntry entry) {
         AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
         if (signingKey == null) {
             return entry;
         }
-        return signAsAgent(entry.withHmac(AuditHmac.computeHmac(entry, signingKey)).withAgentSignature(null));
+        AuditEntry resealed = entry.withHmac(AuditHmac.computeHmac(entry, signingKey));
+        AuditVerificationStatus agentStatus;
+        try {
+            agentStatus = withAgentSignature(entry, AuditVerificationStatus.VALID);
+        } catch (RuntimeException e) {
+            // Whether the signature is a finding cannot be told: sign nothing rather than
+            // sign on trust. Verification then reports the row as missing its signature.
+            LOGGER.warnv("Resealed audit entry {0} is not agent-signed: {1}", sanitize(entry.id()), sanitize(e.getMessage()));
+            return resealed.withAgentSignature(null);
+        }
+        return switch (agentStatus) {
+            case AGENT_SIGNATURE_INVALID, AGENT_SIGNATURE_MISSING -> resealed;
+            default -> signAsAgent(resealed.withAgentSignature(null));
+        };
     }
 
     /**

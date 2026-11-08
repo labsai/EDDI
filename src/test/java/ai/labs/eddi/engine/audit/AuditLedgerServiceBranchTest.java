@@ -487,6 +487,78 @@ class AuditLedgerServiceBranchTest {
             assertEquals(AuditVerificationStatus.VALID, afterDeletion.verifyEntry(redacted.getValue()));
             afterDeletion.shutdown();
         }
+
+        /** The row an erasure re-signs, once the sweep has run over {@code row}. */
+        private AuditEntry erasedRow(AuditEntry row) {
+            when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(row));
+            when(auditStore.redactEntry(any(), eq(row.hmac()))).thenReturn(true);
+
+            assertEquals(1, service.eraseUser("user1").resealed());
+            var redacted = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditStore).redactEntry(redacted.capture(), eq(row.hmac()));
+            return redacted.getValue();
+        }
+
+        @Test
+        @DisplayName("an erasure gives an intact row a fresh agent signature over its new HMAC")
+        void erasureResignsAnIntactRow() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+
+            AuditEntry erased = erasedRow(stored);
+
+            assertNotEquals(stored.agentSignature(), erased.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * A row forged by someone holding the audit HMAC key, without the agent's
+         * signature. Re-signed by the erasure, the agent would vouch for a row it never
+         * wrote, and the one trace of the forgery would be gone.
+         */
+        @Test
+        @DisplayName("an erasure does not give a row missing its agent signature a genuine one")
+        void erasureKeepsAMissingAgentSignatureMissing() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry forged = flushedEntry(service).withAgentSignature(null);
+
+            AuditEntry erased = erasedRow(forged);
+
+            assertNull(erased.agentSignature());
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        @Test
+        @DisplayName("an erasure does not replace a forged agent signature with a genuine one")
+        void erasureKeepsAForgedAgentSignatureInvalid() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            String otherKeysSignature = signingService.sign("default", "agent1", signingService.generateKey("default", "agent1", 2).version(),
+                    AuditAgentSigner.SIGNED_PREFIX + stored.hmac());
+            AuditEntry forged = stored.withAgentSignature("v1:" + otherKeysSignature);
+
+            AuditEntry erased = erasedRow(forged);
+
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_INVALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * Whether the row's signature is a finding cannot be told while the agent store
+         * is down, so the reseal signs nothing rather than signing on trust.
+         */
+        @Test
+        @DisplayName("an erasure that cannot read the agent store leaves the resealed row unsigned")
+        void erasureLeavesTheRowUnsignedWhenTheAgentStoreFails() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            when(agentStore.getCurrentResourceId("agent1")).thenThrow(new IllegalStateException("socket timeout"));
+
+            assertNull(erasedRow(stored).agentSignature());
+            service.shutdown();
+        }
     }
 
     // ==================== flush — success after failure resets counter
