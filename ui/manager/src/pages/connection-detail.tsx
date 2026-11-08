@@ -140,6 +140,14 @@ export function ConnectionDetailPage() {
     formStateRef.current = JSON.stringify([draft, pendingScope, pendingOrigin]);
   }, [draft, pendingScope, pendingOrigin]);
   /**
+   * The extra-parameter rows as the field holds them, serialised.
+   *
+   * A row with no name never reaches `draft` (it is dropped on the way out), so
+   * text typed into one is invisible to `formStateRef`. The field reports its
+   * rows here, and a save compares both.
+   */
+  const extraRowsRef = useRef("");
+  /**
    * `id@version` of the version a save created while the user kept editing.
    *
    * Following that version is the same document, not a different one, so the
@@ -371,7 +379,7 @@ export function ConnectionDetailPage() {
     }
     // `outgoing` already folds in any uncommitted chip text and drops the
     // fields this auth type does not use — see `toStoredConnection`.
-    const sentState = formStateRef.current;
+    const sentState = formStateRef.current + extraRowsRef.current;
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: outgoing });
 
@@ -384,7 +392,7 @@ export function ConnectionDetailPage() {
       baselineDocRef.current = outgoing;
       // The fields stay editable during the PUT. An edit made meanwhile is not
       // saved: it stays on screen, unsaved against the new baseline.
-      const editedSinceSent = formStateRef.current !== sentState;
+      const editedSinceSent = formStateRef.current + extraRowsRef.current !== sentState;
       if (!editedSinceSent) {
         setDraft(outgoing);
         setPendingScope("");
@@ -752,6 +760,7 @@ export function ConnectionDetailPage() {
             <ExtraParamsField
               value={draft.oauth?.extraAuthParams ?? {}}
               onChange={(extraAuthParams) => patchOAuth({ extraAuthParams })}
+              rowsStateRef={extraRowsRef}
               error={fieldError("oauth.extraAuthParams")}
             />
 
@@ -977,10 +986,13 @@ function ScopesField({
 function ExtraParamsField({
   value,
   onChange,
+  rowsStateRef,
   error,
 }: {
   value: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
+  /** Receives the rows, serialised, so the page can see rows `onChange` leaves out. */
+  rowsStateRef: { current: string };
   error?: ValidationCode;
 }) {
   const { t } = useTranslation();
@@ -1006,6 +1018,13 @@ function ExtraParamsField({
     emitted.current = value;
     setRows(Object.entries(value));
   }, [value]);
+
+  useLayoutEffect(() => {
+    rowsStateRef.current = JSON.stringify(rows);
+    return () => {
+      rowsStateRef.current = "";
+    };
+  }, [rows, rowsStateRef]);
 
   const emit = (next: [string, string][]) => {
     setRows(next);

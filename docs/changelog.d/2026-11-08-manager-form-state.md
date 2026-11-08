@@ -18,7 +18,8 @@ become by then.
   the baseline to what it stored, keeps the draft when the form (or uncommitted
   chip text) changed since sending, and tells the route-change reset to leave that
   draft alone for exactly the version it created. The edit stays unsaved and the
-  next save goes against the new version.
+  next save goes against the new version. Text typed into a parameter row that has no
+  name yet counts as a change too, though such a row is not part of the document.
 - **Agent sync** — a batch preview landed on rows whose target or "Create new"
   choice had changed during the request (a diff for one target shown under
   another, with Sync armed to send the new one), or that a reconnect had relisted
