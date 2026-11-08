@@ -27,8 +27,10 @@ export function ResultWarnings({ warnings }: { warnings: readonly string[] }) {
         {t("importDialog.writtenDifferently", "Written, but not exactly as in the source:")}
       </p>
       <ul className="space-y-1 ps-5">
-        {warnings.map((warning) => (
-          <li key={warning}>{warning}</li>
+        {/* Keyed by position, not text: two agents of one name can get the same
+            text, and the list is never reordered. */}
+        {warnings.map((warning, i) => (
+          <li key={i}>{warning}</li>
         ))}
       </ul>
     </div>
