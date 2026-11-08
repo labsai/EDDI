@@ -2270,6 +2270,26 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
+     * The configured members of group {@code groupId}, for the signing guard to
+     * learn how strictly a nested group reads its parent's transcript; {@code null}
+     * when the id names no group.
+     */
+    private List<GroupMember> membersOfGroup(String groupId) {
+        try {
+            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
+            if (current == null) {
+                return null;
+            }
+            AgentGroupConfiguration group = groupStore.read(groupId, current.getVersion());
+            return group != null ? group.getMembers() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    /**
      * Determines which members participate in a phase based on the
      * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
      */
@@ -2290,26 +2310,6 @@ public class GroupConversationService implements IGroupConversationService, User
      * points into, and move the denominator I2's convergence check and I4's
      * unanimity test already computed for the round in flight.
      */
-    /**
-     * The configured members of group {@code groupId}, for the signing guard to
-     * learn how strictly a nested group reads its parent's transcript; {@code null}
-     * when the id names no group.
-     */
-    private List<GroupMember> membersOfGroup(String groupId) {
-        try {
-            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
-            if (current == null) {
-                return null;
-            }
-            AgentGroupConfiguration group = groupStore.read(groupId, current.getVersion());
-            return group != null ? group.getMembers() : null;
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            return null;
-        } catch (IResourceStore.ResourceStoreException e) {
-            throw new IllegalStateException(e.getMessage(), e);
-        }
-    }
-
     public static List<GroupMember> rosterWithRecruits(AgentGroupConfiguration config, GroupConversation gc) {
         List<GroupMember> configured = config.getMembers() != null ? config.getMembers() : List.of();
         if (gc == null || gc.getDynamicMembers() == null || gc.getDynamicMembers().isEmpty()) {

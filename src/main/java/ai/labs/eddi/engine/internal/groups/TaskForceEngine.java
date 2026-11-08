@@ -699,13 +699,13 @@ public class TaskForceEngine {
      *            values below 1 are treated as 1
      */
     /** What the planner is told about a HUMAN member, ahead of their role. */
+    static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
+
     /**
      * Why a task failed without running: its assignee requires peer verification
      * and the task's own text does not verify for it.
      */
     static final String UNVERIFIED_TASK_REASON = "Its task text could not be verified, and this member requires peer verification";
-
-    static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
 
     /**
      * The pause for the next executable HUMAN-assigned task, or {@code null} when
