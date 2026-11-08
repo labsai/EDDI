@@ -205,6 +205,7 @@ class AuditAgentSignerTest {
                 .toList();
         assertEquals(2, warnings.size(), "one WARN for agent version 1, one for version 2; got " + warnings);
         assertTrue(warnings.getFirst().contains("is deployed"), "the WARN says what makes the entries signed again: " + warnings.getFirst());
+        assertTrue(warnings.getFirst().contains("next 10 minutes"), "the WARN says how long its repeats stay at DEBUG: " + warnings.getFirst());
         assertEquals(2, records.stream().filter(r -> r.getLevel().intValue() < Level.WARNING.intValue()).count(),
                 "the repeats are still logged, at DEBUG: " + records.stream().map(LogRecord::getMessage).toList());
     }

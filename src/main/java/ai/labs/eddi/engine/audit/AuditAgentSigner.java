@@ -230,7 +230,8 @@ public class AuditAgentSigner {
         if (warnedKeyNotInVault.asMap().putIfAbsent(key, Boolean.TRUE) == null) {
             LOGGER.warnf("Audit entry '%s' of agent '%s' version %d is not signed: key v%d is not in the secrets vault (revoked or"
                     + " deleted). Entries of that version stay unsigned until a version declaring a current key is deployed;"
-                    + " further ones are logged at DEBUG", sanitize(entry.id()), sanitize(entry.agentId()), entry.agentVersion(), keyVersion);
+                    + " further ones in the next %d minutes are logged at DEBUG", sanitize(entry.id()), sanitize(entry.agentId()),
+                    entry.agentVersion(), keyVersion, KEY_NOT_IN_VAULT_WARN_INTERVAL.toMinutes());
         } else {
             LOGGER.debugf("Audit entry '%s' of agent '%s' is not signed: key v%d is not in the secrets vault", sanitize(entry.id()),
                     sanitize(entry.agentId()), keyVersion);
