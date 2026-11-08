@@ -264,6 +264,20 @@ describe("TeamBudgetsTable", () => {
       expect(keys[1]).toBe(keys[0]);
     });
 
+    it("drops a stale error when a field is edited, but keeps the key for the retry", async () => {
+      const keys = answerTransfers([503]);
+      renderPage("/manage/quotas", <TeamBudgetsTable />);
+      const dialog = await openTransfer();
+      fillTransfer(dialog);
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await within(dialog).findByTestId("team-budget-error");
+      fireEvent.change(within(dialog).getByTestId("team-budget-amount"), { target: { value: "4" } });
+      expect(within(dialog).queryByTestId("team-budget-error")).toBeNull();
+      fireEvent.click(within(dialog).getByTestId("team-budget-transfer-save"));
+      await waitFor(() => expect(keys).toHaveLength(2));
+      expect(keys[1]).toBe(keys[0]);
+    });
+
     it("starts a new transfer after a 4xx, with an empty form and a new key", async () => {
       const keys = answerTransfers([400]);
       renderPage("/manage/quotas", <TeamBudgetsTable />);

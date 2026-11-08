@@ -126,6 +126,14 @@ export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; 
     setOutcomeUnknown(false);
   }
 
+  /** A field edit makes the shown error stale; outcomeUnknown and the key stay, so a retry is still idempotent. */
+  function edited(set: (value: string) => void) {
+    return (value: string) => {
+      set(value);
+      setError(null);
+    };
+  }
+
   function close() {
     // After an attempt that may have been applied, keep it — values, key and
     // error — so reopening and retrying sends the same key, which the server
@@ -186,19 +194,19 @@ export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; 
         </p>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.from", "From")}</span>
-          <select className={FIELD} value={from} onChange={(e) => setFrom(e.target.value)} data-testid="team-budget-from">
+          <select className={FIELD} value={from} onChange={(e) => edited(setFrom)(e.target.value)} data-testid="team-budget-from">
             {options(to)}
           </select>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.to", "To")}</span>
-          <select className={FIELD} value={to} onChange={(e) => setTo(e.target.value)} data-testid="team-budget-to">
+          <select className={FIELD} value={to} onChange={(e) => edited(setTo)(e.target.value)} data-testid="team-budget-to">
             {options(from)}
           </select>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.amount", "Amount (USD)")}</span>
-          <input className={FIELD} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="team-budget-amount" />
+          <input className={FIELD} inputMode="decimal" value={amount} onChange={(e) => edited(setAmount)(e.target.value)} data-testid="team-budget-amount" />
           {source && (
             <span className="mt-1 block text-xs text-muted-foreground">
               {t("teamBudget.remaining", "Remaining")}: {formatUsd(source.remainingUsd ?? 0)}
@@ -211,7 +219,7 @@ export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; 
             className={FIELD}
             maxLength={TEAM_BUDGET_MAX_REASON_LENGTH}
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={(e) => edited(setReason)(e.target.value)}
             data-testid="team-budget-transfer-reason"
           />
           <span className="mt-1 block text-xs text-muted-foreground">{t("teamBudget.reasonHelp", "Required. Recorded in the audit ledger.")}</span>
