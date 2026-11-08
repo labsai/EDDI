@@ -29,7 +29,11 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
   no vault entry can have, deletes nothing: it used to be read as the legacy key, whose private half
   the agent may still need. Already revoked: `200`, nothing written, but the private key is still
   deleted — that delete is best effort after the write, so revoking again is how a key a degraded
-  vault kept is retried.
+  vault kept is retried. A write whose outcome is unknown (a socket error or a lost acknowledgement,
+  which can arrive after the write was applied) is handled as generating a key handles it: the agent
+  is read again, and if its current version no longer trusts the key the revoke landed — the
+  descriptor moves, the private key is deleted and the answer is `200`. Otherwise the failure is
+  rethrown and the key kept, since it is still declared.
 - **The save-time check covers every declared key.** With `signInterAgentMessages` on, a save is
   refused (400) when a key that is not revoked is malformed (version outside 1 to 1 000 000, a
   version declared twice, not an Ed25519 public key), or when the newest key is revoked or outside
@@ -105,9 +109,13 @@ synthesizer, facilitator), or turn the flag off.
 - The import/sync report is a header and an `UpgradeResult` field, shown verbatim by one Manager
   component on the import dialog and the Sync page: the texts are EDDI's own and already name the
   way back, and `warnings` is a general list, not a signing flag.
-- A repeated revoke retries only the private-key delete. A descriptor left behind by a lost write
-  acknowledgement is not repaired here: every `PUT` shares that failure mode, and a recovery path in
-  one endpoint would be a special case.
+- Generate and revoke treat a write whose outcome is unknown the same way, through one helper that
+  reads the agent again and asks whether the change is there; only what to do when it is not
+  differs (a generated key is discarded, a revoked one kept). Without it, a revoke that landed
+  unacknowledged left the descriptor behind, every later save answered 404, and revoking again
+  could not repair it. A descriptor that lags for another reason (the descriptor write itself
+  failing) is still not repaired by a retry; the endpoint answers 500 naming the version it is stuck
+  at.
 
 ### Tests
 
@@ -118,4 +126,4 @@ and validator cases), `AgentPublicKeyTest`, `AgentSigningServiceTest`, `AgentCas
 Manager section, page, import-dialog, Sync-page and API tests, and a new
 [`AgentSigningKeyIT`](../../src/test/java/ai/labs/eddi/integration/AgentSigningKeyIT.java) that runs
 generate, save, sign-on, deploy, converse and revoke through the HTTP stack, response filters
-included (CI only).
+included.
