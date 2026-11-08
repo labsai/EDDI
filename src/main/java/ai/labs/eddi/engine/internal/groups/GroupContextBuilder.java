@@ -527,9 +527,11 @@ public class GroupContextBuilder {
 
         // A summary is the summarizer's retelling of every entry it covers, unverified
         // ones included, so a member from whom one of those entries was withheld
-        // gets the truncation marker instead.
+        // gets the truncation marker instead. Only entries the summarizer reads count:
+        // a withheld facilitator intervention (unsigned bookkeeping) is in no summary.
+        // The placeholder keeps the entry's type, so isSummarizable still applies.
         boolean summaryRetellsWithheld = entries.subList(0, Math.min(summaryUpTo, entries.size())).stream()
-                .anyMatch(GroupSigningGuard::isWithheld);
+                .anyMatch(e -> GroupSigningGuard.isWithheld(e) && isSummarizable(e));
         if (summary != null && !summary.isBlank() && summaryUpTo > 0 && !summaryRetellsWithheld) {
             // Verbatim tail = everything the summary does not cover. Split on the raw
             // boundary rather than "last maxRecentEntries" so there is never a gap
