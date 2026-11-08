@@ -940,7 +940,9 @@ public class RestAgentStore implements IRestAgentStore {
         AgentPublicKey revoked = legacy ? new AgentPublicKey(0, identity.getPublicKey(), 0, 0, true) : entries.get(0).revoke();
         if (!legacy && entries.stream().allMatch(AgentPublicKey::revoked)) {
             // Already revoked: nothing to write, and the answer names the version that
-            // says so.
+            // says so. The private key is still deleted: that delete is best effort
+            // below, so revoking again is how a key the vault kept is retried.
+            agentSigningService.discardKey(defaultTenantId, id, keyVersion);
             return keyChangeResponse(id, version, revoked);
         }
         if (legacy) {
