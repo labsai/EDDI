@@ -91,7 +91,7 @@ out. Longer, each area applies its policy:
 | Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
-| A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
+| A2A mappings, tool pages, Slack dedup, thread locks, RAG ingestion status | node-local copy. A write made during the outage is published to the bucket on the writing node's next read of the key, by compare-and-set against the revision that node last saw; if another node wrote or deleted the key meanwhile, the bucket wins and the local copy is dropped. A value the bucket refuses as too large is never retried | — |
 | Webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes) | follows `degraded.nonces`: **reject** with 503 + `Retry-After`, the sender retries | `degraded.nonces=local` |
 | Audit chain positions | entries recorded unsequenced (verification: UNAVAILABLE, never BROKEN) | — |
 | Cache events | outbox, flushed on reconnect (and every 2 s while connected, for a publish that failed without a disconnect); overflow ⇒ cluster-wide resync, coalesced per node so N nodes asking at once cause one flush each | — |
