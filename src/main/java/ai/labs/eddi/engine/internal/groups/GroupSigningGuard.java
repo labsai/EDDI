@@ -61,9 +61,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * notes, a nested group's answer) carry no signature and pass through, but
  * under a name that cannot pass for a member agent's: signatures authenticate
  * agents, not the engine's own record. A synthesis under the engine's or the
- * user's name is withheld: the engine never records one there. The receiver's
- * own entries are checked like a peer's when it signs; when it does not, it has
- * nothing to check them against and they pass as they are.
+ * user's name is withheld: the engine never records one there. An entry of an
+ * agent that has since been deleted is withheld too: deleting an agent must not
+ * turn its entries into a non-agent's. The receiver's own entries are checked
+ * like a peer's when it signs; when it does not, it has nothing to check them
+ * against and they pass as they are.
  * <p>
  * Holds only caches: agent configurations by version (immutable), the outcome
  * of each Ed25519 check (a pure function of key, signature and signed bytes),
@@ -139,7 +141,8 @@ public class GroupSigningGuard {
                                                 "it was signed in another round of this discussion"), DUPLICATE(
                                                         "its signature already appears earlier in this conversation"), ENGINE_SYNTHESIS(
                                                                 "it is a synthesis under the engine's or the user's name, "
-                                                                        + "under which none is ever recorded");
+                                                                        + "under which none is ever recorded"), NO_SUCH_AGENT(
+                                                                                "the agent it is attributed to no longer exists");
 
         private final String reason;
 
@@ -304,7 +307,8 @@ public class GroupSigningGuard {
      * One verdict per entry of {@code transcript}, in order, as the agent
      * {@code receiverAgentId} is to see them. Every entry is checked on every call
      * (the Ed25519 check itself is remembered): a key revoked mid-discussion takes
-     * effect on the next turn.
+     * effect on the next prompt built. What a receiver was already shown stays in
+     * its own member conversation, whose history its model sees again.
      */
     List<Verdict> verify(GroupConversation gc, List<TranscriptEntry> transcript, String receiverAgentId) {
         var pass = new Pass();
@@ -341,7 +345,10 @@ public class GroupSigningGuard {
             return Verdict.RECEIVERS_OWN;
         }
         if (!speaker.isAgent()) {
-            return Verdict.NOT_AGENT_AUTHORED;
+            // The store has no live agent of this id. A deleted agent is one too, and its
+            // entries must not pass as a non-agent's: a revocation would be undone by the
+            // delete that usually follows it.
+            return writtenAsAnAgent(gc, entry) ? Verdict.NO_SUCH_AGENT : Verdict.NOT_AGENT_AUTHORED;
         }
         if (!entry.hasEnvelopeData() || entry.signatureKeyVersion() == null) {
             return Verdict.UNSIGNED;
@@ -410,22 +417,24 @@ public class GroupSigningGuard {
     }
 
     /**
-     * The speaker as the agent store knows it. An id that names no agent (a human
-     * member, a nested group, a reviewer) is not agent-authored; an agent whose
-     * configuration cannot be read is, with no key, and counts as signing, so its
-     * entries are withheld, the receiver's own included.
+     * The speaker as the agent store knows it. An id with no current version names
+     * no live agent: a human member, a nested group, a reviewer, or an agent since
+     * deleted (PostgreSQL answers null, MongoDB throws); {@link #writtenAsAnAgent}
+     * tells the last apart. An agent whose configuration cannot be read is an
+     * agent, with no key, and counts as signing, so its entries are withheld, the
+     * receiver's own included.
      */
     private Speaker lookUpSpeaker(String speakerId) {
         try {
             var resourceId = agentStore.getCurrentResourceId(speakerId);
             if (resourceId == null) {
-                return Speaker.NOT_AN_AGENT;
+                return Speaker.NO_LIVE_AGENT;
             }
             AgentConfiguration config = agentConfigs.read(speakerId, resourceId.getVersion());
             var security = config.getSecurity();
             return new Speaker(true, config.getIdentity(), security != null && security.isSignInterAgentMessages());
         } catch (ResourceNotFoundException e) {
-            return Speaker.NOT_AN_AGENT;
+            return Speaker.NO_LIVE_AGENT;
         } catch (Exception e) {
             LOGGER.warnf("Could not read agent '%s' to verify its group messages: %s", LogSanitizer.sanitize(speakerId), e.getMessage());
             return new Speaker(true, null, true);
@@ -433,7 +442,20 @@ public class GroupSigningGuard {
     }
 
     private record Speaker(boolean isAgent, AgentIdentity identity, boolean signs) {
-        static final Speaker NOT_AN_AGENT = new Speaker(false, null, false);
+        static final Speaker NO_LIVE_AGENT = new Speaker(false, null, false);
+    }
+
+    /**
+     * Whether {@code entry}, whose speaker id names no live agent, was written as
+     * an agent's all the same: it carries a signature, which only agents give, or
+     * an agent turn of this discussion ran under its speaker id (each one records
+     * its member conversation under that id). Decided by what the discussion
+     * recorded, not by the agent store, since deleting an agent takes it out of the
+     * store.
+     */
+    private static boolean writtenAsAnAgent(GroupConversation gc, TranscriptEntry entry) {
+        return entry.hasEnvelopeData()
+                || gc.getMemberConversationIds() != null && gc.getMemberConversationIds().containsKey(entry.speakerAgentId());
     }
 
     private Requirement requirementOf(String receiverAgentId) {
@@ -562,9 +584,10 @@ public class GroupSigningGuard {
      * The placeholder for an entry that did not verify. It keeps what decides where
      * the entry appears (speaker id, phase index, type, target) and drops every
      * text field: the stored display name and phase name are as unverified as the
-     * content, so the speaker is named by its agent id (a store-generated id, since
-     * an id that names no agent is not withheld but relabelled), or for a synthesis
-     * under the engine's or the user's name, by that fixed label.
+     * content, so the speaker is named by its speaker id (an agent's
+     * store-generated id; for {@link Verdict#NO_SUCH_AGENT}, whatever id the entry
+     * was stored under, with no text of its own), or for a synthesis under the
+     * engine's or the user's name, by that fixed label.
      */
     private static TranscriptEntry withheld(TranscriptEntry entry, Verdict verdict) {
         String speakerId = entry.speakerAgentId();

@@ -300,7 +300,10 @@ another discussion or round, or signed with a revoked key or outside its key's
 validity window) as "[withheld: ...]"; its own messages are checked the same way when it
 signs (only a verifying agent that does not sign sees its own unchecked), a message no agent wrote is shown as "User", "System" or the name followed
 by "(not an agent, unverified)", and it is never given the stored window
-summary. So in such a group every agent that writes to the discussion should
+summary. A message from an agent that has since been deleted is withheld too. Revoking
+a key or deleting an agent hides its messages from every prompt built afterwards, not
+from what a member was already shown, which stays in that member's own conversation
+history: to keep a leaked key's text away from the members, start a new discussion. So in such a group every agent that writes to the discussion should
 sign, a moderator or synthesizer that is not a member included, and member
 display names must be unique within the group (a save with two equal names is
 refused). When asked to turn signing on, say this and send the administrator to
