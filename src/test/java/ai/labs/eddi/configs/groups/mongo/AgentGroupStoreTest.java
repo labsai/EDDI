@@ -200,6 +200,19 @@ class AgentGroupStoreTest {
         assertEquals(List.of(), AgentGroupStore.memberAndLimitProblems(noSuchRoles));
     }
 
+    /**
+     * A blank moderatorAgentId is no moderator to the engine (resolveParticipants
+     * falls back to the first member by speaking order, who speaks under its own
+     * name), so no speaker is ever named "Moderator" and the name stays free.
+     */
+    @Test
+    void agentDisplayNameModerator_isAllowedWhenTheModeratorIdIsBlank() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, " ");
+        c.setMembers(List.of(new GroupMember("a", "Moderator", 1, null), new GroupMember("b", "Bob", 2, null)));
+
+        assertEquals(List.of(), AgentGroupStore.memberAndLimitProblems(c));
+    }
+
     @Test
     void duplicateMember_isRejectedAtSaveTime() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");

@@ -322,11 +322,12 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
      * so a member that requires peer verification would be shown two verified
      * voices under one name, as {@link #duplicateDisplayNameProblems} prevents
      * among members. A role held by a member speaks under its own name, which
-     * leaves the role's name free.
+     * leaves the role's name free, as does a blank moderator id.
      */
     static List<String> engineRoleNameProblems(AgentGroupConfiguration config, List<AgentGroupConfiguration.GroupMember> members) {
         String moderator = config.getModeratorAgentId();
-        boolean nonMemberModerator = moderator != null
+        // A blank id is no moderator to the engine (resolveParticipants).
+        boolean nonMemberModerator = moderator != null && !moderator.isBlank()
                 && members.stream().noneMatch(member -> member != null && moderator.equals(member.agentId()));
         var facilitator = config.getFacilitator();
         String facilitatorId = facilitator != null && facilitator.enabled() ? facilitator.agentId() : null;
