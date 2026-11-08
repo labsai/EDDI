@@ -24,6 +24,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -57,19 +61,9 @@ class AuditAgentSignerTest {
         signer = new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore);
     }
 
-    /** {@code version} is {@link #AGENT}'s current version. */
-    private void currentVersion(int version) throws Exception {
-        when(agentStore.getCurrentResourceId(AGENT)).thenReturn(new IResourceStore.IResourceId() {
-            @Override
-            public String getId() {
-                return AGENT;
-            }
-
-            @Override
-            public Integer getVersion() {
-                return version;
-            }
-        });
+    /** {@code version} is {@link #AGENT}'s newest version. */
+    private void newestVersion(int version) throws Exception {
+        when(agentStore.getNewestVersionIncludingDeleted(AGENT)).thenReturn(version);
     }
 
     /** Stores {@code config} as version {@code version} of {@link #AGENT}. */
@@ -143,7 +137,7 @@ class AuditAgentSignerTest {
         agentVersion(1, signing(List.of(v1)));
         AuditEntry signedBeforeRotation = signer.sign(TENANT, entry(1, HMAC));
         agentVersion(2, signing(List.of(v1, generate(2))));
-        currentVersion(2);
+        newestVersion(2);
 
         assertTrue(signedBeforeRotation.agentSignature().startsWith("v1:"));
         assertEquals(Verdict.VALID, signer.verify(signedBeforeRotation));
@@ -183,6 +177,70 @@ class AuditAgentSignerTest {
         agentVersion(1, signing(List.of(v1)));
 
         assertNull(signer.sign(TENANT, entry(1, HMAC)).agentSignature());
+    }
+
+    /**
+     * Revoking the newest key deletes it from the vault, while the deployed version
+     * keeps naming it until a redeploy: every entry of that version is then
+     * unsigned. One WARN per agent version and key says so; the rest go to DEBUG,
+     * or a busy agent floods the log during the incident.
+     */
+    @Test
+    void aKeyMissingFromTheVaultIsWarnedOncePerAgentVersionAndKey() throws Exception {
+        AgentPublicKey v1 = generate(1);
+        signingService.discardKey(TENANT, AGENT, 1);
+        agentVersion(1, signing(List.of(v1)));
+        agentVersion(2, signing(List.of(v1)));
+
+        List<LogRecord> records = captureLog(() -> {
+            signer.sign(TENANT, entry(1, HMAC));
+            signer.sign(TENANT, entry(1, HMAC));
+            signer.sign(TENANT, entry(1, HMAC));
+            signer.sign(TENANT, entry(2, HMAC));
+        });
+
+        List<String> warnings = records.stream()
+                .filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+                .map(LogRecord::getMessage)
+                .toList();
+        assertEquals(2, warnings.size(), "one WARN for agent version 1, one for version 2; got " + warnings);
+        assertTrue(warnings.getFirst().contains("is deployed"), "the WARN says what makes the entries signed again: " + warnings.getFirst());
+        assertEquals(2, records.stream().filter(r -> r.getLevel().intValue() < Level.WARNING.intValue()).count(),
+                "the repeats are still logged, at DEBUG: " + records.stream().map(LogRecord::getMessage).toList());
+    }
+
+    /**
+     * What {@link AuditAgentSigner} logs while {@code action} runs.
+     * logging.properties turns the ai.labs.eddi namespace off for unit tests, so
+     * the logger is opened explicitly.
+     */
+    private static List<LogRecord> captureLog(Runnable action) {
+        List<LogRecord> captured = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                captured.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger julLogger = Logger.getLogger(AuditAgentSigner.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            action.run();
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        return captured;
     }
 
     @Test
@@ -290,7 +348,7 @@ class AuditAgentSignerTest {
         AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
         AgentPublicKey substitute = generate(5);
         agentVersion(2, signing(List.of(new AgentPublicKey(1, substitute.publicKeyB64(), 0, 0))));
-        currentVersion(2);
+        newestVersion(2);
         String bySubstitute = "v1:" + signingService.sign(TENANT, AGENT, 5, AuditAgentSigner.SIGNED_PREFIX + HMAC);
 
         assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature(bySubstitute)));
@@ -460,7 +518,7 @@ class AuditAgentSignerTest {
         agentVersion(1, signing(List.of(v1)));
         AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
         agentVersion(2, signing(List.of(v1.revoke())));
-        currentVersion(2);
+        newestVersion(2);
 
         assertEquals(Verdict.KEY_REVOKED, signer.verify(signed));
         assertEquals(Verdict.KEY_REVOKED, signer.verify(signed.withAgentSignature(null)),
@@ -482,20 +540,44 @@ class AuditAgentSignerTest {
         assertEquals(Verdict.VALID, signer.verify(legacySigned));
 
         agentVersion(2, signing(List.of()));
-        currentVersion(2);
+        newestVersion(2);
 
         assertEquals(Verdict.KEY_REVOKED, signer.verify(legacySigned));
     }
 
     /**
-     * A deleted agent has no current version: its entries are judged by their own.
+     * Revoke the leaked key, then retire the agent: the soft delete leaves no
+     * current version, but the deleted version that revoked the key is still the
+     * newest, and the revocation still holds.
      */
     @Test
-    void anAgentWithoutACurrentVersionIsJudgedByTheEntrysOwnVersion() throws Exception {
+    void aKeyRevokedBeforeASoftDeleteStillVouchesForNothing() throws Exception {
+        AgentPublicKey v1 = generate(1);
+        agentVersion(1, signing(List.of(v1)));
+        AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
+        agentVersion(2, signing(List.of(v1.revoke())));
+        softDeletedAt(2);
+
+        assertEquals(Verdict.KEY_REVOKED, signer.verify(signed));
+        assertEquals(Verdict.KEY_REVOKED, signer.verify(signed.withAgentSignature(null)));
+    }
+
+    /**
+     * A soft-deleted agent whose last version is the entry's own has nothing newer
+     * to say.
+     */
+    @Test
+    void aSoftDeletedAgentWithNoNewerVersionIsJudgedByTheEntrysOwnVersion() throws Exception {
         agentVersion(1, signing(List.of(generate(1))));
         AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
-        when(agentStore.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+        softDeletedAt(1);
 
         assertEquals(Verdict.VALID, signer.verify(signed));
+    }
+
+    /** Soft-deleted at version {@code version}: no current version is left. */
+    private void softDeletedAt(int version) throws Exception {
+        when(agentStore.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+        newestVersion(version);
     }
 }

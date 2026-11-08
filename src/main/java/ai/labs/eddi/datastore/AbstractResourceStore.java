@@ -119,6 +119,11 @@ public abstract class AbstractResourceStore<T> implements IResourceStore<T> {
         return resourceStore.getCurrentResourceId(id);
     }
 
+    /** @see HistorizedResourceStore#getNewestVersionIncludingDeleted(String) */
+    public Integer getNewestVersionIncludingDeleted(String id) throws ResourceNotFoundException {
+        return resourceStore.getNewestVersionIncludingDeleted(id);
+    }
+
     /**
      * Whether a hit from a reverse-reference lookup should be ignored because it
      * does not describe the resource as it stands today.

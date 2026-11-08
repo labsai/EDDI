@@ -10,14 +10,16 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
-import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -72,20 +74,23 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * content; only the agent's vouching for it is missing:
  * </p>
  * <ul>
- * <li>{@link Verdict#KEY_REVOKED} — the agent's current version has revoked the
+ * <li>{@link Verdict#KEY_REVOKED} — the agent's newest version has revoked the
  * key since, or no longer declares it. Revoking writes a new agent version, so
- * the current one is asked as well as the entry's own. A revoked key is trusted
+ * the newest one is asked as well as the entry's own, soft-deleted or not: a
+ * delete after the revocation does not take it back. A revoked key is trusted
  * for nothing, whenever it signed: whoever holds a leaked key and the audit
  * HMAC key also chooses the timestamp, so no "signed before the revocation"
  * rule can tell their rows from honest ones.</li>
  * <li>{@link Verdict#MISSING} — no signature on an entry its agent version
  * would have signed: removed from the row, or the vault could not sign when the
  * entry was written (logged then). The HMAC is computed before the agent signs
- * and cannot cover the signature, so this is how a stripped signature shows. It
- * proves something only where {@code eddi.audit.hmac-key} is a secret apart
- * from the vault master key: by default the audit key derives from the master
- * key, and whoever holds that can decrypt the agent's private key and sign the
- * forged row anyway.</li>
+ * and cannot cover the signature, so this is how a signature stripped by
+ * someone who can edit rows but does not hold the audit HMAC key shows. It is
+ * no alarm against whoever holds that key: whether a signature was expected is
+ * decided by the row's {@code agentVersion} and {@code timestamp}, which that
+ * party writes and HMACs, so it can name a version that does not sign or a time
+ * before the key's {@code validFromMs}, and the row reads
+ * {@link Verdict#NOT_SIGNED}.</li>
  * <li>{@link Verdict#KEY_UNAVAILABLE} — the agent version that would check the
  * signature no longer exists (the agent was deleted permanently).</li>
  * </ul>
@@ -138,9 +143,27 @@ public class AuditAgentSigner {
         MISSING
     }
 
+    /**
+     * How long one WARN about a key missing from the vault stands for its repeats.
+     */
+    private static final Duration KEY_NOT_IN_VAULT_WARN_INTERVAL = Duration.ofMinutes(10);
+
+    /** A key missing from the vault, as one agent version names it. */
+    private record VersionKey(String tenantId, String agentId, int agentVersion, int keyVersion) {
+    }
+
     private final AgentSigningService signingService;
     private final AgentConfigurationCache agentConfigurations;
     private final IAgentStore agentStore;
+
+    /**
+     * The agent versions whose missing key was reported at WARN within the last
+     * {@link #KEY_NOT_IN_VAULT_WARN_INTERVAL}.
+     */
+    private final Cache<VersionKey, Boolean> warnedKeyNotInVault = Caffeine.newBuilder()
+            .maximumSize(1_000)
+            .expireAfterWrite(KEY_NOT_IN_VAULT_WARN_INTERVAL)
+            .build();
 
     @Inject
     public AuditAgentSigner(AgentSigningService signingService, AgentConfigurationCache agentConfigurations, IAgentStore agentStore) {
@@ -170,8 +193,7 @@ public class AuditAgentSigner {
             int keyVersion = identity.signingKeyVersion();
             String signature = signingService.signIfKeyPresent(tenantId, entry.agentId(), keyVersion, signedBytes(entry));
             if (signature == null) {
-                LOGGER.warnf("Audit entry '%s' of agent '%s' is not signed: key v%d is not in the secrets vault", sanitize(entry.id()),
-                        sanitize(entry.agentId()), keyVersion);
+                logKeyNotInVault(tenantId, entry, keyVersion);
                 return entry;
             }
             if (!signingService.verify(identity.getKeyForVersion(keyVersion), signedBytes(entry), signature)) {
@@ -197,8 +219,27 @@ public class AuditAgentSigner {
     }
 
     /**
+     * Revoking the newest key deletes it from the vault, while the deployed agent
+     * version still names it, so every entry of that version goes unsigned until a
+     * redeploy. The first such entry per agent version and key is a WARN; its
+     * repeats within {@link #KEY_NOT_IN_VAULT_WARN_INTERVAL} are DEBUG, or a busy
+     * agent floods the log during the incident that caused the revocation.
+     */
+    private void logKeyNotInVault(String tenantId, AuditEntry entry, int keyVersion) {
+        var key = new VersionKey(tenantId, entry.agentId(), entry.agentVersion(), keyVersion);
+        if (warnedKeyNotInVault.asMap().putIfAbsent(key, Boolean.TRUE) == null) {
+            LOGGER.warnf("Audit entry '%s' of agent '%s' version %d is not signed: key v%d is not in the secrets vault (revoked or"
+                    + " deleted). Entries of that version stay unsigned until a version declaring a current key is deployed;"
+                    + " further ones are logged at DEBUG", sanitize(entry.id()), sanitize(entry.agentId()), entry.agentVersion(), keyVersion);
+        } else {
+            LOGGER.debugf("Audit entry '%s' of agent '%s' is not signed: key v%d is not in the secrets vault", sanitize(entry.id()),
+                    sanitize(entry.agentId()), keyVersion);
+        }
+    }
+
+    /**
      * Checks a stored entry's agent signature, or its absence, against the agent
-     * version that produced it and the agent as it stands now. The HMAC is not
+     * version that produced it and the agent's newest version. The HMAC is not
      * checked here; a signature only means something on an entry whose HMAC
      * verified.
      *
@@ -270,28 +311,32 @@ public class AuditAgentSigner {
     }
 
     /**
-     * Whether the agent, as it stands now, has withdrawn key {@code keyVersion}:
-     * revoked it, or no longer declares {@code publicKey} for it. An agent with no
-     * current version (deleted) has nothing newer to say, and its entries are
-     * judged by their own version alone.
+     * Whether the agent's newest version has withdrawn key {@code keyVersion}:
+     * revoked it, or no longer declares {@code publicKey} for it. The newest
+     * version counts whether or not it is soft-deleted: revoking a leaked key and
+     * then deleting the agent is how a compromise is handled, and the delete must
+     * not take the revocation back. Only an agent with no version newer than the
+     * entry's has nothing more to say.
      */
     private boolean withdrawnSince(AuditEntry entry, int keyVersion, String publicKey) {
-        AgentConfiguration current;
+        AgentConfiguration newest;
         try {
-            IResourceId currentId = agentStore.getCurrentResourceId(entry.agentId());
-            if (currentId == null || currentId.getVersion() == null || currentId.getVersion().equals(entry.agentVersion())) {
+            Integer newestVersion = agentStore.getNewestVersionIncludingDeleted(entry.agentId());
+            if (newestVersion == null || newestVersion.equals(entry.agentVersion())) {
                 return false;
             }
-            current = agentConfigurations.readIncludingDeleted(entry.agentId(), currentId.getVersion());
+            newest = agentConfigurations.readIncludingDeleted(entry.agentId(), newestVersion);
         } catch (ResourceNotFoundException e) {
+            // Deleted permanently since the entry's version was read: nothing newer is
+            // left to say anything.
             return false;
         } catch (ResourceStoreException e) {
             throw unreadable(entry, null, e);
         }
-        if (current == null) {
+        if (newest == null) {
             return false;
         }
-        AgentIdentity identity = current.getIdentity();
+        AgentIdentity identity = newest.getIdentity();
         if (identity == null || !publicKey.equals(identity.getKeyForVersion(keyVersion))) {
             return true;
         }
@@ -299,7 +344,7 @@ public class AuditAgentSigner {
     }
 
     private static IllegalStateException unreadable(AuditEntry entry, Integer agentVersion, ResourceStoreException cause) {
-        String which = agentVersion != null ? "version " + agentVersion : "the current version";
+        String which = agentVersion != null ? "version " + agentVersion : "the newest version";
         return new IllegalStateException(
                 "Could not read " + which + " of agent " + entry.agentId() + " to verify the agent signature of audit entry " + entry.id(),
                 cause);

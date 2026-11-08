@@ -404,17 +404,7 @@ class AuditLedgerServiceBranchTest {
             identity.setKeys(new ArrayList<>(config.getIdentity().getKeys().stream().map(AgentPublicKey::revoke).toList()));
             revoked.setIdentity(identity);
             when(agentStore.readIncludingDeleted("agent1", 2)).thenReturn(revoked);
-            when(agentStore.getCurrentResourceId("agent1")).thenReturn(new IResourceStore.IResourceId() {
-                @Override
-                public String getId() {
-                    return "agent1";
-                }
-
-                @Override
-                public Integer getVersion() {
-                    return 2;
-                }
-            });
+            when(agentStore.getNewestVersionIncludingDeleted("agent1")).thenReturn(2);
 
             assertEquals(AuditVerificationStatus.AGENT_KEY_REVOKED, service.verifyEntry(stored));
             service.shutdown();
@@ -554,7 +544,7 @@ class AuditLedgerServiceBranchTest {
         void erasureLeavesTheRowUnsignedWhenTheAgentStoreFails() throws Exception {
             service.submit(entry("id1", "conv1", "agent1"));
             AuditEntry stored = flushedEntry(service);
-            when(agentStore.getCurrentResourceId("agent1")).thenThrow(new IllegalStateException("socket timeout"));
+            when(agentStore.getNewestVersionIncludingDeleted("agent1")).thenThrow(new IllegalStateException("socket timeout"));
 
             assertNull(erasedRow(stored).agentSignature());
             service.shutdown();
