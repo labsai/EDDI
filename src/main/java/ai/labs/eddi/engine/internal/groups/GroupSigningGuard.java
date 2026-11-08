@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -41,6 +42,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * Signs the group-transcript entries of agents with
@@ -193,6 +195,10 @@ public class GroupSigningGuard {
          */
         private final Map<TranscriptEntry, Integer> positions;
         private final List<Verdict> verdicts;
+        /**
+         * Whether an agent signs verifiably; {@code null} when nothing was filtered.
+         */
+        private final Predicate<String> signers;
 
         /** A view that shows {@code transcript} as it is. */
         View(Requirement requirement, List<TranscriptEntry> transcript) {
@@ -201,13 +207,16 @@ public class GroupSigningGuard {
             this.stored = transcript;
             this.positions = null;
             this.verdicts = null;
+            this.signers = null;
         }
 
-        private View(Requirement requirement, List<TranscriptEntry> stored, List<TranscriptEntry> visible, List<Verdict> verdicts) {
+        private View(Requirement requirement, List<TranscriptEntry> stored, List<TranscriptEntry> visible, List<Verdict> verdicts,
+                Predicate<String> signers) {
             this.requirement = requirement;
             this.transcript = visible;
             this.stored = stored;
             this.verdicts = verdicts;
+            this.signers = signers;
             this.positions = new IdentityHashMap<>(stored.size());
             for (int i = 0; i < stored.size(); i++) {
                 positions.putIfAbsent(stored.get(i), i);
@@ -261,6 +270,17 @@ public class GroupSigningGuard {
             }
             Integer position = stored != null ? positions.get(stored) : null;
             return position != null && verdicts.get(position).trusted();
+        }
+
+        /**
+         * Whether the reader may take text the engine recorded for agent
+         * {@code agentId} outside the transcript (a task it filed with its task tool)
+         * as that agent's: the agent signs, with a key that is declared, not revoked
+         * and inside its validity window now, so the reader would verify what it writes
+         * to the discussion.
+         */
+        boolean vouchesFor(String agentId) {
+            return signers == null || agentId != null && signers.test(agentId);
         }
     }
 
@@ -430,6 +450,18 @@ public class GroupSigningGuard {
     }
 
     /**
+     * The subject of each of {@code tasks} (from {@code gc}'s task list) as the
+     * agent {@code readerId} may be shown it, in order: as stored, or
+     * {@link TaskRecordView#WITHHELD} (see {@link TaskRecordView#showsTask}). What
+     * a member's task tool lists, so it shows the member no task text the engine's
+     * own prompts withhold from it.
+     */
+    public static List<String> taskSubjectsSeenBy(GroupSigningGuard guard, String readerId, GroupConversation gc, List<TaskItem> tasks) {
+        var records = new TaskRecordView(viewOf(guard, readerId, gc), readerId, assignee -> false, taskId -> false);
+        return tasks.stream().map(task -> records.showsTask(task) ? task.subject() : TaskRecordView.WITHHELD).toList();
+    }
+
+    /**
      * Everyone whose verification setting decides what the engine's records count:
      * the members (recruits included, humans excluded), the moderator and the
      * facilitator.
@@ -469,7 +501,9 @@ public class GroupSigningGuard {
                 visible.add(withheld(entry, verdict));
             }
         }
-        return new View(requirement, snapshot, List.copyOf(visible), verdicts);
+        Map<String, Boolean> signs = new ConcurrentHashMap<>();
+        return new View(requirement, snapshot, List.copyOf(visible), verdicts,
+                agentId -> signs.computeIfAbsent(agentId, this::signsVerifiably));
     }
 
     private static List<TranscriptEntry> snapshotOf(List<TranscriptEntry> transcript) {
@@ -628,6 +662,22 @@ public class GroupSigningGuard {
 
     private record Speaker(boolean isAgent, AgentIdentity identity, boolean signs) {
         static final Speaker NOT_AN_AGENT = new Speaker(false, null, false);
+    }
+
+    /**
+     * Whether {@code agentId} is an agent that signs with a key that would sign
+     * now: declared, not revoked and inside its validity window. An agent whose
+     * configuration cannot be read does not.
+     */
+    private boolean signsVerifiably(String agentId) {
+        Speaker speaker = lookUpSpeaker(agentId);
+        AgentIdentity identity = speaker.identity();
+        if (!speaker.isAgent() || !speaker.signs() || identity == null) {
+            return false;
+        }
+        int keyVersion = identity.signingKeyVersion();
+        return identity.getKeyForVersion(keyVersion) != null && !isRevoked(identity, keyVersion)
+                && keyValidAt(identity, keyVersion, System.currentTimeMillis());
     }
 
     private Requirement requirementOf(String receiverAgentId) {

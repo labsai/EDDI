@@ -32,10 +32,14 @@ import java.util.function.Predicate;
  * result whose entry is unsigned, or a result edited in the store, is not. A
  * result an approver replaced is the reviewer's text, which no agent wrote, and
  * is shown as a reviewer's synthesis edit is.</li>
- * <li>A <b>subject and description</b> are withheld when another agent's task
- * tool wrote them, or when an untrusted {@code PLAN} entry parses to them and
- * no trusted one does. Configured tasks and the user's own are not
- * agent-authored.</li>
+ * <li>A <b>subject and description</b> are withheld when an untrusted
+ * {@code PLAN} entry parses to them and no trusted one does, or when another
+ * agent's task tool wrote them and that agent does not sign verifiably (see
+ * {@link GroupSigningGuard.View#vouchesFor}). The engine records a tool-filed
+ * task under the agent whose turn called the tool, so the task is that agent's
+ * text exactly as its signed entries are; a store edit to it is not detected,
+ * the same boundary as a configured task's text. Configured tasks and the
+ * user's own are not agent-authored.</li>
  * <li>A <b>verification note</b> is withheld when an untrusted
  * {@code VERIFICATION} entry holds it and no trusted agent entry does.</li>
  * </ul>
@@ -86,7 +90,7 @@ final class TaskRecordView {
             return true;
         }
         if (task.createdByAgentId() != null) {
-            return task.createdByAgentId().equals(readerId);
+            return task.createdByAgentId().equals(readerId) || view.vouchesFor(task.createdByAgentId());
         }
         List<String> parsed = List.of(Objects.toString(task.subject(), ""), Objects.toString(task.description(), ""));
         indexPlans();

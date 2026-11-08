@@ -61,6 +61,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LiveDiscussionRegistry {
 
     private final ConcurrentHashMap<String, GroupConversation> live = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, GroupSigningGuard> signingGuards = new ConcurrentHashMap<>();
 
     /**
      * Registers the live instance a discussion loop is about to run with. Called
@@ -71,7 +72,21 @@ public class LiveDiscussionRegistry {
      * freshly-loaded {@code GroupConversation}, never the stale pre-pause one).
      */
     public void register(GroupConversation gc) {
+        register(gc, null);
+    }
+
+    /**
+     * As {@link #register(GroupConversation)}, with the guard the loop reads the
+     * transcript through, so a member's tool shows that member what the engine's
+     * own prompts would (see {@link #signingGuard}).
+     */
+    public void register(GroupConversation gc, GroupSigningGuard signingGuard) {
         live.put(gc.getId(), gc);
+        if (signingGuard != null) {
+            signingGuards.put(gc.getId(), signingGuard);
+        } else {
+            signingGuards.remove(gc.getId());
+        }
     }
 
     /**
@@ -82,6 +97,16 @@ public class LiveDiscussionRegistry {
      */
     public void unregister(String groupConversationId) {
         live.remove(groupConversationId);
+        signingGuards.remove(groupConversationId);
+    }
+
+    /**
+     * The guard a running discussion reads its transcript through, or empty when it
+     * is not running or was registered without one (then nothing is filtered, as
+     * for the loop itself).
+     */
+    public Optional<GroupSigningGuard> signingGuard(String groupConversationId) {
+        return groupConversationId == null ? Optional.empty() : Optional.ofNullable(signingGuards.get(groupConversationId));
     }
 
     /**

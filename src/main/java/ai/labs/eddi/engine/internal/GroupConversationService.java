@@ -942,7 +942,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // recruit tool would then resolve that dead instance, accept the write
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
-                liveDiscussionRegistry.register(gc);
+                liveDiscussionRegistry.register(gc, signingGuard);
                 holdGroupLease(gc.getId());
             }
 

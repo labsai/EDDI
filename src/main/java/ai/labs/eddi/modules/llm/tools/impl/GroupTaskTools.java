@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.engine.internal.groups.GroupSigningGuard;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import dev.langchain4j.agent.tool.P;
@@ -191,9 +192,14 @@ public class GroupTaskTools {
         if (tasks.isEmpty()) {
             return "The task list is empty.";
         }
+        // The caller's own view: a member that requires peer verification is shown no
+        // task text the engine's prompts withhold from it.
+        List<String> subjects = GroupSigningGuard.taskSubjectsSeenBy(registry.signingGuard(groupConversationId).orElse(null), agentId,
+                gc, tasks);
         var sb = new StringBuilder("Current tasks:\n");
-        for (TaskItem t : tasks) {
-            sb.append("- \"").append(t.subject()).append("\" [").append(t.status()).append(']');
+        for (int i = 0; i < tasks.size(); i++) {
+            TaskItem t = tasks.get(i);
+            sb.append("- \"").append(subjects.get(i)).append("\" [").append(t.status()).append(']');
             if (t.assignedDisplayName() != null) {
                 sb.append(" — ").append(t.assignedDisplayName());
             }
