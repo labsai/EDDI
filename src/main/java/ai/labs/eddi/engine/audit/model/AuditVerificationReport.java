@@ -73,10 +73,11 @@ import java.util.List;
  *            entries whose HMAC verified, so their content is intact, but whose
  *            agent signature cannot vouch for them: missing where the agent
  *            version would have signed ({@code AGENT_SIGNATURE_MISSING}), made
- *            with a key revoked since ({@code AGENT_KEY_REVOKED}), or of an
- *            agent deleted permanently ({@code AGENT_KEY_UNAVAILABLE}). Not
- *            proven, not disproven: they defeat {@link #intact()} and raise no
- *            tampering alarm
+ *            with a key revoked since ({@code AGENT_KEY_REVOKED}), or that
+ *            nothing can check, the agent being deleted permanently or the
+ *            signature's legacy key undeclared ({@code AGENT_KEY_UNAVAILABLE}).
+ *            Not proven, not disproven: they defeat {@link #intact()} and raise
+ *            no tampering alarm
  * @param chainStatus
  *            outcome of the sequence-continuity check
  * @param missingSequences

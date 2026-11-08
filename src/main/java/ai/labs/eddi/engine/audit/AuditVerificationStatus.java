@@ -85,9 +85,10 @@ public enum AuditVerificationStatus {
     /**
      * The HMAC verified, and the entry carries an agent signature that cannot be
      * checked: the agent version that signed it no longer exists (the agent was
-     * deleted permanently; a soft-deleted agent's entries are still checked). The
-     * content is intact. Counted in {@code agentSignatureUnproven}, not as
-     * tampering.
+     * deleted permanently; a soft-deleted agent's entries are still checked), or
+     * the signature is in the plain form 6.7.0 and earlier wrote and nothing
+     * declares the legacy key that made it. The content is intact. Counted in
+     * {@code agentSignatureUnproven}, not as tampering.
      */
     AGENT_KEY_UNAVAILABLE
 }

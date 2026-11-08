@@ -1377,8 +1377,9 @@ public class AuditLedgerService implements UserErasureParticipant {
      * its agent signature (see {@link AuditAgentSigner}): a signature that does not
      * verify is {@link AuditVerificationStatus#AGENT_SIGNATURE_INVALID}; one that
      * is missing where its agent version would have signed, was made with a key
-     * revoked since, or can no longer be checked because its agent was deleted
-     * permanently is {@link AuditVerificationStatus#AGENT_SIGNATURE_MISSING},
+     * revoked since, or cannot be checked (its agent was deleted permanently, or no
+     * legacy key is declared for a signature in the form 6.7.0 and earlier wrote)
+     * is {@link AuditVerificationStatus#AGENT_SIGNATURE_MISSING},
      * {@link AuditVerificationStatus#AGENT_KEY_REVOKED} or
      * {@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}. An unsigned entry is
      * only looked at while {@code eddi.audit.agent-signing-enabled} is on: with it
