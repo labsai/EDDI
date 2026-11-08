@@ -425,9 +425,10 @@ class MongoResourceStorageTest {
     }
 
     /**
-     * Every caller of findResources reads the listed documents again by id, so
-     * returning whole documents here (whole transcripts, for group conversations)
-     * decoded each match twice. Filtering and sorting stay on the server, which
+     * Callers of findResources use only the ids and versions: listings read the
+     * documents again by id and the erasure loops delete by id, so returning whole
+     * documents here (whole transcripts, for group conversations) sent each match
+     * over the wire for nothing. Filtering and sorting stay on the server, which
      * applies the projection only to what it returns.
      */
     @Test

@@ -933,9 +933,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 
-        // Only the (id, version) pairs are returned: every caller reads the documents
-        // again by id, so fetching them here as well decoded each match twice.
-        // Filter and sort still run on the full documents, on the server.
+        // Only the (id, version) pairs are returned. Listings read the documents again
+        // by id and the erasure loops need only the ids, so fetching whole documents
+        // here sent every match over the wire for nothing. Filter and sort still run
+        // on the full documents, on the server.
         var iterable = currentCollection.find(query.toBsonDocument()).projection(Projections.include(VERSION_FIELD)).sort(sort).limit(effectiveLimit)
                 .skip(skip > 0 ? skip : 0);
 

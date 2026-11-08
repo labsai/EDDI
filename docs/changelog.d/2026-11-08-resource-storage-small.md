@@ -5,11 +5,12 @@
 ### What changed and why
 
 - **MongoDB id queries project `_id` and `_version` only.**
-  `MongoResourceStorage.findResources` returns `(id, version)` pairs, and every
-  caller reads the listed documents again by id: descriptor listings through
+  `MongoResourceStorage.findResources` returns `(id, version)` pairs. The
+  listings read the documents again by id (descriptor listings through
   `readMany`, the group conversation and shared artifact listings through
-  `read`. Without a projection, each match crossed the wire and was decoded
-  twice, whole transcripts and artifact bodies included. `findResources`,
+  `read`), and the GDPR erasure loops only need the ids. Without a projection,
+  every match crossed the wire and was decoded for nothing, whole transcripts
+  and artifact bodies included, and a listed one was decoded twice. `findResources`,
   `findResourceIdsContaining` and `getCurrentVersion` now project
   `{_version: 1}` (`_id` comes back unless excluded), and
   `findHistoryResourceIdsContaining` projects `{_id: 1}`, the composite id that
