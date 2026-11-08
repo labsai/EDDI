@@ -33,7 +33,9 @@ behaves exactly as before.
   It matches the listing-failure path right beside it, and a retry succeeds once the store answers.
 - **Not in this PR:** serialising the check and the write (two editors saving the same new location at the
   same moment both pass). A per-JVM lock does not serialise a cluster, the import and upgrade paths write
-  outside `RestRagStore`, and chunks in a shared table are still filtered by knowledge-base id. Injecting the
+  outside `RestRagStore`, and in the per-id layout, which every new knowledge base gets, chunks in a shared
+  table are still filtered by knowledge-base id (a knowledge base still in the 6.5.0 name layout is not
+  filtered, so for one of those the race is a real read). Injecting the
   guard into `RestRagStore` instead of constructing it is only a step toward that lock, so it waits for it.
   The replace locks in `RagIngestionService` stay per instance, as their Javadoc says.
 
