@@ -1396,28 +1396,52 @@ each of its turns:
 }
 ```
 
-- The signature covers the entry's content, speaker, target, phase and key
-  version, and the group conversation it belongs to. An entry edited in the
-  store, copied into another discussion, moved to another phase or repeated
-  within one does not verify.
+- The signature covers the entry's content, type, speaker, target, round,
+  phase and key version, and the group conversation it belongs to. An entry
+  edited or retyped in the store, copied into another discussion, moved to
+  another phase or round, or repeated within one does not verify. Moving an
+  entry between repeats of one phase within a round is not detected.
 - **Fail-closed.** Every entry another agent wrote that does not verify, or
   that carries no signature, reaches a verifying member as
   `[withheld: this message could not be verified, because ...]` in its phase
-  prompt and its `groupTranscript` context. A window summary retelling such an
-  entry is replaced by the truncation marker for that member. So in a group
-  where some members verify, every agent member should sign.
-- Entries no agent wrote are not signed and are shown as they are: the user's
-  question and follow-ups, a human member's turn, a reviewer's edit, the
-  engine's own notes and a nested group's answer. They are not
-  authenticated: whoever can write the group-conversation store can add one,
-  or re-attribute an agent's entry to a non-agent speaker id, under any
-  display name, a member agent's included. Verification is keyed on the
-  speaker id, while prompts show the display name.
+  prompt and its `groupTranscript` context. So every agent that writes to the
+  discussion should sign: each member, and the moderator or synthesizer too
+  when it is not a member, or its synthesis is withheld from verifying
+  members.
+- A member's own entries are not checked for it: a verifying member that does
+  not sign is still shown its own answer to revise or defend.
+- A revoked key vouches for nothing, whenever an entry claims to have been
+  signed. A key's `validFromMs`/`validUntilMs` window is checked against the
+  time the signer wrote into the entry, so it limits honest use but does not
+  stop a leaked key: revoke that one.
+- Entries no agent wrote are not signed: the user's question and follow-ups, a
+  human member's turn, a reviewer's edit, the engine's own notes and a nested
+  group's answer. They are not authenticated: whoever can write the
+  group-conversation store can add one, or re-attribute an agent's entry to a
+  non-agent speaker id. A verifying member is therefore shown them under a
+  name no member agent has: `User`, `System`, or the stored name followed by
+  `(not an agent, unverified)`. Member display names must be unique within a
+  group (a save with two equal names, ignoring case, is refused with 400), so
+  two verified voices never share one name either.
+- The stored window summary is free text no signature covers, so a verifying
+  member never gets it: in a windowed discussion it is shown the truncation
+  marker instead.
+- A ballot lists the options the tally counts, taken from the stored
+  transcript, even when the synthesis they come from is withheld from the
+  voter.
+- If a member's configuration cannot be read, the setting this node last read
+  for it applies; if it never read one, the member's turn is recorded
+  `SKIPPED`.
 - The stored transcript is unchanged. Members that do not verify, the Manager,
   SSE and the REST and MCP readers see every entry as stored.
 - Each withheld entry is logged at ERROR the first time, with its index and
-  the reason (`UNSIGNED`, `UNKNOWN_KEY`, `OUT_OF_WINDOW`, `BAD_SIGNATURE`,
-  `DUPLICATE`).
+  the reason (`UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`, `OUT_OF_WINDOW`,
+  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`).
+- **Cost.** A verifying member checks every agent entry before each turn, but
+  each Ed25519 check is remembered on the node, so an entry costs one check
+  per node, not one per turn. Each pass still reads each distinct speaker's
+  current agent version from the store, and every member, verifying or not,
+  reads its own once per pass (two passes per turn: prompt and context).
 
 ## Not yet supported
 

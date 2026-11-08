@@ -165,7 +165,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` — **recommended for production** (Helm: `cluster.degradedTurns` in the chart's `eddi:` block; the Kustomize `nats` component sets it) |
-| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — signed-envelope nonces and the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes): `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
+| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes); group-transcript signing does not use NATS: `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
 | `eddi.cluster.readiness.require-first-connect` | `true` | Not ready until the node has connected to NATS once since boot: one that never connected cannot take a lease, so every turn it served ran unfenced. A later outage keeps it ready. `false` serves degraded from boot |
@@ -572,8 +572,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions, and on every text inside a peer tool's parameter schema |
 | `eddi.a2a.tool-schema.max-bytes` | `32768` | As `eddi.mcp.tool-schema.max-bytes`, for A2A peer tools |
 | `eddi.a2a.tool-schema.max-bytes-per-agent` | `524288` (512 KB) | As `eddi.mcp.tool-schema.max-bytes-per-server`, per A2A peer |
-| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | How old the timestamp of a signed group-transcript entry may be when its nonce is registered. Despite the prefix, A2A requests are not signed |
-| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | How far ahead of this node's clock that timestamp may be |
+| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Unused: nothing registers signed-envelope nonces any more. Group-transcript entries are checked for duplicate nonces within their own transcript, and A2A requests are not signed |
+| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Unused, as `eddi.a2a.signing.nonce.max-age-ms` |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 

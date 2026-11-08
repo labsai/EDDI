@@ -68,6 +68,8 @@ class TaskForceEngineTest {
         templatingEngine = mock(ITemplatingEngine.class);
         jsonSerialization = mock(IJsonSerialization.class);
         memberTurnExecutor = mock(MemberTurnExecutor.class);
+        // As for a member that does not sign: the entry comes back as it went in.
+        when(memberTurnExecutor.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         return new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization,
                 Executors.newVirtualThreadPerTaskExecutor(), new CallerIdentityContext(null, null),
                 new ConcurrentHashMap<>(), 180, 5);
@@ -413,27 +415,28 @@ class TaskForceEngineTest {
     }
 
     /**
-     * A bid is a member-authored contribution, so its BID entry keeps the signature
-     * of the reply it records. Rebuilt bare, a peer requiring verification would
-     * withhold every bid once the phase completed.
+     * A bid is a member-authored contribution, so its BID entry is signed. As a
+     * BID: the signature covers the entry type, so the reply's own signature (made
+     * for the turn's type) would not verify, and a peer requiring verification
+     * would withhold every bid once the phase completed.
      */
     @Test
-    void bidRound_theBidEntryKeepsTheReplysSignature() throws Exception {
+    void bidRound_theBidEntryIsSignedAsABid() throws Exception {
         var engine = engine();
         String json = "{\"bids\": [{\"subject\": \"Task One\", \"confidence\": 0.9}]}";
         when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
                 .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, json, 0, "Execution", TranscriptEntryType.TASK_RESULT, Instant.now(), null,
-                        null, "sig-a", "nonce-a", 1234L, 2));
+                        null, "reply-sig", "reply-nonce", 1234L, 2, 1));
+        var signedBid = new TranscriptEntry(AGENT_A, AGENT_A, json, 0, "Execution", TranscriptEntryType.BID, Instant.now(), null, null,
+                "bid-sig", "bid-nonce", 5678L, 2, 1);
+        when(memberTurnExecutor.sign(any(), argThat(e -> e != null && e.type() == TranscriptEntryType.BID))).thenReturn(signedBid);
         var gc = gcWithUnassignedTasks("Task One", "Task Two");
 
         engine.runBidRoundIfNeeded(gc, bidConfig(member(AGENT_A), member(AGENT_B)), executePhase(), protocol(),
                 "Ship it", 0, null, new AtomicInteger(0), 50);
 
         var bid = gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.BID).findFirst().orElseThrow();
-        assertEquals("sig-a", bid.signature());
-        assertEquals("nonce-a", bid.signatureNonce());
-        assertEquals(1234L, bid.signatureTimestampMs());
-        assertEquals(2, bid.signatureKeyVersion());
+        assertSame(signedBid, bid);
     }
 
     @Test

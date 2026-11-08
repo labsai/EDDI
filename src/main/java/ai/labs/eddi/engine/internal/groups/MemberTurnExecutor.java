@@ -352,10 +352,19 @@ public class MemberTurnExecutor {
         synchronized (gc.getTranscript()) {
             transcriptSnapshot = List.copyOf(gc.getTranscript());
         }
-        // For a member that requires peer verification, every agent-authored entry
-        // that does not verify is replaced by a [withheld] placeholder. Its rendered
-        // prompt went through the same filter in GroupContextBuilder.buildPhaseInput.
-        transcriptSnapshot = signingGuard.visibleTo(member.agentId(), gc, transcriptSnapshot);
+        // For a member that requires peer verification, every entry another agent
+        // wrote that does not verify is replaced by a [withheld] placeholder. Its
+        // rendered prompt went through the same filter in
+        // GroupContextBuilder.buildPhaseInput.
+        var view = signingGuard.viewFor(member.agentId(), gc, transcriptSnapshot);
+        if (view.requirement() == GroupSigningGuard.Requirement.UNKNOWN) {
+            // Neither a fully withheld transcript (wrong if the member never asked
+            // for verification) nor an unverified one (wrong if it did) is a fair
+            // basis for a reply that stays in the transcript.
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Its peer-verification setting could not be read", targetAgentId);
+        }
+        transcriptSnapshot = view.transcript();
         // Scoped like the rendered prompt: this key reaches every template in the
         // member's workflow, so it may not show what the phase's contextScope hides.
         context.put("groupTranscript", new Context(Context.ContextType.object,
@@ -945,6 +954,15 @@ public class MemberTurnExecutor {
         }
         return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED, Instant.now(),
                 prefix + ": " + cause.getMessage(), targetAgentId);
+    }
+
+    /**
+     * {@code entry}, signed for its speaker exactly as a member turn's own entry
+     * is: for the engine's re-recordings of a reply under another type (a
+     * {@code DISSENT}, a {@code BID}), since the signature covers the type.
+     */
+    public TranscriptEntry sign(GroupConversation gc, TranscriptEntry entry) {
+        return signingGuard.sign(gc, entry);
     }
 
     public TranscriptEntry errorEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String message) {

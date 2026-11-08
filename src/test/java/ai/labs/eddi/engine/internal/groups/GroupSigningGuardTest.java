@@ -138,6 +138,40 @@ class GroupSigningGuardTest {
         verify(agentSigningService, never()).signEnvelope(any(), any(), any(), anyInt());
     }
 
+    /**
+     * A revoked newest key signs nothing, and the agent does not fall back to an
+     * older one.
+     */
+    @Test
+    void sign_newestKeyRevoked_unchangedAndNothingSigned() throws Exception {
+        stubAgent(AGENT_A, signingAgent(identity(new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(2, KEY_V2_B64, 0L, 0L).revoke())));
+        var entry = entry(AGENT_A, "hi");
+
+        assertSame(entry, guard().sign(gc(), entry));
+        verify(agentSigningService, never()).signEnvelope(any(), any(), any(), anyInt());
+    }
+
+    /**
+     * A key whose window opens in the future (staged for a rotation) does not sign
+     * yet; the start of the window tolerates the clock skew between nodes, and no
+     * more.
+     */
+    @Test
+    void sign_newestKeyNotValidYet_signsOnlyWithinTheClockSkew() throws Exception {
+        long now = Instant.now().toEpochMilli();
+        stubAgent(AGENT_A, signingAgent(identity(new AgentPublicKey(1, KEY_V1_B64, now + GroupSigningGuard.CLOCK_SKEW_MS + 60_000L, 0L))));
+        var entry = entry(AGENT_A, "hi");
+        assertSame(entry, guard().sign(gc(), entry), "beyond the skew it does not sign");
+        verify(agentSigningService, never()).signEnvelope(any(), any(), any(), anyInt());
+
+        stubAgent(AGENT_A, signingAgent(identity(new AgentPublicKey(1, KEY_V1_B64, now + GroupSigningGuard.CLOCK_SKEW_MS / 2, 0L))));
+        when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(1)))
+                .thenAnswer(inv -> inv.<SignedEnvelope>getArgument(2).withSignature("sig", 1));
+        when(agentSigningService.verifyEnvelope(any(), eq(KEY_V1_B64))).thenReturn(true);
+        assertEquals("sig", guard().sign(gc(), entry).signature(), "within the skew it signs");
+    }
+
     @Test
     void sign_conversationWithoutId_unchanged() throws Exception {
         stubAgent(AGENT_A, signingAgent(identity(new AgentPublicKey(1, KEY_V1_B64, 0L, 0L))));
@@ -183,11 +217,11 @@ class GroupSigningGuardTest {
     }
 
     /**
-     * The signed bytes bind the entry to its conversation, position and key
-     * version, not just to its content.
+     * The signed bytes bind the entry to its conversation, round, position, type
+     * and key version, not just to its content.
      */
     @Test
-    void sign_payloadBindsConversationPositionAndKeyVersion() throws Exception {
+    void sign_payloadBindsConversationRoundPositionTypeAndKeyVersion() throws Exception {
         stubAgent(AGENT_A, signingAgent(identity(new AgentPublicKey(3, KEY_V1_B64, 0L, 0L))));
         var envelope = ArgumentCaptor.forClass(SignedEnvelope.class);
         when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), envelope.capture(), eq(3)))
@@ -195,13 +229,16 @@ class GroupSigningGuardTest {
         when(agentSigningService.verifyEnvelope(any(), eq(KEY_V1_B64))).thenReturn(true);
         var entry = new TranscriptEntry(AGENT_A, "Agent A", "hi", 4, "Critique", TranscriptEntryType.CRITIQUE, Instant.now(), null,
                 "agent-b");
+        var gc = gc();
+        gc.setRound(2);
 
-        guard().sign(gc(), entry);
+        var signed = guard().sign(gc, entry);
 
         assertEquals(AGENT_A, envelope.getValue().senderId());
         assertEquals(GROUP_ID, envelope.getValue().recipientId());
-        assertEquals(Map.of("conversationId", "gc-1", "phaseIndex", 4, "phase", "Critique", "content", "hi", "speakerName", "Agent A",
-                "targetAgentId", "agent-b", "keyVersion", 3), envelope.getValue().payload());
+        assertEquals(Map.of("conversationId", "gc-1", "round", 2, "phaseIndex", 4, "phase", "Critique", "type", "CRITIQUE", "content", "hi",
+                "speakerName", "Agent A", "targetAgentId", "agent-b", "keyVersion", 3), envelope.getValue().payload());
+        assertEquals(2, signed.signatureRound(), "the stored entry names the round it was signed for");
     }
 
     // =================================================================
@@ -244,18 +281,78 @@ class GroupSigningGuardTest {
     }
 
     /**
-     * Fail-closed: when the receiver's own configuration cannot be read, it is
-     * treated as requiring verification, and an entry that cannot be verified is
-     * withheld rather than passed through.
+     * When the receiver's configuration cannot be read and this node never read it,
+     * nothing says whether it asked for verification: the requirement is UNKNOWN
+     * (the member turn is skipped) and the transcript is filtered closed.
      */
     @Test
-    void visibleTo_receiverConfigUnreadable_failsClosed() throws Exception {
+    void viewFor_receiverConfigNeverReadAndUnreadable_unknownAndFilteredClosed() throws Exception {
         when(agentStore.getCurrentResourceId(RECEIVER)).thenThrow(new RuntimeException("store down"));
         when(agentStore.getCurrentResourceId(AGENT_A)).thenThrow(new RuntimeException("store down"));
 
-        var visible = guard().visibleTo(RECEIVER, gc(), List.of(entry(AGENT_A, "hi")));
+        var view = guard().viewFor(RECEIVER, gc(), List.of(entry(AGENT_A, "hi")));
 
-        assertTrue(GroupSigningGuard.isWithheld(visible.get(0)));
+        assertEquals(GroupSigningGuard.Requirement.UNKNOWN, view.requirement());
+        assertTrue(GroupSigningGuard.isWithheld(view.transcript().get(0)));
+    }
+
+    /**
+     * A store failure applies the fail-closed choice only to a receiver that asked
+     * for verification: the setting last read for it decides.
+     */
+    @Test
+    void viewFor_receiverConfigUnreadable_theSettingLastReadApplies() throws Exception {
+        var guard = guard();
+        stubAgent(RECEIVER, new AgentConfiguration());
+        stubAgent("strict", verifyingAgent());
+        stubAgent(AGENT_A, new AgentConfiguration());
+        var transcript = List.of(entry(AGENT_A, "hi"));
+        guard.viewFor(RECEIVER, gc(), transcript);
+        guard.viewFor("strict", gc(), transcript);
+        when(agentStore.getCurrentResourceId(RECEIVER)).thenThrow(new RuntimeException("store down"));
+        when(agentStore.getCurrentResourceId("strict")).thenThrow(new RuntimeException("store down"));
+
+        var lenient = guard.viewFor(RECEIVER, gc(), transcript);
+        var strict = guard.viewFor("strict", gc(), transcript);
+
+        assertEquals(GroupSigningGuard.Requirement.NOT_REQUIRED, lenient.requirement());
+        assertSame(transcript, lenient.transcript(), "a member that never asked sees the transcript as stored");
+        assertEquals(GroupSigningGuard.Requirement.REQUIRED, strict.requirement());
+        assertTrue(GroupSigningGuard.isWithheld(strict.transcript().get(0)));
+    }
+
+    /**
+     * A member's own entries are not checked for it: they are in its own member
+     * conversation already, and withholding them would blank the answer it is asked
+     * to revise or defend.
+     */
+    @Test
+    void visibleTo_theReceiversOwnEntriesPassUnchecked() throws Exception {
+        stubAgent(RECEIVER, verifyingAgent());
+        var own = entry(RECEIVER, "my unsigned answer");
+
+        assertEquals(List.of(own), guard().visibleTo(RECEIVER, gc(), List.of(own)));
+        verifyNoInteractions(agentSigningService);
+    }
+
+    /**
+     * Each Ed25519 check is remembered: a verifying member's prompt and context,
+     * and every later turn, do not run it again over the same entry.
+     */
+    @Test
+    void visibleTo_eachSignatureIsCheckedOnceAcrossPasses() throws Exception {
+        stubAgent(RECEIVER, verifyingAgent());
+        var speaker = new AgentConfiguration();
+        speaker.setIdentity(identity(new AgentPublicKey(1, KEY_V1_B64, 0L, 0L)));
+        stubAgent(AGENT_A, speaker);
+        when(agentSigningService.verifyEnvelope(any(SignedEnvelope.class), anyString())).thenReturn(true);
+        var transcript = List.of(signedEntry("hello", "nonce-1", Instant.now().toEpochMilli(), 1));
+        var guard = guard();
+
+        guard.visibleTo(RECEIVER, gc(), transcript);
+        assertEquals(transcript, guard.visibleTo(RECEIVER, gc(), transcript));
+
+        verify(agentSigningService, times(1)).verifyEnvelope(any(SignedEnvelope.class), anyString());
     }
 
     /**
@@ -282,8 +379,9 @@ class GroupSigningGuardTest {
 
     /**
      * Only agents sign. The user's question, a reviewer's edit and a human member's
-     * turn (speakers the agent store does not know) pass unsigned; an unsigned
-     * entry from an agent, even one named like a reviewer, is withheld.
+     * turn (speakers the agent store does not know) pass unsigned, under a name
+     * that says they are not an agent's; an unsigned entry from an agent, even one
+     * named like a reviewer, is withheld.
      */
     @Test
     void visibleTo_onlyAgentAuthoredEntriesMustVerify() throws Exception {
@@ -300,7 +398,11 @@ class GroupSigningGuardTest {
 
         var visible = guard().visibleTo(RECEIVER, gc(), List.of(question, reviewerEdit, human, lookalike));
 
-        assertEquals(List.of(question, reviewerEdit, human), visible.subList(0, 3));
+        assertSame(question, visible.get(0), "the user's question already carries its fixed label");
+        assertEquals(List.of("Reviewer" + GroupSigningGuard.NOT_AN_AGENT_SUFFIX, "Alice" + GroupSigningGuard.NOT_AN_AGENT_SUFFIX),
+                List.of(visible.get(1).speakerDisplayName(), visible.get(2).speakerDisplayName()));
+        assertEquals(List.of("edited", "my view"), List.of(visible.get(1).content(), visible.get(2).content()));
+        assertEquals(GroupReviewEditor.REVIEWER_EDIT_MARKER, visible.get(1).errorReason());
         assertTrue(GroupSigningGuard.isWithheld(visible.get(3)));
         verify(agentStore, never()).getCurrentResourceId("user");
     }
@@ -390,7 +492,7 @@ class GroupSigningGuardTest {
 
     private static TranscriptEntry signedEntry(String content, String nonce, long signedAt, int keyVersion) {
         return new TranscriptEntry(AGENT_A, "Agent A", content, 0, "P", TranscriptEntryType.OPINION, Instant.now(), null, null,
-                "sig-" + nonce, nonce, signedAt, keyVersion);
+                "sig-" + nonce, nonce, signedAt, keyVersion, 1);
     }
 
     private static GroupConversation gc() {

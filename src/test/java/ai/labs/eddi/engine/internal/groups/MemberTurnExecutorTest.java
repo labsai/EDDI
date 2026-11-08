@@ -273,7 +273,7 @@ class MemberTurnExecutorTest {
         when(signingGuard.sign(any(), any())).thenAnswer(inv -> {
             TranscriptEntry e = inv.getArgument(1);
             return new TranscriptEntry(e.speakerAgentId(), e.speakerDisplayName(), e.content(), e.phaseIndex(), e.phaseName(),
-                    e.type(), e.timestamp(), e.errorReason(), e.targetAgentId(), "sig-abc", "nonce-1", 1234L, 7);
+                    e.type(), e.timestamp(), e.errorReason(), e.targetAgentId(), "sig-abc", "nonce-1", 1234L, 7, 1);
         });
 
         var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
@@ -375,9 +375,9 @@ class MemberTurnExecutorTest {
 
     /**
      * The {@code groupTranscript} context a member's own workflow receives is the
-     * transcript as {@link GroupSigningGuard#visibleTo} lets that member see it —
-     * for a member requiring peer verification, with unverified peer entries
-     * withheld — never the raw transcript.
+     * transcript as {@link GroupSigningGuard#viewFor} lets that member see it — for
+     * a member requiring peer verification, with unverified peer entries withheld —
+     * never the raw transcript.
      */
     @Test
     void executeAgentTurn_groupTranscriptContext_isWhatTheSigningGuardLetsTheMemberSee() throws Exception {
@@ -401,7 +401,8 @@ class MemberTurnExecutorTest {
         var placeholder = new TranscriptEntry("agent-b", "Agent B", "[withheld]", 0, "P-OPINION",
                 TranscriptEntryType.OPINION, Instant.now(), GroupSigningGuard.WITHHELD_MARKER, null);
         var signingGuard = Mockito.mock(GroupSigningGuard.class);
-        when(signingGuard.visibleTo(eq(AGENT_A), eq(gc), any())).thenReturn(List.of(placeholder));
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any()))
+                .thenReturn(new GroupSigningGuard.View(GroupSigningGuard.Requirement.REQUIRED, List.of(placeholder)));
         when(signingGuard.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
@@ -409,6 +410,34 @@ class MemberTurnExecutorTest {
         executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
 
         assertEquals(List.of(placeholder), sent[0].getContext().get("groupTranscript").getValue());
+    }
+
+    /**
+     * A member whose peer-verification setting cannot be read, and was never read
+     * on this node, does not take its turn: neither a fully withheld transcript
+     * (wrong if it never asked for verification) nor an unverified one (wrong if it
+     * did) is a fair basis for a reply that stays in the transcript.
+     */
+    @Test
+    void executeAgentTurn_peerVerificationSettingUnknown_turnSkippedAndAgentNotAsked() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var gc = newGc();
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any()))
+                .thenReturn(new GroupSigningGuard.View(GroupSigningGuard.Requirement.UNKNOWN, List.of()));
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var entry = executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, entry.type());
+        assertTrue(entry.errorReason().contains("peer-verification setting"), entry.errorReason());
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     // =================================================================

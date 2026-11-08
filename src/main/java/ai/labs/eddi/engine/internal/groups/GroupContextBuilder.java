@@ -124,14 +124,18 @@ public class GroupContextBuilder {
      *            When a signing guard is wired and {@code gc} is given, an AGENT
      *            speaker that requires peer verification is shown the transcript
      *            with every unverified peer entry withheld, before anything else
-     *            reads it.
+     *            reads it, and is never shown the stored window summary.
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc,
                                   AgentGroupConfiguration.RetroConfig retroConfig) {
+        List<TranscriptEntry> stored = transcript;
+        boolean verifying = false;
         GroupSigningGuard guard = signingGuard;
         if (guard != null && gc != null && speaker.memberType() == MemberType.AGENT) {
-            transcript = guard.visibleTo(speaker.agentId(), gc, transcript);
+            var view = guard.viewFor(speaker.agentId(), gc, transcript);
+            transcript = view.transcript();
+            verifying = view.requirement() != GroupSigningGuard.Requirement.NOT_REQUIRED;
         }
 
         String template = phase.inputTemplate() != null
@@ -151,7 +155,7 @@ public class GroupContextBuilder {
         // Phase-type specific variables
         switch (phase.type()) {
             case OPINION -> {
-                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker, window, gc);
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker, window, gc, !verifying);
                 data.put("previousResponses", prev);
             }
             case CRITIQUE -> {
@@ -265,9 +269,13 @@ public class GroupContextBuilder {
             case VOTE -> {
                 // I14: the ballot prompt renders the options and the JSON contract.
                 // Scope is NONE (save-time enforced), so no transcript context rides
-                // along — blindness is structural, not this template's doing.
+                // along — blindness is structural, not this template's doing. The
+                // options are resolved from the stored transcript, as the tally
+                // resolves them: a ballot is counted against those options, so a
+                // verifying voter from whom the synthesis they come from is withheld
+                // is still shown what it is voting on.
                 var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
-                data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
+                data.put("options", VoteTallyEngine.resolveOptions(voteConfig, stored));
                 data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));
             }
             case PROPOSAL, BARGAIN -> {
@@ -488,6 +496,17 @@ public class GroupContextBuilder {
      */
     public List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker,
                                                    ContextWindowConfig window, GroupConversation gc) {
+        return filterByScope(transcript, scope, currentPhaseIdx, speaker, window, gc, true);
+    }
+
+    /**
+     * @param showStoredSummary
+     *            {@code false} for a member that requires peer verification: the
+     *            stored summary is free text in the conversation document that no
+     *            signature covers, so it gets the truncation marker instead
+     */
+    private List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker,
+                                                    ContextWindowConfig window, GroupConversation gc, boolean showStoredSummary) {
         if (scope == null || scope == ContextScope.NONE) {
             return List.of();
         }
@@ -525,14 +544,7 @@ public class GroupContextBuilder {
         String summary = scope == ContextScope.ANONYMOUS ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
         int summaryUpTo = scope == ContextScope.ANONYMOUS ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
 
-        // A summary is the summarizer's retelling of every entry it covers, unverified
-        // ones included, so a member from whom one of those entries was withheld
-        // gets the truncation marker instead. Only entries the summarizer reads count:
-        // a withheld facilitator intervention (unsigned bookkeeping) is in no summary.
-        // The placeholder keeps the entry's type, so isSummarizable still applies.
-        boolean summaryRetellsWithheld = entries.subList(0, Math.min(summaryUpTo, entries.size())).stream()
-                .anyMatch(e -> GroupSigningGuard.isWithheld(e) && isSummarizable(e));
-        if (summary != null && !summary.isBlank() && summaryUpTo > 0 && !summaryRetellsWithheld) {
+        if (showStoredSummary && summary != null && !summary.isBlank() && summaryUpTo > 0) {
             // Verbatim tail = everything the summary does not cover. Split on the raw
             // boundary rather than "last maxRecentEntries" so there is never a gap
             // (entries neither summarized nor shown) and never duplication (entries

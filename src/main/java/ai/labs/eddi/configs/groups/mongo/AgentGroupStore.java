@@ -170,6 +170,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
         }
         problems.addAll(duplicateMemberProblems(members));
+        problems.addAll(duplicateDisplayNameProblems(members));
         if (config.getMaxRounds() < 0) {
             problems.add("maxRounds must not be negative");
         }
@@ -253,6 +254,34 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 problems.add("members[" + i + "] repeats members[" + first + "] ('" + members.get(i).agentId().trim()
                         + "') — a member can hold only one seat, because both seats would share one member conversation and "
                         + "see each other's answers. Use a second agent for a second seat");
+            }
+        }
+        return problems;
+    }
+
+    /**
+     * Two members under one display name (ignoring case and surrounding blanks).
+     * Every prompt names a speaker by its display name, and a signature proves
+     * which agent wrote an entry, not which seat it holds, so a member that
+     * requires peer verification would be shown two verified voices under one name
+     * with no way to tell them apart. Members without a display name are left out.
+     * Stored configs that already hold such a pair still load; the next save asks
+     * for distinct names.
+     */
+    static List<String> duplicateDisplayNameProblems(List<AgentGroupConfiguration.GroupMember> members) {
+        List<String> problems = new ArrayList<>();
+        Map<String, Integer> firstSeat = new HashMap<>();
+        for (int i = 0; i < members.size(); i++) {
+            var member = members.get(i);
+            if (member == null || member.displayName() == null || member.displayName().isBlank()) {
+                continue;
+            }
+            String name = member.displayName().trim();
+            Integer first = firstSeat.putIfAbsent(name.toLowerCase(Locale.ROOT), i);
+            if (first != null) {
+                problems.add("members[" + i + "] has the same displayName as members[" + first + "] ('" + name
+                        + "') — prompts name every speaker by display name, so the two could not be told apart. "
+                        + "Give each member its own displayName");
             }
         }
         return problems;

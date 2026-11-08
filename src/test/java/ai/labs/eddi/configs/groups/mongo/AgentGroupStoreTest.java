@@ -129,6 +129,24 @@ class AgentGroupStoreTest {
         assertTrue(problems.contains("artifactConfig.maxArtifactsPerDiscussion must be at most"), problems);
     }
 
+    /**
+     * Prompts name every speaker by display name, and a signature proves which
+     * agent wrote an entry, not which seat it holds: two members under one name
+     * could not be told apart, verified or not.
+     */
+    @Test
+    void duplicateDisplayName_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "Alice", 1, null), new GroupMember("b", "Bob", 2, null),
+                new GroupMember("m", " alice ", 3, null), new GroupMember("n", null, 4, null), new GroupMember("o", null, 5, null)));
+
+        var problems = AgentGroupStore.memberAndLimitProblems(c);
+
+        assertEquals(1, problems.size(), problems.toString());
+        assertTrue(problems.get(0).startsWith("members[2] has the same displayName as members[0] ('alice')"), problems.get(0));
+        assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateMembersAndLimits(c));
+    }
+
     @Test
     void duplicateMember_isRejectedAtSaveTime() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
