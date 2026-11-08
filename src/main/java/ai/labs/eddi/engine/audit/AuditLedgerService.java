@@ -1373,11 +1373,16 @@ public class AuditLedgerService implements UserErasureParticipant {
 
     /**
      * Re-check a stored entry, spending legacy-recovery searches from a budget the
-     * caller's whole sweep shares. An entry whose HMAC verifies and that carries an
-     * agent signature is also checked against its agent's public key (see
-     * {@link AuditAgentSigner}): a signature that does not verify is
-     * {@link AuditVerificationStatus#AGENT_SIGNATURE_INVALID}, one whose agent
-     * version no longer exists {@link AuditVerificationStatus#UNKNOWN_KEY}.
+     * caller's whole sweep shares. An entry whose HMAC verifies is also checked for
+     * its agent signature (see {@link AuditAgentSigner}): a signature that does not
+     * verify is {@link AuditVerificationStatus#AGENT_SIGNATURE_INVALID}; one that
+     * is missing where its agent version would have signed, was made with a key
+     * revoked since, or can no longer be checked because its agent was deleted
+     * permanently is {@link AuditVerificationStatus#AGENT_SIGNATURE_MISSING},
+     * {@link AuditVerificationStatus#AGENT_KEY_REVOKED} or
+     * {@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}. An unsigned entry is
+     * only looked at while {@code eddi.audit.agent-signing-enabled} is on: with it
+     * off, no entry is expected to carry a signature.
      *
      * @param entry
      *            a stored entry, as read back from {@link IAuditStore}
@@ -1388,7 +1393,7 @@ public class AuditLedgerService implements UserErasureParticipant {
     public AuditVerificationStatus verifyEntry(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
         AuditVerificationStatus hmacStatus = verifyHmac(entry, recoveryBudget);
         boolean hmacVerified = hmacStatus == AuditVerificationStatus.VALID || hmacStatus == AuditVerificationStatus.VALID_RECOVERED;
-        if (!hmacVerified || agentSigner == null) {
+        if (!hmacVerified || agentSigner == null || entry.agentSignature() == null && !agentSigningEnabled) {
             return hmacStatus;
         }
         // The agent signature covers the HMAC, so it is only worth checking on an entry
@@ -1396,7 +1401,9 @@ public class AuditLedgerService implements UserErasureParticipant {
         return switch (agentSigner.verify(entry)) {
             case NOT_SIGNED, VALID -> hmacStatus;
             case INVALID -> AuditVerificationStatus.AGENT_SIGNATURE_INVALID;
-            case KEY_UNAVAILABLE -> AuditVerificationStatus.UNKNOWN_KEY;
+            case MISSING -> AuditVerificationStatus.AGENT_SIGNATURE_MISSING;
+            case KEY_REVOKED -> AuditVerificationStatus.AGENT_KEY_REVOKED;
+            case KEY_UNAVAILABLE -> AuditVerificationStatus.AGENT_KEY_UNAVAILABLE;
         };
     }
 

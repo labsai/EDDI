@@ -30,7 +30,24 @@ class AuditVerificationReportTest {
 
     private static AuditVerificationReport report(int valid, int recovered, int recoverySkipped, int invalid, ChainStatus chain) {
         return new AuditVerificationReport("conversation", "conv-1", true, valid + invalid, valid, recovered, recoverySkipped,
-                invalid, 0, chain, List.of(), List.of(), List.of(), List.of(), Instant.parse("2026-08-20T10:00:00Z"));
+                invalid, 0, 0, chain, List.of(), List.of(), List.of(), List.of(), Instant.parse("2026-08-20T10:00:00Z"));
+    }
+
+    /**
+     * An entry whose HMAC verified but whose agent signature cannot vouch for it —
+     * missing, made with a key revoked since, or of an agent deleted permanently.
+     * Its content is proven, so it is no tampering alarm; but the sweep did not
+     * prove everything it was asked to.
+     */
+    @Test
+    @DisplayName("an agent signature that cannot vouch defeats intact, and is not tampering")
+    void unprovenAgentSignatureIsNotTampering() {
+        var swept = new AuditVerificationReport("conversation", "conv-1", true, 10, 9, 0, 0, 0, 0, 1, ChainStatus.INTACT, List.of(),
+                List.of(), List.of(), List.of(), Instant.parse("2026-08-20T10:00:00Z"));
+
+        assertFalse(swept.tamperingSuspected());
+        assertEquals(0, swept.disproven());
+        assertFalse(swept.intact());
     }
 
     @Test

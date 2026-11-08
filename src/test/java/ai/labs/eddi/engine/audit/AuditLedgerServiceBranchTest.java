@@ -293,6 +293,7 @@ class AuditLedgerServiceBranchTest {
 
         private AgentSigningService signingService;
         private IAgentStore agentStore;
+        private AgentConfiguration config;
         private AuditLedgerService service;
 
         @BeforeEach
@@ -300,7 +301,7 @@ class AuditLedgerServiceBranchTest {
             signingService = SigningTestSupport.signingService(SigningTestSupport.inMemoryVault(), meterRegistry);
             agentStore = mock(IAgentStore.class);
             var key = signingService.generateKey("default", "agent1", 1);
-            var config = new AgentConfiguration();
+            config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
             security.setSignInterAgentMessages(true);
             config.setSecurity(security);
@@ -309,7 +310,7 @@ class AuditLedgerServiceBranchTest {
             config.setIdentity(identity);
             when(agentStore.read("agent1", 1)).thenReturn(config);
             when(agentStore.readIncludingDeleted("agent1", 1)).thenReturn(config);
-            service = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
+            service = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
         }
 
         @Test
@@ -347,18 +348,103 @@ class AuditLedgerServiceBranchTest {
             service.shutdown();
         }
 
+        /**
+         * The agent's owner may delete it permanently. Its entries' HMACs still prove
+         * their content, so the uncheckable signature is reported, not counted as
+         * tampering (see {@code RestAuditStoreTest}).
+         */
         @Test
-        @DisplayName("the agent signature of an entry whose agent was permanently deleted is UNKNOWN_KEY")
-        void deletedAgentIsUnknownKey() throws Exception {
+        @DisplayName("the agent signature of an entry whose agent was permanently deleted is AGENT_KEY_UNAVAILABLE")
+        void deletedAgentsSignatureIsUnavailable() throws Exception {
             service.submit(entry("id1", "conv1", "agent1"));
             AuditEntry stored = flushedEntry(service);
             when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
             when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
-            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
+            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
 
-            assertEquals(AuditVerificationStatus.UNKNOWN_KEY, afterDeletion.verifyEntry(stored));
+            assertEquals(AuditVerificationStatus.AGENT_KEY_UNAVAILABLE, afterDeletion.verifyEntry(stored));
             service.shutdown();
             afterDeletion.shutdown();
+        }
+
+        @Test
+        @DisplayName("a signature stripped from an entry its agent version signs is AGENT_SIGNATURE_MISSING")
+        void strippedSignatureIsMissing() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stripped = flushedEntry(service).withAgentSignature(null);
+
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(stripped));
+            service.shutdown();
+        }
+
+        /**
+         * With agent signing off for the deployment, no entry is expected to carry one.
+         */
+        @Test
+        @DisplayName("with eddi.audit.agent-signing-enabled=false an unsigned entry is not reported missing")
+        void noSignatureIsMissingWhileAgentSigningIsOff() {
+            service.shutdown();
+            var unsignedLedger = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), false);
+            unsignedLedger.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(unsignedLedger);
+
+            assertNull(stored.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, unsignedLedger.verifyEntry(stored));
+            unsignedLedger.shutdown();
+        }
+
+        @Test
+        @DisplayName("an entry whose agent key was revoked since is AGENT_KEY_REVOKED")
+        void revokedKeyIsReported() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            var revoked = new AgentConfiguration();
+            revoked.setSecurity(config.getSecurity());
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(config.getIdentity().getKeys().stream().map(AgentPublicKey::revoke).toList()));
+            revoked.setIdentity(identity);
+            when(agentStore.readIncludingDeleted("agent1", 2)).thenReturn(revoked);
+            when(agentStore.getCurrentResourceId("agent1")).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return "agent1";
+                }
+
+                @Override
+                public Integer getVersion() {
+                    return 2;
+                }
+            });
+
+            assertEquals(AuditVerificationStatus.AGENT_KEY_REVOKED, service.verifyEntry(stored));
+            service.shutdown();
+        }
+
+        /**
+         * The chain position is taken before the agent signs. An unchecked failure
+         * reading the agent version (a driver timeout) used to escape submit, losing
+         * the entry and leaving a gap verification reports as a deletion.
+         */
+        @Test
+        @DisplayName("an unchecked agent-store failure neither loses the entry nor leaves a gap in the chain")
+        @SuppressWarnings("unchecked")
+        void anAgentStoreFailureKeepsTheChainWhole() throws Exception {
+            doReturn(true).when(auditStore).supportsSequence();
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IllegalStateException("socket timeout")).thenReturn(config);
+
+            assertTrue(service.submit(entry("id1", "conv1", "agent1")));
+            assertTrue(service.submit(entry("id2", "conv1", "agent1")));
+            service.flush();
+
+            var batch = ArgumentCaptor.forClass(List.class);
+            verify(auditStore).appendBatch(batch.capture());
+            List<AuditEntry> stored = batch.getValue();
+            assertEquals(2, stored.size(), "the entry whose agent version could not be read is still stored");
+            assertTrue(stored.get(0).sequence() >= 0);
+            assertEquals(stored.get(0).sequence() + 1, stored.get(1).sequence(), "no position between them was consumed");
+            assertNull(stored.get(0).agentSignature());
+            assertNotNull(stored.get(1).agentSignature());
+            service.shutdown();
         }
 
         @Test
@@ -367,7 +453,7 @@ class AuditLedgerServiceBranchTest {
             service.submit(entry("id1", "conv1", "agent1"));
             AuditEntry stored = flushedEntry(service);
             when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
-            var afterSoftDelete = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
+            var afterSoftDelete = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
 
             assertEquals(AuditVerificationStatus.VALID, afterSoftDelete.verifyEntry(stored));
             service.shutdown();
@@ -388,7 +474,7 @@ class AuditLedgerServiceBranchTest {
             service.shutdown();
             when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
             when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
-            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore)), true);
+            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
             when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(stored));
             when(auditStore.redactEntry(any(), eq(stored.hmac()))).thenReturn(true);
 

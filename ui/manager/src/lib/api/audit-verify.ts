@@ -19,13 +19,19 @@ export type AuditEntryStatus =
   | "INVALID"
   | "UNSIGNED"
   | "SIGNING_DISABLED"
-  /**
-   * A key this deployment recorded as having signed entries, but no longer holds;
-   * or an agent signature whose agent version no longer exists.
-   */
+  /** An HMAC key this deployment recorded as having signed entries, but no longer holds. */
   | "UNKNOWN_KEY"
   /** The HMAC matches, but the agent's signature on the entry does not verify. */
-  | "AGENT_SIGNATURE_INVALID";
+  | "AGENT_SIGNATURE_INVALID"
+  /**
+   * The HMAC matches, but the agent signature cannot vouch for the entry: it is
+   * missing where the agent version would have signed, its key was revoked
+   * since, or its agent was deleted permanently. Counted in
+   * `agentSignatureUnproven`, never as tampering.
+   */
+  | "AGENT_SIGNATURE_MISSING"
+  | "AGENT_KEY_REVOKED"
+  | "AGENT_KEY_UNAVAILABLE";
 
 /** Continuity of the per-conversation sequence chain. */
 export type AuditChainStatus = "INTACT" | "BROKEN" | "INCOMPLETE" | "UNAVAILABLE" | "NOT_APPLICABLE";
@@ -52,6 +58,8 @@ export interface AuditVerificationReport {
   recoverySkipped: number;
   invalid: number;
   unsigned: number;
+  /** Content proven by the HMAC, agent signature unable to vouch — "not proven", not "disproven". */
+  agentSignatureUnproven: number;
   chainStatus: AuditChainStatus;
   missingSequences: number[];
   undeliveredSequences: number[];
@@ -82,7 +90,8 @@ export function verifyAgentAudit(agentId: string, agentVersion?: number | null):
  *   (an entry was removed).
  * - `unverified` — nothing is disproven, but something could not be checked:
  *   unsigned entries, a key this deployment no longer holds, legacy entries the
- *   recovery budget did not reach, ledger-side gaps, duplicates.
+ *   recovery budget did not reach, agent signatures that cannot vouch,
+ *   ledger-side gaps, duplicates.
  * - `signing-disabled` — no signing key, so nothing was checked at all.
  *
  * Mirrors `AuditVerificationReport.intact()` / `tamperingSuspected()`, which the
@@ -101,6 +110,7 @@ export function auditVerdict(report: AuditVerificationReport, loadedCount = 0): 
   const clean =
     report.invalid === 0 &&
     report.unsigned === 0 &&
+    report.agentSignatureUnproven === 0 &&
     chainOk &&
     (report.duplicateSequences?.length ?? 0) === 0 &&
     uncoveredCount(report, loadedCount) === 0;
@@ -130,4 +140,13 @@ export function uncoveredCount(report: AuditVerificationReport, loadedCount: num
 /** Entries signed with a key this deployment no longer holds. */
 export function unknownKeyCount(report: AuditVerificationReport): number {
   return (report.problems ?? []).filter((p) => p.status === "UNKNOWN_KEY").length;
+}
+
+/**
+ * Entries whose content is intact but whose agent signature was altered or
+ * forged. Counted in `invalid` with the entries whose content was changed, which
+ * is the opposite finding, so the screen tells the two apart.
+ */
+export function agentSignatureInvalidCount(report: AuditVerificationReport): number {
+  return (report.problems ?? []).filter((p) => p.status === "AGENT_SIGNATURE_INVALID").length;
 }

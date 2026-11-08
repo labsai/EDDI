@@ -13,6 +13,8 @@ import ai.labs.eddi.engine.audit.model.AuditVerificationReport.ChainStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Instant;
 import java.util.List;
@@ -201,6 +203,32 @@ class RestAuditStoreTest {
         assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_INVALID, report.problems().getFirst().status());
         assertFalse(report.intact());
         assertTrue(report.tamperingSuspected());
+    }
+
+    /**
+     * Threats 7 and 10: an entry whose HMAC verified but whose agent signature
+     * cannot vouch for it. Its content is proven, so counting it in {@code invalid}
+     * made an agent's routine permanent delete raise {@code tamperingSuspected} for
+     * every entry it had signed. It is its own count, listed as a problem, and
+     * keeps the sweep from reporting intact.
+     */
+    @ParameterizedTest
+    @EnumSource(value = AuditVerificationStatus.class, names = {"AGENT_SIGNATURE_MISSING", "AGENT_KEY_REVOKED", "AGENT_KEY_UNAVAILABLE"})
+    @DisplayName("an agent signature that cannot vouch is counted on its own, not as tampering")
+    void unprovenAgentSignatureIsNotInvalid(AuditVerificationStatus status) {
+        var entry = entryAt("id-1", 0);
+        when(auditStore.getEntries("conv-1", 0, 1000)).thenReturn(List.of(entry));
+        when(auditStore.countByConversation("conv-1")).thenReturn(1L);
+        when(auditLedgerService.verifyEntry(eq(entry), any())).thenReturn(status);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(0, report.valid());
+        assertEquals(0, report.invalid());
+        assertEquals(1, report.agentSignatureUnproven());
+        assertEquals(status, report.problems().getFirst().status());
+        assertFalse(report.tamperingSuspected());
+        assertFalse(report.intact());
     }
 
     /**

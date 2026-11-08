@@ -36,6 +36,7 @@ import {
   auditVerdict,
   uncoveredCount,
   unknownKeyCount,
+  agentSignatureInvalidCount,
   type AuditEntryStatus,
   type AuditVerificationReport,
 } from "@/lib/api/audit-verify";
@@ -271,7 +272,9 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
             data-testid="entry-verify-invalid"
           >
             <ShieldX className="h-3 w-3" />
-            {t("audit.verify.entryInvalid", "Signature does not match")}
+            {problem === "AGENT_SIGNATURE_INVALID"
+              ? t("audit.verify.entryAgentSignatureInvalid", "Agent signature does not match")
+              : t("audit.verify.entryInvalid", "Signature does not match")}
           </span>
         )}
         {problem !== undefined && problem !== "INVALID" && problem !== "AGENT_SIGNATURE_INVALID" && (
@@ -1316,9 +1319,10 @@ function IntegrityBanner({
   }
 
   if (verdict === "tampered") {
+    const agentSignatures = agentSignatureInvalidCount(report);
     const disproven = Math.max(
       0,
-      report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKeyCount(report),
+      report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKeyCount(report) - agentSignatures,
     );
     return (
       <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3" data-testid="integrity-banner" data-verdict="tampered" role="alert">
@@ -1334,6 +1338,14 @@ function IntegrityBanner({
               {t("audit.verify.tamperedInvalid", {
                 count: disproven,
                 defaultValue: "{{count}} entry signature(s) do not match their content — the entries were changed after they were written.",
+              })}
+            </p>
+          )}
+          {agentSignatures > 0 && (
+            <p className="text-xs text-foreground">
+              {t("audit.verify.tamperedAgentSignature", {
+                count: agentSignatures,
+                defaultValue: "{{count}} agent signature(s) do not verify — the content is intact, but the signature was altered or forged.",
               })}
             </p>
           )}
@@ -1377,6 +1389,14 @@ function IntegrityBanner({
   const unknown = unknownKeyCount(report);
   if (unknown > 0) {
     reasons.push(t("audit.verify.reasonUnknownKey", { count: unknown, defaultValue: "{{count}} signed with a key this deployment no longer holds" }));
+  }
+  if (report.agentSignatureUnproven > 0) {
+    reasons.push(
+      t("audit.verify.reasonAgentSignature", {
+        count: report.agentSignatureUnproven,
+        defaultValue: "{{count}} entry(ies) whose agent signature is missing, revoked or can no longer be checked",
+      }),
+    );
   }
   if (report.recoverySkipped > 0) {
     reasons.push(t("audit.verify.reasonSkipped", { count: report.recoverySkipped, defaultValue: "{{count}} older entry(ies) not checked" }));

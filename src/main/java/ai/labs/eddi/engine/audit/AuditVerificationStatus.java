@@ -53,10 +53,6 @@ public enum AuditVerificationStatus {
      * treated as unverified until the key is supplied. A key id the deployment
      * never recorded is reported as {@link #INVALID} instead — the id is text in
      * the row, and anyone able to edit the row can write one.
-     * <p>
-     * Also an entry whose HMAC verified and whose agent signature cannot be
-     * checked, because the agent version that signed it no longer exists (the agent
-     * was deleted permanently; a soft-deleted agent's entries are still checked).
      */
     UNKNOWN_KEY,
 
@@ -67,5 +63,31 @@ public enum AuditVerificationStatus {
      * intact; the signature was altered or forged. Counted with the invalid
      * entries.
      */
-    AGENT_SIGNATURE_INVALID
+    AGENT_SIGNATURE_INVALID,
+
+    /**
+     * The HMAC verified, but the entry carries no agent signature although its
+     * agent version would have signed it: the signature was removed from the row,
+     * or the vault could not sign when the entry was written (the ledger logged a
+     * WARN then). The content is intact; the agent's vouching for it is not proven.
+     * Counted in {@code agentSignatureUnproven}, not as tampering.
+     */
+    AGENT_SIGNATURE_MISSING,
+
+    /**
+     * The HMAC verified, but the key the entry's agent signs it with has been
+     * revoked since, or the agent no longer declares it: a revoked key vouches for
+     * nothing, whenever it signed. The content is intact. Counted in
+     * {@code agentSignatureUnproven}, not as tampering.
+     */
+    AGENT_KEY_REVOKED,
+
+    /**
+     * The HMAC verified, and the entry carries an agent signature that cannot be
+     * checked: the agent version that signed it no longer exists (the agent was
+     * deleted permanently; a soft-deleted agent's entries are still checked). The
+     * content is intact. Counted in {@code agentSignatureUnproven}, not as
+     * tampering.
+     */
+    AGENT_KEY_UNAVAILABLE
 }
