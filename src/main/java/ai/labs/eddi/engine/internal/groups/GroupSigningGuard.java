@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -110,9 +109,9 @@ public class GroupSigningGuard {
             if (agentConfig.getIdentity() != null
                     && agentConfig.getIdentity().getKeys() != null
                     && !agentConfig.getIdentity().getKeys().isEmpty()) {
-                keyVersion = agentConfig.getIdentity().getKeys().stream()
-                        .mapToInt(AgentPublicKey::version)
-                        .max().orElse(0);
+                // The same rule the validator and key generation use: the newest
+                // in-range version, so a legacy out-of-range entry never decides.
+                keyVersion = agentConfig.getIdentity().signingKeyVersion();
                 // A revoked newest key stops signing, with no fallback to an older
                 // key. Deleting its private half on revoke is best effort, so the
                 // vault may still hold it: the flag, not the vault, decides.
