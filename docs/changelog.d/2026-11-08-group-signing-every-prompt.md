@@ -59,7 +59,9 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   the rework did not run in a note of its own), so the note still traces to the verifier's entry;
   it used to be suffixed with " (the rework did not run)", which no entry held, and passed. The
   verification summary renders the verdict array the engine applied before any other array, so a
-  reply carrying a second array still shows the decoded feedback the note is traced by.
+  reply carrying a second array still shows the decoded feedback the note is traced by. A note is
+  traced by its text without surrounding whitespace, since the summary is trimmed: feedback ending
+  in a newline or a space was not found in it and passed.
 - **Handoffs.** An `AUTO` tool handoff filed another team's agent's text into the backlog with no
   creator, and the cadence turned it into configured task text. The backlog task now records the
   agent that wrote it (`TeamHandoffService`, `TaskItem.filedBy`); `TaskDefinition` carries it as an

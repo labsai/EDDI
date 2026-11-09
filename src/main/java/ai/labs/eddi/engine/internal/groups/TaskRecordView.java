@@ -150,11 +150,14 @@ final class TaskRecordView {
         if (note == null || note.isBlank()) {
             return note;
         }
+        // Traced by its text without surrounding whitespace: the verifier's readable
+        // summary is trimmed, so feedback ending in whitespace is not in it verbatim.
+        String text = note.strip();
         boolean fromUntrustedEntry = false;
         List<TranscriptEntry> stored = view.stored();
         for (TranscriptEntry entry : stored) {
             if (entry == null || entry.type() != TranscriptEntryType.VERIFICATION || entry.content() == null
-                    || !entry.content().contains(note)) {
+                    || !entry.content().contains(text)) {
                 continue;
             }
             if (!view.trusts(entry)) {
