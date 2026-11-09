@@ -930,17 +930,23 @@ public class RestAgentStore implements IRestAgentStore {
         }
         AgentConfiguration config = currentVersionForKeyChange(id, version);
         var identity = config.getIdentity();
+        String notDeclared = "Agent " + id + " declares no signing key v" + keyVersion
+                + (keyVersion == 0 ? " and no legacy signing key (identity.publicKey)" : "");
+        if (identity == null) {
+            // No identity block declares no key at all: answered before anything below
+            // reads or writes the identity.
+            throw new NotFoundException(notDeclared);
+        }
 
         // The legacy unversioned key (keyVersion 0) has no revoked flag to set, so
         // revoking it removes it: an entry signed as v0 then names no key and is not
         // trusted. An identity.keys entry that is itself declared as v0 — malformed,
         // but what a peer checks a v0 signature against — is revoked with it.
-        boolean legacy = keyVersion == 0 && identity != null && identity.getPublicKey() != null && !identity.getPublicKey().isBlank();
-        List<AgentPublicKey> keys = identity != null && identity.getKeys() != null ? identity.getKeys() : List.of();
+        boolean legacy = keyVersion == 0 && identity.getPublicKey() != null && !identity.getPublicKey().isBlank();
+        List<AgentPublicKey> keys = identity.getKeys() != null ? identity.getKeys() : List.of();
         List<AgentPublicKey> entries = keys.stream().filter(k -> k.version() == keyVersion).toList();
         if (!legacy && entries.isEmpty()) {
-            throw new NotFoundException("Agent " + id + " declares no signing key v" + keyVersion
-                    + (keyVersion == 0 ? " and no legacy signing key (identity.publicKey)" : ""));
+            throw new NotFoundException(notDeclared);
         }
         AgentPublicKey revoked = legacy ? new AgentPublicKey(0, identity.getPublicKey(), 0, 0, true) : entries.get(0).revoke();
         if (!legacy && entries.stream().allMatch(AgentPublicKey::revoked)) {
