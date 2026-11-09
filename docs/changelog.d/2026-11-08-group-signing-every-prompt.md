@@ -69,13 +69,13 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   the run's task keeps it, so `View.vouchesFor` applies. The per-discussion cap
   `maxAgentAddedTasksPerDiscussion` counts the tasks members file with the task tool
   (`SharedTaskList.agentFiledTaskCount`, persisted with the discussion), no longer every task with
-  a creator, so the handed-off tasks a run starts with do not use up the members' budget. `onDecision` handoffs and inbox items a
-  person accepts name no agent; the docs and the operator recommend `REVIEW` intake for a team
+  a creator, so the handed-off tasks a run starts with do not use up the members' budget.
+  `onDecision` handoffs and inbox items a person accepts name no agent; the docs and the operator recommend `REVIEW` intake for a team
   whose members verify, since those still reach the run as configured text. A team with a verifying
   reader never runs a handed-off task it could not verify: `TeamHandoffService` files an `AUTO`
   tool handoff from an agent that does not sign verifiably to the intake inbox, as `REVIEW` would,
   and `TeamCadenceService` does not pull a backlog task whose agent stopped signing (it waits on
-  the backlog), so no member fails it unasked on every run, is charged a `tasksFailed` for it or
+  the backlog, and each fire that leaves it logs why at INFO), so no member fails it unasked on every run, is charged a `tasksFailed` for it or
   is quoted it in the cadence question. Both ask `GroupConversationService.recordsTrustAgentText`
   (`GroupSigningGuard.recordsTrustAgentText`: no reader verifies, or the agent signs verifiably; an
   unreadable group counts as verifying).
