@@ -192,9 +192,10 @@ public class GroupApprovedResultActions {
                         // The claim could not be persisted, so nothing was sent. Do not leave
                         // the record PENDING: the discussion may finish without another leg,
                         // which would drop the action silently. Settle it visibly instead —
-                        // SKIPPED when this pod saw a cancel, otherwise FAILED (a cancel stored
-                        // by another pod makes the claim's state check fail the same way).
-                        boolean wasCancelled = cancelled != null && cancelled.getAsBoolean();
+                        // SKIPPED when the discussion was cancelled — seen by this pod or stored
+                        // by another one, which fails the claim's state check without touching
+                        // this pod's token — otherwise FAILED.
+                        boolean wasCancelled = (cancelled != null && cancelled.getAsBoolean()) || cancelledInStore(gc, store);
                         settle(gc, store, taskId, record.finished(
                                 wasCancelled ? ApprovedActionStatus.SKIPPED : ApprovedActionStatus.FAILED, Instant.now(), null, null,
                                 wasCancelled
@@ -313,6 +314,22 @@ public class GroupApprovedResultActions {
                 LogSanitizer.sanitize(gc.getId()), outcome.status());
         meterRegistry.counter(METRIC, "outcome", outcome.status().name().toLowerCase(Locale.ROOT)).increment();
         audit(gc, taskId, outcome, durationMs);
+    }
+
+    /**
+     * Whether the stored discussion is CANCELLED — a cancel written by another pod
+     * that this pod's cancellation token has not seen. False when it cannot be
+     * read.
+     */
+    private static boolean cancelledInStore(GroupConversation gc, IGroupConversationStore store) {
+        try {
+            GroupConversation stored = store.read(gc.getId());
+            return stored != null && stored.getState() == GroupConversationState.CANCELLED;
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | RuntimeException e) {
+            LOGGER.debugf("Could not re-read group conversation %s after a failed claim: %s", LogSanitizer.sanitize(gc.getId()),
+                    e.getMessage());
+            return false;
+        }
     }
 
     private static boolean persist(GroupConversation gc, IGroupConversationStore store) {

@@ -126,9 +126,14 @@ target and the all-agents secrets above. The approver is recorded on the action
    `OUTCOME_UNKNOWN` counts as a failure for `onFailure`. The claim is a
    compare-and-set on the discussion still being `IN_PROGRESS`, so a cancel
    stored first makes it fail. A claim that cannot be written sends nothing and
-   settles the record visibly — `SKIPPED` when the pod saw the cancel, `FAILED`
-   otherwise (store unavailable, or a cancel stored by another pod) — rather
-   than leaving it `PENDING` for a leg that may never come.
+   settles the record visibly — `SKIPPED` when the discussion was cancelled
+   (seen by this pod, or read back from the store after a cancel by another
+   pod), `FAILED` otherwise (store unavailable) — rather than leaving it
+   `PENDING` for a leg that may never come. The audit entry and the metric
+   always carry that outcome; the stored record shows it only if the follow-up
+   write succeeds. When that write fails too — and a cancelled discussion
+   always refuses it, since it requires `IN_PROGRESS` — the stored record stays
+   `PENDING` unless a later write of the discussion carries the outcome.
 
 So the guarantee is **at most once**: exactly once whenever the run survives,
 and effectively once across a crash for a target that deduplicates on

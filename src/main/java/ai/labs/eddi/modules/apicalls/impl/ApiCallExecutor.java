@@ -1541,17 +1541,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return redacted;
     }
 
+    /**
+     * The request URL before templating: an absolute {@code http...} path as is,
+     * otherwise the path joined to {@code targetServerUrl} with one slash. Shared
+     * with the save-time reference check of approved-result actions, so both read
+     * the same URL.
+     */
+    public static String targetDestination(String targetServerUrl, String rawPath) {
+        String path = rawPath == null ? "" : rawPath.trim();
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
+            path = SLASH_CHAR + path;
+        }
+        return path.startsWith("http") ? path : (targetServerUrl == null ? "" : targetServerUrl) + path;
+    }
+
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext,
                                       ResolvedSecrets resolvedSecrets)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
-        String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
-            path = SLASH_CHAR + path;
-        }
-        var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        var targetDestination = targetDestination(targetServerUrl, requestConfig.getPath().trim());
         rejectTemplatedAuthority(targetDestination);
         // The only host a ${context:…} header may go to: the configuration's own
         // target, with deployment-wide variables (never conversation data) applied.

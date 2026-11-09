@@ -61,8 +61,10 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   record found later becomes OUTCOME_UNKNOWN and is never resent — the tool-call execution journal's contract.
   `{action.idempotencyKey}` lets a deduplicating target make it effectively once across a crash. The claim is a CAS
   on the discussion still being IN_PROGRESS, so a cancel stored first makes it fail; a claim that cannot be written
-  sends nothing and settles the record SKIPPED (cancel seen on this pod) or FAILED, never leaving it PENDING for a
-  leg that may not come.
+  sends nothing and settles the record SKIPPED (a cancel seen on this pod or read back from the store) or FAILED,
+  rather than leaving it PENDING for a leg that may not come. The audit entry and metric always carry that outcome;
+  the stored record shows it only if the follow-up write succeeds — a cancelled discussion refuses it, and then the
+  stored record stays PENDING unless a later write of the discussion carries the outcome.
 - **Only human approvals publish.** A `system:*` approval (timeout `AUTO_APPROVE`) records SKIPPED.
 - **Identity:** the call runs as the group (`runAs: group:<groupId>` in the audit entry) with author-written,
   all-agents secrets only; the approver is recorded, never impersonated.

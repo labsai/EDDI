@@ -329,6 +329,25 @@ class GroupApprovedResultActionsTest {
             verifyNoInteractions(executor);
             assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
         }
+
+        @Test
+        void aClaimRefusedByACancelStoredByAnotherPod_settlesSkipped_notFailed() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled")).when(store).updateIfState(any(), any());
+            // another pod stored the cancel; this pod's token never flips
+            var stored = new GroupConversation();
+            stored.setState(GroupConversationState.CANCELLED);
+            when(store.read(gc.getId())).thenReturn(stored);
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.COMPLETED, gc.getTaskList().findById(task.id()).status(), "a cancel does not fail the task");
+        }
     }
 
     @Nested

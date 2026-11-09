@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -192,11 +193,14 @@ class ApprovedResultActionValidationTest {
     }
 
     @Test
-    void theJoinedUrl_mirrorsTheExecutor() {
-        assertEquals("https://h/x", ApprovedResultActionValidation.effectiveUrl("https://h", "x"));
-        assertEquals("https://h/x", ApprovedResultActionValidation.effectiveUrl("https://h", " /x "));
-        assertEquals("https://other/x", ApprovedResultActionValidation.effectiveUrl("https://h", "https://other/x"));
-        assertEquals("https://h", ApprovedResultActionValidation.effectiveUrl("https://h", ""));
+    void theJoinedUrl_isTheExecutorsOwnJoin() {
+        // the check calls ApiCallExecutor.targetDestination, the join buildRequest uses
+        assertEquals("https://h/x", ApiCallExecutor.targetDestination("https://h", "x"));
+        assertEquals("https://h/x", ApiCallExecutor.targetDestination("https://h", " /x "));
+        assertEquals("https://other/x", ApiCallExecutor.targetDestination("https://h", "https://other/x"));
+        assertEquals("httpbin/x", ApiCallExecutor.targetDestination("https://h", "httpbin/x"));
+        assertEquals("https://h", ApiCallExecutor.targetDestination("https://h", ""));
+        assertEquals("https://h", ApiCallExecutor.targetDestination("https://h", null));
     }
 
     @Test

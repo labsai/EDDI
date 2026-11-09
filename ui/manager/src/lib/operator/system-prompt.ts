@@ -1639,7 +1639,11 @@ your tool schemas do not cover it, not as a routine first step:
   discussion marks it OUTCOME_UNKNOWN, and a discussion cancelled while no leg
   runs keeps it PENDING, so neither status proves whether the target got the
   request: tell the admin to check the target. A claim that cannot be written
-  sends nothing and reads FAILED (or SKIPPED after a cancel). Calls with
+  sends nothing and is settled FAILED, or SKIPPED when the discussion was
+  cancelled; the audit entry and metric always show that, but the stored
+  record reads it only if the follow-up write succeeds — if that write fails
+  too (a cancelled discussion always refuses it), the record stays PENDING
+  unless a later write of the discussion carries it. Calls with
   preRequest.propertyInstructions are refused. At most once covers the
   claim, not the call's own retries: postResponse.retryApiCallInstruction on
   the referenced call can repeat the request, so for a non-idempotent publish

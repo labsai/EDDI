@@ -16,6 +16,7 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.SecretContextReferences;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -209,9 +210,9 @@ public class ApprovedResultActionValidation {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("targetServerUrl", httpCalls.getTargetServerUrl());
         fields.put("request.path", call.getRequest().getPath());
-        // The URL as ApiCallExecutor joins it, so a reference split across the two
-        // fields is checked as the one string the executor resolves.
-        fields.put("request URL", effectiveUrl(httpCalls.getTargetServerUrl(), call.getRequest().getPath()));
+        // The URL as ApiCallExecutor joins it — the same helper — so a reference split
+        // across the two fields is checked as the one string the executor resolves.
+        fields.put("request URL", ApiCallExecutor.targetDestination(httpCalls.getTargetServerUrl(), call.getRequest().getPath()));
         fields.put("request.body", call.getRequest().getBody());
         if (call.getRequest().getHeaders() != null) {
             call.getRequest().getHeaders().forEach((k, v) -> fields.put("request.headers." + k, v));
@@ -220,15 +221,6 @@ public class ApprovedResultActionValidation {
             call.getRequest().getQueryParams().forEach((k, v) -> fields.put("request.queryParams." + k, v));
         }
         return fields;
-    }
-
-    /** Mirrors the path join in {@code ApiCallExecutor}'s request building. */
-    static String effectiveUrl(String targetServerUrl, String rawPath) {
-        String path = rawPath == null ? "" : rawPath.trim();
-        if (!path.startsWith("/") && !path.isEmpty() && !path.startsWith("http")) {
-            path = "/" + path;
-        }
-        return path.startsWith("http") ? path : (targetServerUrl == null ? "" : targetServerUrl) + path;
     }
 
     private static String uriProblem(String uri) {
