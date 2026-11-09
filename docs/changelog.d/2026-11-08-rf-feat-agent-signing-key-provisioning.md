@@ -69,23 +69,23 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
 
 ### Upgrading: agents already stored with these flags
 
-Before this branch the save-time check accepted `signInterAgentMessages` or
-`requirePeerVerification` whenever `identity` held any non-blank string, and nothing could put a
+Before this change the save-time check accepted `signInterAgentMessages` or
+`requirePeerVerification` whenever `identity` held any non-blank string, and no EDDI API could put a
 private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing, and
 after the upgrade **every save of it is refused (400)** — a person's save, a workflow cascade, an
 autonomy change, an API sync — until an admin either generates a key (**Generate signing key** in
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
 off. Find them with a query on `security.signInterAgentMessages: true` in the agents collection
 (or table). An import or a sync onto such an agent turns the flag off and reports it, rather than
-failing. Any `identity.keys` entry a person pasted before this branch stays trusted by peers until it
+failing. Any `identity.keys` entry a person pasted before this change stays trusted by peers until it
 is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
 every entry EDDI did not generate — the legacy `identity.publicKey` (v0) included, which generating
 a key does not remove.
 
 **Agents stored with `security.requirePeerVerification: true`.** Until now peer verification only
 logged a failure. With group-signature verification, which builds on this change, such an agent
-receives every peer entry that does not verify as a `[withheld ...]` placeholder — and since nothing
-could sign before this branch, that is every entry another agent wrote. One such agent among a
+receives every peer entry that does not verify as a `[withheld ...]` placeholder — and since no release
+could provision a key, that is every entry another agent wrote. One such agent among a
 group's members, moderator or facilitator also makes the group's records count only entries that
 verify for every reader: the vote finds no options and records that it could not run, the
 negotiation table stays empty, and the SERVICE judge and the retrospective see only signed entries —
@@ -100,8 +100,10 @@ synthesizer, facilitator), or turn the flag off.
   endpoints that change keys are where the audit trail and the vault write are.
 - Revocation is a flag, not a deletion of the entry: a verifier must recognise and refuse an entry
   signed under the key, which an unknown version would only report as "unknown key". The group
-  verifier on this branch does not read the flag yet (that is the group-signing verification work);
-  until it does, the deleted private key is what stops anything new being signed with it.
+  verifier in this change does not read the flag yet; until it does, the deleted private key is
+  what stops anything new being signed with it. (Superseded by the entry "peer verification is
+  fail-closed and binds the conversation, position and key version", 2026-11-08: a revoked key
+  vouches for nothing.)
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
   signer's rule for a key outside its window.
 - A malformed key that is revoked no longer blocks a save, so revoking is the way out for an agent

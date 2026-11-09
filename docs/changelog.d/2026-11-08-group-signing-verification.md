@@ -41,8 +41,9 @@ never enforced.
   into another round is withheld (`WRONG_ROUND`). Moving one between repeats of a phase within a
   round is not detected. An entry signed before its conversation began (30 s skew) is withheld; that
   rule rests on the stored `created` time.
-- **Revocation and windows.** A key revoked through the new admin endpoint (base branch) vouches for
-  nothing, whatever time an entry claims (`REVOKED`); the signer does not sign with a revoked newest
+- **Revocation and windows.** A key revoked through the new admin endpoint (see the entry
+  "identity is engine-owned, keys can be revoked, and generating one no longer breaks the agent's
+  descriptor") vouches for nothing, whatever time an entry claims (`REVOKED`); the signer does not sign with a revoked newest
   key. A `validFromMs`/`validUntilMs` window is enforced on both sides, but against the time the
   signer wrote, so it limits honest use and does not stop a leaked key. Revocation applies to every
   prompt built after it; what a member was already shown stays in its own conversation history,
@@ -108,8 +109,11 @@ never enforced.
   logged (all 11 locales). The Platform Operator's prompt says what a verifying agent sees and who
   must sign (operator revision bumped).
 
-Nothing had been signed in the wild (provisioning only lands with the base branch), so the change
-of the signed bytes needs no migration.
+No release could provision a signing key (that lands with the entry "admins provision an agent
+signing key end to end; the validator checks the key is usable"), so no release signed a group
+entry and the change of the signed bytes needs no migration. An entry signed under a key written
+into the vault outside EDDI's API was signed over the old payload; it no longer verifies and is
+withheld from verifying members.
 
 ### Upgrading
 
