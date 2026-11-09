@@ -242,6 +242,27 @@ class GroupSigningGuardTest {
         assertEquals(2, signed.signatureRound(), "the stored entry names the round it was signed for");
     }
 
+    /**
+     * A legacy entry above {@code MAX_VERSION} is ignored by
+     * {@code signingKeyVersion()}, so the guard must ignore it too, or this revoked
+     * entry would silence a usable v1.
+     */
+    @Test
+    void sign_revokedOutOfRangeKey_signsWithTheInRangeKeyTheValidatorPicks() throws Exception {
+        var identity = identity(new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(AgentPublicKey.MAX_VERSION + 1, KEY_V2_B64, 0L, 0L).revoke());
+        stubAgent(AGENT_A, signingAgent(identity));
+        when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(1)))
+                .thenAnswer(inv -> inv.<SignedEnvelope>getArgument(2).withSignature("sig-xyz", 1));
+        when(agentSigningService.verifyEnvelope(any(), eq(KEY_V1_B64))).thenReturn(true);
+
+        var signed = guard().sign(gc(), entry(AGENT_A, "hi"));
+
+        assertEquals("sig-xyz", signed.signature());
+        assertEquals(identity.signingKeyVersion(), signed.signatureKeyVersion());
+        verify(agentSigningService).signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(1));
+    }
+
     // =================================================================
     // visibleTo — who has to verify, and what reaches them
     // =================================================================
