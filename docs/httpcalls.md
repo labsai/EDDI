@@ -91,11 +91,14 @@ than degrading quietly:
   could not be captured never gets the self release.
 
   With `eddi.security.ssrf-protection.enabled=true`, the loopback default is
-  refused before any request is made (loopback is exactly what that protection
-  blocks), so such a deployment must set `eddi.self.base-url` to an address the
-  server can reach *and* that passes the full SSRF target policy — which also
-  rejects private and link-local addresses, so an in-cluster service name that
-  resolves to a private IP stays blocked. `eddi.self.base-url` must be a bare
+  refused (loopback is exactly what that protection blocks; httpcalls have no
+  self exception), and an httpcall naming it literally fails to deploy. Such a
+  deployment either lists the self host in
+  `eddi.security.ssrf-protection.allowed-hosts` (`127.0.0.1:7070`), or sets
+  `eddi.self.base-url` to an address the server can reach *and* that passes the
+  full SSRF target policy — which also rejects private and link-local
+  addresses, so an in-cluster service name that resolves to a private IP must be
+  listed as well. `eddi.self.base-url` must be a bare
   `scheme://host[:port]`; a value with a path, query, fragment or credentials is
   ignored (logged at ERROR). A plain-`http` value naming a non-loopback host is
   accepted but logged at WARN, since the caller's token would cross the network
