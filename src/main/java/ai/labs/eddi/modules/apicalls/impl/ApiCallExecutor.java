@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretEncodings;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedFanOut;
@@ -397,7 +398,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // api key sk-…"). The executor knows exactly which plaintexts it
                         // sent, so those are removed by value before the body goes
                         // anywhere — memory, template data, the tool result or a log.
-                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), resolvedSecrets);
+                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(),
+                                SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -1481,7 +1483,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         shortOnes.removeAll(longOnes);
         Object cleaned = longOnes.isEmpty() ? null : SecretValueScrubber.scrubDeep(tree, longOnes, RequestRedactor.REDACTED);
         Object current = cleaned != null ? cleaned : tree;
-        Object exactCleaned = shortOnes.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, shortOnes, RequestRedactor.REDACTED);
+        Object exactCleaned = shortOnes.isEmpty()
+                ? null
+                : SecretValueScrubber.scrubDeepExact(current,
+                        SecretEncodings.withEncodedForms(shortOnes, SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH), RequestRedactor.REDACTED);
         return exactCleaned != null ? exactCleaned : current;
     }
 
@@ -1495,7 +1500,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 longOnes.add(secret);
             }
         }
-        return longOnes;
+        return SecretEncodings.withEncodedForms(longOnes, MIN_SUCCESS_BODY_REDACTION_LENGTH);
     }
 
     /**
@@ -1537,7 +1542,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return headers;
         }
         var redacted = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        Set<String> needles = SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH);
+        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, needles)));
         return redacted;
     }
 
