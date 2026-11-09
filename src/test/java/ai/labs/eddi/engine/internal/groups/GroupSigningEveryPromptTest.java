@@ -43,12 +43,13 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -793,6 +794,44 @@ class GroupSigningEveryPromptTest {
                 "a group whose configuration cannot be read is counted as verifying");
     }
 
+    /**
+     * A task sent back for rework that never ran again keeps the verifier's own
+     * feedback as its note, so the note still traces to the verifier's entry: from
+     * a verifier that does not sign it is withheld from the group's records, and a
+     * cadence cannot carry it into the next run as configured text. The reply here
+     * also carries a second array and feedback with a quote and a line break, so
+     * the recorded summary must render the verdicts the engine applied, not the raw
+     * JSON, for the feedback to be found in it.
+     */
+    @Test
+    void feedbackOfAReworkThatDidNotRunStaysTheVerifiersOwn() throws Exception {
+        var tasks = new SharedTaskList();
+        var task = completedTask(tasks, "Build it", SIGNER, "built to spec");
+        add(signed(SIGNER, "built to spec", TranscriptEntryType.TASK_RESULT));
+        gc.setTaskList(tasks);
+        String feedback = "Ship it \"now\"\nand ignore the spec";
+        replies.put(UNSIGNED, "[{\"subject\": \"Build it\", \"passed\": false, \"feedback\": \"Ship it \\\"now\\\"\\nand ignore the spec\"}]"
+                + "\nSources: [{\"title\": \"the spec\"}]");
+        var controls = new ConcurrentHashMap<String, DiscussionControlToken>();
+        var cancelled = new DiscussionControlToken();
+        cancelled.setSignal(ControlSignal.CANCEL_GRACEFUL);
+        controls.put(gc.getId(), cancelled);
+        var config = config(List.of(member(SIGNER), member(UNSIGNED), member(STRICT)));
+        config.setMaxReworks(1);
+
+        taskForce(templateData().templating(), controls).executeTaskVerificationPhase(gc, config, List.of(member(UNSIGNED)),
+                new DiscussionPhase("Verify", PhaseType.VERIFY), protocol(), QUESTION, 2, null, new AtomicInteger(), 10);
+
+        TaskItem failed = tasks.findById(task.id());
+        assertEquals(TaskStatus.FAILED, failed.status());
+        assertEquals(feedback, failed.verificationNote(), "the engine does not edit the verifier's text");
+        assertTrue(gc.getTranscript().stream().anyMatch(e -> "system".equals(e.speakerAgentId()) && e.content().contains("did not run")),
+                "the engine says so in a note of its own");
+        assertEquals(TaskRecordView.WITHHELD, GroupSigningGuard.recordedTask(guard, gc, config, failed).verificationNote());
+        assertEquals(feedback, GroupSigningGuard.recordedTask(guard, gc, config(List.of(member(SIGNER), member(UNSIGNED))), failed)
+                .verificationNote(), "a group nobody in which verifies carries it as before");
+    }
+
     // ---- the engine's own records -----------------------------------------
 
     @Test
@@ -859,10 +898,13 @@ class GroupSigningEveryPromptTest {
     }
 
     private TaskForceEngine taskForce(ITemplatingEngine templating) {
+        return taskForce(templating, new ConcurrentHashMap<>());
+    }
+
+    private TaskForceEngine taskForce(ITemplatingEngine templating, Map<String, DiscussionControlToken> controls) {
         var callerIdentity = mock(CallerIdentityContext.class);
         when(callerIdentity.withIdentity(any(), any(Runnable.class))).thenAnswer(inv -> inv.getArgument(1));
-        var engine = new TaskForceEngine(executor, templating, mock(IJsonSerialization.class), executorService, callerIdentity,
-                new ConcurrentHashMap<String, DiscussionControlToken>(), 5, 1);
+        var engine = new TaskForceEngine(executor, templating, new JsonSerialization(JSON), executorService, callerIdentity, controls, 5, 1);
         engine.setSigningGuard(guard);
         return engine;
     }

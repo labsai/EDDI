@@ -900,12 +900,19 @@ public class TaskForceEngine {
             executeTaskExecutionPhase(gc, config, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
                     false);
             // A rework that did not get to run (budget, cancel, a wave error) ends FAILED,
-            // never stranded ASSIGNED.
+            // never stranded ASSIGNED. Its note stays the verifier's own text, which is
+            // how the records trace it to the verifier's entry (TaskRecordView); the
+            // engine says the rework did not run in a note of its own.
+            int notRun = 0;
             for (TaskItem failed : toRework) {
                 TaskItem live = gc.getTaskList().findById(failed.id());
                 if (live != null && (live.status() == TaskStatus.ASSIGNED || live.status() == TaskStatus.PENDING)) {
-                    gc.getTaskList().failTask(live.id(), live.verificationNote() + " (the rework did not run)");
+                    gc.getTaskList().failTask(live.id(), live.verificationNote());
+                    notRun++;
                 }
+            }
+            if (notRun > 0) {
+                addVerificationNote(gc, phase, phaseIdx, "The rework of %d task(s) did not run; they stay failed".formatted(notRun));
             }
             verified = gc.getTaskList().all().stream().filter(t -> t.status() == TaskStatus.COMPLETED).toList();
             if (verified.isEmpty() || GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)
@@ -1233,8 +1240,9 @@ public class TaskForceEngine {
     /**
      * As {@link #readJsonList}, but for applying verdicts: the array must hold an
      * element shaped like a verdict, so an unrelated object array in the same reply
-     * is neither the verdict list nor a rival to it. (Display formatting keeps the
-     * lenient reader: it renders whatever the verifier wrote.)
+     * is neither the verdict list nor a rival to it. (Display formatting tries it
+     * first and falls back to the lenient reader, so it renders the verdicts that
+     * were applied, or else whatever the verifier wrote.)
      */
     private List<?> readVerdictList(String json) {
         List<?> list = readJsonList(json);
@@ -1284,7 +1292,13 @@ public class TaskForceEngine {
         }
 
         try {
-            var match = EmbeddedJson.soleArrayMatch(rawContent, this::readJsonList);
+            // The verdicts the engine applied first, so a reply with a second array still
+            // shows them, with their feedback decoded: a task's verification note is
+            // traced to the verifier's entry by that text (TaskRecordView).
+            var match = EmbeddedJson.soleArrayMatch(rawContent, this::readVerdictList);
+            if (match == null) {
+                match = EmbeddedJson.soleArrayMatch(rawContent, this::readJsonList);
+            }
             List<?> items = match != null ? match.value() : null;
             if (items == null || items.isEmpty()) {
                 return rawContent;
