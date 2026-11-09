@@ -22,7 +22,7 @@ A whole-feature review of agent signing found that the audit half signed with ke
 - **The verify endpoints' Javadoc** in `IRestAuditStore` no longer calls the check HMAC-only: both verify agent signatures and count the unprovable ones in `agentSignatureUnproven`.
 - **Docs and API text.** [Audit ledger](../audit-ledger.md#agent-signatures): audit entries are signed by the agent version a conversation runs, so they need a deployed version with the key and the flag (group messages are signed from the newest stored version at once); the verdicts; and that the agent signature adds protection only where `eddi.audit.hmac-key` is separate from the vault master key. The OpenAPI text of `POST /agentstore/agents/{id}/signing-keys` scopes "no redeploy needed" to group messages. [Cryptography](../cryptography.md) mentions revocation.
 - **Manager.** The audit page no longer says an entry with a forged agent signature had its content changed: it shows "N agent signature(s) do not verify — the content is intact" next to the content line, and the row chip reads "Agent signature does not match". `agentSignatureUnproven` makes the verdict "Not fully verified" with its own reason. Three keys in all 11 locales.
-- **Operator.** The prompt says audit entries need a deployed version, how the new verdicts are counted, and that a plain-Base64 signature written by 6.7.0 or earlier is checked against the legacy `identity.publicKey` (revision 68).
+- **Operator.** The prompt says audit entries need a deployed version, how the new verdicts are counted, and that a plain-Base64 signature written by 6.7.0 or earlier is checked against the legacy `identity.publicKey`.
 
 ### Design decisions
 
