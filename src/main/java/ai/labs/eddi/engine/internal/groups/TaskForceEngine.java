@@ -894,8 +894,11 @@ public class TaskForceEngine {
                         : "The verifier did not accept this result.";
                 gc.getTaskList().reworkTask(failed.id(), feedback);
                 Metrics.counter(METER_TASK_REWORKS).increment();
-                addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — %s".formatted(
-                        gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject(), feedback));
+                // The note is the engine's, shown to every verifying member as such, so it
+                // does not quote the verifier: its feedback reaches the member through the
+                // task, where the records trace it to the verifier's entry.
+                addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — the verifier's feedback is on the task".formatted(
+                        gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject()));
             }
             executeTaskExecutionPhase(gc, config, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
                     false);

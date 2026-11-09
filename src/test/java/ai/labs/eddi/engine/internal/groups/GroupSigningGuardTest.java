@@ -540,6 +540,28 @@ class GroupSigningGuardTest {
     }
 
     /**
+     * A facilitator that is not a member runs its turns under a key of its own, so
+     * no member conversation is recorded under its id. Its FACILITATION notes are
+     * still an agent's text: only the facilitator, or a member recruiting someone,
+     * records one under an agent id. Deleting the facilitator must not turn its
+     * withheld notes into a non-agent's shown text.
+     */
+    @Test
+    void visibleTo_aDeletedFacilitatorsNotesStayWithheld() throws Exception {
+        String facilitator = "facilitator-agent";
+        stubAgent(RECEIVER, verifyingAgent());
+        when(agentStore.getCurrentResourceId(facilitator)).thenReturn(null);
+        var note = new TranscriptEntry(facilitator, "Facilitator", "Facilitator ended the phase — the reason it gave", 0, "P",
+                TranscriptEntryType.FACILITATION, Instant.now(), null, null);
+
+        var visible = guard().visibleTo(RECEIVER, gc(), List.of(note)).get(0);
+
+        assertTrue(GroupSigningGuard.isWithheld(visible), "a facilitator's note is an agent's text");
+        assertEquals(facilitator + AgentGroupStore.NOT_AN_AGENT_SUFFIX, visible.speakerDisplayName());
+        assertFalse(visible.content().contains("the reason it gave"));
+    }
+
+    /**
      * The placeholder keeps the entry's place, speaker id, phase index and type
      * (window summaries are keyed on raw indices) and says why, but none of its
      * unverified text: not what was said, nor the stored name or phase name.

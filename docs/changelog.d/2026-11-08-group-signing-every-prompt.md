@@ -66,7 +66,10 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   creator, and the cadence turned it into configured task text. The backlog task now records the
   agent that wrote it (`TeamHandoffService`, `TaskItem.filedBy`); `TaskDefinition` carries it as an
   engine-only `createdByAgentId` (`@JsonIgnore`: never written to or read from a stored config) and
-  the run's task keeps it, so `View.vouchesFor` applies. `onDecision` handoffs and inbox items a
+  the run's task keeps it, so `View.vouchesFor` applies. The per-discussion cap
+  `maxAgentAddedTasksPerDiscussion` counts the tasks members file with the task tool
+  (`SharedTaskList.agentFiledTaskCount`, persisted with the discussion), no longer every task with
+  a creator, so the handed-off tasks a run starts with do not use up the members' budget. `onDecision` handoffs and inbox items a
   person accepts name no agent; the docs and the operator recommend `REVIEW` intake for a team
   whose members verify, since those and the cadence question still quote the text.
 - **User memories.** A group- or global-visible user memory another agent wrote is not loaded as a
@@ -90,7 +93,14 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   are signed for the agent and named by it, as a `DISSENT` or `BID` already is: each carries the
   agent's own text. The tie-break note was an engine entry quoting the facilitator, and the
   recruitment note an unsigned entry named `System` under the recruiter. The task-failure note is
-  the engine's own (`system`, with the member as its target).
+  the engine's own (`system`, with the member as its target). The rework note (*"Returned for
+  rework (1/2): <subject> — the verifier's feedback is on the task"*) no longer quotes the
+  verifier: every member is shown it as the engine's, and the feedback reaches the reworking member
+  through the task, whose note the records trace to the verifier's entry.
+- **Deleted facilitators.** A `FACILITATION` note under an agent id counts as an agent's
+  (`GroupSigningGuard.writtenAsAnAgent`), so a facilitator that was never a member, and runs its
+  turns under a key of its own, keeps its unsigned notes withheld after it is deleted. That was the
+  one deleted agent the rule missed.
 
 Docs: [group-conversations.md](../group-conversations.md#signed-contributions) lists every prompt
 and record covered, and its "Not yet supported" row now names only what is still unsigned.
@@ -132,11 +142,9 @@ makes, which cannot sign.
 
 ### Not done
 
-- Engine notes still quote a few short pieces of agent text (a task subject, rework feedback, the
-  convergence check's reason). Listed in the docs.
+- Engine notes still quote a few short pieces of agent text (a task subject, the convergence
+  check's reason). Listed in the docs.
 - The cadence question quotes every pulled task, handed-off ones included, under the user's name,
   and `onDecision` handoffs name no agent; both are documented, with `REVIEW` intake recommended.
 - Lessons another team shares, and those the scorecard tool returns, were checked only against
   the storing team's records rule. Documented, not filtered.
-- A handed-off task in a run now counts toward `taskListConfig.maxAgentAddedTasksPerDiscussion`,
-  since it has a creator; the task-list section of group-conversations.md says so.

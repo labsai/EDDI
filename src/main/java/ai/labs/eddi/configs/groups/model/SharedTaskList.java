@@ -417,8 +417,7 @@ public class SharedTaskList {
         // pass together — 5 concurrent callers against a cap of 20 with 19 filed
         // produced 24. The cap exists precisely as the unbounded-growth guard for an
         // LLM that can call this in a loop, so an advisory one is no guard at all.
-        if (maxAgentAddedTasks > 0 && createdByAgentId != null
-                && tasks.stream().filter(t -> t.createdByAgentId() != null).count() >= maxAgentAddedTasks) {
+        if (maxAgentAddedTasks > 0 && createdByAgentId != null && agentFiledTaskCount >= maxAgentAddedTasks) {
             return AddTaskResult.rejected(
                     "The task list is full for this discussion (%d agent-filed tasks). Finish existing tasks instead of adding more."
                             .formatted(maxAgentAddedTasks));
@@ -474,6 +473,9 @@ public class SharedTaskList {
             tasks.remove(filed);
             return AddTaskResult.rejected("That would create a circular dependency. Check what \"%s\" depends on."
                     .formatted(trimmedSubject));
+        }
+        if (createdByAgentId != null) {
+            agentFiledTaskCount++;
         }
         return new AddTaskResult(filed, null);
     }
@@ -853,6 +855,25 @@ public class SharedTaskList {
             reviewerEdits.put(taskId, edit);
         }
         return u;
+    }
+
+    /**
+     * How many tasks members filed with their task tools in this discussion, what
+     * {@code maxAgentAddedTasksPerDiscussion} bounds. Counted where they are filed
+     * ({@link #addAgentTask}), not from the tasks' creators: a task the run was
+     * seeded with keeps the agent that wrote it (a handoff) as its creator, for
+     * peer verification, but no member of this discussion filed it. Persisted with
+     * the discussion, so the cap holds across a pause; a document written before
+     * this count existed starts it at 0.
+     */
+    private int agentFiledTaskCount;
+
+    public synchronized int getAgentFiledTaskCount() {
+        return agentFiledTaskCount;
+    }
+
+    public synchronized void setAgentFiledTaskCount(int agentFiledTaskCount) {
+        this.agentFiledTaskCount = Math.max(0, agentFiledTaskCount);
     }
 
     // ==================== E2 — reworks within a run ====================
