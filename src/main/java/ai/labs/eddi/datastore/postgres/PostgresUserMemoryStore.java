@@ -317,7 +317,9 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(6, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(7, entry.sourceConversationId());
             ps.setBoolean(8, entry.conflicted());
-            ps.setString(9, agentId);
+            // The writer the entry names, as MongoUserMemoryStore records it: not always
+            // the owner.
+            ps.setString(9, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
