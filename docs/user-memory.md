@@ -203,6 +203,8 @@ Returns: "✅ Forgotten: favorite_color"
 | `group` | All agents in the same group conversation can see it | `(userId, key, sourceAgentId)` among the agent's non-global entries |
 | `global` | All agents for this user can see it | `(userId, key)` |
 
+An agent with `security.requirePeerVerification` (see [Signed contributions](group-conversations.md#signed-contributions)) sees only its own entries and the ones no agent wrote (the user's, an admin's): a `group` or `global` entry another agent wrote carries no signature, so it is neither loaded as a property nor returned by `recallMemories`, `searchMemory` or `forgetFact`. The setting is read from the deployed agent version.
+
 A `self` or `group` write never touches the shared `global` entry with the same key — an agent can hold a private note and a shared fact under one key. (MongoDB used to key self/group writes without the visibility term, so saving a private note flipped the agent's own shared entry to `self` and every other agent lost it; PostgreSQL always had this identity.)
 
 ### Group Memory

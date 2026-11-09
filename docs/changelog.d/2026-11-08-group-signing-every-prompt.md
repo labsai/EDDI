@@ -25,9 +25,10 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   through the group's records view (below). Each dissenter reacts to the synthesis
   as it sees it, and one for which this round's synthesis does not verify is not asked. The
   facilitator's excerpt is the latest contribution it may take as written.
-- **Task records** (`TaskRecordView`). A result is quoted to a verifying reader only when it is its
-  own task or a trusted entry of the assignee holds exactly that text, so an unsigned result or one
-  edited in the store reads `[withheld: this text could not be verified]`; a result an approver
+- **Task records** (`TaskRecordView`). A result is quoted to a verifying reader only when a trusted
+  entry of the assignee holds exactly that text, so an unsigned result or one edited in the store
+  reads `[withheld: this text could not be verified]`, the reader's own results included when it
+  signs (one that does not sign trusts its own entries, so it still sees its result); a result an approver
   edited (`SharedTaskList.reviewerEdits`) is the reviewer's text and is shown. A subject and
   description are withheld when an untrusted `PLAN` entry parses to them and no trusted one does,
   or when another member's task tool wrote them and that member does not sign verifiably (no key,
@@ -36,7 +37,11 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   task is its text and a verifying assignee does it. A verification note is withheld when an untrusted
   `VERIFICATION` entry holds it and no trusted agent entry does. A verifying member whose own
   task's text does not verify fails the task without being asked; a bidder is announced only the
-  tasks it may see.
+  tasks it may see. A verifying verifier is given only the tasks whose text and result it may see
+  (`TaskRecordView.showsWork`); the rest stay `COMPLETED` with an engine note giving their count,
+  and with none left it gets no turn. Before, every withheld task carried one shared placeholder,
+  so its verdict matched no task and fell through to the fail-open path that marked every task
+  `VERIFIED`.
 - **Follow-ups** pass the member's view as `groupTranscript`, and the answer is signed.
 - **Nested groups.** A `GROUP` speaker reads the parent transcript as strictly as its strictest
   reader: its agent members, its moderator and its facilitator (the set `readersOf` counts for the
@@ -49,14 +54,35 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   tools are not assembled for a member that requires verification or whose setting cannot be read.
 - **Cadence feedback.** A standing team's cadence wrote a failed task's raw result or verification
   note into the backlog description, which the next run shows as configured task text. It now
-  writes the task as the group's records count it (`GroupConversationService.recordedTask`).
+  writes the task as the group's records count it (`GroupConversationService.recordedTask`). A
+  rework that did not run keeps the verifier's own feedback as the task's note (the engine says
+  the rework did not run in a note of its own), so the note still traces to the verifier's entry;
+  it used to be suffixed with " (the rework did not run)", which no entry held, and passed. The
+  verification summary renders the verdict array the engine applied before any other array, so a
+  reply carrying a second array still shows the decoded feedback the note is traced by.
+- **Handoffs.** An `AUTO` tool handoff filed another team's agent's text into the backlog with no
+  creator, and the cadence turned it into configured task text. The backlog task now records the
+  agent that wrote it (`TeamHandoffService`, `TaskItem.filedBy`); `TaskDefinition` carries it as an
+  engine-only `createdByAgentId` (`@JsonIgnore`: never written to or read from a stored config) and
+  the run's task keeps it, so `View.vouchesFor` applies. `onDecision` handoffs and inbox items a
+  person accepts name no agent; the docs and the operator recommend `REVIEW` intake for a team
+  whose members verify, since those and the cadence question still quote the text.
+- **User memories.** A group- or global-visible user memory another agent wrote is not loaded as a
+  property (`Conversation.loadUserProperties`) or returned by the memory tool's recall and search
+  (`UserMemoryTool`) for an agent that requires peer verification. The flag rides from the deployed
+  agent (`Agent.setPeerVerificationRequired`) onto every turn's memory, like the continuation
+  policy.
 - **The engine's records** (`GroupSigningGuard.recordView`, `recordedEntries`). Once any member,
   the moderator or the facilitator requires verification, the `SERVICE` judge's input, the
   negotiation table, an arbitration
   verdict, the vote's options and ballots and a retrospective's lessons count only entries that
   verify for every reader (no reader's own entries are exempt). The ballot prompt now takes its
   options from the voter's own view, which reverses the previous PR's choice of the stored
-  transcript: an unverified synthesis offers no options, and the vote does not run on it.
+  transcript: an unverified synthesis offers no options, and the vote does not run on it. A
+  `HUMAN_DECIDES` tie resumed by the person or the timeout moderator is rebuilt from the same
+  records (`HumanTieBreakEngine.rebuildOutcome` takes `PhaseExecutionEngine.recordsOf`), a
+  facilitator's `CALL_VOTE` is refused once a reader verifies unless the facilitator signs
+  verifiably, and a facilitator that is switched off is no reader (`readersOf`).
 - **Entries written for an agent.** The readable verification summary, the facilitator's notes
   (an escalation dropped for an approval gate or for a tie-break included) and the recruitment note
   are signed for the agent and named by it, as a `DISSENT` or `BID` already is: each carries the
@@ -72,7 +98,12 @@ reserved names, withheld engine-named syntheses, the ballot taken from the voter
 group-wide records rule; the "Not filtered yet" sentence is gone. The Platform Operator's prompt
 names the same rules and the two failure messages an admin will ask about (`The vote could not
 run: only 0 option(s) were available`, `Its task text could not be verified, and this member
-requires peer verification`); operator revision bumped.
+requires peer verification`); operator revision bumped. The Manager's "Require peer
+verification" description (all 11 locales) now says the records rule is group-wide and that a
+verifying agent gets no artifact tools. [user-memory.md](../user-memory.md) says what such an agent
+loads and recalls; [team-handoff.md](../team-handoff.md) and the Dynamic
+Agents section say what peer verification means for handoffs and for agents `create_sub_agent`
+makes, which cannot sign.
 
 ### Design decisions
 
@@ -101,3 +132,9 @@ requires peer verification`); operator revision bumped.
 
 - Engine notes still quote a few short pieces of agent text (a task subject, rework feedback, the
   convergence check's reason). Listed in the docs.
+- The cadence question quotes every pulled task, handed-off ones included, under the user's name,
+  and `onDecision` handoffs name no agent; both are documented, with `REVIEW` intake recommended.
+- Lessons another team shares, and those the scorecard tool returns, were checked only against
+  the storing team's records rule. Documented, not filtered.
+- A handed-off task in a run now counts toward `taskListConfig.maxAgentAddedTasks`, since it has a
+  creator.

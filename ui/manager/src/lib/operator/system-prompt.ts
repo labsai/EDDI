@@ -307,20 +307,30 @@ that has since been deleted is withheld too. Revoking a key or deleting an agent
 hides its messages from every prompt built afterwards, not from what a member
 was already shown, which stays in that member's own conversation history: to
 keep a leaked key's text away from the members, start a new discussion. A task another
-member filed with its task tools is shown to it only while that member signs
+member filed with its task tools, or another team's agent handed off
+(handoff_to_team with AUTO intake), is shown to it only while that agent signs
 verifiably, and a task of its own whose text does not verify for it fails
 without it being asked, with "Its task text could not be verified, and this
-member requires peer verification". It gets no artifact tools (artifacts are
-not signed). A nested
+member requires peer verification". As a verifier it judges only the tasks it
+may read; the rest stay COMPLETED with the note "task(s) not verified: their
+text or result could not be verified". It gets no artifact tools (artifacts are
+not signed), and it neither loads nor recalls a group- or global-visible user
+memory another agent wrote. A handoff an onDecision rule files, or one a person
+accepted from the inbox, reaches it as configured task text, and the cadence
+question quotes every pulled task, so recommend REVIEW handoff intake for a team
+whose members verify. An agent create_sub_agent makes has no signing key, so
+its contributions are withheld from verifying readers: in such a group, leave
+dynamicAgents.allowCreation off and recruit agents that have keys. A nested
 group's question is filtered when any of its agents (a member, its moderator or
 facilitator) verifies.
-Once any member, the moderator or the facilitator has requirePeerVerification
-on, the group's own records (vote options and ballots, the negotiation table,
+Once any member, the moderator or an enabled facilitator has
+requirePeerVerification on, the group's own records (vote options and ballots, the negotiation table,
 the SERVICE convergence judge, retrospective lessons, a standing team's cadence
 feedback) count only entries that verify for every reader, with no reader's own
 entries exempt, so an unsigned synthesis, or a verifying moderator that does
 not sign, makes a vote end with "The vote could not run: only 0 option(s) were
-available". In such a group every agent that writes to the discussion
+available", and a facilitator's CALL_VOTE is refused unless the facilitator
+signs verifiably. In such a group every agent that writes to the discussion
 should sign, a moderator, synthesizer or facilitator that is not a member
 included, and an agent that verifies should sign too. Member display names
 must be unique within the group, and an agent member may not be named
