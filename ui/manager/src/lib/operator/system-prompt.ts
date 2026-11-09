@@ -292,8 +292,10 @@ AGENT_SIGNATURE_MISSING (none where the version would have signed),
 AGENT_KEY_REVOKED (key revoked since) and AGENT_KEY_UNAVAILABLE (agent
 permanently deleted) count in \`agentSignatureUnproven\` instead: the content
 is intact, so they are not tampering. A revoked key is trusted for nothing,
-whenever it signed, audit entries included, and revoking the newest key stops
-the agent signing until a new one is generated. \`identity\` is
+whenever it signed, audit entries included (a peer that verifies treats such a
+message as not verifying), and revoking the newest key stops the agent signing
+until a new one is generated. Revoking deletes the private half from the vault,
+best effort: it does not stop anyone holding another copy from signing. \`identity\` is
 engine-owned: an agent save — yours, an import or a sync included — keeps the
 stored identity whatever the body says, so editing \`identity.keys\` or
 \`validUntilMs\` does nothing; only those two endpoints change keys. A save with

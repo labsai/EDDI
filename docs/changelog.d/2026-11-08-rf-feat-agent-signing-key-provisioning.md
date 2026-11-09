@@ -79,8 +79,8 @@ autonomy change, an API sync — until an admin either generates a key (**Genera
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
 off. Find them with a query on `security.signInterAgentMessages: true` in the agents collection
 (or table). An import or a sync onto such an agent turns the flag off and reports it, rather than
-failing. Any `identity.keys` entry a person pasted before this change stays trusted by peers until it
-is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
+failing. Any `identity.keys` entry a person pasted before this change is a key whose private half someone
+outside EDDI may hold, and peers trust it until it is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
 every entry EDDI did not generate — the legacy `identity.publicKey` (v0) included, which generating
 a key does not remove.
 
@@ -104,7 +104,8 @@ synthesizer, facilitator), or turn the flag off.
 - Revocation is a flag, not a deletion of the entry: a verifier must recognise and refuse an entry
   signed under the key, which an unknown version would only report as "unknown key". The group
   verifier in this change does not read the flag yet; until it does, the deleted private key is
-  what stops anything new being signed with it. (Superseded by the entry "peer verification is
+  what stops EDDI signing anything new with it (best effort; it does not stop anyone holding another
+  copy of that private key). (Superseded by the entry "peer verification is
   fail-closed and binds the conversation, position and key version", 2026-11-08: a revoked key
   vouches for nothing.)
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
