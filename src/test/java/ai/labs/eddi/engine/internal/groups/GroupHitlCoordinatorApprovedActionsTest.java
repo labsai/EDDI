@@ -52,7 +52,7 @@ class GroupHitlCoordinatorApprovedActionsTest {
 
     private static final String GC_ID = "gc-1";
     private static final String GROUP_ID = "group-1";
-    private static final String URI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
+    private static final String URI = "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
 
     private IGroupConversationStore conversationStore;
     private IAgentGroupStore groupStore;

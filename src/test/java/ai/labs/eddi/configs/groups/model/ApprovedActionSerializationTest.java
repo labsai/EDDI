@@ -58,7 +58,7 @@ class ApprovedActionSerializationTest {
     void aPhaseWithOnApproved_defaultsTypeAndPolicy() throws Exception {
         String phase = """
                 {"name":"Draft","type":"EXECUTE","requiresApproval":true,
-                 "onApproved":{"action":{"uri":"eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/abc?version=1","call":"post"}}}
+                 "onApproved":{"action":{"uri":"eddi://ai.labs.apicalls/apicallstore/apicalls/abc?version=1","call":"post"}}}
                 """;
 
         var parsed = json.deserialize(phase, AgentGroupConfiguration.DiscussionPhase.class);

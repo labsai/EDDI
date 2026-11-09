@@ -1186,7 +1186,7 @@ public class AgentGroupConfiguration {
      *            the same executor agents use
      * @param uri
      *            the {@code httpcalls} configuration, with an explicit version:
-     *            {@code eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=<n>}
+     *            {@code eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=<n>}
      * @param call
      *            the {@code name} of the call inside that configuration
      */

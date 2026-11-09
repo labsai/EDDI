@@ -827,7 +827,7 @@ Actions](group-approved-result-actions.md).
 
 ```json
 { "name": "Draft", "type": "EXECUTE", "requiresApproval": true,
-  "onApproved": { "action": { "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1", "call": "postIssueComment" },
+  "onApproved": { "action": { "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1", "call": "postIssueComment" },
                   "onFailure": "FAIL_TASK" } }
 ```
 

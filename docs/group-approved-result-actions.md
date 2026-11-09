@@ -26,7 +26,7 @@ group whose `hitlConfig.granularity` is `TASK`:
   "onApproved": {
     "action": {
       "type": "HTTPCALL",
-      "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=1",
+      "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=1",
       "call": "postIssueComment"
     },
     "onFailure": "FAIL_TASK"
@@ -141,7 +141,7 @@ PostgreSQL alike; documents written before the feature simply have none):
   "status": "SUCCEEDED",
   "phaseName": "Draft",
   "phaseIndex": 1,
-  "target": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=1#postIssueComment",
+  "target": "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=1#postIssueComment",
   "onFailure": "FAIL_TASK",
   "approvedBy": "alice",
   "edited": true,
@@ -241,7 +241,7 @@ The group:
       "requiresApproval": true,
       "onApproved": {
         "action": {
-          "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=1",
+          "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=1",
           "call": "postIssueComment"
         },
         "onFailure": "FAIL_TASK"

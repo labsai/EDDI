@@ -94,8 +94,8 @@ public class ApprovedResultActionValidation {
             }
             ApprovedAction action = phase.onApproved().action();
             if (action == null) {
-                problems.add(path + ".action is required: { \"type\": \"HTTPCALL\", \"uri\": \"eddi://ai.labs.httpcalls/httpcallsstore/"
-                        + "httpcalls/<id>?version=<n>\", \"call\": \"<call name>\" }");
+                problems.add(path + ".action is required: { \"type\": \"HTTPCALL\", \"uri\": \"eddi://ai.labs.apicalls/apicallstore/"
+                        + "apicalls/<id>?version=<n>\", \"call\": \"<call name>\" }");
                 continue;
             }
             if (action.call() == null || action.call().isBlank()) {
@@ -214,12 +214,14 @@ public class ApprovedResultActionValidation {
 
     private static String uriProblem(String uri) {
         if (uri == null || uri.isBlank()) {
-            return "is required — eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=<n>";
+            return "is required — eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=<n>";
         }
         try {
             URI parsed = URI.create(uri.trim());
-            if (!"eddi".equals(parsed.getScheme()) || !"ai.labs.httpcalls".equals(parsed.getHost())) {
-                return "must be an httpcalls URI (eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=<n>)";
+            // the v6 host, and the pre-v6 one stored configurations may still carry
+            if (!"eddi".equals(parsed.getScheme())
+                    || !("ai.labs.apicalls".equals(parsed.getHost()) || "ai.labs.httpcalls".equals(parsed.getHost()))) {
+                return "must be an httpcalls URI (eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=<n>)";
             }
             IResourceStore.IResourceId id = RestUtilities.extractResourceId(parsed);
             if (id == null || id.getId() == null) {

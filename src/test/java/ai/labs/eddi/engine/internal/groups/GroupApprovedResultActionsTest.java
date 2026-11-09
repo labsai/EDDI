@@ -49,7 +49,7 @@ import static org.mockito.Mockito.*;
 
 class GroupApprovedResultActionsTest {
 
-    private static final String URI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
+    private static final String URI = "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
     private static final String CALL = "postComment";
 
     private IApiCallsStore apiCallsStore;

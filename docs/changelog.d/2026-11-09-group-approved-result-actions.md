@@ -13,7 +13,7 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
 ```json
 { "name": "Draft", "type": "EXECUTE", "requiresApproval": true,
   "onApproved": { "action": { "type": "HTTPCALL",
-                              "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1",
+                              "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1",
                               "call": "postIssueComment" },
                   "onFailure": "FAIL_TASK" } }
 ```

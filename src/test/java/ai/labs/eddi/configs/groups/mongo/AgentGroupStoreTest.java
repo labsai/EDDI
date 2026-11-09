@@ -814,7 +814,7 @@ class AgentGroupStoreTest {
         var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
         var draft = new DiscussionPhase("Draft", PhaseType.EXECUTE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false,
                 null, false, null, null, new AgentGroupConfiguration.OnApprovedConfig(new AgentGroupConfiguration.ApprovedAction(null,
-                        "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=1", "post"), null));
+                        "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=1", "post"), null));
         var c = config(DiscussionStyle.CUSTOM, List.of(draft), null);
 
         var e = assertThrows(IllegalArgumentException.class, () -> store.validateApprovedResultActions(c));

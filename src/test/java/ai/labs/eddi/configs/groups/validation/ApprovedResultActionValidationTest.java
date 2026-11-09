@@ -31,7 +31,7 @@ import static org.mockito.Mockito.*;
 
 class ApprovedResultActionValidationTest {
 
-    private static final String URI = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
+    private static final String URI = "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
 
     private IApiCallsStore apiCallsStore;
     private ServiceJudgeVaultGrants vaultGrants;
@@ -115,7 +115,7 @@ class ApprovedResultActionValidationTest {
         assertTrue(ApprovedResultActionValidation.structuralProblems(config(HitlGranularity.TASK, phase(PhaseType.EXECUTE, true, null)))
                 .getFirst().contains(".action is required"));
         var problems = ApprovedResultActionValidation.structuralProblems(config(HitlGranularity.TASK,
-                phase(PhaseType.EXECUTE, true, action("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0", " "))));
+                phase(PhaseType.EXECUTE, true, action("eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0", " "))));
         assertEquals(2, problems.size(), problems.toString());
         assertTrue(problems.get(0).contains(".action.call is required"));
         assertTrue(problems.get(1).contains("explicit ?version="));
