@@ -419,7 +419,7 @@
     "revokeSigningKey": "Revocar",
     "keyRevoked": "Revocada",
     "revokeSigningKeyConfirm": "¿Revocar la clave de firma v{{version}}?",
-    "revokeSigningKeyDesc": "Los demás agentes dejarán de confiar en todos los mensajes firmados con esta clave, sin importar cuándo se firmaron, y su clave privada se elimina del almacén. Esto no se puede deshacer. Si es la clave más reciente, el agente deja de firmar y se rechaza todo guardado con la firma activada, hasta que generes una nueva o desactives la firma.",
+    "revokeSigningKeyDesc": "Los demás agentes dejarán de confiar en todos los mensajes firmados con esta clave, sin importar cuándo se firmaron. Su clave privada se elimina del almacén (en la medida de lo posible: si la eliminación falla, revocarla de nuevo lo reintenta). Esto no se puede deshacer. Revocar la clave heredada v0 la elimina; una clave versionada revocada sigue en la lista, marcada como revocada. Si es la clave más reciente, el agente deja de firmar y se rechaza cada guardado con la firma activada, hasta que generes una nueva o desactives la firma.",
     "signingKeyRevoked": "Clave de firma v{{version}} revocada.",
     "signingNeedsKey": "Este agente no tiene una clave de firma utilizable (no hay ninguna declarada o la más reciente está revocada), así que se rechaza guardar con la firma activada. Un administrador puede generar una arriba.",
     "skillAlreadyExists": "Esta habilidad ya está declarada",

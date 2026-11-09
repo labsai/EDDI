@@ -109,7 +109,10 @@ never enforced.
   (signing, replay, revocation, peer verification; "non-repudiation" dropped, since the deployment holds every key; the RFC 8785
   claim corrected) and a [Signed contributions](../group-conversations.md#signed-contributions)
   section. The Manager's "Require peer verification" description no longer says failures are only
-  logged (all 11 locales). The Platform Operator's prompt says what a verifying agent sees and who
+  logged (all 11 locales). The revoke dialog says again that peers stop trusting every message
+  signed with the revoked key: the base branch's copy says peer verification does not refuse a
+  revoked versioned key yet, which this branch makes untrue; its best-effort vault delete and
+  legacy-v0 wording stay (all 11 locales). The Platform Operator's prompt says what a verifying agent sees and who
   must sign (operator revision bumped).
 
 Nothing had been signed in the wild (provisioning only lands with the base branch), so the change
