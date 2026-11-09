@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.AgentIdentity;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.SecurityConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -559,6 +561,29 @@ class GroupSigningGuardTest {
         assertTrue(GroupSigningGuard.isWithheld(visible), "a facilitator's note is an agent's text");
         assertEquals(facilitator + AgentGroupStore.NOT_AN_AGENT_SUFFIX, visible.speakerDisplayName());
         assertFalse(visible.content().contains("the reason it gave"));
+    }
+
+    /**
+     * A standing team pulls a task another team's agent handed off only while its
+     * records would take the text as that agent's: no reader requires peer
+     * verification, or the agent signs verifiably. A configuration that cannot be
+     * read counts as a reader that does.
+     */
+    @Test
+    void recordsTrustAgentText_followsTheReadersAndTheWritersKey() throws Exception {
+        var team = new AgentGroupConfiguration();
+        team.setMembers(List.of(new GroupMember(RECEIVER, "Receiver", 1, null)));
+        stubAgent(AGENT_A, new AgentConfiguration());
+        stubAgent("signer", signingAgent(identity(new AgentPublicKey(1, KEY_V1_B64, 0L, 0L))));
+
+        stubAgent(RECEIVER, new AgentConfiguration());
+        assertTrue(GroupSigningGuard.recordsTrustAgentText(guard(), team, AGENT_A), "no reader verifies");
+
+        stubAgent(RECEIVER, verifyingAgent());
+        assertFalse(GroupSigningGuard.recordsTrustAgentText(guard(), team, AGENT_A), "a reader verifies, the writer does not sign");
+        assertTrue(GroupSigningGuard.recordsTrustAgentText(guard(), team, "signer"), "the writer signs verifiably");
+        assertFalse(GroupSigningGuard.recordsTrustAgentText(guard(), null, AGENT_A), "an unreadable configuration counts as verifying");
+        assertTrue(GroupSigningGuard.recordsTrustAgentText(guard(), team, null), "text no agent wrote");
     }
 
     /**

@@ -33,6 +33,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -253,9 +254,15 @@ public class TeamCadenceService {
                 }
             }
 
-            // 2. Pull: top-N executable backlog tasks, highest priority first.
+            // 2. Pull: top-N executable backlog tasks, highest priority first. A task
+            // another team's agent handed off waits while a member that requires peer
+            // verification could not take its text as that agent's: the member would
+            // fail it unasked on every run, and the question would quote it to them.
+            Map<String, Boolean> trusted = new HashMap<>();
             List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
                     .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
+                    .filter(task -> task.createdByAgentId() == null || trusted.computeIfAbsent(task.createdByAgentId(),
+                            agent -> groupConversationService.recordsTrustAgentText(groupId, agent)))
                     .limit(cadence.maxBacklogTasksPerRun())
                     .toList();
             if (pulled.isEmpty()) {
