@@ -280,9 +280,12 @@ a key keeps it, and peers trust it for v0 signatures until it is revoked). You h
 no tool for either, on purpose: whoever mints or retires an agent's key decides
 what signs as that agent. The private key stays in the secrets vault; the
 public key is added to the agent's \`identity.keys\` as a new agent version, and
-the agent signs its group-conversation messages with the newest one. A revoked
-key is trusted for nothing, whenever it signed, and revoking the newest key
-stops the agent signing until a new one is generated. \`identity\` is
+the agent signs its group-conversation messages with the newest one. Revoking
+a key deletes its private half from the vault (best effort; it does not stop
+anyone holding another copy from signing), and revoking the newest key stops
+the agent signing until a new one is generated. Peer verification does not
+yet read the revoked flag: a signature made with a revoked versioned key still
+verifies (a revoked legacy v0 key is removed, so it does not). \`identity\` is
 engine-owned: an agent save — yours, an import or a sync included — keeps the
 stored identity whatever the body says, so editing \`identity.keys\` or
 \`validUntilMs\` does nothing; only those two endpoints change keys. A save with
