@@ -1628,6 +1628,19 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("an agent with no identity block declares no key: a 404, and nothing is written")
+        void noIdentityIs404() throws Exception {
+            stored.setIdentity(null);
+
+            var e = assertThrows(NotFoundException.class, () -> store.revokeSigningKey(AGENT_ID, 1, 1));
+            assertTrue(e.getMessage().contains("declares no signing key v1"), e.getMessage());
+            assertThrows(NotFoundException.class, () -> store.revokeSigningKey(AGENT_ID, 0, 1));
+
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"), "no key is discarded");
+        }
+
+        @Test
         @DisplayName("refuses a stale version with 409, and keeps the key")
         void refusesAStaleVersion() throws Exception {
             when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 3));
