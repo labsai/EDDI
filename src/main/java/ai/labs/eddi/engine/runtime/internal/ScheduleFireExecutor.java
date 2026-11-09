@@ -925,9 +925,12 @@ public class ScheduleFireExecutor {
     /**
      * Run one team-cadence pull (I13) and record the fire. Mirrors
      * {@link #fireDreamConsolidation}: a deliberate skip (backlog empty, previous
-     * discussion still running, lost claim) is COMPLETED with the reason in the
-     * log; a real failure is FAILED so it retries with backoff and eventually
-     * dead-letters instead of appearing to run while doing nothing.
+     * discussion still running, lost claim, only handed-off tasks the team cannot
+     * verify left) is COMPLETED with the reason in the fire log's
+     * {@code errorMessage}, as a skipped conversation fire carries its own, so the
+     * fire history says why a team did nothing; a real failure is FAILED so it
+     * retries with backoff and eventually dead-letters instead of appearing to run
+     * while doing nothing.
      */
     private ScheduleFireLog fireTeamCadence(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
@@ -942,6 +945,7 @@ public class ScheduleFireExecutor {
             if (result.isSuccess()) {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
                 if (result.skippedReason() != null) {
+                    errorMessage = result.skippedReason();
                     LOGGER.infof("[SCHEDULE] Team cadence '%s' (id=%s) skipped: %s", schedule.getName(), schedule.getId(),
                             result.skippedReason());
                 } else {
