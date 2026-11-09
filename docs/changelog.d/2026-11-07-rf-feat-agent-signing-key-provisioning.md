@@ -63,7 +63,7 @@ unsigned transcript entry while the configuration said the agent signed.
 - Versioned keys only: the legacy unversioned `agent-signing-key:{id}` is still read and checked but
   not written, so there is one way to provision.
 - No MCP tool: the plan called it optional, and an MCP tool would widen who can mint keys beyond the
-  REST role gate this PR pins.
+  REST role gate this change pins.
 - Validity windows and verification outcomes are untouched here: enforcing `validUntilMs`, a
   fail-closed verdict per entry and binding the conversation into the signed bytes are the entry
   "peer verification is fail-closed and binds the conversation, position and key version"

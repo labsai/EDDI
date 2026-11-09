@@ -110,10 +110,10 @@ never enforced.
   must sign (operator revision bumped).
 
 No release could provision a signing key (that lands with the entry "admins provision an agent
-signing key end to end; the validator checks the key is usable"), so no release signed a group
-entry and the change of the signed bytes needs no migration. An entry signed under a key written
-into the vault outside EDDI's API was signed over the old payload; it no longer verifies and is
-withheld from verifying members.
+signing key end to end; the validator checks the key is usable"), so a group entry was signed only
+where an agent's legacy key had been written into the vault outside EDDI's API, and the change of
+the signed bytes needs no migration. Such an entry was signed over the old payload: it no longer
+verifies and is withheld from verifying members. What that agent signs after the upgrade verifies.
 
 ### Upgrading
 

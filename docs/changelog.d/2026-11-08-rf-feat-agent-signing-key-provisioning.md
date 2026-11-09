@@ -71,7 +71,9 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
 
 Before this change the save-time check accepted `signInterAgentMessages` or
 `requirePeerVerification` whenever `identity` held any non-blank string, and no EDDI API could put a
-private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing, and
+private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing (unless
+the private half of its legacy `identity.publicKey` was written into the vault outside the API, as
+`agent-signing-key:{agentId}`: that agent keeps signing with it, and its saves pass), and
 after the upgrade **every save of it is refused (400)** — a person's save, a workflow cascade, an
 autonomy change, an API sync — until an admin either generates a key (**Generate signing key** in
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
@@ -85,7 +87,8 @@ a key does not remove.
 **Agents stored with `security.requirePeerVerification: true`.** Until now peer verification only
 logged a failure. With group-signature verification, which builds on this change, such an agent
 receives every peer entry that does not verify as a `[withheld ...]` placeholder — and since no release
-could provision a key, that is every entry another agent wrote. One such agent among a
+could provision a key, that is every entry another agent wrote, apart from what an agent signing
+with such a legacy key writes after the upgrade. One such agent among a
 group's members, moderator or facilitator also makes the group's records count only entries that
 verify for every reader: the vote finds no options and records that it could not run, the
 negotiation table stays empty, and the SERVICE judge and the retrospective see only signed entries —
