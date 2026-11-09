@@ -1460,7 +1460,11 @@ each of its turns:
   could not verify: an `AUTO` handoff from an agent that does not sign
   verifiably goes to the intake inbox for a person to accept, and a backlog
   task whose agent stops signing waits on the backlog, not pulled, so no
-  member fails it, is charged for it or is quoted it. Configured tasks and
+  member fails it, is charged for it or is quoted it. Such a task stays
+  `PENDING`; a cadence fire that it leaves with nothing to run records why
+  in the schedule's fire history, naming the agents. To free it, give the
+  agent a signing key again (or turn its signing back on), or delete the
+  task and file it again. Configured tasks and
   the user's own are shown, and so is a handoff a person accepted from the
   intake inbox. A store edit to a task's subject or description is not
   detected, here or for configured tasks. A verification note is withheld
@@ -1493,10 +1497,11 @@ each of its turns:
   What counts is who last wrote the value, since a global entry keeps its
   creator as owner when another agent writes it; the store leaves these
   entries out before the recall limit, so its own memories, the ones the user
-  or an admin wrote and the team's lessons are all shown. It does not
-  overwrite such a global value with a `longTerm` property either (see
-  [User Memory](user-memory.md)). (The flag is read from the deployed agent
-  version.)
+  or an admin wrote and the team's lessons are all shown. A `longTerm`
+  property it sets for a global key is written as any agent's is, replacing
+  such a value, and makes it the value's writer, so it is shown the value
+  again (see [User Memory](user-memory.md)). (The flag is read from the
+  deployed agent version.)
 - **Entries the engine writes for an agent are signed for it.** A follow-up
   answer, the readable summary of a task-force verification, the
   facilitator's notes (an escalation dropped for an approval gate or a

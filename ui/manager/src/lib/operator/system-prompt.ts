@@ -311,15 +311,20 @@ member filed with its task tools, or another team's agent handed off
 (handoff_to_team with AUTO intake), is shown to it only while that agent signs
 verifiably: a team with such a member files an AUTO handoff from an agent that
 does not to its intake inbox for a person to accept, and its cadence does not
-pull a backlog task whose agent stopped signing (it waits on the backlog). A
+pull a backlog task whose agent stopped signing: it waits on the backlog as
+PENDING, and a cadence fire it leaves with nothing to run records why in the
+schedule's fire history (the Error column of a COMPLETED fire on the
+Schedules page), naming the agent. To free it, give that agent a signing key again (or turn its
+signing back on), or delete the task and file it again. A
 task of its own whose text does not verify for it fails without it being asked, with "Its task text could not be verified, and this
 member requires peer verification". As a verifier it judges only the tasks it
 may read; the rest stay COMPLETED with the note "task(s) not verified: their
 text or result could not be verified". It gets no artifact tools (artifacts are
 not signed), and in every conversation, 1:1 chats included, it neither loads
 nor recalls a group- or global-visible user memory whose value another agent
-last wrote (its own, the user's and its team's lessons are shown), nor
-overwrites such a global value with a longTerm property. A handoff an onDecision rule files, or one a person
+last wrote (its own, the user's and its team's lessons are shown). A longTerm
+property it sets for a global key is written like any agent's, replacing
+another agent's value and making it the writer. A handoff an onDecision rule files, or one a person
 accepted from the inbox, reaches it as configured task text, and the cadence
 question quotes the tasks it pulls, so recommend REVIEW handoff intake for a team
 whose members verify. An agent create_sub_agent makes has no signing key, so

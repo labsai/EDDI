@@ -384,6 +384,13 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
 
+> **A team cadence fire that runs nothing says why.** A skip (the backlog has no
+> executable task, the previous run still holds the workspace, the team's
+> monthly budget is spent, another fire won the claim, or the only executable
+> tasks are handed-off ones the team cannot verify) logs `COMPLETED` with the
+> reason in `errorMessage`, as a `SKIPPED` conversation fire carries its own. It
+> is not a failure: it never retries or dead-letters.
+
 > **A RAG ingestion fire starts a run; it does not wait for it.** The fire claims
 > the source's run and hands it to a worker of its own, then logs `COMPLETED` —
 > a crawl outlasts the scheduler's lease, and running it inside the fire meant

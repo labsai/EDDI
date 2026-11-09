@@ -76,7 +76,11 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   tool handoff from an agent that does not sign verifiably to the intake inbox, as `REVIEW` would,
   and `TeamCadenceService` does not pull a backlog task whose agent stopped signing (it waits on
   the backlog, and each fire that leaves it logs why at INFO), so no member fails it unasked on every run, is charged a `tasksFailed` for it or
-  is quoted it in the cadence question. Both ask `GroupConversationService.recordsTrustAgentText`
+  is quoted it in the cadence question. A fire such tasks leave with nothing to run is skipped with
+  a reason that says so, naming the agents and how to free the tasks (a signing key again, or
+  delete and re-file), instead of "No executable backlog tasks"; and every team-cadence skip now
+  records its reason in the fire log's `errorMessage` (`ScheduleFireExecutor.fireTeamCadence`), as
+  a `SKIPPED` conversation fire does, so the schedule's fire history says why a team did nothing. Both ask `GroupConversationService.recordsTrustAgentText`
   (`GroupSigningGuard.recordsTrustAgentText`: no reader verifies, or the agent signs verifiably; an
   unreadable group counts as verifying).
 - **User memories.** A group- or global-visible user memory whose value another agent wrote is not
@@ -90,12 +94,19 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   by their owner), and `UserMemoryEntry.writtenByAgentOtherThan` reads it. The stores leave those
   entries out in the query (`getVisibleEntriesForVerifyingReader`), before `maxRecallEntries`, so
   other agents' entries no longer take the places of the reader's own and the user's. A team's
-  lessons (`group:<groupId>`, written by the engine as `retro`) are kept. Such an agent also does
-  not overwrite a global value another agent last wrote with a `longTerm` property
-  (`Conversation.storePropertiesPermanently`), since it set the property without being shown the
-  value. A Dream consolidation that merges several agents' entries is written as the housekeeping
-  agent's (`DreamService`), not as the first original's owner, which could be the user or the
-  reader itself. The Manager's "Require peer verification" description (11 locales) says this
+  lessons (`group:<groupId>`, written by the engine as `retro`) are kept. The stores record the
+  writer an entry names (`lastWriterAgentId`; the 13-argument constructor names its owner), so the
+  writes made for an agent other than the row's owner name both: an undo or redo of a turn
+  (`ConversationService.syncLongTermChanges`) records the conversation's agent, not the global
+  row's creator, which had relabelled one agent's value as another's, and a REST `PUT` that names
+  no writer records its `sourceAgentId` (`UserMemoryWriteRules.withDefaults`). A Dream
+  consolidation (`DreamService`) takes the merged entry's writer from the originals' writers, not
+  their owners: none when no agent wrote any, the one agent that did, otherwise the housekeeping
+  agent, so a merge of the user's keys an agent overwrote is no longer stored as no agent's. A
+  verifying agent's `longTerm` property for a global key is written as any agent's
+  (last writer wins) and makes it the value's writer: an earlier version of this change dropped
+  it when another agent had last written the key, which lost a fact the user had just given the
+  agent, on every turn and for good, since the agent was never shown the stored value. The Manager's "Require peer verification" description (11 locales) says this
   applies in every conversation.
 - **The engine's records** (`GroupSigningGuard.recordView`, `recordedEntries`). Once any member,
   the moderator or the facilitator requires verification, the `SERVICE` judge's input, the
@@ -168,7 +179,15 @@ makes, which cannot sign.
 - A handed-off task a verifying team cannot verify goes to the intake inbox at filing and waits on
   the backlog if its agent stops signing later, rather than being pulled and failed: a person
   vouches for inbox text by accepting it, and nothing in the receiving team can make an unsigned
-  agent's text verify.
+  agent's text verify. Why it waits is said in the fire history, not on the task: a note or status
+  on the task would be a second workspace write in the pull and would have to be cleared once the
+  agent signs again.
+- A verifying agent's global property write is not refused. Rejected: dropping it when another
+  agent last wrote the key (a fact the user just gave is lost, for good, since the agent is never
+  shown the stored value and so never becomes its writer), and writing it only when it differs
+  from a configured default (the agent never loaded the hidden value, so there is nothing to
+  compare with). A property setter that sets a default for a global key every turn overwrites
+  other agents' values whether the agent verifies or not; the docs say to use `self` for such keys.
 
 ### Not done
 
