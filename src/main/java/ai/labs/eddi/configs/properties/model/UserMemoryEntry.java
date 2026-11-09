@@ -27,6 +27,15 @@ import java.util.List;
 public record UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
         List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
 
+    /**
+     * Whether an agent other than {@code agentId} wrote this entry. One the user or
+     * an admin wrote names no agent. A reader that requires peer verification is
+     * shown no such entry: no signature covers it.
+     */
+    public boolean writtenByAgentOtherThan(String agentId) {
+        return sourceAgentId != null && !sourceAgentId.isBlank() && !sourceAgentId.equals(agentId);
+    }
+
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");
 

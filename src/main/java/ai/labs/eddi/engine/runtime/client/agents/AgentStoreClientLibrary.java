@@ -83,6 +83,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             ((Agent) agent).setUserMemoryConfig(new AgentConfiguration.UserMemoryConfig());
         }
         ((Agent) agent).setMemoryToolsEnabled(agentConfig.isEnableMemoryTools());
+        ((Agent) agent).setPeerVerificationRequired(agentConfig.getSecurity() != null && agentConfig.getSecurity().isRequirePeerVerification());
 
         // Memory Policy (Phase A: Strict Write Discipline)
         if (agentConfig.getMemoryPolicy() != null) {

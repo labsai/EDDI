@@ -385,7 +385,14 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
+            List<UserMemoryEntry> visible = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+            // A member that requires peer verification is shown no agent text that no
+            // signature covers: a group- or global-visible memory another agent wrote
+            // is such text.
+            if (memory.isPeerVerificationRequired()) {
+                visible = visible.stream().filter(entry -> !entry.writtenByAgentOtherThan(agentId)).toList();
+            }
+            List<UserMemoryEntry> entries = mostSpecificPerKey(visible);
 
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);
