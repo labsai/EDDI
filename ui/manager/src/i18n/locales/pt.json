@@ -419,7 +419,7 @@
     "revokeSigningKey": "Revogar",
     "keyRevoked": "Revogada",
     "revokeSigningKeyConfirm": "Revogar a chave de assinatura v{{version}}?",
-    "revokeSigningKeyDesc": "Os outros agentes deixam de confiar em qualquer mensagem assinada com esta chave, independentemente de quando foi assinada, e a sua chave privada é eliminada do cofre. Esta ação não pode ser anulada. Se for a chave mais recente, o agente deixa de assinar e qualquer gravação com a assinatura ativada é recusada, até gerar uma nova ou desativar a assinatura.",
+    "revokeSigningKeyDesc": "A sua chave privada é eliminada do cofre (na medida do possível: se a eliminação falhar, revogar novamente tenta outra vez). Esta ação não pode ser desfeita. Revogar a chave legada v0 remove-a, pelo que os outros agentes deixam de confiar nas mensagens assinadas com ela. Uma chave versionada revogada continua listada e a verificação pelos outros agentes ainda não a recusa: uma mensagem assinada com ela, por qualquer pessoa com uma cópia da sua chave privada, ainda pode ser verificada. Se for a chave mais recente, o agente deixa de assinar e cada gravação com a assinatura ativada é recusada, até gerar uma nova ou desativar a assinatura.",
     "signingKeyRevoked": "Chave de assinatura v{{version}} revogada.",
     "signingNeedsKey": "Este agente não tem uma chave de assinatura utilizável (nenhuma está declarada, ou a mais recente foi revogada), por isso guardar com a assinatura ativada é recusado. Um administrador pode gerar uma acima.",
     "skillAlreadyExists": "Esta competência já foi declarada",
