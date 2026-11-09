@@ -1460,9 +1460,10 @@ each of its turns:
   could not verify: an `AUTO` handoff from an agent that does not sign
   verifiably goes to the intake inbox for a person to accept, and a backlog
   task whose agent stops signing waits on the backlog, not pulled, so no
-  member fails it, is charged for it or is quoted it. Configured tasks and the user's own are shown, and so is a
-  handoff a person accepted from the intake inbox. A store edit to a task's subject or description is
-  not detected, here or for configured tasks. A verification note is withheld
+  member fails it, is charged for it or is quoted it. Configured tasks and
+  the user's own are shown, and so is a handoff a person accepted from the
+  intake inbox. A store edit to a task's subject or description is not
+  detected, here or for configured tasks. A verification note is withheld
   when it comes from a verifier entry that does not verify. A verifying member
   whose own task's text does not verify is not asked to do it: the task fails
   with "Its task text could not be verified". A verifying verifier judges only

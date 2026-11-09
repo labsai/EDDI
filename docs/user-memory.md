@@ -392,6 +392,9 @@ Each memory entry contains:
   "conflicted": false,
   "accessCount": 12,
   "createdAt": "2026-01-15T10:30:00Z",
-  "updatedAt": "2026-03-29T14:22:00Z"
+  "updatedAt": "2026-03-29T14:22:00Z",
+  "lastWriterAgentId": "agent-789"
 }
 ```
+
+`sourceAgentId` is the agent that created the entry, and a `global` entry keeps it when another agent writes the key. `lastWriterAgentId` is the agent whose write produced the value the entry holds now (here another agent overwrote `agent-456`'s fact), `null` when the user or an admin wrote it. An entry stored before the field existed reads back with its owner as writer. An agent that requires peer verification goes by this field (see [Visibility scopes](#visibility-scopes)).

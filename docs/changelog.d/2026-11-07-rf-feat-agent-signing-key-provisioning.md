@@ -62,9 +62,9 @@ unsigned transcript entry while the configuration said the agent signed.
 - No MCP tool: the plan called it optional, and an MCP tool would widen who can mint keys beyond the
   REST role gate this PR pins.
 - Validity windows and verification outcomes are untouched here: enforcing `validUntilMs`, a
-  fail-closed verdict per entry and binding the conversation into the signed bytes are the entry "peer verification is fail-closed
-  and binds the conversation, position and key version" (2026-11-08); audit signatures (still on
-  the unversioned key) are left to a later change.
+  fail-closed verdict per entry and binding the conversation into the signed bytes are the entry
+  "peer verification is fail-closed and binds the conversation, position and key version"
+  (2026-11-08); audit signatures (still on the unversioned key) are left to a later change.
 
 ### Tests
 
