@@ -1243,7 +1243,10 @@ public class AgentConfiguration {
          * maintain the user's whole memory set across agents — the cross-agent
          * consolidation {@link #isPreserveAgentProvenance()}{@code =false} describes.
          * Entries without a {@code sourceAgentId} (legacy/migrated rows) are only in
-         * scope in this mode, since no agent owns them.
+         * scope in this mode, since no agent owns them. An entry merged from several
+         * agents' entries is this agent's own model text and is written as its, so an
+         * agent that requires peer verification does not read it as its own or the
+         * user's.
          *
          * @since 6.1.0
          */

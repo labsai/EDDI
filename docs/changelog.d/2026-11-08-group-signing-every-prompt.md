@@ -71,12 +71,32 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   (`SharedTaskList.agentFiledTaskCount`, persisted with the discussion), no longer every task with
   a creator, so the handed-off tasks a run starts with do not use up the members' budget. `onDecision` handoffs and inbox items a
   person accepts name no agent; the docs and the operator recommend `REVIEW` intake for a team
-  whose members verify, since those and the cadence question still quote the text.
-- **User memories.** A group- or global-visible user memory another agent wrote is not loaded as a
-  property (`Conversation.loadUserProperties`) or returned by the memory tool's recall and search
-  (`UserMemoryTool`) for an agent that requires peer verification. The flag rides from the deployed
-  agent (`Agent.setPeerVerificationRequired`) onto every turn's memory, like the continuation
-  policy.
+  whose members verify, since those still reach the run as configured text. A team with a verifying
+  reader never runs a handed-off task it could not verify: `TeamHandoffService` files an `AUTO`
+  tool handoff from an agent that does not sign verifiably to the intake inbox, as `REVIEW` would,
+  and `TeamCadenceService` does not pull a backlog task whose agent stopped signing (it waits on
+  the backlog), so no member fails it unasked on every run, is charged a `tasksFailed` for it or
+  is quoted it in the cadence question. Both ask `GroupConversationService.recordsTrustAgentText`
+  (`GroupSigningGuard.recordsTrustAgentText`: no reader verifies, or the agent signs verifiably; an
+  unreadable group counts as verifying).
+- **User memories.** A group- or global-visible user memory whose value another agent wrote is not
+  loaded as a property (`Conversation.loadUserProperties`) or returned by the memory tool's recall,
+  search and forget (`UserMemoryTool`) for an agent that requires peer verification, in any
+  conversation. The flag rides from the deployed agent (`Agent.setPeerVerificationRequired`) onto
+  every turn's memory, like the continuation policy. A global entry keeps its creator as owner when
+  another agent writes it, so each entry now records its last writer (`lastWriterAgentId` in
+  MongoDB, `last_writer_agent_id` in PostgreSQL, added by `ALTER TABLE ... ADD COLUMN IF NOT
+  EXISTS`; `""` for the user's or an admin's write, absent on older entries, which read as written
+  by their owner), and `UserMemoryEntry.writtenByAgentOtherThan` reads it. The stores leave those
+  entries out in the query (`getVisibleEntriesForVerifyingReader`), before `maxRecallEntries`, so
+  other agents' entries no longer take the places of the reader's own and the user's. A team's
+  lessons (`group:<groupId>`, written by the engine as `retro`) are kept. Such an agent also does
+  not overwrite a global value another agent last wrote with a `longTerm` property
+  (`Conversation.storePropertiesPermanently`), since it set the property without being shown the
+  value. A Dream consolidation that merges several agents' entries is written as the housekeeping
+  agent's (`DreamService`), not as the first original's owner, which could be the user or the
+  reader itself. The Manager's "Require peer verification" description (11 locales) says this
+  applies in every conversation.
 - **The engine's records** (`GroupSigningGuard.recordView`, `recordedEntries`). Once any member,
   the moderator or the facilitator requires verification, the `SERVICE` judge's input, the
   negotiation table, an arbitration
@@ -139,12 +159,24 @@ makes, which cannot sign.
   construction sites, re-signed on every cadence append).
 - Artifacts are gated by absence for verifying members rather than filtered by last editor: a
   version merges earlier text, so the last editor says nothing about who wrote what.
+- A user memory is judged by its last writer, a field written on every write, not by its owner:
+  the owner has to stay the creator (the global-key ownership guard and `upsertIfOwnedBy` read it),
+  and a memory entry holds one value, unlike an artifact version. The filter runs in the store's
+  query so the recall limit counts only what the reader is shown; over-fetching by a constant
+  factor still fails once peers write more than that factor allows. Rejected: dropping every
+  global entry for a verifying reader (its own and the user's would go too).
+- A handed-off task a verifying team cannot verify goes to the intake inbox at filing and waits on
+  the backlog if its agent stops signing later, rather than being pulled and failed: a person
+  vouches for inbox text by accepting it, and nothing in the receiving team can make an unsigned
+  agent's text verify.
 
 ### Not done
 
 - Engine notes still quote a few short pieces of agent text (a task subject, the convergence
   check's reason). Listed in the docs.
-- The cadence question quotes every pulled task, handed-off ones included, under the user's name,
-  and `onDecision` handoffs name no agent; both are documented, with `REVIEW` intake recommended.
+- The cadence question quotes the pulled tasks under the user's name, and `onDecision` handoffs
+  and inbox items a person accepted name no agent; documented, with `REVIEW` intake recommended.
+- A key revoked between a cadence pull and the task's turn still fails that task once (and charges
+  its assignee), before the next fire leaves it on the backlog.
 - Lessons another team shares, and those the scorecard tool returns, were checked only against
   the storing team's records rule. Documented, not filtered.

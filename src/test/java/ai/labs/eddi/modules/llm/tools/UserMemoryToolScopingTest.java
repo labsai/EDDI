@@ -83,14 +83,21 @@ class UserMemoryToolScopingTest {
         var byOther = entry("1", "team_decision", Visibility.group, AGENT_A, List.of("group-1"), Instant.now());
         var byItself = entry("2", "own_note", Visibility.group, AGENT_B, List.of("group-1"), Instant.now());
         var byTheUser = entry("3", "language", Visibility.global, null, List.of(), Instant.now());
+        // The user's key, last written by another agent: the owner says nothing about
+        // the value.
+        var overwrittenByOther = new UserMemoryEntry("4", USER, "timezone", "UTC+14", "fact", Visibility.global, null, List.of(), "conv-x",
+                false, 0, Instant.now(), Instant.now(), AGENT_A);
         when(store.getVisibleEntries(eq(USER), eq(AGENT_B), any(), any(), anyInt())).thenReturn(List.of(byOther, byItself, byTheUser));
-        when(store.filterEntries(USER, "e")).thenReturn(List.of(byOther, byItself, byTheUser));
+        when(store.getVisibleEntriesForVerifyingReader(eq(USER), eq(AGENT_B), any(), any(), anyInt())).thenReturn(List.of(byItself, byTheUser));
+        when(store.filterEntries(USER, "e")).thenReturn(List.of(byOther, byItself, byTheUser, overwrittenByOther));
         var verifying = new UserMemoryTool(store, USER, AGENT_B, "conv-1", List.of("group-1"), config, () -> false, true);
 
         for (String result : List.of(verifying.recallMemories(), verifying.searchMemory("e"))) {
             assertFalse(result.contains("team_decision"), result);
+            assertFalse(result.contains("timezone"), result);
             assertTrue(result.contains("own_note") && result.contains("language"), result);
         }
+        verify(store, never()).getVisibleEntries(any(), any(), any(), any(), anyInt());
         assertTrue(toolFor(AGENT_B, List.of("group-1")).recallMemories().contains("team_decision"), "an agent that does not verify reads it");
     }
 

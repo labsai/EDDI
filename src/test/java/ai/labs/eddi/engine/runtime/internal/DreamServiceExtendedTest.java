@@ -484,6 +484,37 @@ class DreamServiceExtendedTest {
             // Already shared → a single merged entry, still group-scoped
             verify(store, times(1)).insertIfAbsent(argThat(entry -> entry.visibility() == Visibility.group));
         }
+
+        /**
+         * A merge of several agents' entries is the housekeeping agent's own model
+         * text. Crediting it to the first original's owner made it read as the user's
+         * (a null owner) or as that agent's own, so a reader that requires peer
+         * verification loaded the other agents' unsigned facts with it.
+         */
+        @Test
+        @DisplayName("a merge of several agents' entries is credited to the housekeeping agent, not to the first original")
+        void aCrossAgentMergeBelongsToTheHousekeepingAgent() throws Exception {
+            dreamConfig.setSummarizeGroupBy("all");
+            dreamConfig.setPreserveAgentProvenance(false);
+            dreamConfig.setSummarizeMinEntries(2);
+            dreamConfig.setCrossAgentMaintenance(true);
+
+            var entries = new ArrayList<>(List.of(
+                    new UserMemoryEntry("id1", "user-1", "k1", "the user's", "fact", Visibility.global, null, null, "source", false, 0,
+                            Instant.now().minusSeconds(100), Instant.now()),
+                    new UserMemoryEntry("id2", "user-1", "k2", "agent a's", "fact", Visibility.global, "agent-a", null, "source", false, 0,
+                            Instant.now().minusSeconds(90), Instant.now()),
+                    new UserMemoryEntry("id3", "user-1", "k3", "agent b's", "fact", Visibility.global, "agent-b", null, "source", false, 0,
+                            Instant.now().minusSeconds(80), Instant.now())));
+            when(store.getAllEntries("user-1")).thenReturn(entries);
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                    .thenReturn(new SummarizationResult("[{\"key\": \"merged\", \"value\": \"all three\"}]", 0, 0));
+
+            assertTrue(dreamService.process("user-1", "housekeeper", dreamConfig).isSuccess());
+
+            verify(store).insertIfAbsent(argThat(entry -> "merged".equals(entry.key()) && "housekeeper".equals(entry.sourceAgentId())));
+        }
     }
 
     // ==================== buildGroups — groupBy strategies ====================

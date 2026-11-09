@@ -109,6 +109,34 @@ class ConversationLongTermPersistenceTest {
         assertEquals("dietary_restriction", entry.getValue().key());
     }
 
+    /**
+     * An agent that requires peer verification is not shown a global memory whose
+     * value another agent wrote, so a longTerm property it sets for that key was
+     * set without it. Writing it would replace the other agent's fact, on every
+     * turn, since the agent never sees the stored value; a key whose value it may
+     * read (the user's here) is written as before.
+     */
+    @Test
+    @DisplayName("a verifying agent does not overwrite a global memory another agent last wrote")
+    void aVerifyingAgentLeavesAnotherAgentsGlobalValueAlone() throws Exception {
+        memory.setPeerVerificationRequired(true);
+        var othersValue = new UserMemoryEntry("e1", "user-1", "preferred_language", "de", "fact", Visibility.global, null, List.of(), "conv-o",
+                false, 0, Instant.now(), Instant.now(), "agent-o");
+        var usersValue = new UserMemoryEntry("e2", "user-1", "timezone", "CET", "fact", Visibility.global, "agent-o", List.of(), null, false,
+                0, Instant.now(), Instant.now(), null);
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(othersValue, usersValue));
+
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("preferred_language", new Property("preferred_language", "en", Scope.longTerm));
+        memory.getConversationProperties().put("timezone", new Property("timezone", "UTC", Scope.longTerm));
+        conversation.say("hi", new LinkedHashMap<>());
+
+        ArgumentCaptor<UserMemoryEntry> written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(written.capture());
+        assertEquals("timezone", written.getValue().key());
+        assertTrue(memory.getPendingLongTermWrites().isEmpty(), "the refused write is not retried on every turn");
+    }
+
     @Test
     @DisplayName("G6 — a second turn that changes nothing writes nothing either")
     void secondTurnWithoutChangesWritesNothing() throws Exception {

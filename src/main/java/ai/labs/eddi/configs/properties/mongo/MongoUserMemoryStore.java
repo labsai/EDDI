@@ -68,6 +68,15 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_CATEGORY = "category";
     private static final String FIELD_VISIBILITY = "visibility";
     private static final String FIELD_SOURCE_AGENT_ID = "sourceAgentId";
+    /**
+     * The agent whose write produced the stored value, {@link #NO_AGENT_WRITER} for
+     * a write no agent made (the user's, an admin's). Set on every write, unlike
+     * the owner, which a global entry keeps from its insert. Missing on an entry
+     * stored before it existed, which then reads back with its owner as writer.
+     */
+    static final String FIELD_LAST_WRITER_AGENT_ID = "lastWriterAgentId";
+    /** What {@link #FIELD_LAST_WRITER_AGENT_ID} holds for a write no agent made. */
+    private static final String NO_AGENT_WRITER = "";
     private static final String FIELD_GROUP_IDS = "groupIds";
     private static final String FIELD_SOURCE_CONVERSATION_ID = "sourceConversationId";
     private static final String FIELD_CONFLICTED = "conflicted";
@@ -182,7 +191,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
             Bson filter = and(eq(FIELD_USER_ID, userId), eq(FIELD_KEY, key), eq(FIELD_VISIBILITY, Visibility.global.name()));
             Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_UPDATED_AT, now.toString()),
-                    Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
+                    Updates.set(FIELD_LAST_WRITER_AGENT_ID, NO_AGENT_WRITER), Updates.setOnInsert(FIELD_USER_ID, userId),
+                    Updates.setOnInsert(FIELD_KEY, key),
                     Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
                     Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
@@ -318,7 +328,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
 
         return Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
-                Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
+                Updates.set(FIELD_LAST_WRITER_AGENT_ID, writerOf(entry)), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
                 Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
@@ -355,7 +366,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()), Updates.set(FIELD_CONFLICTED, entry.conflicted()),
-                Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
+                Updates.set(FIELD_LAST_WRITER_AGENT_ID, writerOf(entry)), Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
         return memoriesCollection.updateOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt)), update)
                 .getModifiedCount() == 1;
     }
@@ -381,8 +392,18 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public List<UserMemoryEntry> getVisibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries)
             throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
+        return visibleEntries(buildVisibilityFilter(userId, agentId, groupIds, false), recallOrder, maxEntries);
+    }
 
-        Bson filter = buildVisibilityFilter(userId, agentId, groupIds);
+    @Override
+    public List<UserMemoryEntry> getVisibleEntriesForVerifyingReader(String userId, String agentId, List<String> groupIds, String recallOrder,
+                                                                     int maxEntries)
+            throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
+        return visibleEntries(buildVisibilityFilter(userId, agentId, groupIds, true), recallOrder, maxEntries);
+    }
+
+    private List<UserMemoryEntry> visibleEntries(Bson filter, String recallOrder, int maxEntries) {
 
         if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
             List<UserMemoryEntry> entries = new ArrayList<>();
@@ -404,8 +425,14 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
      * derived from the supplied group ids, with group visibility, with a group-id
      * overlap — never another human user's entries. The user's own branch is
      * untouched, so personal recall behaves exactly as before.
+     * <p>
+     * For a reader that requires peer verification ({@code verifyingReader}) the
+     * user's branch keeps only the entries whose value this agent or no agent wrote
+     * ({@link UserMemoryEntry#writtenByAgentOtherThan}), in the query, so the limit
+     * counts only entries the reader is shown. The team branch is left as it is: a
+     * team's lessons are the engine's.
      */
-    static Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds) {
+    static Bson buildVisibilityFilter(String userId, String agentId, List<String> groupIds, boolean verifyingReader) {
         List<Bson> visibilityFilters = new ArrayList<>();
 
         // Self: entries created by this agent for this user
@@ -419,7 +446,9 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Global: all global entries for this user
         visibilityFilters.add(eq(FIELD_VISIBILITY, Visibility.global.name()));
 
-        Bson userScope = and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
+        Bson userScope = verifyingReader
+                ? and(eq(FIELD_USER_ID, userId), or(visibilityFilters), writtenByThisOrNoAgent(agentId))
+                : and(eq(FIELD_USER_ID, userId), or(visibilityFilters));
         if (groupIds == null || groupIds.isEmpty()) {
             return userScope;
         }
@@ -431,6 +460,18 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson teamScope = and(in(FIELD_USER_ID, teamOwners), eq(FIELD_VISIBILITY, Visibility.group.name()),
                 in(FIELD_GROUP_IDS, groupIds));
         return or(userScope, teamScope);
+    }
+
+    /**
+     * The entries whose value {@code agentId} or no agent wrote: the query form of
+     * {@code !UserMemoryEntry.writtenByAgentOtherThan(agentId)}. An entry stored
+     * before writers were recorded has no {@link #FIELD_LAST_WRITER_AGENT_ID}
+     * ({@code eq(field, null)} matches a missing field), and its owner stands in.
+     */
+    private static Bson writtenByThisOrNoAgent(String agentId) {
+        return or(eq(FIELD_LAST_WRITER_AGENT_ID, agentId), eq(FIELD_LAST_WRITER_AGENT_ID, NO_AGENT_WRITER),
+                and(eq(FIELD_LAST_WRITER_AGENT_ID, null),
+                        or(eq(FIELD_SOURCE_AGENT_ID, agentId), eq(FIELD_SOURCE_AGENT_ID, null), eq(FIELD_SOURCE_AGENT_ID, NO_AGENT_WRITER))));
     }
 
     /**
@@ -586,7 +627,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),
                 Updates.setOnInsert(FIELD_VISIBILITY, entry.visibility().name()),
-                Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
+                Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()),
+                Updates.setOnInsert(FIELD_LAST_WRITER_AGENT_ID, writerOf(entry)), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
                 Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
@@ -645,6 +687,26 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 doc.getString(FIELD_KEY), doc.get(FIELD_VALUE), doc.getString(FIELD_CATEGORY), vis, doc.getString(FIELD_SOURCE_AGENT_ID),
                 doc.getList(FIELD_GROUP_IDS, String.class, List.of()), doc.getString(FIELD_SOURCE_CONVERSATION_ID),
                 doc.getBoolean(FIELD_CONFLICTED, false), doc.getInteger(FIELD_ACCESS_COUNT, 0),
-                createdAtStr != null ? Instant.parse(createdAtStr) : null, updatedAtStr != null ? Instant.parse(updatedAtStr) : null);
+                createdAtStr != null ? Instant.parse(createdAtStr) : null, updatedAtStr != null ? Instant.parse(updatedAtStr) : null,
+                lastWriterOf(doc.getString(FIELD_LAST_WRITER_AGENT_ID), doc.getString(FIELD_SOURCE_AGENT_ID)));
+    }
+
+    /**
+     * What {@link #FIELD_LAST_WRITER_AGENT_ID} stores for {@code entry}'s write.
+     */
+    private static String writerOf(UserMemoryEntry entry) {
+        return entry.sourceAgentId() != null && !entry.sourceAgentId().isBlank() ? entry.sourceAgentId() : NO_AGENT_WRITER;
+    }
+
+    /**
+     * The entry's {@link UserMemoryEntry#lastWriterAgentId} from the stored field:
+     * {@code null} for {@link #NO_AGENT_WRITER}, the owner when the field is
+     * missing (an entry stored before writers were recorded).
+     */
+    private static String lastWriterOf(String stored, String owner) {
+        if (stored == null) {
+            return owner;
+        }
+        return stored.isEmpty() ? null : stored;
     }
 }
