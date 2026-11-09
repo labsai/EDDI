@@ -23,7 +23,9 @@
   key, the secrets API cannot write an `agent-signing-key:` name (its key-name pattern has no `:`),
   and an agent without a vault key signs nothing. `deleteKeyPair` and its version sweep stay. The
   deleted generators were the only code able to write such an entry, so making signing keys
-  provisionable means bringing key generation back behind an admin operation.
+  provisionable means bringing key generation back behind an admin operation. (Superseded by the
+  entry "admins provision an agent signing key end to end; the validator checks the key is usable",
+  2026-11-07: an admin endpoint now provisions and rotates versioned keys.)
 - [`configuration-reference.md`](../configuration-reference.md) `eddi.audit.agent-signing-enabled`:
   the 60 s re-check now covers a replaced or removed key, not only a missing one.
 - Comments that named the deleted methods now say what is true: `RestAgentStore.validateSecurityFlags`,
