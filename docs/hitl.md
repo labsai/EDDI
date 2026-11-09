@@ -269,6 +269,7 @@ re-evaluated against a newer version's configuration.
 | `granularity` | `PHASE` \| `TASK` | `PHASE` | See [Granularity](#granularity-group-only) |
 | `approvalTimeout` / `timeoutPolicy` | as above | `WAIT_INDEFINITELY` | Validated at save time |
 | `onTaskRejection` | `FAIL` \| `RETRY` | `FAIL` | `FAIL`: rejected task is terminal. `RETRY`: task is re-queued (ASSIGNED) with the reviewer's note as feedback — the agent re-executes it addressing the rejection reason. |
+| `approvalCompletesBacklogTask` | boolean | `false` | Standing teams only: a backlog task a person approved at a `TASK` gate stays done at cadence writeback (`COMPLETED`, counted in `tasksApproved`) instead of returning to `PENDING` and running again. Timeout auto-approvals (`system:timeout`) do not count. See [Standing Teams](group-conversations.md#standing-teams-i13) |
 | `phases[n].requiresApproval` | boolean | `false` | Per-phase approval gate |
 
 ### REST API

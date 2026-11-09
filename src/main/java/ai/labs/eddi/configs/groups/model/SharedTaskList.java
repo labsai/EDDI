@@ -595,8 +595,26 @@ public class SharedTaskList {
         return u;
     }
 
-    /** AWAITING_APPROVAL → COMPLETED (result already stored). */
+    /**
+     * AWAITING_APPROVAL → COMPLETED (result already stored), with no decider on
+     * record — kept for the call sites that predate
+     * {@link #approveTask(String, String)}. The approval is still recorded, as made
+     * by an unnamed person.
+     */
     public synchronized TaskItem approveTask(String taskId) {
+        return approveTask(taskId, null);
+    }
+
+    /**
+     * AWAITING_APPROVAL → COMPLETED (result already stored), recording who decided
+     * in {@link #getApprovals()}.
+     *
+     * @param decidedBy
+     *            the decider as the HITL decision names it — a user id, or a
+     *            {@code system:*} actor such as {@code system:timeout};
+     *            {@code null} when nobody was authenticated
+     */
+    public synchronized TaskItem approveTask(String taskId, String decidedBy) {
         TaskItem t = requireTask(taskId);
         if (t.status() != TaskStatus.AWAITING_APPROVAL)
             throw new IllegalStateException("approveTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
@@ -604,6 +622,7 @@ public class SharedTaskList {
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
+        approvals.put(taskId, new TaskApproval(decidedBy, Instant.now().toString(), false));
         return u;
     }
 
@@ -654,9 +673,10 @@ public class SharedTaskList {
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
                 reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
-        // the next result is a new one: an edit recorded against the superseded result
-        // no longer describes it
+        // the next result is a new one: an edit (or approval) recorded against the
+        // superseded result no longer describes it
         reviewerEdits.remove(taskId);
+        approvals.remove(taskId);
         return u;
     }
 
@@ -846,7 +866,58 @@ public class SharedTaskList {
         if (edit != null) {
             reviewerEdits.put(taskId, edit);
         }
+        approvals.put(taskId, new TaskApproval(edit != null ? edit.decidedBy() : null, Instant.now().toString(), true));
         return u;
+    }
+
+    // ==================== approvals — who approved a task ====================
+
+    /**
+     * A task left {@code AWAITING_APPROVAL} through an approval decision. The
+     * status alone cannot say so: an approved task is {@code COMPLETED}, exactly
+     * like one that completed in a phase without {@code requiresApproval}.
+     *
+     * @param decidedBy
+     *            the decider, as on the HITL decision ({@code system:timeout} for a
+     *            timeout auto-approval); {@code null} when nobody was authenticated
+     * @param at
+     *            when (ISO-8601)
+     * @param edited
+     *            whether the approver replaced the result
+     *            ({@link #approveTaskWithEditedResult})
+     */
+    public record TaskApproval(String decidedBy, String at, boolean edited) {
+
+        /**
+         * Whether a person made this decision. A {@code system:*} decider — a timeout,
+         * the no-progress guard — is a decision nobody made, the same line the
+         * earned-autonomy evidence draws ({@code TIMEOUT}/{@code SYSTEM} are refused
+         * there). {@code system:} is a reserved principal prefix, so no authenticated
+         * caller can claim it.
+         */
+        public boolean byPerson() {
+            return decidedBy == null || !decidedBy.startsWith("system:");
+        }
+    }
+
+    /**
+     * taskId → the approval that completed it. Absent on a document written before
+     * this map existed, which reads back empty (such a task then simply does not
+     * count as approved); an older pod re-saving drops it.
+     */
+    private Map<String, TaskApproval> approvals = new ConcurrentHashMap<>();
+
+    public Map<String, TaskApproval> getApprovals() {
+        return approvals;
+    }
+
+    public void setApprovals(Map<String, TaskApproval> approvals) {
+        this.approvals = approvals != null ? new ConcurrentHashMap<>(approvals) : new ConcurrentHashMap<>();
+    }
+
+    /** The approval that completed {@code taskId}, or {@code null}. */
+    public TaskApproval approvalOf(String taskId) {
+        return taskId != null ? approvals.get(taskId) : null;
     }
 
     // ==================== E2 — reworks within a run ====================
