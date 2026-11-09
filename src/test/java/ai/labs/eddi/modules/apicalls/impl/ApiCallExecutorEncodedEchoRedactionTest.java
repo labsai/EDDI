@@ -29,8 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class ApiCallExecutorEncodedEchoRedactionTest {
 
     /** The review's secret, and its echoes. */
-    private static final String SECRET = "deadbeefcafe1234";
-    private static final String SECRET_BASE64 = "ZGVhZGJlZWZjYWZlMTIzNA==";
+    private static final String ECHOED_VALUE = "deadbeefcafe1234";
+    private static final String ECHOED_VALUE_BASE64 = "ZGVhZGJlZWZjYWZlMTIzNA==";
 
     /** A secret with characters every encoding changes. */
     private static final String SPECIAL = "p@ss word/123~?>>";
@@ -46,7 +46,7 @@ class ApiCallExecutorEncodedEchoRedactionTest {
         })
         @DisplayName("the review's base64 echo")
         void base64(String echo) {
-            String redacted = ApiCallExecutor.redactSuccessText("x-api-key: " + echo + "\n", Set.of(SECRET));
+            String redacted = ApiCallExecutor.redactSuccessText("x-api-key: " + echo + "\n", Set.of(ECHOED_VALUE));
             assertEquals("x-api-key: " + REDACTED + "\n", redacted);
         }
 
@@ -85,15 +85,15 @@ class ApiCallExecutorEncodedEchoRedactionTest {
         @Test
         @DisplayName("an unrelated body is unchanged")
         void unrelated() {
-            String body = "status=ok; token=ZmFrZS10b2tlbg==; path=/a%20b";
-            assertEquals(body, ApiCallExecutor.redactSuccessText(body, Set.of(SECRET, SPECIAL)));
+            String body = "status=ok; ref=ZmFrZS10b2tlbg==; path=/a%20b";
+            assertEquals(body, ApiCallExecutor.redactSuccessText(body, Set.of(ECHOED_VALUE, SPECIAL)));
         }
 
         @Test
         @DisplayName("a reversed secret is out of scope and stays")
         void reversedIsNotCovered() {
-            String reversed = new StringBuilder(SECRET).reverse().toString();
-            assertEquals(reversed, ApiCallExecutor.redactSuccessText(reversed, Set.of(SECRET)));
+            String reversed = new StringBuilder(ECHOED_VALUE).reverse().toString();
+            assertEquals(reversed, ApiCallExecutor.redactSuccessText(reversed, Set.of(ECHOED_VALUE)));
         }
 
         @Test
@@ -114,13 +114,13 @@ class ApiCallExecutorEncodedEchoRedactionTest {
         @DisplayName("encodings of a long secret are removed from string values, also inside longer text")
         void longSecretEncodings() {
             Map<String, Object> tree = new LinkedHashMap<>();
-            tree.put("headers", Map.of("X-Api-Key", SECRET_BASE64));
+            tree.put("headers", Map.of("X-Api-Key", ECHOED_VALUE_BASE64));
             tree.put("args", "q=" + "p%40ss+word%2F123%7E%3F%3E%3E" + "&page=2");
             tree.put("html", "<td>p@ss word/123~?&gt;&gt;</td>");
             tree.put("count", 3);
 
             @SuppressWarnings("unchecked")
-            var redacted = (Map<String, Object>) ApiCallExecutor.redactSuccessTree(tree, Set.of(SECRET, SPECIAL));
+            var redacted = (Map<String, Object>) ApiCallExecutor.redactSuccessTree(tree, Set.of(ECHOED_VALUE, SPECIAL));
 
             assertEquals(Map.of("X-Api-Key", REDACTED), redacted.get("headers"));
             assertEquals("q=" + REDACTED + "&page=2", redacted.get("args"));
@@ -161,16 +161,16 @@ class ApiCallExecutorEncodedEchoRedactionTest {
         @DisplayName("an unrelated body comes back as it was")
         void unrelated() {
             Map<String, Object> tree = Map.of("token", "ZmFrZS10b2tlbg==", "path", "/a%20b", "n", 12345678);
-            assertSame(tree, ApiCallExecutor.redactSuccessTree(tree, Set.of(SECRET, SPECIAL, "alice12")));
+            assertSame(tree, ApiCallExecutor.redactSuccessTree(tree, Set.of(ECHOED_VALUE, SPECIAL, "alice12")));
         }
 
         @Test
         @DisplayName("the verbatim secret is still removed")
         void verbatimStillRemoved() {
-            Map<String, Object> tree = Map.of("echo", "key " + SECRET);
+            Map<String, Object> tree = Map.of("echo", "key " + ECHOED_VALUE);
             @SuppressWarnings("unchecked")
-            var redacted = (Map<String, Object>) ApiCallExecutor.redactSuccessTree(tree, Set.of(SECRET));
-            assertFalse(String.valueOf(redacted).contains(SECRET), redacted.toString());
+            var redacted = (Map<String, Object>) ApiCallExecutor.redactSuccessTree(tree, Set.of(ECHOED_VALUE));
+            assertFalse(String.valueOf(redacted).contains(ECHOED_VALUE), redacted.toString());
         }
     }
 }
