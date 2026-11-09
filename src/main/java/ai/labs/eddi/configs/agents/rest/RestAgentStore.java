@@ -1004,10 +1004,36 @@ public class RestAgentStore implements IRestAgentStore {
             if (!current.getVersion().equals(version)) {
                 throw RestUtilities.createConflictException(resourceURI, current);
             }
+            catchUpDescriptor(id, version);
             return agentStore.read(id, version);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Repairs what an earlier key change left behind when its agent write landed
+     * but {@link #advanceDescriptor} did not: the agent at {@code agentVersion},
+     * its descriptor still one version back. The 500 that change answered names the
+     * new version, so retrying there (or at the version a 409 hands back) is the
+     * way out — it moves the descriptor first, before this change writes the agent
+     * again on top of a descriptor that would then be two versions behind. Only
+     * that one-behind shape is repaired; a descriptor that is missing or further
+     * off is left as it is, for the change to fail on as before.
+     */
+    private void catchUpDescriptor(String id, int agentVersion) {
+        IResourceId descriptorId;
+        try {
+            descriptorId = documentDescriptorStore.getCurrentResourceId(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return;
+        }
+        if (descriptorId == null || descriptorId.getVersion() == null || descriptorId.getVersion() != agentVersion - 1) {
+            return;
+        }
+        log.warnf("Agent %s is at version %d but its descriptor names version %d (an earlier key change did not finish): moving it",
+                sanitize(id), agentVersion, agentVersion - 1);
+        advanceDescriptor(id, agentVersion - 1, agentVersion);
     }
 
     /**

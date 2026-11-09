@@ -419,7 +419,7 @@
     "revokeSigningKey": "Révoquer",
     "keyRevoked": "Révoquée",
     "revokeSigningKeyConfirm": "Révoquer la clé de signature v{{version}} ?",
-    "revokeSigningKeyDesc": "Les autres agents cesseront de faire confiance à tout message signé avec cette clé, quelle que soit sa date de signature, et sa clé privée est supprimée du coffre. Cette action est irréversible. S'il s'agit de la clé la plus récente, l'agent cesse de signer et tout enregistrement avec la signature activée est refusé, jusqu'à ce que vous en génériez une nouvelle ou désactiviez la signature.",
+    "revokeSigningKeyDesc": "Les autres agents cesseront de faire confiance à tout message signé avec cette clé, quelle que soit sa date de signature. Sa clé privée est supprimée du coffre (dans la mesure du possible : si la suppression échoue, révoquer à nouveau la relance). Cette action est irréversible. Révoquer l'ancienne clé v0 la supprime ; une clé versionnée révoquée reste listée, marquée comme révoquée. S'il s'agit de la clé la plus récente, l'agent cesse de signer et chaque enregistrement avec la signature activée est refusé, jusqu'à ce que vous en génériez une nouvelle ou désactiviez la signature.",
     "signingKeyRevoked": "Clé de signature v{{version}} révoquée.",
     "signingNeedsKey": "Cet agent n'a pas de clé de signature utilisable (aucune n'est déclarée, ou la plus récente est révoquée) : un enregistrement avec la signature activée est donc refusé. Un administrateur peut en générer une ci-dessus.",
     "skillAlreadyExists": "Cette compétence est déjà déclarée",

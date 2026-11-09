@@ -63,7 +63,9 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
   Revoke once generated keys exist (generating a key keeps `identity.publicKey`, which peers trust
   for v0 signatures; the row used to disappear). The "a save with signing on is refused" warning
   also shows when the newest key is revoked, and the revoke dialog says saves are refused until a
-  new key exists or signing is off. Copy in all 11 locales.
+  new key exists or signing is off. It also says deleting the private key is best effort, that
+  revoking the legacy v0 key removes it, and that a revoked versioned key is not yet refused by peer
+  verification. Copy in all 11 locales.
 - **Operator.** The system prompt explains revocation, that `identity` cannot be edited through a
   save, the cascade's signing 400/503, and the import/sync report; revision bumped.
 
@@ -109,7 +111,8 @@ synthesizer, facilitator), or turn the flag off.
   fail-closed and binds the conversation, position and key version", 2026-11-08: a revoked key
   vouches for nothing.)
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
-  signer's rule for a key outside its window.
+  signer's rule for a key outside its window. `GroupSigningGuard` reads the flag before it signs, so
+  this holds when the vault delete failed and the private key is still there.
 - A malformed key that is revoked no longer blocks a save, so revoking is the way out for an agent
   stored with a planted entry.
 - The import/sync report is a header and an `UpgradeResult` field, shown verbatim by one Manager
@@ -119,9 +122,11 @@ synthesizer, facilitator), or turn the flag off.
   reads the agent again and asks whether the change is there; only what to do when it is not
   differs (a generated key is discarded, a revoked one kept). Without it, a revoke that landed
   unacknowledged left the descriptor behind, every later save answered 404, and revoking again
-  could not repair it. A descriptor that lags for another reason (the descriptor write itself
-  failing) is still not repaired by a retry; the endpoint answers 500 naming the version it is stuck
-  at.
+  could not repair it. When the descriptor write itself fails, the endpoint answers 500 naming the
+  new version, and a key change retried at that version (the version a 409 for the old one hands
+  back) first moves a descriptor left exactly one version behind, then carries on. Only that shape
+  is repaired; a missing descriptor, or one further behind, fails as before. An ordinary agent save
+  at the new version does not repair it: retry the key change.
 
 ### Tests
 

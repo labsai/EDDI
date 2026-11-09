@@ -1267,6 +1267,32 @@ class RestAgentStoreTest {
         }
 
         /**
+         * An earlier key change wrote the agent as version 2 and failed to move the
+         * descriptor. Generating again at 2 used to write version 3 and then fail to
+         * read a descriptor at 2, leaving it two versions behind.
+         */
+        @Test
+        @DisplayName("moves a descriptor an earlier key change left one version behind before writing the agent again")
+        void catchesUpADescriptorLeftBehind() throws Exception {
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenAnswer(invocation -> storedCopy());
+            when(AgentStore.update(eq(AGENT_ID), eq(2), any(), anyBoolean())).thenReturn(3);
+            when(documentDescriptorStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1));
+            var atTwo = new DocumentDescriptor();
+            when(documentDescriptorStore.readDescriptor(AGENT_ID, 2)).thenReturn(atTwo);
+
+            Response response = store.createSigningKey(AGENT_ID, 2);
+
+            assertEquals(200, response.getStatus());
+            var order = inOrder(documentDescriptorStore, AgentStore);
+            order.verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            order.verify(AgentStore).update(eq(AGENT_ID), eq(2), any(), eq(true));
+            order.verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(2), same(atTwo));
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=2"), descriptor.getResource());
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=3"), atTwo.getResource());
+        }
+
+        /**
          * A socket error or a lost commit acknowledgement can arrive after the write
          * was applied. Discarding the key then left an agent declaring a key its vault
          * no longer held: it could not sign, and every later save was refused.
@@ -1638,6 +1664,45 @@ class RestAgentStoreTest {
 
             verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
             assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"), "no key is discarded");
+        }
+
+        /**
+         * The agent write of an earlier revoke landed and moving the descriptor did
+         * not: the agent is at version 2, its descriptor still at 1. Retrying at 1 is
+         * answered 409 and retrying at 2 finds the key already revoked, so nothing
+         * moved the descriptor again and every later save of the agent was 404.
+         */
+        @Test
+        @DisplayName("a retry at the new version moves a descriptor an earlier revoke left one version behind")
+        void retryRepairsADescriptorLeftBehind() throws Exception {
+            var revoked = new AgentConfiguration();
+            revoked.setWorkflows(new ArrayList<>());
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()).revoke(),
+                    AgentPublicKey.createCurrent(2, v2.publicKeyB64()))));
+            revoked.setIdentity(identity);
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenReturn(revoked);
+            when(documentDescriptorStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1));
+
+            Response response = store.revokeSigningKey(AGENT_ID, 1, 2);
+
+            assertEquals(200, response.getStatus());
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=2"), descriptor.getResource());
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("leaves a descriptor that already names the agent's version alone")
+        void leavesACurrentDescriptorAlone() throws Exception {
+            when(documentDescriptorStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1));
+
+            store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            // Only the revoke's own move, from 1 to 2: no catch-up from 0.
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            verify(documentDescriptorStore, never()).updateDescriptor(eq(AGENT_ID), eq(0), any());
         }
 
         @Test

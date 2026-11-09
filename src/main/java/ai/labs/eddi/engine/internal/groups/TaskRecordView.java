@@ -150,9 +150,14 @@ final class TaskRecordView {
         if (note == null || note.isBlank()) {
             return note;
         }
-        // Traced by its text without surrounding whitespace: the verifier's readable
-        // summary is trimmed, so feedback ending in whitespace is not in it verbatim.
-        String text = note.strip();
+        // Traced by its text without what the verifier's readable summary may cut from
+        // its ends: the summary is String.trim()med, which drops control characters
+        // such as ESC as well, so feedback ending in one is not in it verbatim.
+        String text = stripEnds(note);
+        if (text.isEmpty()) {
+            // Nothing readable to trace, as a blank note: it carries no text to withhold.
+            return note;
+        }
         boolean fromUntrustedEntry = false;
         List<TranscriptEntry> stored = view.stored();
         for (TranscriptEntry entry : stored) {
@@ -168,6 +173,28 @@ final class TaskRecordView {
             }
         }
         return fromUntrustedEntry ? WITHHELD : note;
+    }
+
+    /**
+     * {@code text} without leading and trailing characters that either
+     * {@link String#strip()} (Unicode whitespace) or {@link String#trim()} (every
+     * code point up to {@code U+0020}, control characters included) removes, in any
+     * mix, so a note is found in a summary that was cut by either.
+     */
+    private static String stripEnds(String text) {
+        int start = 0;
+        int end = text.length();
+        while (start < end && isCut(text.charAt(start))) {
+            start++;
+        }
+        while (end > start && isCut(text.charAt(end - 1))) {
+            end--;
+        }
+        return text.substring(start, end);
+    }
+
+    private static boolean isCut(char c) {
+        return c <= ' ' || Character.isWhitespace(c);
     }
 
     private Map<String, Set<String>> trustedContents() {
