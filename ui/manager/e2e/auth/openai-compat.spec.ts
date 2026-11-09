@@ -86,6 +86,8 @@ test.describe("OpenAI-compatible API — shared key under OIDC", () => {
   });
 
   test("a chat completion runs end to end with the shared key", async ({ request }) => {
+    // Deployment plus up to one model-catalogue expiry (30 s) before the turn runs.
+    test.setTimeout(120_000);
     // A full turn, not just the model list: the conversation runs while the
     // request carries the anonymous identity, on a backend where authorization
     // is enabled — the combination no other tier exercises.
@@ -125,13 +127,34 @@ test.describe("OpenAI-compatible API — shared key under OIDC", () => {
         )
         .toContain("READY");
 
+      // The adapter caches its model catalogue for eddi.openai-compat.model-cache-seconds
+      // (30 s by default) and a deployment does not clear it, so an agent deployed
+      // seconds after an earlier test listed /v1/models is not in the catalogue yet.
+      // Wait until the list offers it, then use the id it offers: the canonical
+      // <slug>-<last six of agentId>, or <slug>-<agentId> when the short form collides.
+      let modelId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const list = await request.get(`${API_BASE}/v1/models`, { headers: sharedKeyHeaders() });
+            const ids = ((await list.json()) as { data?: { id: string }[] }).data?.map((m) => m.id) ?? [];
+            modelId = ids.find((id) => id.endsWith(`-${agentId}`) || id.endsWith(`-${agentId.slice(-6)}`));
+            return modelId;
+          },
+          {
+            message: "the deployed agent never appeared in /v1/models; with workspaces enforced, only published agents are listed",
+            timeout: 60_000,
+            intervals: [1_000, 2_000, 5_000],
+          },
+        )
+        .toBeDefined();
+
       const res = await request.post(`${API_BASE}/v1/chat/completions`, {
         headers: {
           ...sharedKeyHeaders(),
           "X-OpenWebUI-Chat-Id": `e2e-openai-compat-${agentId}`,
         },
-        // The bare agentId is an accepted model value (AgentModelResolver step 2).
-        data: { model: agentId, messages: [{ role: "user", content: "hello" }] },
+        data: { model: modelId, messages: [{ role: "user", content: "hello" }] },
       });
       expect(res.status(), await res.text()).toBe(200);
       expect(((await res.json()) as { object?: string }).object).toBe("chat.completion");

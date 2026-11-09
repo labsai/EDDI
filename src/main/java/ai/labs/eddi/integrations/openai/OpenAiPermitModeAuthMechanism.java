@@ -104,6 +104,19 @@ public class OpenAiPermitModeAuthMechanism implements HttpAuthenticationMechanis
     private final Set<String> methods;
     private final int priority;
 
+    /**
+     * Decides once, at startup, whether the mechanism is active: the adapter is
+     * enabled, both the adapter's {@code http-policy} and the HTTP permission
+     * Quarkus applies to {@code /v1/*} are {@code permit}, and inclusive
+     * authentication is off. Any other combination leaves it inactive, so OIDC
+     * keeps {@code /v1}.
+     *
+     * @param permissionMethods
+     *            the methods the {@code openai-compat} permission lists; none means
+     *            every method, as it does to Quarkus
+     * @param oidcPriority
+     *            OIDC's mechanism priority; this mechanism ranks one above it
+     */
     @Inject
     public OpenAiPermitModeAuthMechanism(OpenAiCompatConfig config,
             @ConfigProperty(name = "quarkus.http.auth.permission.openai-compat.policy") Optional<String> permissionPolicy,
@@ -154,6 +167,16 @@ public class OpenAiPermitModeAuthMechanism implements HttpAuthenticationMechanis
         return priority;
     }
 
+    /**
+     * Whether this request is one the mechanism takes away from OIDC. Every
+     * condition must hold, and any doubt answers {@code false}, which leaves the
+     * request to OIDC exactly as before: the mechanism is active, the method is one
+     * the {@code openai-compat} permission covers, and the path is {@code /v1} or
+     * below it in <em>both</em> forms Quarkus matches permissions against — the
+     * router's normalized path and its fully normalized form. A spelling only one
+     * of them places under {@code /v1} (a matrix parameter, an encoded dot segment)
+     * is not taken.
+     */
     boolean appliesTo(RoutingContext context) {
         if (!active || context == null) {
             return false;
@@ -170,6 +193,9 @@ public class OpenAiPermitModeAuthMechanism implements HttpAuthenticationMechanis
         return isGuardedPath(HttpSecurityUtils.normalizePath(routerPath));
     }
 
+    /**
+     * {@code /v1} itself or a path below it; {@code /v1x} and {@code /v10} are not.
+     */
     static boolean isGuardedPath(String path) {
         return path != null
                 && (path.equals(GUARDED_PATH) || path.startsWith(GUARDED_PATH + "/"));
