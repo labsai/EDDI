@@ -869,4 +869,37 @@ class TeamHandoffServiceTest {
         }
     }
 
+    // ------------------------------------------------------------- provenance
+
+    /**
+     * A tool handoff carries text an agent wrote. The backlog task records that
+     * agent as its creator, so a member of the receiving team that requires peer
+     * verification is shown it only while that agent signs verifiably, as it is a
+     * task an agent filed with its task tool.
+     */
+    @Nested
+    class Provenance {
+
+        @Test
+        void aMembersHandoffIsFiledAsTheMemberThatCalledTheTool() throws Exception {
+            assertTrue(service.file(groupRequest("From a member")).success());
+            assertEquals("member-1", workspace().getBacklog().getTasks().get(0).createdByAgentId());
+        }
+
+        @Test
+        void aStandaloneAgentsHandoffIsFiledAsThatAgent() throws Exception {
+            accept = new AcceptPolicy(List.of(new AcceptRule("agent:agent-1", IntakeMode.AUTO, null)), 0, 0);
+            assertTrue(service.file(agentRequest("From an agent")).success());
+            assertEquals("agent-1", workspace().getBacklog().getTasks().get(0).createdByAgentId());
+        }
+
+        @Test
+        void aDecisionHandoffNamesNoAgent() throws Exception {
+            var r = groupRequest("From a decision");
+            assertTrue(service.file(new HandoffRequest(SourceKind.GROUP, SOURCE_GROUP, null, "gc-1", null, "user-1", TARGET, r.subject(),
+                    r.description(), 6, Trigger.DECISION, "decision-1", null, null, 0, List.of(), null, 0, null)).success());
+            assertNull(workspace().getBacklog().getTasks().get(0).createdByAgentId());
+        }
+    }
+
 }

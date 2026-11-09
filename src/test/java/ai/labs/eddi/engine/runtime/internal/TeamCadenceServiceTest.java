@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -166,6 +167,21 @@ class TeamCadenceServiceTest {
         var order = inOrder(workspaceStore, prepared);
         order.verify(workspaceStore).casRunningDiscussion(workspace);
         order.verify(prepared).launch();
+    }
+
+    @Test
+    @DisplayName("a pulled task an agent filed keeps that agent as its creator, so a verifying member's view applies to it")
+    void fire_keepsTheCreatorOfAnAgentFiledTask() throws Exception {
+        workspace(cadence(2, null), new TaskItem("Handed off", "from another team", 9).filedBy("agent-x"),
+                new TaskItem("Local", "from a person", 5));
+        startedGc();
+
+        assertTrue(service.processScheduledFire("sched-1", metadata()).isSuccess());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<TaskDefinition>> tasksCaptor = ArgumentCaptor.forClass(List.class);
+        verify(groupConversationService).prepareCadenceDiscussion(eq(GROUP_ID), anyString(), anyString(), tasksCaptor.capture(), any(), any());
+        assertEquals(Arrays.asList("agent-x", null), tasksCaptor.getValue().stream().map(TaskDefinition::createdByAgentId).toList());
     }
 
     @Test

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.*;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -374,6 +375,24 @@ class AgentGroupConfigurationTest {
         var td = new TaskDefinition("Subject", "Desc", null, List.of(), 0);
 
         assertEquals("ALL", td.assignToRole());
+    }
+
+    /**
+     * The creator is the engine's provenance for a pulled backlog task, never part
+     * of a configuration: not written, and not read from a stored or imported one.
+     */
+    @Test
+    void taskDefinition_createdByAgentIdIsNeverSerialized() throws Exception {
+        var json = JsonMapper.builder().findAndAddModules().build();
+        var config = new AgentGroupConfiguration();
+        config.setTasks(List.of(new TaskDefinition("Subject", "Desc", "ALL", List.of(), 0, null, "agent-x")));
+
+        String written = json.writeValueAsString(config);
+        assertFalse(written.contains("createdByAgentId"), written);
+        var read = json.readValue("{\"tasks\": [{\"subject\": \"S\", \"description\": \"D\", \"createdByAgentId\": \"agent-x\"}]}",
+                AgentGroupConfiguration.class);
+        assertNull(read.getTasks().getFirst().createdByAgentId());
+        assertEquals("S", read.getTasks().getFirst().subject());
     }
 
     // ==================== DiscussionPhase ====================

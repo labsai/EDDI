@@ -609,12 +609,15 @@ public class TeamCadenceService {
     /**
      * Pulled backlog items as a runtime task plan. Dependencies are dropped on
      * purpose: {@code findExecutableTasks} already guaranteed every pulled task's
-     * dependencies are met, and backlog ids mean nothing inside the discussion.
+     * dependencies are met, and backlog ids mean nothing inside the discussion. The
+     * agent that filed an item (a handoff) stays its creator, so the run shows it
+     * to a member that requires peer verification as it shows a task filed with the
+     * task tool, not as configured text.
      */
     private static List<TaskDefinition> toTaskDefinitions(List<TaskItem> pulled) {
         List<TaskDefinition> defs = new ArrayList<>(pulled.size());
         for (TaskItem task : pulled) {
-            defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority()));
+            defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority(), null, task.createdByAgentId()));
         }
         return defs;
     }

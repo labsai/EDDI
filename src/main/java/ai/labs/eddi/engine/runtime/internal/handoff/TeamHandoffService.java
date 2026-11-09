@@ -442,7 +442,7 @@ public class TeamHandoffService {
                     return HandoffResult.of(Outcome.BACKLOG_FULL,
                             "That team's backlog is full. Do not retry; tell the user the team needs to clear its backlog.");
                 }
-                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, request.bet()));
+                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, request.bet()).filedBy(writingAgentOf(request)));
                 handoffs.putOrigin(task.id(), origin);
                 landed = "backlog";
             } else {
@@ -468,6 +468,24 @@ public class TeamHandoffService {
             }
         }
         return HandoffResult.of(Outcome.CONFLICT, "That team's workspace is being changed concurrently. Do not retry in this turn.");
+    }
+
+    /**
+     * The agent whose text a handoff files, recorded as the backlog task's creator:
+     * the member that called the tool, or the standalone agent. A member of the
+     * receiving team that requires peer verification is then shown the task only
+     * while that agent signs verifiably (see {@code TaskRecordView}). A
+     * {@code DECISION} handoff renders the source group's decision record and names
+     * no agent; an inbox item a person accepts is not filed here.
+     */
+    private static String writingAgentOf(HandoffRequest request) {
+        if (request.trigger() != WorkspaceHandoffs.Trigger.TOOL) {
+            return null;
+        }
+        if (request.sourceMemberAgentId() != null && !request.sourceMemberAgentId().isBlank()) {
+            return request.sourceMemberAgentId();
+        }
+        return request.sourceKind() == WorkspaceHandoffs.SourceKind.AGENT ? request.sourceId() : null;
     }
 
     private HandoffOrigin originFor(HandoffRequest request, String handoffId, String dedupeKey, Intake intake, Instant now) {

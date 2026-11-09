@@ -108,6 +108,12 @@ public class SharedTaskList {
                     result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, null);
         }
 
+        /** This task as filed by agent {@code agentId} (or by no agent). */
+        public TaskItem filedBy(String agentId) {
+            return new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                    result, verificationNote, verified, priority, createdAt, completedAt, agentId, bet);
+        }
+
         /** This task with a different bet (or none). */
         public TaskItem withBet(Bet newBet) {
             return new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,

@@ -155,7 +155,7 @@ public class TaskForceEngine {
         // First pass: create all TaskItems
         List<TaskItem> createdItems = new ArrayList<>();
         for (TaskDefinition td : config.getTasks()) {
-            TaskItem task = new TaskItem(td.subject(), td.description(), td.priority());
+            TaskItem task = new TaskItem(td.subject(), td.description(), td.priority()).filedBy(td.createdByAgentId());
             gc.getTaskList().addTask(task);
             createdItems.add(task);
         }
