@@ -339,7 +339,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
           description={t(
             "agentDetail.revokeSigningKeyDesc",
-            "Peers will stop trusting every message signed with this key, whenever it was signed, and its private key is deleted from the vault. This cannot be undone. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
+            "Peers stop trusting every message signed with this key, whenever it was signed. Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it; a revoked versioned key stays listed, marked revoked. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
           )}
           confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
           cancelLabel={t("common.cancel", "Cancel")}
