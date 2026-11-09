@@ -1640,8 +1640,9 @@ your tool schemas do not cover it, not as a routine first step:
   runs keeps it PENDING, so neither status proves whether the target got the
   request: tell the admin to check the target. A claim that cannot be written
   sends nothing and is settled FAILED, or SKIPPED when the discussion was
-  cancelled; the audit entry and metric always show that, but the stored
-  record reads it only if the follow-up write succeeds — if that write fails
+  cancelled; the metric always counts that, an audit entry shows it only
+  when the audit ledger is enabled and its submission succeeded, and the
+  stored record reads it only if the follow-up write succeeds — if that write fails
   too (a cancelled discussion always refuses it), the record stays PENDING
   unless a later write of the discussion carries it. Calls with
   preRequest.propertyInstructions are refused. At most once covers the

@@ -109,7 +109,8 @@ A refused save answers `400` and names the phase and the fix, e.g.
 
 Nobody's personal identity. The call carries only what its author wrote — the
 target and the all-agents secrets above. The approver is recorded on the action
-(`approvedBy`) and in its audit entry, which states `runAs: group:<groupId>`.
+(`approvedBy`) and, when the audit ledger is enabled, in its audit entry, which
+states `runAs: group:<groupId>`.
 
 ## Exactly once — what is guaranteed
 
@@ -129,8 +130,9 @@ target and the all-agents secrets above. The approver is recorded on the action
    settles the record visibly — `SKIPPED` when the discussion was cancelled
    (seen by this pod, or read back from the store after a cancel by another
    pod), `FAILED` otherwise (store unavailable) — rather than leaving it
-   `PENDING` for a leg that may never come. The audit entry and the metric
-   always carry that outcome; the stored record shows it only if the follow-up
+   `PENDING` for a leg that may never come. The metric always counts that
+   outcome; an audit entry carries it only when the audit ledger is enabled and
+   its submission succeeds; the stored record shows it only if the follow-up
    write succeeds. When that write fails too — and a cancelled discussion
    always refuses it, since it requires `IN_PROGRESS` — the stored record stays
    `PENDING` unless a later write of the discussion carries the outcome.
@@ -178,11 +180,13 @@ PostgreSQL alike; documents written before the feature simply have none):
 `OUTCOME_UNKNOWN`, `SKIPPED`. `responseUrl` is the response's `html_url` (else
 `url`) when it is a JSON object carrying one; `summary` is short and redacted.
 
-- **Audit ledger:** one entry per settled action, task id
-  `group.approved_action` — approver, edit flag, target, status, HTTP code,
-  response URL and the result's SHA-256 and length (the text itself stays on
-  the task).
-- **Metrics:** `eddi_group_approved_action_total{outcome=succeeded|failed|outcome_unknown|skipped}`.
+- **Audit ledger:** when the ledger is enabled, one entry per settled action,
+  task id `group.approved_action` — approver, edit flag, target, status, HTTP
+  code, response URL and the result's SHA-256 and length (the text itself stays
+  on the task). With the ledger disabled no entry is written, and a submission
+  that fails is logged as a warning and leaves none.
+- **Metrics:** `eddi_group_approved_action_total{outcome=succeeded|failed|outcome_unknown|skipped}`,
+  incremented for every settled action whether or not the ledger is enabled.
 
 ## Cost and quotas
 

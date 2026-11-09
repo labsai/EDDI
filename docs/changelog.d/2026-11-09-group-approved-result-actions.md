@@ -45,8 +45,9 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   each field and on the URL as the executor joins it, so a reference split across `targetServerUrl` and the path is
   caught — and `${connection:}`, `${caller:}`, `${context:}` are refused. The reference half is re-checked before
   every send.
-- **Audit/metrics:** one ledger entry per settled action (`group.approved_action`, approver, target, status, result
-  SHA-256 and length, HTTP code, URL); counter `eddi_group_approved_action_total{outcome}`.
+- **Audit/metrics:** with the audit ledger enabled, one ledger entry per settled action (`group.approved_action`,
+  approver, target, status, result SHA-256 and length, HTTP code, URL); counter
+  `eddi_group_approved_action_total{outcome}` on every settled action.
 - **Docs:** new `docs/group-approved-result-actions.md` (in `SUMMARY.md`) with a Content Studio example posting an
   approved GitHub comment; pointers from `group-conversations.md` (per-phase controls), `hitl.md` (group config table,
   Group members) and `hitl-review-and-audit.md` (edited results). Platform Operator prompt gained the field
@@ -62,8 +63,8 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   `{action.idempotencyKey}` lets a deduplicating target make it effectively once across a crash. The claim is a CAS
   on the discussion still being IN_PROGRESS, so a cancel stored first makes it fail; a claim that cannot be written
   sends nothing and settles the record SKIPPED (a cancel seen on this pod or read back from the store) or FAILED,
-  rather than leaving it PENDING for a leg that may not come. The audit entry and metric always carry that outcome;
-  the stored record shows it only if the follow-up write succeeds — a cancelled discussion refuses it, and then the
+  rather than leaving it PENDING for a leg that may not come. The metric always counts that outcome; an audit entry
+  carries it only when the audit ledger is enabled and its submission succeeds; the stored record shows it only if the follow-up write succeeds — a cancelled discussion refuses it, and then the
   stored record stays PENDING unless a later write of the discussion carries the outcome.
 - **Only human approvals publish.** A `system:*` approval (timeout `AUTO_APPROVE`) records SKIPPED.
 - **Identity:** the call runs as the group (`runAs: group:<groupId>` in the audit entry) with author-written,
