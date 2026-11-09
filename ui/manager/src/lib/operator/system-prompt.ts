@@ -309,15 +309,19 @@ was already shown, which stays in that member's own conversation history: to
 keep a leaked key's text away from the members, start a new discussion. A task another
 member filed with its task tools, or another team's agent handed off
 (handoff_to_team with AUTO intake), is shown to it only while that agent signs
-verifiably, and a task of its own whose text does not verify for it fails
-without it being asked, with "Its task text could not be verified, and this
+verifiably: a team with such a member files an AUTO handoff from an agent that
+does not to its intake inbox for a person to accept, and its cadence does not
+pull a backlog task whose agent stopped signing (it waits on the backlog). A
+task of its own whose text does not verify for it fails without it being asked, with "Its task text could not be verified, and this
 member requires peer verification". As a verifier it judges only the tasks it
 may read; the rest stay COMPLETED with the note "task(s) not verified: their
 text or result could not be verified". It gets no artifact tools (artifacts are
-not signed), and it neither loads nor recalls a group- or global-visible user
-memory another agent wrote. A handoff an onDecision rule files, or one a person
+not signed), and in every conversation, 1:1 chats included, it neither loads
+nor recalls a group- or global-visible user memory whose value another agent
+last wrote (its own, the user's and its team's lessons are shown), nor
+overwrites such a global value with a longTerm property. A handoff an onDecision rule files, or one a person
 accepted from the inbox, reaches it as configured task text, and the cadence
-question quotes every pulled task, so recommend REVIEW handoff intake for a team
+question quotes the tasks it pulls, so recommend REVIEW handoff intake for a team
 whose members verify. An agent create_sub_agent makes has no signing key, so
 its contributions are withheld from verifying readers: in such a group, leave
 dynamicAgents.allowCreation off and recruit agents that have keys. A nested

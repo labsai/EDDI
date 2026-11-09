@@ -404,7 +404,7 @@
     "publicKeys": "Claves públicas",
     "recallOrder": "Orden de recuperación",
     "requirePeer": "Requerir verificación de pares",
-    "requirePeerDesc": "Comprueba las firmas de los mensajes de los participantes anteriores antes de que este agente responda en una conversación de grupo. Los mensajes de otros agentes que no se pueden verificar se le ocultan. En un grupo, en cuanto un miembro, el moderador o el facilitador exige verificación, las votaciones, las tablas de negociación y las lecciones cuentan solo las entradas firmadas para todos, así que todo agente que escriba en él debería firmar. Un agente que verifica no recibe herramientas de artefactos",
+    "requirePeerDesc": "Comprueba las firmas de los mensajes de los participantes anteriores antes de que este agente responda en una conversación de grupo. Los mensajes de otros agentes que no se pueden verificar se le ocultan. En un grupo, en cuanto un miembro, el moderador o el facilitador exige verificación, las votaciones, las tablas de negociación y las lecciones cuentan solo las entradas firmadas para todos, así que todo agente que escriba en él debería firmar. Un agente que verifica no recibe herramientas de artefactos. En todas las conversaciones, incluidos los chats individuales, no se le muestra ninguna memoria de usuario visible para el grupo o global que haya escrito otro agente",
     "securityFlags": "Firma y verificación",
     "securityIdentity": "Seguridad e identidad",
     "sessionManagement": "Gestión de sesiones",
