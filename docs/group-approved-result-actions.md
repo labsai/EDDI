@@ -87,12 +87,17 @@ before every send:
   use that configuration (workspace USE access);
 - the call makes exactly one request and sees its outcome — `fireAndForget`,
   batch and `forEach` calls are refused;
+- the call has no `preRequest.propertyInstructions` (even an empty list): the
+  executor rebuilds the template data from conversation memory after them, which
+  would drop `task.*`, `group.*` and `action.*`;
 - **credentials:** a group is not an agent, so there is no identity to test a
   narrow vault grant against. Every `${vault:...}` reference in the target URL,
   path, headers, query or body must name a secret **granted to all agents**
   (`allowedAgents: ["*"]`) — the rule the SERVICE judge and lesson consolidation
   follow ([Group Convergence Judge: SERVICE](group-service-judge.md)). A grant
-  narrowed after the save fails the next send instead of using the secret;
+  narrowed after the save fails the next send instead of using the secret. The
+  URL is also checked as the executor joins it (`targetServerUrl` + path), so a
+  reference split across the two fields is caught;
 - `${connection:...}`, `${caller:...}` and `${context:...}` are refused: the
   action runs after the approval, in the background, with no caller or request
   context they could mean.
@@ -118,7 +123,12 @@ target and the all-agents secrets above. The approver is recorded on the action
    to a run that died mid-call (pod crash, failover): it becomes
    `OUTCOME_UNKNOWN` and is **never sent again** — the same contract as the
    tool-call [execution journal](hitl.md#the-execution-journal-at-most-once).
-   `OUTCOME_UNKNOWN` counts as a failure for `onFailure`.
+   `OUTCOME_UNKNOWN` counts as a failure for `onFailure`. The claim is a
+   compare-and-set on the discussion still being `IN_PROGRESS`, so a cancel
+   stored first makes it fail. A claim that cannot be written sends nothing and
+   settles the record visibly — `SKIPPED` when the pod saw the cancel, `FAILED`
+   otherwise (store unavailable, or a cancel stored by another pod) — rather
+   than leaving it `PENDING` for a leg that may never come.
 
 So the guarantee is **at most once**: exactly once whenever the run survives,
 and effectively once across a crash for a target that deduplicates on
@@ -129,7 +139,11 @@ the target already processed — leave them off for a non-idempotent publish.
 A discussion whose pod dies after the approval but before the claim stays
 `IN_PROGRESS` with the record `PENDING`; groups have no automatic recovery of a
 running discussion today, so it is not sent until a later leg of that
-discussion runs.
+discussion runs. The same goes for a record left `RUNNING` by a crash: it reads
+`RUNNING` until a later leg turns it into `OUTCOME_UNKNOWN`. A discussion
+cancelled while no leg is running keeps a `PENDING` record. In all three cases
+the status does not say whether the target received the request — check the
+target.
 
 ## What is recorded
 

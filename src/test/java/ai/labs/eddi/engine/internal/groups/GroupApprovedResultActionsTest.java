@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -298,7 +299,7 @@ class GroupApprovedResultActionsTest {
         }
 
         @Test
-        void aClaimThatCannotBePersisted_sendsNothing_andStaysOwed() throws Exception {
+        void aClaimThatCannotBePersisted_sendsNothing_andSettlesFailed() throws Exception {
             var task = new TaskItem("Post", "p", 0);
             var gc = awaitingGc(task, "text");
             gc.getTaskList().approveTask(task.id());
@@ -308,7 +309,25 @@ class GroupApprovedResultActionsTest {
             actions.runOwed(gc, store, () -> false);
 
             verifyNoInteractions(executor);
-            assertEquals(ApprovedActionStatus.PENDING, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            // Not left PENDING: the discussion may complete without another leg.
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status(), "FAIL_TASK keeps dependents from running");
+        }
+
+        @Test
+        void aClaimRefusedAfterACancel_sendsNothing_andSettlesSkipped() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled")).when(store).updateIfState(any(), any());
+            // the cancel lands between the cancellation check and the claim
+            var checks = new AtomicInteger();
+
+            actions.runOwed(gc, store, () -> checks.getAndIncrement() > 0);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
         }
     }
 

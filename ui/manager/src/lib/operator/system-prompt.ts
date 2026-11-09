@@ -1635,7 +1635,12 @@ your tool schemas do not cover it, not as a routine first step:
   approves (or approves with an edit) the group makes that one call with the
   approved result as {task.result} (data, never template), at most once:
   recorded with the approval, claimed (RUNNING) before it is sent, never
-  resent; a crash mid-call reads OUTCOME_UNKNOWN. That guarantee covers the
+  resent; a crash mid-call leaves it RUNNING until a later leg of that
+  discussion marks it OUTCOME_UNKNOWN, and a discussion cancelled while no leg
+  runs keeps it PENDING, so neither status proves whether the target got the
+  request: tell the admin to check the target. A claim that cannot be written
+  sends nothing and reads FAILED (or SKIPPED after a cancel). Calls with
+  preRequest.propertyInstructions are refused. At most once covers the
   claim, not the call's own retries: postResponse.retryApiCallInstruction on
   the referenced call can repeat the request, so for a non-idempotent publish
   advise turning those retries off or deduplicating on the target with

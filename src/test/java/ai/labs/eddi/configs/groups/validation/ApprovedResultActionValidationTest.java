@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.groups.validation;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedAction;
@@ -174,5 +175,39 @@ class ApprovedResultActionValidationTest {
         verify(vaultGrants).problems(eq("a call"),
                 argThat(fields -> "Bearer ${vault:github-token}".equals(fields.get("request.headers.Authorization"))
                         && fields.containsKey("request.body") && fields.containsKey("targetServerUrl")));
+    }
+
+    @Test
+    void aVaultReferenceSplitAcrossServerUrlAndPath_isCheckedAsTheJoinedUrl() throws Exception {
+        var httpCalls = new ApiCallsConfiguration();
+        httpCalls.setTargetServerUrl("https://api.example.com/${vault:");
+        call.getRequest().setPath("restricted}/comments");
+        httpCalls.setHttpCalls(List.of(call));
+        when(apiCallsStore.read("6740a1b2c3d4e5f6a7b8c9d0", 2)).thenReturn(httpCalls);
+
+        validation.referenceProblems("a", action(URI, "postComment"));
+
+        verify(vaultGrants).problems(eq("a call"),
+                argThat(fields -> "https://api.example.com/${vault:/restricted}/comments".equals(fields.get("request URL"))));
+    }
+
+    @Test
+    void theJoinedUrl_mirrorsTheExecutor() {
+        assertEquals("https://h/x", ApprovedResultActionValidation.effectiveUrl("https://h", "x"));
+        assertEquals("https://h/x", ApprovedResultActionValidation.effectiveUrl("https://h", " /x "));
+        assertEquals("https://other/x", ApprovedResultActionValidation.effectiveUrl("https://h", "https://other/x"));
+        assertEquals("https://h", ApprovedResultActionValidation.effectiveUrl("https://h", ""));
+    }
+
+    @Test
+    void preRequestPropertyInstructions_areRefused() {
+        var preRequest = new HttpPreRequest();
+        preRequest.setPropertyInstructions(List.of());
+        call.setPreRequest(preRequest);
+
+        var problems = validation.referenceProblems("a", action(URI, "postComment"));
+
+        assertEquals(1, problems.size(), problems.toString());
+        assertTrue(problems.getFirst().contains("preRequest.propertyInstructions"));
     }
 }

@@ -38,10 +38,13 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   `type` field leaves room.
 - **Validation** (`ApprovedResultActionValidation`, called from `AgentGroupStore.create/update`, `400` with the
   phase index and the fix): EXECUTE phase, `requiresApproval`, `hitlConfig.granularity: TASK`, `uri` an httpcalls
-  URI with an explicit version, the call exists and makes one request (no fire-and-forget, batch, forEach), the saver
-  holds USE access to the httpcalls configuration, every `${vault:...}` is granted to all agents
-  (`ServiceJudgeVaultGrants`, its message now names approved-result actions too), and `${connection:}`, `${caller:}`,
-  `${context:}` are refused. The reference half is re-checked before every send.
+  URI with an explicit version, the call exists and makes one request (no fire-and-forget, batch, forEach), it has
+  no `preRequest.propertyInstructions` (the executor would rebuild the template data from memory and drop
+  `task.*`/`group.*`/`action.*`), the saver holds USE access to the httpcalls configuration, every `${vault:...}` is
+  granted to all agents (`ServiceJudgeVaultGrants`, its message now names approved-result actions too) — checked on
+  each field and on the URL as the executor joins it, so a reference split across `targetServerUrl` and the path is
+  caught — and `${connection:}`, `${caller:}`, `${context:}` are refused. The reference half is re-checked before
+  every send.
 - **Audit/metrics:** one ledger entry per settled action (`group.approved_action`, approver, target, status, result
   SHA-256 and length, HTTP code, URL); counter `eddi_group_approved_action_total{outcome}`.
 - **Docs:** new `docs/group-approved-result-actions.md` (in `SUMMARY.md`) with a Content Studio example posting an
@@ -56,7 +59,10 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
 - **At most once, honestly named.** The record is created in the approval's own state+pauseId CAS write (a retried
   approval loses it, `putIfAbsent` per task), claimed as RUNNING and persisted *before* the send, and a RUNNING
   record found later becomes OUTCOME_UNKNOWN and is never resent — the tool-call execution journal's contract.
-  `{action.idempotencyKey}` lets a deduplicating target make it effectively once across a crash.
+  `{action.idempotencyKey}` lets a deduplicating target make it effectively once across a crash. The claim is a CAS
+  on the discussion still being IN_PROGRESS, so a cancel stored first makes it fail; a claim that cannot be written
+  sends nothing and settles the record SKIPPED (cancel seen on this pod) or FAILED, never leaving it PENDING for a
+  leg that may not come.
 - **Only human approvals publish.** A `system:*` approval (timeout `AUTO_APPROVE`) records SKIPPED.
 - **Identity:** the call runs as the group (`runAs: group:<groupId>` in the audit entry) with author-written,
   all-agents secrets only; the approver is recorded, never impersonated.

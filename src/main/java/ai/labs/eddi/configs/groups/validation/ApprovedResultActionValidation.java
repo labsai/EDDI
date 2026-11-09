@@ -166,6 +166,13 @@ public class ApprovedResultActionValidation {
             problems.add(path + ".call '" + LogSanitizer.sanitize(action.call()) + "' is fire-and-forget, batched or forEach — an "
                     + "approved-result action must make exactly one request and see its outcome; use a plain call");
         }
+        if (call.getPreRequest() != null && call.getPreRequest().getPropertyInstructions() != null) {
+            // The executor rebuilds the template data from conversation memory after
+            // pre-request instructions, which would drop task.*, group.* and action.*.
+            problems.add(path + ".call '" + LogSanitizer.sanitize(action.call()) + "' has preRequest.propertyInstructions — an "
+                    + "approved-result action renders with the approved task's data, which those instructions would replace; "
+                    + "remove them or use another call");
+        }
         if (call.getRequest() == null) {
             problems.add(path + ".call '" + LogSanitizer.sanitize(action.call()) + "' has no request");
             return problems;
@@ -202,6 +209,9 @@ public class ApprovedResultActionValidation {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("targetServerUrl", httpCalls.getTargetServerUrl());
         fields.put("request.path", call.getRequest().getPath());
+        // The URL as ApiCallExecutor joins it, so a reference split across the two
+        // fields is checked as the one string the executor resolves.
+        fields.put("request URL", effectiveUrl(httpCalls.getTargetServerUrl(), call.getRequest().getPath()));
         fields.put("request.body", call.getRequest().getBody());
         if (call.getRequest().getHeaders() != null) {
             call.getRequest().getHeaders().forEach((k, v) -> fields.put("request.headers." + k, v));
@@ -210,6 +220,15 @@ public class ApprovedResultActionValidation {
             call.getRequest().getQueryParams().forEach((k, v) -> fields.put("request.queryParams." + k, v));
         }
         return fields;
+    }
+
+    /** Mirrors the path join in {@code ApiCallExecutor}'s request building. */
+    static String effectiveUrl(String targetServerUrl, String rawPath) {
+        String path = rawPath == null ? "" : rawPath.trim();
+        if (!path.startsWith("/") && !path.isEmpty() && !path.startsWith("http")) {
+            path = "/" + path;
+        }
+        return path.startsWith("http") ? path : (targetServerUrl == null ? "" : targetServerUrl) + path;
     }
 
     private static String uriProblem(String uri) {

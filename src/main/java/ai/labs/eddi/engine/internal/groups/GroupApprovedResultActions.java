@@ -189,7 +189,19 @@ public class GroupApprovedResultActions {
                         settle(gc, store, taskId, record.finished(ApprovedActionStatus.SKIPPED, Instant.now(), null, null,
                                 "The discussion was cancelled before the action ran"), 0L);
                     } else if (!send(gc, store, taskId, record)) {
-                        return; // the claim could not be persisted: send nothing more this leg
+                        // The claim could not be persisted, so nothing was sent. Do not leave
+                        // the record PENDING: the discussion may finish without another leg,
+                        // which would drop the action silently. Settle it visibly instead —
+                        // SKIPPED when this pod saw a cancel, otherwise FAILED (a cancel stored
+                        // by another pod makes the claim's state check fail the same way).
+                        boolean wasCancelled = cancelled != null && cancelled.getAsBoolean();
+                        settle(gc, store, taskId, record.finished(
+                                wasCancelled ? ApprovedActionStatus.SKIPPED : ApprovedActionStatus.FAILED, Instant.now(), null, null,
+                                wasCancelled
+                                        ? "The discussion was cancelled before the action ran"
+                                        : "Not sent: the claim could not be written (the discussion changed state or the store was "
+                                                + "unavailable) — post it by hand or approve the task again"),
+                                0L);
                     }
                 }
             } catch (RuntimeException e) {
