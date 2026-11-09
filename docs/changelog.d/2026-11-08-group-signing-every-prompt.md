@@ -136,5 +136,5 @@ makes, which cannot sign.
   and `onDecision` handoffs name no agent; both are documented, with `REVIEW` intake recommended.
 - Lessons another team shares, and those the scorecard tool returns, were checked only against
   the storing team's records rule. Documented, not filtered.
-- A handed-off task in a run now counts toward `taskListConfig.maxAgentAddedTasks`, since it has a
-  creator.
+- A handed-off task in a run now counts toward `taskListConfig.maxAgentAddedTasksPerDiscussion`,
+  since it has a creator; the task-list section of group-conversations.md says so.

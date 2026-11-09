@@ -183,7 +183,10 @@ tools.
 Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
-exhaust it. A rejected call does not consume the per-turn budget.
+exhaust it. A standing team's backlog task another team's agent handed off is
+agent-filed too (the run keeps that agent as its creator, see
+[Signed contributions](#signed-contributions)), so each one a cadence run pulls
+counts toward the cap. A rejected call does not consume the per-turn budget.
 
 **No claim or complete tools.** The wave loop owns every task-state transition;
 a second writer racing it would corrupt the state machine that decides what runs
