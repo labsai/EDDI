@@ -894,9 +894,13 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 lastWriterOf(rs.getString("last_writer_agent_id"), owner));
     }
 
-    /** What {@code last_writer_agent_id} stores for {@code entry}'s write. */
+    /**
+     * What {@code last_writer_agent_id} stores for {@code entry}'s write: the
+     * writer it names, which is not always its owner — a rewrite of another agent's
+     * global row, a Dream merge of the user's keys.
+     */
     private static String writerOf(UserMemoryEntry entry) {
-        return entry.sourceAgentId() != null && !entry.sourceAgentId().isBlank() ? entry.sourceAgentId() : NO_AGENT_WRITER;
+        return entry.lastWriterAgentId() != null && !entry.lastWriterAgentId().isBlank() ? entry.lastWriterAgentId() : NO_AGENT_WRITER;
     }
 
     /**

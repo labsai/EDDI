@@ -694,6 +694,17 @@ public class DreamService {
             String sourceAgent = distinctAgents.size() == 1
                     ? distinctAgents.iterator().next()
                     : distinctAgents.isEmpty() ? null : agentId;
+            // Who wrote the merged text goes by who wrote the originals' values, not by
+            // who owns them: a user's global key an agent overwrote keeps the user as
+            // owner, and a merge of it written as no agent's passed that agent's text to
+            // every verifying reader as the user's.
+            Set<String> distinctWriters = groupEntries.stream()
+                    .map(UserMemoryEntry::lastWriterAgentId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toSet());
+            String writer = distinctWriters.size() == 1
+                    ? distinctWriters.iterator().next()
+                    : distinctWriters.isEmpty() ? null : agentId;
             // Defence in depth: should a future grouping change ever hand us a
             // self-scoped group spanning several agents, skip it rather than
             // widen it — a privacy boundary must fail closed.
@@ -780,7 +791,7 @@ public class DreamService {
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
-                            earliestCreated, Instant.now());
+                            earliestCreated, Instant.now(), writer);
                     // An entry that reuses an original is meant to overwrite it. Any other
                     // entry must be new: the collision check above ran before this write,
                     // so a memory a conversation, REST or MCP created with this key in the

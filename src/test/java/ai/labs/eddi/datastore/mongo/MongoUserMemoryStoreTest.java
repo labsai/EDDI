@@ -689,6 +689,35 @@ class MongoUserMemoryStoreTest extends MongoTestBase {
 
             assertEquals(List.of("retro:abc", "users", "own"), keys);
         }
+
+        /**
+         * Undo/redo rewrites a global row another agent owns with the value this
+         * conversation's agent produced, and a Dream merge writes its model's text over
+         * a user's key: both name a writer that is not the owner.
+         */
+        @Test
+        @DisplayName("a write that names its writer records that writer and keeps the owner")
+        void aWriteRecordsTheWriterItNames() throws IResourceStore.ResourceStoreException {
+            store.upsert(globalEntry("user-1", "city", "Paris", "agent-a"));
+            store.upsert(new UserMemoryEntry(null, "user-1", "city", "Berlin", "preference", Visibility.global, "agent-a", List.of(), "conv-b",
+                    false, 0, null, null, "agent-b"));
+
+            UserMemoryEntry city = store.getByKey("user-1", "city").orElseThrow();
+            assertEquals("agent-a", city.sourceAgentId(), "the owner is kept");
+            assertEquals("agent-b", city.lastWriterAgentId());
+            assertTrue(store.getVisibleEntriesForVerifyingReader("user-1", "agent-a", List.of(), "most_recent", 50).isEmpty(),
+                    "agent-a does not take agent-b's value as its own");
+
+            assertTrue(store.replaceIfUnchanged(city.id(), new UserMemoryEntry(null, "user-1", "city", "Graz", "preference", Visibility.global,
+                    "agent-a", List.of(), "dream-consolidation", false, 0, null, null, null), city.updatedAt()));
+            assertNull(store.getByKey("user-1", "city").orElseThrow().lastWriterAgentId(), "a write no agent made");
+
+            assertNotNull(store.insertIfAbsent(new UserMemoryEntry(null, "user-1", "diet", "vegan", "preference", Visibility.global, null,
+                    List.of(), "dream-consolidation", false, 0, null, null, "agent-b")));
+            UserMemoryEntry diet = store.getByKey("user-1", "diet").orElseThrow();
+            assertNull(diet.sourceAgentId(), "still the user's key");
+            assertEquals("agent-b", diet.lastWriterAgentId());
+        }
     }
 
     // ─── Helpers ────────────────────────────────────────────────

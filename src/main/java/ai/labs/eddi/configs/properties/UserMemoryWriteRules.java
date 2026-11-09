@@ -84,13 +84,19 @@ public final class UserMemoryWriteRules {
         return null;
     }
 
-    /** The entry with an absent category set to {@code fact}. */
+    /**
+     * The entry with an absent category set to {@code fact} and an absent last
+     * writer set to its owner: a body that names no writer is recorded as the agent
+     * it names wrote it, as before writers were recorded.
+     */
     public static UserMemoryEntry withDefaults(UserMemoryEntry entry) {
-        if (entry.category() != null) {
+        if (entry.category() != null && entry.lastWriterAgentId() != null) {
             return entry;
         }
-        return new UserMemoryEntry(entry.id(), entry.userId(), entry.key(), entry.value(), "fact", entry.visibility(), entry.sourceAgentId(),
-                entry.groupIds(), entry.sourceConversationId(), entry.conflicted(), entry.accessCount(), entry.createdAt(), entry.updatedAt());
+        return new UserMemoryEntry(entry.id(), entry.userId(), entry.key(), entry.value(), entry.category() != null ? entry.category() : "fact",
+                entry.visibility(), entry.sourceAgentId(), entry.groupIds(), entry.sourceConversationId(), entry.conflicted(),
+                entry.accessCount(), entry.createdAt(), entry.updatedAt(),
+                entry.lastWriterAgentId() != null ? entry.lastWriterAgentId() : entry.sourceAgentId());
     }
 
     private static int valueLength(Object value) {

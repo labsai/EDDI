@@ -26,8 +26,10 @@ import java.util.List;
  * global entry is shared, and a later write by another agent replaces its value
  * but keeps the owner, so who wrote the value it holds is
  * {@code lastWriterAgentId}: the agent whose write produced it, {@code null}
- * when the user or an admin wrote it. An entry stored before writers were
- * recorded reads back with its owner as writer.
+ * when the user or an admin wrote it. The stores record the writer an entry
+ * names, so a write on behalf of an agent other than the owner names both. An
+ * entry stored before writers were recorded reads back with its owner as
+ * writer.
  *
  * @author ginccc
  * @since 6.0.0
