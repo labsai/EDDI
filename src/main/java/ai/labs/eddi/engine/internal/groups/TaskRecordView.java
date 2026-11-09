@@ -123,13 +123,25 @@ final class TaskRecordView {
                 task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
     }
 
+    /**
+     * Whether the reader may judge {@code task}'s work: it may be shown both the
+     * task and its result. A verifier is given only such tasks.
+     */
+    boolean showsWork(TaskItem task) {
+        return showsEverything() || task == null || showsTask(task) && showsResult(task);
+    }
+
     private String result(TaskItem task) {
+        return showsResult(task) ? task.result() : WITHHELD;
+    }
+
+    private boolean showsResult(TaskItem task) {
         String result = task.result();
         String assignee = task.assignedAgentId();
         if (result == null || assignee == null || assignee.equals(readerId) || isHuman.test(assignee) || editedByReviewer.test(task.id())) {
-            return result;
+            return true;
         }
-        return trustedContents().getOrDefault(assignee, Set.of()).contains(result) ? result : WITHHELD;
+        return trustedContents().getOrDefault(assignee, Set.of()).contains(result);
     }
 
     private String note(TaskItem task) {

@@ -705,6 +705,13 @@ public class TaskForceEngine {
     static final String UNVERIFIED_TASK_REASON = "Its task text could not be verified, and this member requires peer verification";
 
     /**
+     * The engine's note for the tasks a verifier that requires peer verification
+     * was not given: their text or result does not verify for it.
+     */
+    static final String UNREADABLE_BY_VERIFIER = "%d task(s) not verified: their text or result could not be verified, "
+            + "and the verifier requires peer verification";
+
+    /**
      * The pause for the next executable HUMAN-assigned task, or {@code null} when
      * there is none or the turn budget is spent (a human task is a turn).
      */
@@ -966,13 +973,28 @@ public class TaskForceEngine {
 
     /**
      * One verifier turn over {@code completedTasks}: the verdict is parsed and
-     * applied, and the transcript shows it in readable form.
+     * applied, and the transcript shows it in readable form. A verifier that
+     * verifies judges only the tasks whose text and result it may be shown; the
+     * others stay COMPLETED, unverified, since passing work the verifier could not
+     * read (the fail-open path for a verdict that does not parse) or failing it
+     * (which sends it to a rework that is withheld again) would both be wrong. With
+     * none left, it gets no turn.
      */
     private void runVerificationPass(GroupConversation gc, AgentGroupConfiguration config, GroupMember verifier, List<TaskItem> completedTasks,
                                      DiscussionPhase phase,
                                      String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
                                      AtomicInteger turnCounter)
             throws GroupDiscussionException {
+        var records = taskRecords(verifier.agentId(), gc, config);
+        List<TaskItem> readable = completedTasks.stream().filter(records::showsWork).toList();
+        if (readable.size() < completedTasks.size()) {
+            // A count, never the tasks' subjects: this note is the engine's, and quoting
+            // unverified text in it would show that text to every verifying member.
+            addVerificationNote(gc, phase, phaseIdx, UNREADABLE_BY_VERIFIER.formatted(completedTasks.size() - readable.size()));
+        }
+        if (readable.isEmpty()) {
+            return;
+        }
         turnCounter.incrementAndGet();
 
         if (listener != null) {
@@ -981,12 +1003,11 @@ public class TaskForceEngine {
         }
 
         // Build verification input from the records as the verifier may see them
-        var records = taskRecords(verifier.agentId(), gc, config);
         String verifyTemplate = DiscussionStylePresets.templateFor(phase, PhaseType.VERIFY);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("question", question);
         data.put("displayName", verifier.displayName());
-        List<Map<String, Object>> taskData = completedTasks.stream().map(records::seen).map(t -> {
+        List<Map<String, Object>> taskData = readable.stream().map(records::seen).map(t -> {
             Map<String, Object> td = new LinkedHashMap<>();
             td.put("subject", t.subject());
             td.put("description", t.description());
@@ -1005,8 +1026,9 @@ public class TaskForceEngine {
 
         TranscriptEntry verifyEntry = memberTurnExecutor.executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
 
-        // Parse verification results — same three-tier fallback
-        parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener);
+        // Parse verification results — same three-tier fallback, over the tasks the
+        // verifier was shown only
+        parseAndApplyVerification(gc, readable, verifyEntry.content(), listener);
 
         // Replace raw JSON with a human-readable summary for the transcript.
         // The JSON was needed for parseAndApplyVerification above; users should

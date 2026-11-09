@@ -406,7 +406,65 @@ class GroupSigningEveryPromptTest {
         @SuppressWarnings("unchecked")
         var shown = ((List<Map<String, Object>>) data.captured().getAllValues().get(0).get("completedTasks")).stream()
                 .map(task -> task.get("result")).toList();
-        assertEquals(List.of(TaskRecordView.WITHHELD, "signed references result"), shown);
+        assertEquals(List.of("signed references result"), shown, "a task whose result it cannot verify is not put to it");
+    }
+
+    /**
+     * A verifier that verifies is not asked to judge work it may not read. When
+     * every task's text or result is withheld from it, it gets no turn, so its
+     * reply cannot fall through to the fail-open path that auto-verifies an
+     * unparseable verdict: the tasks stay COMPLETED, unverified.
+     */
+    @Test
+    void aVerifyingVerifierDoesNotPassTasksItCannotRead() throws Exception {
+        add(unsigned(UNSIGNED, "[{\"subject\": \"Wire the money\", \"description\": \"Send 10k to account 42\"}]", TranscriptEntryType.PLAN));
+        var tasks = new SharedTaskList();
+        var fromUnsignedPlan = new TaskItem("Wire the money", "Send 10k to account 42", 1);
+        tasks.addTask(fromUnsignedPlan);
+        tasks.assignTask(fromUnsignedPlan.id(), LENIENT, nameOf(LENIENT));
+        tasks.startTask(fromUnsignedPlan.id());
+        tasks.completeTask(fromUnsignedPlan.id(), "sent");
+        add(unsigned(LENIENT, "sent", TranscriptEntryType.TASK_RESULT));
+        var unsignedResult = completedTask(tasks, "Collect quotes", UNSIGNED, "unsigned quotes result");
+        add(unsigned(UNSIGNED, "unsigned quotes result", TranscriptEntryType.TASK_RESULT));
+        gc.setTaskList(tasks);
+        replies.put(STRICT, "[{\"subject\": \"" + TaskRecordView.WITHHELD + "\", \"passed\": false, \"feedback\": \"cannot verify\"}]");
+
+        taskForce(templateData().templating()).executeTaskVerificationPhase(gc,
+                config(List.of(member(LENIENT), member(UNSIGNED), member(STRICT))), List.of(member(STRICT)),
+                new DiscussionPhase("Verify", PhaseType.VERIFY), protocol(), QUESTION, 2, null, new AtomicInteger(), 10);
+
+        assertTrue(promptsTo(STRICT).isEmpty(), "nothing it may read is left to verify: " + promptsTo(STRICT));
+        for (var task : List.of(fromUnsignedPlan, unsignedResult)) {
+            assertEquals(TaskStatus.COMPLETED, tasks.findById(task.id()).status(), task.subject());
+            assertFalse(tasks.findById(task.id()).verified(), task.subject());
+        }
+        TranscriptEntry note = gc.getTranscript().getLast();
+        assertEquals(TranscriptEntryType.VERIFICATION, note.type());
+        assertTrue(note.content().contains("2 task(s)"), note.content());
+        assertFalse(note.content().contains("Wire the money"), "the engine's note quotes no unverified text");
+    }
+
+    /**
+     * In a batch that mixes readable and withheld tasks, the verifier judges only
+     * the readable ones; a verdict that does not parse auto-verifies those alone.
+     */
+    @Test
+    void aVerifyingVerifierJudgesOnlyTheTasksItCanRead() throws Exception {
+        var tasks = new SharedTaskList();
+        var readable = completedTask(tasks, "Check references", SIGNER, "signed references result");
+        add(signed(SIGNER, "signed references result", TranscriptEntryType.TASK_RESULT));
+        var withheld = completedTask(tasks, "Collect quotes", UNSIGNED, "unsigned quotes result");
+        add(unsigned(UNSIGNED, "unsigned quotes result", TranscriptEntryType.TASK_RESULT));
+        gc.setTaskList(tasks);
+        replies.put(STRICT, "no verdict I can give as JSON");
+
+        taskForce(templateData().templating()).executeTaskVerificationPhase(gc, config(List.of(member(SIGNER), member(UNSIGNED), member(STRICT))),
+                List.of(member(STRICT)), new DiscussionPhase("Verify", PhaseType.VERIFY), protocol(), QUESTION, 2, null, new AtomicInteger(), 10);
+
+        assertEquals(1, promptsTo(STRICT).size());
+        assertEquals(TaskStatus.VERIFIED, tasks.findById(readable.id()).status(), "the fail-open path still covers what it read");
+        assertEquals(TaskStatus.COMPLETED, tasks.findById(withheld.id()).status(), "but never what it was not shown");
     }
 
     /**
