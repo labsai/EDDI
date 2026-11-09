@@ -99,7 +99,11 @@ public interface IRestAuditStore {
 
     /**
      * Verify the integrity of a conversation's audit trail: recompute every entry's
-     * HMAC and check the per-conversation sequence for gaps.
+     * HMAC, check its agent signature (or its absence) where the HMAC verified, and
+     * check the per-conversation sequence for gaps. An agent signature that cannot
+     * vouch for an entry counts in
+     * {@link AuditVerificationReport#agentSignatureUnproven()}, not as tampering;
+     * see audit-ledger.md#agent-signatures for the statuses.
      * <p>
      * Note the path is {@code /verify/{conversationId}} rather than
      * {@code /{conversationId}/verify} so it cannot be shadowed by, or shadow, the
@@ -116,7 +120,7 @@ public interface IRestAuditStore {
      *            maximum entries to verify (default: 1000, hard ceiling 10 000). A
      *            non-positive value falls back to the default, it does not mean
      *            "unbounded"
-     * @return per-entry HMAC status plus the chain verdict
+     * @return per-entry HMAC and agent-signature status plus the chain verdict
      */
     @GET
     @Path("/verify/{conversationId}")
@@ -128,7 +132,8 @@ public interface IRestAuditStore {
 
     /**
      * Verify the integrity of an agent's audit entries. Spans many conversations,
-     * so only the per-entry HMACs are checked — the chain verdict is
+     * so each entry's HMAC and agent signature are checked, as for
+     * {@link #verifyConversation}, but not the chain — the chain verdict is
      * {@code NOT_APPLICABLE}.
      *
      * @param agentId
@@ -140,7 +145,7 @@ public interface IRestAuditStore {
      * @param limit
      *            maximum entries to verify (default: 1000, hard ceiling 10 000). A
      *            non-positive value falls back to the default
-     * @return per-entry HMAC status
+     * @return per-entry HMAC and agent-signature status
      */
     @GET
     @Path("/verify/agent/{agentId}")

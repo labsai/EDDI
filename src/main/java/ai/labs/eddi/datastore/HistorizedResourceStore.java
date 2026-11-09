@@ -144,6 +144,32 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         };
     }
 
+    /**
+     * The newest version of {@code id}, a soft-deleted one included: the current
+     * version while there is one, otherwise the newest version in history — after a
+     * soft delete, the version that was deleted. Unlike
+     * {@link #getCurrentResourceId}, this still answers for a soft-deleted
+     * resource, whose last version {@link #readIncludingDeleted} can read.
+     *
+     * @throws ResourceNotFoundException
+     *             if no version is left at all: the resource never existed, or was
+     *             deleted permanently
+     */
+    public Integer getNewestVersionIncludingDeleted(String id) throws ResourceNotFoundException {
+
+        checkNotNull(id, "id");
+
+        Integer current = resourceStorage.getCurrentVersion(id);
+        if (current != -1) {
+            return current;
+        }
+        var historyLatest = resourceStorage.readHistoryLatest(id);
+        if (historyLatest == null) {
+            throw new ResourceNotFoundException("No version left for id (" + id + ")");
+        }
+        return historyLatest.getVersion();
+    }
+
     @Override
     public T read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
 

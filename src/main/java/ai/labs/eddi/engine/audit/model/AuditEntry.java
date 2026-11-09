@@ -68,8 +68,9 @@ import java.util.Map;
  * @param hmac
  *            HMAC-SHA256 integrity hash of all fields above
  * @param agentSignature
- *            Optional cryptographic agent signature for tamper-evident identity
- *            proof (null when signing not configured)
+ *            The agent's Ed25519 signature over {@code hmac}, stored as
+ *            {@code v<keyVersion>:<Base64 signature>}; null when the agent
+ *            version does not sign (see {@code AuditAgentSigner})
  * @param sequence
  *            0-based, gap-free position of this entry within its conversation,
  *            or {@link #UNSEQUENCED} when the backing store cannot persist it.

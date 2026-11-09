@@ -280,9 +280,20 @@ a key keeps it, and peers trust it for v0 signatures until it is revoked). You h
 no tool for either, on purpose: whoever mints or retires an agent's key decides
 what signs as that agent. The private key stays in the secrets vault; the
 public key is added to the agent's \`identity.keys\` as a new agent version, and
-the agent signs its group-conversation messages with the newest one. A revoked
-key is trusted for nothing, whenever it signed, and revoking the newest key
-stops the agent signing until a new one is generated. \`identity\` is
+the agent signs its group-conversation messages with the newest one at once.
+Its own audit entries are signed by the agent version a conversation runs, so
+they stay unsigned until a version that declares the key and has signing on
+is deployed. An audit entry's \`agentSignature\` is
+\`v<keyVersion>:<signature>\`, or plain Base64 on entries written by 6.7.0 or
+earlier, which is checked against the legacy \`identity.publicKey\` (AGENT_KEY_UNAVAILABLE
+when that version declares none); the audit verify endpoints report one that does
+not verify as AGENT_SIGNATURE_INVALID (counted in \`invalid\`: tampering).
+AGENT_SIGNATURE_MISSING (none where the version would have signed),
+AGENT_KEY_REVOKED (key revoked since) and AGENT_KEY_UNAVAILABLE (agent
+permanently deleted) count in \`agentSignatureUnproven\` instead: the content
+is intact, so they are not tampering. A revoked key is trusted for nothing,
+whenever it signed, audit entries included, and revoking the newest key stops
+the agent signing until a new one is generated. \`identity\` is
 engine-owned: an agent save — yours, an import or a sync included — keeps the
 stored identity whatever the body says, so editing \`identity.keys\` or
 \`validUntilMs\` does nothing; only those two endpoints change keys. A save with

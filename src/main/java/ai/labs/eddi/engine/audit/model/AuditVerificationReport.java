@@ -14,8 +14,9 @@ import java.util.List;
  * <p>
  * Two independent things are reported, because they catch different attacks:
  * <ul>
- * <li><strong>Per-entry HMAC status</strong> — catches a field edited in
- * place.</li>
+ * <li><strong>Per-entry status</strong> — the HMAC catches a field edited in
+ * place; on an entry whose HMAC verified, the agent's signature over that HMAC
+ * shows which agent's key vouched for it.</li>
  * <li><strong>Chain status</strong> — catches an entry <em>removed</em> or
  * reordered, which a per-entry HMAC cannot see at all. Entries carry a signed,
  * gap-free per-conversation sequence; a missing number is a missing entry, and
@@ -46,7 +47,8 @@ import java.util.List;
  *            number of entries examined
  * @param valid
  *            entries whose HMAC recomputed correctly, including the
- *            {@code recovered} ones
+ *            {@code recovered} ones, and whose agent signature verified
+ *            wherever one was expected
  * @param recovered
  *            of those, entries written before the v4 canonical form that
  *            verified only after the timestamp precision their backend could
@@ -61,9 +63,21 @@ import java.util.List;
  *            that verdict is "not proven" rather than "disproven", and that a
  *            narrower page or a larger budget would say more
  * @param invalid
- *            entries whose HMAC did not match — tampering, or a key change
+ *            entries whose HMAC did not match — tampering, or a key change —
+ *            plus those whose agent signature did not verify
+ *            ({@code AGENT_SIGNATURE_INVALID}), and those that name an HMAC key
+ *            this deployment no longer holds ({@code UNKNOWN_KEY})
  * @param unsigned
  *            entries stored without an HMAC
+ * @param agentSignatureUnproven
+ *            entries whose HMAC verified, so their content is intact, but whose
+ *            agent signature cannot vouch for them: missing where the agent
+ *            version would have signed ({@code AGENT_SIGNATURE_MISSING}), made
+ *            with a key revoked since ({@code AGENT_KEY_REVOKED}), or that
+ *            nothing can check, the agent being deleted permanently or the
+ *            signature's legacy key undeclared ({@code AGENT_KEY_UNAVAILABLE}).
+ *            Not proven, not disproven: they defeat {@link #intact()} and raise
+ *            no tampering alarm
  * @param chainStatus
  *            outcome of the sequence-continuity check
  * @param missingSequences
@@ -86,19 +100,20 @@ import java.util.List;
  * @since 6.2.0
  */
 public record AuditVerificationReport(String scope, String scopeId, boolean signingEnabled, int entriesChecked, int valid, int recovered,
-        int recoverySkipped, int invalid, int unsigned, ChainStatus chainStatus, List<Long> missingSequences,
+        int recoverySkipped, int invalid, int unsigned, int agentSignatureUnproven, ChainStatus chainStatus, List<Long> missingSequences,
         List<Long> undeliveredSequences, List<Long> duplicateSequences, List<EntryProblem> problems, Instant verifiedAt) {
 
     /**
      * Whether the sweep found nothing wrong. False whenever an entry failed
-     * verification or the chain is anything other than {@code INTACT} — note that a
-     * sweep with no signing key is never {@code intact}, because it checked
-     * nothing, and that an {@code INCOMPLETE} chain is still an incomplete record
-     * even though it is not evidence of tampering. Duplicate sequence numbers also
-     * defeat it: the chain cannot be trusted when two entries claim the same
-     * position, even where no number is missing. The one status that does
-     * <em>not</em> defeat it is {@code NOT_APPLICABLE} — that is an agent-scope
-     * sweep, where no single sequence run is expected in the first place.
+     * verification, an agent signature could not vouch for its entry, or the chain
+     * is anything other than {@code INTACT} — note that a sweep with no signing key
+     * is never {@code intact}, because it checked nothing, and that an
+     * {@code INCOMPLETE} chain is still an incomplete record even though it is not
+     * evidence of tampering. Duplicate sequence numbers also defeat it: the chain
+     * cannot be trusted when two entries claim the same position, even where no
+     * number is missing. The one status that does <em>not</em> defeat it is
+     * {@code NOT_APPLICABLE} — that is an agent-scope sweep, where no single
+     * sequence run is expected in the first place.
      */
     public boolean intact() {
         // NOT_APPLICABLE counts as clean: an agent-scope sweep spans many
@@ -108,15 +123,16 @@ public record AuditVerificationReport(String scope, String scopeId, boolean sign
         // useless. UNAVAILABLE is NOT clean — there the chain could not be
         // established, so a deletion would go unseen.
         boolean chainOk = chainStatus == ChainStatus.INTACT || chainStatus == ChainStatus.NOT_APPLICABLE;
-        return signingEnabled && invalid == 0 && unsigned == 0 && chainOk
+        return signingEnabled && invalid == 0 && unsigned == 0 && agentSignatureUnproven == 0 && chainOk
                 && (duplicateSequences == null || duplicateSequences.isEmpty());
     }
 
     /**
      * Whether anything in the swept range points at <em>tampering</em>: an entry
      * whose HMAC no longer recomputes, or a gap this deployment cannot account for.
-     * An {@code INCOMPLETE} chain (the ledger dropped those entries itself) and a
-     * missing signing key are explicitly not tampering.
+     * An {@code INCOMPLETE} chain (the ledger dropped those entries itself), a
+     * missing signing key and an agent signature that cannot vouch
+     * ({@link #agentSignatureUnproven}) are explicitly not tampering.
      * <p>
      * Nor is {@link #recoverySkipped}. Those rows failed their direct check and
      * were then <em>not searched</em>, because the sweep's recovery budget was

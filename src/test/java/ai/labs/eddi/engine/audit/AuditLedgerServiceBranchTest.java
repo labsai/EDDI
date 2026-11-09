@@ -4,7 +4,13 @@
  */
 package ai.labs.eddi.engine.audit;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.SigningTestSupport;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -16,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -226,123 +233,378 @@ class AuditLedgerServiceBranchTest {
         assertEquals(1, service.getQueueSize());
     }
 
-    // ==================== applyAgentSignature — hmac non-null ====================
+    // ==================== agent signature ====================
 
-    @SuppressWarnings("unchecked")
-    @Test
-    @DisplayName("applyAgentSignature signs using hmac when available")
-    void applyAgentSignatureWithHmac() throws Exception {
-        AgentSigningService signingService = mock(AgentSigningService.class);
-        doReturn("sig123").when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
-
-        IAuditClusterSupport natsInstance = null;
-
+    /** A ledger with an HMAC key, signing as agents through {@code signer}. */
+    private AuditLedgerService signingLedger(AuditAgentSigner signer, boolean agentSigningEnabled) {
         var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.of("master-key"), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
+                Optional.of("master-key"), "deadletter.jsonl", agentSigningEnabled, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                true, 500, meterRegistry, null, signer, new ObjectMapper());
         service.init();
-
-        var entry = entry("id1", "conv1", "agent1");
-        service.submit(entry);
-        service.flush();
-
-        // The entry should have hmac (from master key) and agent signature
-        verify(auditStore).appendBatch(argThat(batch -> {
-            AuditEntry e = batch.getFirst();
-            assertNotNull(e.hmac());
-            assertEquals("sig123", e.agentSignature());
-            return true;
-        }));
-        // Verify sign was called with hmac (not entry id)
-        verify(signingService).signIfKeyPresent(eq("default"), eq("agent1"), argThat(payload -> payload != null && !payload.equals("id1")));
-
-        service.shutdown();
+        return service;
     }
 
-    // ==================== applyAgentSignature — AgentSigningException
-    // ====================
-
+    /** The one entry the ledger flushed to the store. */
     @SuppressWarnings("unchecked")
-    @Test
-    @DisplayName("applyAgentSignature returns original entry on AgentSigningException")
-    void applyAgentSignatureException() throws Exception {
-        AgentSigningService signingService = mock(AgentSigningService.class);
-        doThrow(new AgentSigningService.AgentSigningException("no key", new RuntimeException("missing")))
-                .when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
-
-        IAuditClusterSupport natsInstance = null;
-
-        var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
-        service.init();
-
-        var entry = entry("id1", "conv1", "agent1");
-        service.submit(entry);
+    private AuditEntry flushedEntry(AuditLedgerService service) {
         service.flush();
-
-        // Entry should have no agent signature (exception was caught)
-        verify(auditStore).appendBatch(argThat(batch -> {
-            AuditEntry e = batch.getFirst();
-            assertNull(e.agentSignature());
-            return true;
-        }));
-
-        service.shutdown();
+        var batch = ArgumentCaptor.forClass(List.class);
+        verify(auditStore).appendBatch(batch.capture());
+        return (AuditEntry) batch.getValue().getFirst();
     }
 
-    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("applyAgentSignature leaves the entry unsigned when the agent has no key")
-    void applyAgentSignatureNoKey() throws Exception {
-        AgentSigningService signingService = mock(AgentSigningService.class);
-        doReturn(null).when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
-
-        IAuditClusterSupport natsInstance = null;
-
-        var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
-        service.init();
+    @DisplayName("the agent signs the entry after its HMAC, and the signed entry is what is stored")
+    void agentSignsAfterTheHmac() throws Exception {
+        AuditAgentSigner signer = mock(AuditAgentSigner.class);
+        when(signer.sign(eq("default"), any())).thenAnswer(invocation -> {
+            AuditEntry entry = invocation.getArgument(1);
+            assertNotNull(entry.hmac(), "the signature covers the HMAC, so the HMAC comes first");
+            return entry.withAgentSignature("v1:sig");
+        });
+        var service = signingLedger(signer, true);
 
         service.submit(entry("id1", "conv1", "agent1"));
-        service.flush();
 
-        verify(auditStore).appendBatch(argThat(batch -> {
-            assertNull(batch.getFirst().agentSignature());
-            return true;
-        }));
-        verify(signingService, never()).sign(anyString(), anyString(), anyString());
-
+        assertEquals("v1:sig", flushedEntry(service).agentSignature());
         service.shutdown();
     }
 
-    // ==================== applyAgentSignature — null hmac uses entry.id()
-    // ====================
-
-    @SuppressWarnings("unchecked")
     @Test
-    @DisplayName("applyAgentSignature signs using entry.id() when hmac is null")
-    void applyAgentSignatureNullHmac() throws Exception {
-        AgentSigningService signingService = mock(AgentSigningService.class);
-        doReturn("sig-from-id").when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
+    @DisplayName("eddi.audit.agent-signing-enabled=false signs nothing")
+    void agentSigningDisabledSignsNothing() throws Exception {
+        AuditAgentSigner signer = mock(AuditAgentSigner.class);
+        var service = signingLedger(signer, false);
 
-        IAuditClusterSupport natsInstance = null;
+        service.submit(entry("id1", "conv1", "agent1"));
 
-        // No master key → no hmac
-        var service = new AuditLedgerService(auditStore, true, 60,
-                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
-                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
-        service.init();
-
-        var entry = entry("my-id", "conv1", "agent1");
-        service.submit(entry);
-        service.flush();
-
-        // Should sign with entry.id() since hmac is null
-        verify(signingService).signIfKeyPresent(eq("default"), eq("agent1"), eq("my-id"));
-
+        assertNull(flushedEntry(service).agentSignature());
+        verify(signer, never()).sign(anyString(), any());
         service.shutdown();
+    }
+
+    /**
+     * Sign, store, verify — with real Ed25519 keys over an in-memory vault, and a
+     * signing agent version from a stubbed agent store.
+     */
+    @Nested
+    @DisplayName("agent signature round trip")
+    class AgentSignatureRoundTrip {
+
+        private AgentSigningService signingService;
+        private IAgentStore agentStore;
+        private AgentConfiguration config;
+        private AuditLedgerService service;
+
+        @BeforeEach
+        void provisionASigningAgent() throws Exception {
+            signingService = SigningTestSupport.signingService(SigningTestSupport.inMemoryVault(), meterRegistry);
+            agentStore = mock(IAgentStore.class);
+            var key = signingService.generateKey("default", "agent1", 1);
+            config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(List.of(new AgentPublicKey(key.version(), key.publicKeyB64(), 0, 0))));
+            config.setIdentity(identity);
+            when(agentStore.read("agent1", 1)).thenReturn(config);
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenReturn(config);
+            service = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
+        }
+
+        @Test
+        @DisplayName("a stored entry carries a versioned agent signature and verifies VALID")
+        void signedEntryVerifies() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+
+            assertTrue(stored.agentSignature().startsWith("v1:"), stored.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(stored));
+            service.shutdown();
+        }
+
+        @Test
+        @DisplayName("a replaced agent signature on intact content is AGENT_SIGNATURE_INVALID")
+        void replacedSignatureIsReported() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            String otherKeysSignature = signingService.sign("default", "agent1", signingService.generateKey("default", "agent1", 2).version(),
+                    AuditAgentSigner.SIGNED_PREFIX + stored.hmac());
+
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_INVALID,
+                    service.verifyEntry(stored.withAgentSignature("v1:" + otherKeysSignature)));
+            service.shutdown();
+        }
+
+        @Test
+        @DisplayName("edited content is INVALID, whatever the agent signature says")
+        void editedContentIsInvalid() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+
+            AuditEntry edited = stored.withPayload(Map.of("text", "edited"), stored.output(), stored.llmDetail(), stored.toolCalls());
+            assertEquals(AuditVerificationStatus.INVALID, service.verifyEntry(edited));
+            service.shutdown();
+        }
+
+        /**
+         * The agent's owner may delete it permanently. Its entries' HMACs still prove
+         * their content, so the uncheckable signature is reported, not counted as
+         * tampering (see {@code RestAuditStoreTest}).
+         */
+        @Test
+        @DisplayName("the agent signature of an entry whose agent was permanently deleted is AGENT_KEY_UNAVAILABLE")
+        void deletedAgentsSignatureIsUnavailable() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
+
+            assertEquals(AuditVerificationStatus.AGENT_KEY_UNAVAILABLE, afterDeletion.verifyEntry(stored));
+            service.shutdown();
+            afterDeletion.shutdown();
+        }
+
+        @Test
+        @DisplayName("a signature stripped from an entry its agent version signs is AGENT_SIGNATURE_MISSING")
+        void strippedSignatureIsMissing() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stripped = flushedEntry(service).withAgentSignature(null);
+
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(stripped));
+            service.shutdown();
+        }
+
+        /**
+         * With agent signing off for the deployment, no entry is expected to carry one.
+         */
+        @Test
+        @DisplayName("with eddi.audit.agent-signing-enabled=false an unsigned entry is not reported missing")
+        void noSignatureIsMissingWhileAgentSigningIsOff() {
+            service.shutdown();
+            var unsignedLedger = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), false);
+            unsignedLedger.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(unsignedLedger);
+
+            assertNull(stored.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, unsignedLedger.verifyEntry(stored));
+            unsignedLedger.shutdown();
+        }
+
+        @Test
+        @DisplayName("an entry whose agent key was revoked since is AGENT_KEY_REVOKED")
+        void revokedKeyIsReported() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            var revoked = new AgentConfiguration();
+            revoked.setSecurity(config.getSecurity());
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setKeys(new ArrayList<>(config.getIdentity().getKeys().stream().map(AgentPublicKey::revoke).toList()));
+            revoked.setIdentity(identity);
+            when(agentStore.readIncludingDeleted("agent1", 2)).thenReturn(revoked);
+            when(agentStore.getNewestVersionIncludingDeleted("agent1")).thenReturn(2);
+
+            assertEquals(AuditVerificationStatus.AGENT_KEY_REVOKED, service.verifyEntry(stored));
+            service.shutdown();
+        }
+
+        /**
+         * The chain position is taken before the agent signs. An unchecked failure
+         * reading the agent version (a driver timeout) used to escape submit, losing
+         * the entry and leaving a gap verification reports as a deletion.
+         */
+        @Test
+        @DisplayName("an unchecked agent-store failure neither loses the entry nor leaves a gap in the chain")
+        @SuppressWarnings("unchecked")
+        void anAgentStoreFailureKeepsTheChainWhole() throws Exception {
+            doReturn(true).when(auditStore).supportsSequence();
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IllegalStateException("socket timeout")).thenReturn(config);
+
+            assertTrue(service.submit(entry("id1", "conv1", "agent1")));
+            assertTrue(service.submit(entry("id2", "conv1", "agent1")));
+            service.flush();
+
+            var batch = ArgumentCaptor.forClass(List.class);
+            verify(auditStore).appendBatch(batch.capture());
+            List<AuditEntry> stored = batch.getValue();
+            assertEquals(2, stored.size(), "the entry whose agent version could not be read is still stored");
+            assertTrue(stored.get(0).sequence() >= 0);
+            assertEquals(stored.get(0).sequence() + 1, stored.get(1).sequence(), "no position between them was consumed");
+            assertNull(stored.get(0).agentSignature());
+            assertNotNull(stored.get(1).agentSignature());
+            service.shutdown();
+        }
+
+        @Test
+        @DisplayName("an entry of a soft-deleted agent still verifies VALID")
+        void softDeletedAgentStillVerifies() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            var afterSoftDelete = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
+
+            assertEquals(AuditVerificationStatus.VALID, afterSoftDelete.verifyEntry(stored));
+            service.shutdown();
+            afterSoftDelete.shutdown();
+        }
+
+        /**
+         * Whether an erasure may re-sign a row depends on its HMAC alone: the reseal
+         * makes a new agent signature anyway. Graded by the agent signature too, a row
+         * whose agent was deleted kept its old HMAC over the redacted content and
+         * failed verification from then on.
+         */
+        @Test
+        @DisplayName("an erasure reseals an intact row even when its agent signature can no longer be checked")
+        void erasureResealsByTheHmacAlone() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            service.shutdown();
+            when(agentStore.read("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+            var afterDeletion = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
+            when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(stored));
+            when(auditStore.redactEntry(any(), eq(stored.hmac()))).thenReturn(true);
+
+            var result = afterDeletion.eraseUser("user1");
+
+            assertEquals(1, result.resealed());
+            var redacted = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditStore).redactEntry(redacted.capture(), eq(stored.hmac()));
+            assertNull(redacted.getValue().agentSignature(), "the deleted agent cannot sign the redacted row");
+            assertEquals(AuditVerificationStatus.VALID, afterDeletion.verifyEntry(redacted.getValue()));
+            afterDeletion.shutdown();
+        }
+
+        /** The row an erasure re-signs, once the sweep has run over {@code row}. */
+        private AuditEntry erasedRow(AuditEntry row) {
+            when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(row));
+            when(auditStore.redactEntry(any(), eq(row.hmac()))).thenReturn(true);
+
+            assertEquals(1, service.eraseUser("user1").resealed());
+            var redacted = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditStore).redactEntry(redacted.capture(), eq(row.hmac()));
+            return redacted.getValue();
+        }
+
+        @Test
+        @DisplayName("an erasure gives an intact row a fresh agent signature over its new HMAC")
+        void erasureResignsAnIntactRow() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+
+            AuditEntry erased = erasedRow(stored);
+
+            assertNotEquals(stored.agentSignature(), erased.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * A row forged by someone holding the audit HMAC key, without the agent's
+         * signature. Re-signed by the erasure, the agent would vouch for a row it never
+         * wrote, and the one trace of the forgery would be gone.
+         */
+        @Test
+        @DisplayName("an erasure does not give a row missing its agent signature a genuine one")
+        void erasureKeepsAMissingAgentSignatureMissing() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry forged = flushedEntry(service).withAgentSignature(null);
+
+            AuditEntry erased = erasedRow(forged);
+
+            assertNull(erased.agentSignature());
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        @Test
+        @DisplayName("an erasure does not replace a forged agent signature with a genuine one")
+        void erasureKeepsAForgedAgentSignatureInvalid() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            String otherKeysSignature = signingService.sign("default", "agent1", signingService.generateKey("default", "agent1", 2).version(),
+                    AuditAgentSigner.SIGNED_PREFIX + stored.hmac());
+            AuditEntry forged = stored.withAgentSignature("v1:" + otherKeysSignature);
+
+            AuditEntry erased = erasedRow(forged);
+
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_INVALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * A row written by 6.7.0 or earlier carries the agent's signature in the old
+         * form: Base64 with no key version, over the bare HMAC, by the key under the
+         * agent's unversioned vault name.
+         */
+        private AuditEntry legacySignedRow() throws Exception {
+            var legacy = signingService.generateKey("default", "agent1", 5);
+            config.getIdentity().setPublicKey(legacy.publicKeyB64());
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            return stored.withAgentSignature(signingService.sign("default", "agent1", legacy.version(), stored.hmac()));
+        }
+
+        @Test
+        @DisplayName("a row signed in the old plain form verifies VALID, also with agent signing off")
+        void legacySignatureVerifies() throws Exception {
+            AuditEntry legacyRow = legacySignedRow();
+            var unsignedLedger = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), false);
+
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(legacyRow));
+            assertEquals(AuditVerificationStatus.VALID, unsignedLedger.verifyEntry(legacyRow));
+            service.shutdown();
+            unsignedLedger.shutdown();
+        }
+
+        @Test
+        @DisplayName("an erasure re-signs a row signed in the old plain form in the current form")
+        void erasureResignsALegacyRow() throws Exception {
+            AuditEntry erased = erasedRow(legacySignedRow());
+
+            assertTrue(erased.agentSignature().startsWith("v1:"), erased.agentSignature());
+            assertEquals(AuditVerificationStatus.VALID, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * An old plain signature nothing can check is unproven, not tampering, and the
+         * erasure must not turn it into a genuine signature: someone holding the audit
+         * HMAC key could otherwise write a row with any Base64 in it and have the agent
+         * vouch for the row at the next erasure.
+         */
+        @Test
+        @DisplayName("an erasure does not give a row whose old plain signature cannot be checked a genuine one")
+        void erasureDoesNotVouchForAnUncheckableLegacySignature() {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            AuditEntry uncheckable = stored.withAgentSignature(stored.agentSignature().substring("v1:".length()));
+            assertEquals(AuditVerificationStatus.AGENT_KEY_UNAVAILABLE, service.verifyEntry(uncheckable));
+
+            AuditEntry erased = erasedRow(uncheckable);
+
+            assertNull(erased.agentSignature());
+            assertEquals(AuditVerificationStatus.AGENT_SIGNATURE_MISSING, service.verifyEntry(erased));
+            service.shutdown();
+        }
+
+        /**
+         * Whether the row's signature is a finding cannot be told while the agent store
+         * is down, so the reseal signs nothing rather than signing on trust.
+         */
+        @Test
+        @DisplayName("an erasure that cannot read the agent store leaves the resealed row unsigned")
+        void erasureLeavesTheRowUnsignedWhenTheAgentStoreFails() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            when(agentStore.getNewestVersionIncludingDeleted("agent1")).thenThrow(new IllegalStateException("socket timeout"));
+
+            assertNull(erasedRow(stored).agentSignature());
+            service.shutdown();
+        }
     }
 
     // ==================== flush — success after failure resets counter

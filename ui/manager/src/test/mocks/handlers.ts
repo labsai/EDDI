@@ -4555,6 +4555,7 @@ function mockAuditVerification(scope: "conversation" | "agent", scopeId: string)
     recoverySkipped: 0,
     invalid: 0,
     unsigned: 0,
+    agentSignatureUnproven: 0,
     chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
     missingSequences: [],
     undeliveredSequences: [],

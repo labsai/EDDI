@@ -5,7 +5,8 @@
 package ai.labs.eddi.engine.audit;
 
 /**
- * Outcome of re-checking one stored audit entry's HMAC.
+ * Outcome of re-checking one stored audit entry: its HMAC, and on an entry
+ * whose HMAC verified, the agent signature it carries.
  *
  * @since 6.2.0
  */
@@ -53,5 +54,41 @@ public enum AuditVerificationStatus {
      * never recorded is reported as {@link #INVALID} instead — the id is text in
      * the row, and anyone able to edit the row can write one.
      */
-    UNKNOWN_KEY
+    UNKNOWN_KEY,
+
+    /**
+     * The HMAC verified, but the agent signature does not: it does not verify
+     * against the public key the entry's agent version declares, it names a key
+     * version that agent version never declared, or it is malformed. The content is
+     * intact; the signature was altered or forged. Counted with the invalid
+     * entries.
+     */
+    AGENT_SIGNATURE_INVALID,
+
+    /**
+     * The HMAC verified, but the entry carries no agent signature although its
+     * agent version would have signed it: the signature was removed from the row,
+     * or the vault could not sign when the entry was written (the ledger logged a
+     * WARN then). The content is intact; the agent's vouching for it is not proven.
+     * Counted in {@code agentSignatureUnproven}, not as tampering.
+     */
+    AGENT_SIGNATURE_MISSING,
+
+    /**
+     * The HMAC verified, but the key the entry's agent signs it with has been
+     * revoked since, or the agent no longer declares it: a revoked key vouches for
+     * nothing, whenever it signed. The content is intact. Counted in
+     * {@code agentSignatureUnproven}, not as tampering.
+     */
+    AGENT_KEY_REVOKED,
+
+    /**
+     * The HMAC verified, and the entry carries an agent signature that cannot be
+     * checked: the agent version that signed it no longer exists (the agent was
+     * deleted permanently; a soft-deleted agent's entries are still checked), or
+     * the signature is in the plain form 6.7.0 and earlier wrote and nothing
+     * declares the legacy key that made it. The content is intact. Counted in
+     * {@code agentSignatureUnproven}, not as tampering.
+     */
+    AGENT_KEY_UNAVAILABLE
 }
