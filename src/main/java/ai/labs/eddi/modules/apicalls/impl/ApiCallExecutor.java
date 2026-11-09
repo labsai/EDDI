@@ -1416,6 +1416,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         stringOf(outgoing.get(IRequest.KEY_BODY)));
             }
             return built;
+        } catch (SecretResolver.MisconfiguredVaultReferenceException e) {
+            // Shown to the caller of a refused conversation start: say which call it is.
+            // Built from reference names only, so there is no plaintext to redact.
+            throw new SecretResolver.MisconfiguredVaultReferenceException("API call '" + call.getName() + "': " + e.getMessage(), e);
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1917,9 +1921,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         resolved.append(value, copied, value.length());
         if (unresolved != null) {
-            throw new IllegalArgumentException(location + " references " + unresolved
-                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
-                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+            // Diagnosed only now, on the failure path: it names the tenant looked up and
+            // tells a configuration error (answered 422 at conversation start) from a
+            // vault outage (still a 500).
+            throw SecretResolver.unresolvedReferenceFailure(location, unresolved,
+                    secretResolver.diagnoseUnresolved(SecretReference.parse(unresolved)));
         }
         return resolved.toString();
     }

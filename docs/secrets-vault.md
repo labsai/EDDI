@@ -170,6 +170,19 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+### When a reference does not resolve
+
+A reference that cannot be resolved is never sent: the LLM task or API call that carries it fails instead. The error names the reference **and the tenant it was looked up in**, because the short form has an implicit one — `${vault:api-key}` always means tenant `default`, so a secret stored under tenant `eddi` is not found by it:
+
+```text
+API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'),
+which could not be resolved: no secret named 'api-key' exists in tenant 'default'. A reference without a
+tenant always looks in tenant 'default'; for a secret stored in another tenant write ${vault:<tenant>/api-key}.
+Refusing to send the unresolved reference.
+```
+
+For an API call the reason is specific: no such secret in that tenant, no vault configured (`EDDI_VAULT_MASTER_KEY`), a reserved name, or the vault could not read the secret. All but the last are configuration problems, and so is a secret sent to a host its [`allowedHosts`](#destination-allow-list-allowedhosts) does not name. When one of them stops an agent's `CONVERSATION_START` turn, `POST /agents/{agentId}/start` answers `422` with `{"error": "agent_misconfigured", "message": "..."}` instead of a bare `500`, so a client can tell "fix the agent" from "the server failed". A vault that could not be read is still a `500`. Messages carry names only, never a value.
+
 ### Editing a configuration that holds a reference: PATCH, not echo
 
 A stored configuration carries your credential **references**, not secrets — `GET /llmstore/llms/{id}` returns `"apiKey": "${vault:anthropic-api-key}"`. Editing it by reading the document and sending the whole thing back with `PUT` therefore means *sending a reference back*, and that is the one thing a caller that is not a human at the Manager should not do:

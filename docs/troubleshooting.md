@@ -230,9 +230,9 @@ Secrets are written with `PUT /secretstore/secrets/{tenantId}/{keyName}` and a b
 
 ### A `${vault:...}` reference is not resolved
 
-- **Log:** `Vault reference not found: ${vault:...} — passing through unchanged` (the secret does not exist), or `Failed to resolve vault reference: ${vault:...} — ...` (decryption or persistence failure).
-- **Effect:** LLM tasks and API calls refuse to send the literal reference; for HTTP calls the error ends with `Refusing to send the unresolved reference.`
-- **Fix:** Check the key name and tenant (`${vault:keyName}` means tenant `default`; `${vault:tenantId/keyName}` names one explicitly). The older `${eddivault:...}` prefix is still accepted.
+- **Log:** `Vault reference not found: ${vault:...} (no tenant given, so tenant 'default') — passing through unchanged` (the secret does not exist), or `Failed to resolve vault reference: ${vault:...} — ...` (decryption or persistence failure).
+- **Effect:** LLM tasks and API calls refuse to send the literal reference. Every such error names the tenant the reference was looked up in. For HTTP calls it names the call and says why, e.g. `API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: no secret named 'api-key' exists in tenant 'default'. ... Refusing to send the unresolved reference.` When that happens on the `CONVERSATION_START` turn, `POST /agents/{agentId}/start` answers **`422`** `{"error": "agent_misconfigured", "message": "..."}` (see [REST API errors](rest-api-reference.md#errors)); a vault that could not be read stays a `500`.
+- **Fix:** Check the key name and tenant (`${vault:keyName}` always means tenant `default`; `${vault:tenantId/keyName}` names one explicitly — a secret stored under tenant `eddi` needs `${vault:eddi/keyName}`). The older `${eddivault:...}` prefix is still accepted.
 
 ### Agent deployment refused because of a secret grant
 

@@ -239,4 +239,98 @@ class SecretResolverTest {
             assertEquals(3, listened.size());
         }
     }
+
+    @Nested
+    @DisplayName("an unresolved reference: why, and what the caller is told")
+    class UnresolvedReferences {
+
+        private final SecretReference ref = new SecretReference("default", "api-key");
+
+        @Test
+        @DisplayName("no such secret in the tenant looked up: NOT_FOUND")
+        void notFound() throws Exception {
+            when(secretProvider.getMetadata(ref)).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+            assertEquals(SecretResolver.UnresolvedReason.NOT_FOUND, resolver.diagnoseUnresolved(ref));
+        }
+
+        @Test
+        @DisplayName("the secret exists, so its resolution failed in the vault: PROVIDER_FAILED")
+        void existsButDidNotResolve() throws Exception {
+            when(secretProvider.getMetadata(ref)).thenReturn(null);
+            assertEquals(SecretResolver.UnresolvedReason.PROVIDER_FAILED, resolver.diagnoseUnresolved(ref));
+        }
+
+        @Test
+        @DisplayName("the metadata could not be read either: PROVIDER_FAILED")
+        void metadataUnreadable() throws Exception {
+            when(secretProvider.getMetadata(ref)).thenThrow(new ISecretProvider.SecretProviderException("db down"));
+            assertEquals(SecretResolver.UnresolvedReason.PROVIDER_FAILED, resolver.diagnoseUnresolved(ref));
+        }
+
+        @Test
+        @DisplayName("no vault, or a reserved name, is decided without asking the provider")
+        void vaultOffAndReserved() throws Exception {
+            assertEquals(SecretResolver.UnresolvedReason.RESERVED,
+                    resolver.diagnoseUnresolved(new SecretReference("default", SecretReference.AGENT_SIGNING_KEY_PREFIX + "a1")));
+            when(secretProvider.isAvailable()).thenReturn(false);
+            assertEquals(SecretResolver.UnresolvedReason.VAULT_NOT_CONFIGURED, resolver.diagnoseUnresolved(ref));
+            verify(secretProvider, never()).getMetadata(any());
+        }
+
+        @Test
+        @DisplayName("a short-form reference that names no secret says it looked in tenant 'default' and how to name another")
+        void notFoundMessageNamesTheDefaultTenant() {
+            var failure = SecretResolver.unresolvedReferenceFailure("header 'X-Api-Key'", "${vault:api-key}",
+                    SecretResolver.UnresolvedReason.NOT_FOUND);
+
+            assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, failure);
+            assertTrue(failure.getMessage().startsWith("header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default')"),
+                    failure.getMessage());
+            assertTrue(failure.getMessage().contains("no secret named 'api-key' exists in tenant 'default'"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("${vault:<tenant>/api-key}"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("a full-form reference names its own tenant and gets no short-form hint")
+        void notFoundMessageNamesTheExplicitTenant() {
+            var failure = SecretResolver.unresolvedReferenceFailure("a request body", "${vault:eddi/api-key}",
+                    SecretResolver.UnresolvedReason.NOT_FOUND);
+
+            assertTrue(failure.getMessage().contains("${vault:eddi/api-key} (tenant 'eddi')"), failure.getMessage());
+            assertTrue(failure.getMessage().contains("exists in tenant 'eddi'"), failure.getMessage());
+            assertFalse(failure.getMessage().contains("<tenant>"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("no vault and a reserved name are configuration refusals too")
+        void vaultOffAndReservedAreRefusals() {
+            var off = SecretResolver.unresolvedReferenceFailure("x", "${vault:k}", SecretResolver.UnresolvedReason.VAULT_NOT_CONFIGURED);
+            var reserved = SecretResolver.unresolvedReferenceFailure("x", "${vault:k}", SecretResolver.UnresolvedReason.RESERVED);
+
+            assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, off);
+            assertTrue(off.getMessage().contains("EDDI_VAULT_MASTER_KEY"), off.getMessage());
+            assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, reserved);
+        }
+
+        @Test
+        @DisplayName("a vault outage, or an unknown reason, is a plain IllegalArgumentException, not a refusal")
+        void outageIsNotARefusal() {
+            var outage = SecretResolver.unresolvedReferenceFailure("x", "${vault:k}", SecretResolver.UnresolvedReason.PROVIDER_FAILED);
+            var unknown = SecretResolver.unresolvedReferenceFailure("x", "${vault:k}", null);
+
+            assertEquals(IllegalArgumentException.class, outage.getClass());
+            assertEquals(IllegalArgumentException.class, unknown.getClass());
+            assertTrue(unknown.getMessage().contains("EDDI_VAULT_MASTER_KEY"), unknown.getMessage());
+            assertTrue(unknown.getMessage().contains("(no tenant given, so tenant 'default')"), unknown.getMessage());
+        }
+
+        @Test
+        @DisplayName("requireResolved names the tenant the reference was looked up in")
+        void requireResolvedNamesTheTenant() {
+            var e = assertThrows(SecretResolver.UnresolvedSecretReferenceException.class,
+                    () -> SecretResolver.requireResolved(Map.of("apiKey", "${vault:anthropic-key}"), "chat model 'anthropic'"));
+
+            assertTrue(e.getMessage().contains("${vault:anthropic-key} (no tenant given, so tenant 'default')"), e.getMessage());
+        }
+    }
 }
