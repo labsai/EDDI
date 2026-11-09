@@ -500,6 +500,26 @@ public class GroupSigningGuard {
     }
 
     /**
+     * Whether the records of the group configured as {@code config} take text the
+     * engine recorded for agent {@code agentId} outside the transcript (a backlog
+     * task it handed off) as that agent's: no reader of the group requires peer
+     * verification, or the agent signs with a key that would sign now, as
+     * {@link View#vouchesFor} decides for a task in a discussion. {@code config} is
+     * {@code null} when it could not be read, which counts as a reader that
+     * requires verification; {@code guard} is {@code null} where none was wired,
+     * which trusts the text as {@link #recordedTask} carries it.
+     */
+    public static boolean recordsTrustAgentText(GroupSigningGuard guard, AgentGroupConfiguration config, String agentId) {
+        if (agentId == null || guard == null || guard.agentStore == null || guard.agentSigningService == null) {
+            return true;
+        }
+        if (config != null && readersOf(config, null).stream().allMatch(reader -> guard.requirementOf(reader) == Requirement.NOT_REQUIRED)) {
+            return true;
+        }
+        return guard.signsVerifiably(agentId);
+    }
+
+    /**
      * Everyone whose verification setting decides what the engine's records count:
      * the members (recruits included, humans excluded), the moderator and the
      * facilitator, when it is enabled.
@@ -711,14 +731,17 @@ public class GroupSigningGuard {
 
     /**
      * Whether {@code entry}, whose speaker id names no live agent, was written as
-     * an agent's all the same: it carries a signature, which only agents give, or
+     * an agent's all the same: it carries a signature, which only agents give, it
+     * is a {@code FACILITATION} note, which only the facilitator or a member
+     * recruiting someone records under an agent id (a facilitator that is not a
+     * member runs its turns under a key of its own, so the next test misses it), or
      * an agent turn of this discussion ran under its speaker id (each one records
      * its member conversation under that id). Decided by what the discussion
      * recorded, not by the agent store, since deleting an agent takes it out of the
      * store.
      */
     private static boolean writtenAsAnAgent(GroupConversation gc, TranscriptEntry entry) {
-        return entry.hasEnvelopeData()
+        return entry.hasEnvelopeData() || entry.type() == TranscriptEntryType.FACILITATION
                 || gc.getMemberConversationIds() != null && gc.getMemberConversationIds().containsKey(entry.speakerAgentId());
     }
 

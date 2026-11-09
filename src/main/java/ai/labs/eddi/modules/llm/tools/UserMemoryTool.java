@@ -293,8 +293,11 @@ public class UserMemoryTool {
             + "Returns a formatted list of remembered facts, preferences, and context.")
     public String recallMemories() {
         try {
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries())
-                    .stream().filter(this::readableUnderPeerVerification).toList();
+            // An agent that requires peer verification is shown no memory another agent
+            // wrote; the store leaves those out before the recall limit.
+            List<UserMemoryEntry> entries = peerVerification
+                    ? store.getVisibleEntriesForVerifyingReader(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries())
+                    : store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries());
 
             if (entries.isEmpty()) {
                 return "No memories found for this user.";

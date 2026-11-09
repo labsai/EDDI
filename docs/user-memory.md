@@ -119,7 +119,7 @@ Attaching the memory tools is a three-way conjunction across the two configurati
 | `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle — the primary ceiling. A soft cap: it is checked before each consolidation call against the **estimated** spend so far (see `inputPricePer1M`) |
 | `inputPricePer1M` | `Double` | *(unset)* | USD price per 1M input tokens of `llmModel`, used to estimate spend against `maxCostPerRun`. Unset: an upper bound of **$15** is assumed — the input list price of the most expensive mainstream tier (Claude Opus) — so the estimate errs high and a run stops early rather than late. Set both prices to make the budget accurate |
 | `outputPricePer1M` | `Double` | *(unset)* | USD price per 1M output tokens of `llmModel`. Unset: an upper bound of **$75** (Claude Opus output). When the provider reports no token usage, tokens are estimated at 3 characters each |
-| `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. |
+| `crossAgentMaintenance` | `boolean` | `false` | By default a dream cycle only touches memories the **firing agent** wrote (`sourceAgentId`). Set `true` to let it maintain the user's whole memory set across agents — otherwise agent A's retention setting would delete agent B's memories, and A's model endpoint would see B's private text. An entry merged from several agents' entries is written as the firing agent's, since its model wrote it. |
 | `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
 | `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations. Passed under the key the provider reads (`model` for Ollama, `modelId` for Bedrock/HuggingFace/Vertex, `deploymentName` for Azure, `modelName` otherwise) |
 | `parameters` | `Map<String,String>` | `{}` | Model parameters for the consolidation LLM — `apiKey`, `baseUrl`, `temperature`, … — passed to the model registry exactly like an LLM task's `parameters` block, so `${vault:…}` and `${vars:…}` resolve. **Required when `summarizeInteractions` is `true`**: a background dream cycle has no parent LLM task to inherit credentials from, so without it every summarization step fails with a provider 401 while stale pruning keeps working. |
@@ -203,7 +203,7 @@ Returns: "✅ Forgotten: favorite_color"
 | `group` | All agents in the same group conversation can see it | `(userId, key, sourceAgentId)` among the agent's non-global entries |
 | `global` | All agents for this user can see it | `(userId, key)` |
 
-An agent with `security.requirePeerVerification` (see [Signed contributions](group-conversations.md#signed-contributions)) sees only its own entries and the ones no agent wrote (the user's, an admin's): a `group` or `global` entry another agent wrote carries no signature, so it is neither loaded as a property nor returned by `recallMemories`, `searchMemory` or `forgetFact`. The setting is read from the deployed agent version.
+An agent with `security.requirePeerVerification` (see [Signed contributions](group-conversations.md#signed-contributions)) sees, in every conversation and not only in groups, only the entries whose value it or no agent wrote (the user, an admin), and its team's lessons: a `group` or `global` entry another agent wrote carries no signature, so it is neither loaded as a property nor returned by `recallMemories`, `searchMemory` or `forgetFact`. What counts is who wrote the value an entry holds, not who created it: a `global` entry is shared, and another agent's write replaces its value while the entry keeps its creator as owner, so each entry also records its last writer (`lastWriterAgentId`; an entry stored before this reads as written by its owner). The store leaves the other entries out before `maxRecallEntries` is applied, so they do not take the places of the ones the agent is shown. Such an agent also does not overwrite a `global` value another agent last wrote with a `longTerm` property, since it set that property without being shown the value; the property stays in the conversation. A team's lessons (`group:<groupId>`, see [Group Memory](#group-memory)) are the engine's, distilled from the team's records under its verification rule, and are loaded as usual. The setting is read from the deployed agent version.
 
 A `self` or `group` write never touches the shared `global` entry with the same key — an agent can hold a private note and a shared fact under one key. (MongoDB used to key self/group writes without the visibility term, so saving a private note flipped the agent's own shared entry to `self` and every other agent lost it; PostgreSQL always had this identity.)
 
@@ -392,6 +392,9 @@ Each memory entry contains:
   "conflicted": false,
   "accessCount": 12,
   "createdAt": "2026-01-15T10:30:00Z",
-  "updatedAt": "2026-03-29T14:22:00Z"
+  "updatedAt": "2026-03-29T14:22:00Z",
+  "lastWriterAgentId": "agent-789"
 }
 ```
+
+`sourceAgentId` is the agent that created the entry, and a `global` entry keeps it when another agent writes the key. `lastWriterAgentId` is the agent whose write produced the value the entry holds now (here another agent overwrote `agent-456`'s fact), `null` when the user or an admin wrote it. An entry stored before the field existed reads back with its owner as writer. An agent that requires peer verification goes by this field (see [Visibility scopes](#visibility-scopes)).

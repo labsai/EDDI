@@ -900,6 +900,38 @@ class TeamHandoffServiceTest {
                     r.description(), 6, Trigger.DECISION, "decision-1", null, null, 0, List.of(), null, 0, null)).success());
             assertNull(workspace().getBacklog().getTasks().get(0).createdByAgentId());
         }
+
+        /**
+         * A receiving team whose records would not take the writing agent's text as its
+         * (a member requires peer verification, the agent does not sign verifiably)
+         * could never do an AUTO handoff: its cadence does not pull it. It waits in the
+         * intake inbox instead, where a person vouches for it.
+         */
+        @Test
+        void anAutoHandoffATeamCannotVerifyWaitsForReview() throws Exception {
+            List<String> asked = new ArrayList<>();
+            var verifying = new TeamHandoffService(workspaces, groupStore, quotas, audit, meters, admissions, 3, Duration.ofDays(30), clock,
+                    (config, agentId) -> {
+                        asked.add(agentId);
+                        return false;
+                    });
+
+            var result = verifying.file(groupRequest("From an unsigned member"));
+
+            assertEquals(Outcome.QUEUED_FOR_REVIEW, result.outcome());
+            assertEquals(0, workspace().getBacklog().size(), "nothing its cadence would pull and fail");
+            assertEquals(1, workspace().getHandoffs().inboxSize());
+            assertEquals(List.of("member-1"), asked, "decided by the agent that wrote the text");
+        }
+
+        @Test
+        void anAutoHandoffATeamCanVerifyIsFiled() throws Exception {
+            var trusting = new TeamHandoffService(workspaces, groupStore, quotas, audit, meters, admissions, 3, Duration.ofDays(30), clock,
+                    (config, agentId) -> true);
+
+            assertEquals(Outcome.FILED, trusting.file(groupRequest("From a signing member")).outcome());
+            assertEquals(1, workspace().getBacklog().size());
+        }
     }
 
 }

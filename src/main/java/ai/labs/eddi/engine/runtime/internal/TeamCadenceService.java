@@ -33,6 +33,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -253,9 +254,15 @@ public class TeamCadenceService {
                 }
             }
 
-            // 2. Pull: top-N executable backlog tasks, highest priority first.
+            // 2. Pull: top-N executable backlog tasks, highest priority first. A task
+            // another team's agent handed off waits while a member that requires peer
+            // verification could not take its text as that agent's: the member would
+            // fail it unasked on every run, and the question would quote it to them.
+            Map<String, Boolean> trusted = new HashMap<>();
             List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
                     .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
+                    .filter(task -> task.createdByAgentId() == null || trusted.computeIfAbsent(task.createdByAgentId(),
+                            agent -> trustsHandoffsOf(groupId, cadenceId, agent)))
                     .limit(cadence.maxBacklogTasksPerRun())
                     .toList();
             if (pulled.isEmpty()) {
@@ -620,6 +627,22 @@ public class TeamCadenceService {
             defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority(), null, task.createdByAgentId()));
         }
         return defs;
+    }
+
+    /**
+     * Whether group {@code groupId}'s records take the backlog tasks agent
+     * {@code agentId} handed off as that agent's, so this fire may pull them. A
+     * task held back stays {@code PENDING} on the backlog and nothing else says
+     * why, so each fire that leaves one logs it.
+     */
+    private boolean trustsHandoffsOf(String groupId, String cadenceId, String agentId) {
+        boolean trusted = groupConversationService.recordsTrustAgentText(groupId, agentId);
+        if (!trusted) {
+            LOGGER.infof("Cadence %s for group %s leaves the backlog tasks agent '%s' handed off waiting: a reader of the group "
+                    + "requires peer verification (or the group could not be read) and that agent does not sign verifiably",
+                    LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), LogSanitizer.sanitize(agentId));
+        }
+        return trusted;
     }
 
     /**

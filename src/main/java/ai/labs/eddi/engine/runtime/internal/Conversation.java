@@ -385,13 +385,12 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> visible = store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
             // A member that requires peer verification is shown no agent text that no
-            // signature covers: a group- or global-visible memory another agent wrote
-            // is such text.
-            if (memory.isPeerVerificationRequired()) {
-                visible = visible.stream().filter(entry -> !entry.writtenByAgentOtherThan(agentId)).toList();
-            }
+            // signature covers: a group- or global-visible memory whose value another
+            // agent wrote is such text. The store leaves those out before the limit.
+            List<UserMemoryEntry> visible = memory.isPeerVerificationRequired()
+                    ? store.getVisibleEntriesForVerifyingReader(userId, agentId, groupIds, recallOrder, maxEntries)
+                    : store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
             List<UserMemoryEntry> entries = mostSpecificPerKey(visible);
 
             for (UserMemoryEntry entry : entries) {
@@ -948,6 +947,16 @@ public class Conversation implements IConversation {
                     LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
                             + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
                 }
+                if (vis == Visibility.global && conversationMemory.isPeerVerificationRequired()
+                        && globalValueWrittenByAnotherAgent(store, userId, agentId, propertyEntry.getKey())) {
+                    // This agent was not shown that value, so its property was set without
+                    // it: writing it would replace another agent's fact on every turn.
+                    LOGGER.infof("[MEMORY] Not persisting longTerm property '%s' of conversation %s: its global memory was last "
+                            + "written by another agent, which this agent does not read since it requires peer verification",
+                            sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                    pending.remove(propertyEntry.getKey());
+                    continue;
+                }
                 UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
@@ -962,6 +971,21 @@ public class Conversation implements IConversation {
         // The turn's writes are now the new baseline — a resume that persists twice
         // within the same Conversation must not rewrite them a second time.
         captureLongTermBaseline();
+    }
+
+    /**
+     * Whether the global memory {@code key} of {@code userId} holds a value another
+     * agent than {@code agentId} wrote: one a reader that requires peer
+     * verification was not shown.
+     */
+    private static boolean globalValueWrittenByAnotherAgent(IUserMemoryStore store, String userId, String agentId, String key)
+            throws IResourceStore.ResourceStoreException {
+        for (UserMemoryEntry stored : store.getAllEntries(userId)) {
+            if (key.equals(stored.key()) && stored.visibility() == Visibility.global) {
+                return stored.writtenByAgentOtherThan(agentId);
+            }
+        }
+        return false;
     }
 
     /**

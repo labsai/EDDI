@@ -2279,17 +2279,43 @@ public class GroupConversationService implements IGroupConversationService, User
      * cannot be read is counted as verifying.
      */
     public TaskItem recordedTask(GroupConversation gc, TaskItem task) {
-        AgentGroupConfiguration config = null;
+        return GroupSigningGuard.recordedTask(signingGuard, gc, recordsConfigOf(gc.getGroupId()), task);
+    }
+
+    /**
+     * Whether group {@code groupId}'s records take a backlog task agent
+     * {@code agentId} handed off as that agent's text: none of its readers requires
+     * peer verification, or the agent signs verifiably. A standing team's cadence
+     * pulls only such tasks, and a group whose configuration cannot be read is
+     * counted as verifying.
+     */
+    public boolean recordsTrustAgentText(String groupId, String agentId) {
+        return recordsTrustAgentText(recordsConfigOf(groupId), agentId);
+    }
+
+    /**
+     * As {@link #recordsTrustAgentText(String, String)}, for a group configuration
+     * already read; {@code null} counts as verifying.
+     */
+    public boolean recordsTrustAgentText(AgentGroupConfiguration config, String agentId) {
+        return GroupSigningGuard.recordsTrustAgentText(signingGuard, config, agentId);
+    }
+
+    /**
+     * The group's current configuration, or {@code null} (verified-only) when it
+     * cannot be read.
+     */
+    private AgentGroupConfiguration recordsConfigOf(String groupId) {
         try {
-            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(gc.getGroupId());
+            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
             if (current != null) {
-                config = groupStore.read(gc.getGroupId(), current.getVersion());
+                return groupStore.read(groupId, current.getVersion());
             }
         } catch (Exception e) {
             LOGGER.warnf("Could not read group '%s' to learn who reads its records (%s): counting them as verified-only",
-                    LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+                    LogSanitizer.sanitize(groupId), e.getMessage());
         }
-        return GroupSigningGuard.recordedTask(signingGuard, gc, config, task);
+        return null;
     }
 
     /**

@@ -21,6 +21,7 @@ import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.Intake;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission.Decision;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffResult.Outcome;
 import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
@@ -47,6 +48,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 
 /**
  * The one place that writes into ANOTHER team's workspace.
@@ -94,18 +96,32 @@ public class TeamHandoffService {
     private final int maxHops;
     private final Duration declineMemory;
     private final Clock clock;
+    /**
+     * Whether the receiving team's records take an agent's text as that agent's
+     * (see {@link #reviewedWhenUnverifiable}).
+     */
+    private final BiPredicate<AgentGroupConfiguration, String> recordsTrustAgentText;
 
     @Inject
     public TeamHandoffService(IGroupWorkspaceStore workspaceStore, IAgentGroupStore groupStore, IToolQuotaStore quotaStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, Instance<HandoffAdmission> admissions,
+            GroupConversationService groupConversationService,
             @ConfigProperty(name = "eddi.groups.handoff.max-hops", defaultValue = "3") int maxHops,
             @ConfigProperty(name = "eddi.groups.handoff.decline-memory", defaultValue = "P30D") Duration declineMemory) {
-        this(workspaceStore, groupStore, quotaStore, auditLedgerService, meterRegistry, admissions, maxHops, declineMemory, Clock.systemUTC());
+        this(workspaceStore, groupStore, quotaStore, auditLedgerService, meterRegistry, admissions, maxHops, declineMemory, Clock.systemUTC(),
+                groupConversationService::recordsTrustAgentText);
     }
 
     TeamHandoffService(IGroupWorkspaceStore workspaceStore, IAgentGroupStore groupStore, IToolQuotaStore quotaStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, Instance<HandoffAdmission> admissions, int maxHops,
             Duration declineMemory, Clock clock) {
+        this(workspaceStore, groupStore, quotaStore, auditLedgerService, meterRegistry, admissions, maxHops, declineMemory, clock,
+                (config, agentId) -> true);
+    }
+
+    TeamHandoffService(IGroupWorkspaceStore workspaceStore, IAgentGroupStore groupStore, IToolQuotaStore quotaStore,
+            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, Instance<HandoffAdmission> admissions, int maxHops,
+            Duration declineMemory, Clock clock, BiPredicate<AgentGroupConfiguration, String> recordsTrustAgentText) {
         this.workspaceStore = workspaceStore;
         this.groupStore = groupStore;
         this.quotaStore = quotaStore;
@@ -115,6 +131,7 @@ public class TeamHandoffService {
         this.maxHops = Math.max(1, maxHops);
         this.declineMemory = declineMemory != null ? declineMemory : Duration.ofDays(30);
         this.clock = clock;
+        this.recordsTrustAgentText = recordsTrustAgentText;
     }
 
     /** Pipeline entry — see the class Javadoc. Never throws. */
@@ -184,7 +201,7 @@ public class TeamHandoffService {
             return HandoffResult.of(Outcome.NOT_ACCEPTED,
                     "That team does not accept handoffs from you. Tell the user; do not try another route around it.");
         }
-        IntakeMode mode = rule.mode();
+        IntakeMode mode = reviewedWhenUnverifiable(request, targetConfig, rule.mode());
         modeHolder[0] = mode;
 
         // 2. Lineage.
@@ -486,6 +503,24 @@ public class TeamHandoffService {
             return request.sourceMemberAgentId();
         }
         return request.sourceKind() == WorkspaceHandoffs.SourceKind.AGENT ? request.sourceId() : null;
+    }
+
+    /**
+     * {@code mode}, or {@link IntakeMode#REVIEW} for an {@code AUTO} handoff whose
+     * text the receiving team's records would not take as its writing agent's: a
+     * member that requires peer verification, while that agent does not sign
+     * verifiably. Filed to the backlog, such a task is one its cadence never pulls,
+     * since a verifying member would fail it unasked on every run; in the intake
+     * inbox a person reads it and vouches for it by accepting it.
+     */
+    private IntakeMode reviewedWhenUnverifiable(HandoffRequest request, AgentGroupConfiguration targetConfig, IntakeMode mode) {
+        String writer = writingAgentOf(request);
+        if (mode != IntakeMode.AUTO || writer == null || recordsTrustAgentText.test(targetConfig, writer)) {
+            return mode;
+        }
+        LOGGER.infof("Handoff from agent '%s' to group '%s' goes to the intake inbox: a member there requires peer verification "
+                + "and the agent does not sign verifiably", LogSanitizer.sanitize(writer), LogSanitizer.sanitize(request.targetGroupId()));
+        return IntakeMode.REVIEW;
     }
 
     private HandoffOrigin originFor(HandoffRequest request, String handoffId, String dedupeKey, Intake intake, Instant now) {
