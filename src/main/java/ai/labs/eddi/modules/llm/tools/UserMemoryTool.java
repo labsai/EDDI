@@ -492,6 +492,14 @@ public class UserMemoryTool {
     }
 
     /**
+     * An agent that requires peer verification reads only its own memories and the
+     * ones no agent wrote (the user's, an admin's).
+     */
+    private boolean readableUnderPeerVerification(UserMemoryEntry entry) {
+        return !peerVerification || !entry.writtenByAgentOtherThan(agentId);
+    }
+
+    /**
      * Whether this agent may see the given entry. Mirrors the store-side recall
      * scoping ({@code self(agentId) OR group(groupIds) OR global}) and additionally
      * always admits entries this agent itself created.
@@ -502,14 +510,6 @@ public class UserMemoryTool {
      * The LLM tool path must not inherit that: agent B must never read or delete
      * agent A's {@code visibility:self} memories about a shared user.
      */
-    /**
-     * An agent that requires peer verification reads only its own memories and the
-     * ones no agent wrote (the user's, an admin's).
-     */
-    private boolean readableUnderPeerVerification(UserMemoryEntry entry) {
-        return !peerVerification || !entry.writtenByAgentOtherThan(agentId);
-    }
-
     private boolean isVisibleToThisAgent(UserMemoryEntry entry) {
         if (entry == null || !readableUnderPeerVerification(entry)) {
             return false;
