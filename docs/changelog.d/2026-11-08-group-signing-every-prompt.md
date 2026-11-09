@@ -132,6 +132,15 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   (`GroupSigningGuard.writtenAsAnAgent`), so a facilitator that was never a member, and runs its
   turns under a key of its own, keeps its unsigned notes withheld after it is deleted. That was the
   one deleted agent the rule missed.
+- **Review fixes (PR #1367).** A task a verifying assignee cannot verify fails before a turn is
+  reserved: it takes nothing from `maxTurns`, fires no speaker events, and under
+  `onAgentFailure: ABORT` fails only itself, since the member was never asked
+  (`TaskForceEngine.executeTaskExecutionPhase`). A bid counts only on a task its bidder was
+  announced, so a verifying bidder cannot win one it was not shown and then fail it
+  (`runBidRoundIfNeeded`). A HUMAN member named as moderator is no reader of the group's records
+  (`GroupSigningGuard.readersOf`), so a store failure reading its id cannot make them filter for
+  everyone. `PostgresUserMemoryStore.upsertIfOwnedBy` records the entry's writer, as the Mongo
+  store does, instead of always the owner.
 
 Docs: [group-conversations.md](../group-conversations.md#signed-contributions) lists every prompt
 and record covered, and its "Not yet supported" row now names only what is still unsigned.

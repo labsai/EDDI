@@ -459,6 +459,25 @@ public class TaskForceEngine {
                 CompletableFuture<Void> future = CompletableFuture.runAsync(callerIdentityContext.withIdentity(waveCaller, () -> {
                     for (TaskItem task : agentTasks) {
                         try {
+                            // A member that verifies is not asked to do a task whose own
+                            // text does not verify for it. That is no failure of the member:
+                            // the task fails, with no turn taken, no speaker events, and no
+                            // ABORT of the discussion.
+                            var records = taskRecords(member.agentId(), gc, config);
+                            if (!records.showsTask(task)) {
+                                synchronized (taskList) {
+                                    if (cancellation.isCancelled()) {
+                                        break;
+                                    }
+                                    synchronized (gc.getTranscript()) {
+                                        gc.getTranscript().add(new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx,
+                                                phase.name(), TranscriptEntryType.SKIPPED, Instant.now(), UNVERIFIED_TASK_REASON, null));
+                                    }
+                                    taskList.failTask(task.id(), "No result: " + UNVERIFIED_TASK_REASON);
+                                }
+                                continue;
+                            }
+
                             // Claim the turn budget and the task itself under the task-list
                             // monitor, together with the cancellation check. Atomically,
                             // because (a) N agent threads racing a check-then-act on the
@@ -478,15 +497,10 @@ public class TaskForceEngine {
                             }
 
                             // Build task-specific input from the records as the member may
-                            // see them. A member that verifies is not asked to do a task
-                            // whose own text does not verify for it: the task fails instead.
-                            var records = taskRecords(member.agentId(), gc, config);
-                            TranscriptEntry entry = records.showsTask(task)
-                                    ? memberTurnExecutor.executeAgentTurn(member, gc,
-                                            buildTaskExecutionInput(task, question, phase, gc, records), protocol, phaseIdx, phase, null,
-                                            listener, cancellation)
-                                    : new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
-                                            TranscriptEntryType.SKIPPED, Instant.now(), UNVERIFIED_TASK_REASON, null);
+                            // see them.
+                            TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(member, gc,
+                                    buildTaskExecutionInput(task, question, phase, gc, records), protocol, phaseIdx, phase, null, listener,
+                                    cancellation);
 
                             // The orchestrator owns the group document from the moment it
                             // cancels this wave: publish the result only if the wave is
@@ -1393,7 +1407,6 @@ public class TaskForceEngine {
         }
         turnCounter.addAndGet(bidders.size());
 
-        var announcedSubjects = unassigned.stream().map(TaskItem::subject).collect(Collectors.toSet());
         var cancellation = new MemberTurnCancellation();
         final var bidCaller = callerIdentityContext.captureOrCurrent();
         List<CompletableFuture<List<TaskBidEngine.Bid>>> futures = bidders.stream()
@@ -1416,7 +1429,10 @@ public class TaskForceEngine {
                                     member.displayName(), reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
                                     Instant.now(), null, null)));
                         }
-                        return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
+                        // A bid counts only on a task this bidder was announced: one it was
+                        // not shown would be awarded to it and then fail as unverified.
+                        var bidderSubjects = announced.stream().map(TaskItem::subject).collect(Collectors.toSet());
+                        return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, bidderSubjects);
                     } catch (Exception e) {
                         LOGGER.warnf("Bid turn failed for '%s': %s — casting no bids",
                                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(e.getMessage()));

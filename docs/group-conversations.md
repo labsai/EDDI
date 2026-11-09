@@ -1470,12 +1470,14 @@ each of its turns:
   detected, here or for configured tasks. A verification note is withheld
   when it comes from a verifier entry that does not verify. A verifying member
   whose own task's text does not verify is not asked to do it: the task fails
-  with "Its task text could not be verified". A verifying verifier judges only
+  with "Its task text could not be verified". That uses no turn and is no
+  failure of the member, so under `onAgentFailure: ABORT` the discussion goes
+  on. A verifying verifier judges only
   the tasks whose text and result it may see: the others stay `COMPLETED`,
   unverified, with a note giving their count, and with none left it gets no
   turn, so a verdict that cannot be parsed never auto-verifies work it was not
-  shown. A bidder is announced only the tasks whose text it may see, and
-  `listGroupTasks` lists each subject as the calling member may see it.
+  shown. A bidder is announced, and can win, only the tasks whose text it may
+  see, and `listGroupTasks` lists each subject as the calling member may see it.
 - **The engine's own records.** Once any member, the moderator or the
   facilitator (an enabled one: a facilitator that is switched off reads
   nothing and counts for nothing) requires verification, what the engine
