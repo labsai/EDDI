@@ -75,7 +75,10 @@ Before this change the save-time check accepted `signInterAgentMessages` or
 `requirePeerVerification` whenever `identity` held any non-blank string, and no EDDI API could put a
 private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing (unless
 the private half of its legacy `identity.publicKey` was written into the vault outside the API, as
-`agent-signing-key:{agentId}`: that agent keeps signing with it, and its saves pass), and
+`agent-signing-key:{agentId}`, and the legacy key is the one it signs with: `identity.keys` holds no key,
+revoked or not, with a version from 1 to 1,000,000, since the newest such version is selected over v0
+whether or not the vault holds its private half. That agent keeps signing with the legacy key, and its saves pass as long as every other
+non-revoked key in `identity.keys` is well-formed), and
 after the upgrade **every save of it is refused (400)** — a person's save, a workflow cascade, an
 autonomy change, an API sync — until an admin either generates a key (**Generate signing key** in
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
