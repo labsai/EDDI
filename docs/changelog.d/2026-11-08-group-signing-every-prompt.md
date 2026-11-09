@@ -61,7 +61,9 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   verification summary renders the verdict array the engine applied before any other array, so a
   reply carrying a second array still shows the decoded feedback the note is traced by. A note is
   traced by its text without surrounding whitespace, since the summary is trimmed: feedback ending
-  in a newline or a space was not found in it and passed.
+  in a newline or a space was not found in it and passed. The ends cut are the union of what
+  `String.strip()` and `String.trim()` remove, since the summary's `trim()` also drops control
+  characters: feedback ending in an ESC was not found either and passed.
 - **Handoffs.** An `AUTO` tool handoff filed another team's agent's text into the backlog with no
   creator, and the cadence turned it into configured task text. The backlog task now records the
   agent that wrote it (`TeamHandoffService`, `TaskItem.filedBy`); `TaskDefinition` carries it as an
