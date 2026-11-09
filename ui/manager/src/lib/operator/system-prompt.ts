@@ -1627,6 +1627,24 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
+- Approved-result actions: phases[n].onApproved = {action: {type HTTPCALL
+  (default, the only kind), uri (an httpcalls URI with an explicit ?version=),
+  call (a call name in it)}, onFailure FAIL_TASK (default) | KEEP_COMPLETED}.
+  Valid only on an EXECUTE phase with requiresApproval in a group with
+  hitlConfig.granularity TASK (else a 400 at save). On each task a PERSON
+  approves (or approves with an edit) the group makes that one call with the
+  approved result as {task.result} (data, never template), at most once:
+  recorded with the approval, claimed (RUNNING) before it is sent, never
+  resent; a crash mid-call reads OUTCOME_UNKNOWN. Rejected, RETRY-reset and
+  system:* (AUTO_APPROVE timeout) approvals send nothing (SKIPPED). The outcome
+  is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
+  responseUrl, summary), audit task id group.approved_action, metric
+  eddi_group_approved_action_total{outcome}. The call's \${vault:…} secrets
+  must be granted to all agents; \${connection:…}, \${caller:…}, \${context:…},
+  fire-and-forget, batch and forEach calls are refused. Not in the Manager's
+  phase editor (JSON only). This is the answer when a team must publish only
+  human-approved text: a member's own gated tool call is rejected in a group
+  turn (inGroupTurns REJECT).
 - Edit-on-approve: an agent's hitlConfig.review (allowAnswerEdits, default
   false), screenEdits (OUTPUT_GUARDRAILS default, or NONE), maxEditChars
   (default 16000), approvalCategory (default rule:<agentId>), reasonCodes (code
