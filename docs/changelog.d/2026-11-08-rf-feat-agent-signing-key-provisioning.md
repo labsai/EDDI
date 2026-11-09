@@ -77,10 +77,12 @@ autonomy change, an API sync — until an admin either generates a key (**Genera
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
 off. Find them with a query on `security.signInterAgentMessages: true` in the agents collection
 (or table). An import or a sync onto such an agent turns the flag off and reports it, rather than
-failing. Any `identity.keys` entry a person pasted before this branch stays trusted by peers until it
-is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
-every entry EDDI did not generate — the legacy `identity.publicKey` (v0) included, which generating
-a key does not remove.
+failing. Any `identity.keys` entry a person pasted before this branch is a key whose private half
+someone outside EDDI may hold: review the keys of every agent a `requirePeerVerification` agent
+checks, and revoke every entry EDDI did not generate — the legacy `identity.publicKey` (v0)
+included, which generating a key does not remove. On this branch alone revoking the v0 key removes
+it, but a revoked versioned entry still verifies in peer checks: the peer verifier does not read the
+flag until group-signature verification, which builds on this change.
 
 **Agents stored with `security.requirePeerVerification: true`.** Until now peer verification only
 logged a failure. With group-signature verification, which builds on this change, such an agent
@@ -101,7 +103,9 @@ synthesizer, facilitator), or turn the flag off.
 - Revocation is a flag, not a deletion of the entry: a verifier must recognise and refuse an entry
   signed under the key, which an unknown version would only report as "unknown key". The group
   verifier on this branch does not read the flag yet (that is the group-signing verification work);
-  until it does, the deleted private key is what stops anything new being signed with it.
+  until it does, a signature made with a revoked versioned key still verifies. Deleting the vault's
+  private key only stops EDDI signing with it (and is best effort); it does not stop anyone holding
+  another copy of that private key from signing messages that verify.
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
   signer's rule for a key outside its window.
 - A malformed key that is revoked no longer blocks a save, so revoking is the way out for an agent
