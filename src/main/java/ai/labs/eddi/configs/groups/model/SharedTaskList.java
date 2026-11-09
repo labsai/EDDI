@@ -849,6 +849,126 @@ public class SharedTaskList {
         return u;
     }
 
+    // ==================== approved-result actions ====================
+
+    /** Where an approved-result action stands. */
+    public enum ApprovedActionStatus {
+        /**
+         * Owed: the approval that created it was persisted, the call has not started.
+         */
+        PENDING,
+        /**
+         * Claimed and persisted immediately before the call was sent. A record still
+         * RUNNING when a run finds it belongs to a run that died mid-call; it becomes
+         * {@link #OUTCOME_UNKNOWN} and is never sent again.
+         */
+        RUNNING,
+        /** The call returned 2xx. */
+        SUCCEEDED,
+        /** The call was refused, unreachable, or returned a non-2xx status. */
+        FAILED,
+        /**
+         * The run that sent the call died before recording what it returned; the target
+         * may or may not have acted. Not retried — check the target.
+         */
+        OUTCOME_UNKNOWN,
+        /**
+         * Not run: the approval was made by the system (a timeout's AUTO_APPROVE), not
+         * by a person, or the discussion was cancelled first.
+         */
+        SKIPPED
+    }
+
+    /**
+     * The approved-result action of one task ({@code phase.onApproved}), persisted
+     * with the discussion. At most one per task, and a record that has left
+     * {@link ApprovedActionStatus#PENDING} is never sent again — that is the
+     * at-most-once guarantee.
+     *
+     * @param status
+     *            where it stands
+     * @param phaseName
+     *            the EXECUTE phase whose {@code onApproved} it runs
+     * @param phaseIndex
+     *            that phase's index in the discussion's phase list
+     * @param target
+     *            what it calls, {@code <httpcalls uri>#<call name>}, as configured
+     *            when the task was approved
+     * @param onFailure
+     *            the phase's {@code onFailure} at approval time
+     * @param approvedBy
+     *            who approved the task
+     * @param edited
+     *            whether the approver edited the result
+     * @param idempotencyKey
+     *            stable per discussion and task — offered to the call as
+     *            {@code {action.idempotencyKey}}
+     * @param approvedAt
+     *            when the approval was recorded
+     * @param startedAt
+     *            when the call was claimed (RUNNING); {@code null} before
+     * @param finishedAt
+     *            when the outcome was recorded; {@code null} before
+     * @param httpCode
+     *            the final HTTP status, {@code null} when none was received
+     * @param responseUrl
+     *            {@code html_url} or {@code url} of a JSON response body, when it
+     *            carries one — the link to what was published
+     * @param summary
+     *            a short, redacted summary of the outcome or the failure reason
+     */
+    public record ApprovedActionRecord(ApprovedActionStatus status, String phaseName, int phaseIndex, String target,
+            AgentGroupConfiguration.ApprovedActionFailurePolicy onFailure, String approvedBy, boolean edited, String idempotencyKey,
+            Instant approvedAt, Instant startedAt, Instant finishedAt, Integer httpCode,
+            String responseUrl, String summary) {
+
+        /** This record, claimed for sending. */
+        public ApprovedActionRecord running(Instant when) {
+            return new ApprovedActionRecord(ApprovedActionStatus.RUNNING, phaseName, phaseIndex, target, onFailure, approvedBy, edited,
+                    idempotencyKey, approvedAt, when, null, null, null, null);
+        }
+
+        /** This record with its outcome. */
+        public ApprovedActionRecord finished(ApprovedActionStatus outcome, Instant when, Integer code, String url, String text) {
+            return new ApprovedActionRecord(outcome, phaseName, phaseIndex, target, onFailure, approvedBy, edited, idempotencyKey, approvedAt,
+                    startedAt, when, code, url, text);
+        }
+    }
+
+    /**
+     * taskId → its approved-result action. Absent on a document written before the
+     * feature (and on every task of a phase without {@code onApproved}).
+     */
+    private Map<String, ApprovedActionRecord> approvedActions = new ConcurrentHashMap<>();
+
+    public Map<String, ApprovedActionRecord> getApprovedActions() {
+        return approvedActions;
+    }
+
+    public void setApprovedActions(Map<String, ApprovedActionRecord> approvedActions) {
+        this.approvedActions = approvedActions != null ? new ConcurrentHashMap<>(approvedActions) : new ConcurrentHashMap<>();
+    }
+
+    /**
+     * Records the action a task owes, unless it already has one — an approval is
+     * never turned into a second action.
+     *
+     * @return whether the record was added
+     */
+    public synchronized boolean recordApprovedAction(String taskId, ApprovedActionRecord record) {
+        if (taskId == null || record == null) {
+            return false;
+        }
+        return approvedActions.putIfAbsent(taskId, record) == null;
+    }
+
+    /** Replaces the action record of a task that already has one. */
+    public synchronized void updateApprovedAction(String taskId, ApprovedActionRecord record) {
+        if (taskId != null && record != null && approvedActions.containsKey(taskId)) {
+            approvedActions.put(taskId, record);
+        }
+    }
+
     // ==================== E2 — reworks within a run ====================
 
     /**

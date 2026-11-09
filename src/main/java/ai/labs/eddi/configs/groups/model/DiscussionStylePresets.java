@@ -587,7 +587,7 @@ public final class DiscussionStylePresets {
                 repaired.set(i, new DiscussionPhase(phase.name(), phase.type(), phase.participants(), phase.turnOrder(),
                         phase.contextScope(), phase.targetEachPeer(), TEMPLATE_ARBITRATION, phase.repeats(),
                         phase.requiresApproval(), phase.convergence(), phase.allowAbstention(), phase.voteConfig(),
-                        phase.skipIf()));
+                        phase.skipIf(), phase.onApproved()));
             }
         }
         return repaired != null ? repaired : phases;

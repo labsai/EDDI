@@ -54,6 +54,7 @@ import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
+import ai.labs.eddi.engine.internal.groups.GroupApprovedResultActions;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
@@ -1256,7 +1257,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
                                         phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
                                         phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
-                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf());
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf(), phase.onApproved());
                                 phaseList.set(phaseIdx, phase);
                                 persistRuntimePhases(gc, phaseList);
                             }
@@ -2844,6 +2845,16 @@ public class GroupConversationService implements IGroupConversationService, User
         // What the RETRO phase quotes: the team's own reported outcomes, then the
         // lessons other teams chose to share with it. Each is empty when off.
         contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
+    }
+
+    /**
+     * Wires approved-result actions ({@code phase.onApproved}) into the approval
+     * resume. Initializer injection, same reason as {@link #wireOutcomeDigest}:
+     * builds made with {@code new} in tests run no actions.
+     */
+    @Inject
+    void wireApprovedResultActions(GroupApprovedResultActions approvedResultActions) {
+        hitlCoordinator.setApprovedResultActions(approvedResultActions);
     }
 
     @Inject

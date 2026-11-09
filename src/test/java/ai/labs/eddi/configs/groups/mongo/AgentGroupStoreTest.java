@@ -806,4 +806,20 @@ class AgentGroupStoreTest {
                         List.of(AgentGroupConfiguration.FacilitatorMove.ESCALATE_HUMAN),
                         AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE, 10, null))));
     }
+    @Test
+    @SuppressWarnings("unchecked")
+    void onApprovedOnAnUngatedPhase_isRefusedAtSave_evenWithoutTheReferenceValidator() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
+        var draft = new DiscussionPhase("Draft", PhaseType.EXECUTE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false,
+                null, false, null, null, new AgentGroupConfiguration.OnApprovedConfig(new AgentGroupConfiguration.ApprovedAction(null,
+                        "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/6740a1b2c3d4e5f6a7b8c9d0?version=1", "post"), null));
+        var c = config(DiscussionStyle.CUSTOM, List.of(draft), null);
+
+        var e = assertThrows(IllegalArgumentException.class, () -> store.validateApprovedResultActions(c));
+
+        assertTrue(e.getMessage().contains("phases[0].onApproved needs requiresApproval: true"), e.getMessage());
+        assertTrue(e.getMessage().contains("hitlConfig.granularity: TASK"), e.getMessage());
+    }
 }
