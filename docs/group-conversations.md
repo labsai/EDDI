@@ -1476,7 +1476,23 @@ each of its turns:
 - A revoked key vouches for nothing, whenever an entry claims to have been
   signed. A key's `validFromMs`/`validUntilMs` window is checked against the
   time the signer wrote into the entry, so it limits honest use but does not
-  stop a leaked key: revoke that one.
+  stop a leaked key: revoke that one. Revocation applies to every prompt built
+  after it. An entry a member was already shown while the key was valid stays
+  in that member's own conversation history, which its model is shown again on
+  later turns until the history window drops it; to keep a leaked key's text
+  away from the members, start a new discussion.
+- An agent that has been deleted vouches for nothing either, whether it was
+  deleted for good or can still be restored. An entry under its id is withheld
+  from a verifying member, signed or not, when the discussion shows an agent
+  wrote it: the entry carries a signature, which only agents give, or an agent
+  turn of this discussion ran under its speaker id. Its placeholder is named
+  by that id followed by `(not an agent, unverified)`, since no agent store
+  vouches for the id any more. Other ids that name no agent (a human member,
+  a nested group, a reviewer) are shown labelled as below. So revoking a compromised agent's key and then deleting the agent
+  keeps its entries withheld. The one deleted agent this does not recognise is
+  a facilitator that was never a member: its turns run under a conversation
+  of their own and its notes are unsigned, so after the delete they are shown
+  labelled as a non-agent's.
 - Entries no agent wrote are not signed: the user's question and follow-ups, a
   human member's turn, a reviewer's edit, the engine's own notes and a nested
   group's answer. They are not authenticated: whoever can write the
@@ -1510,7 +1526,8 @@ each of its turns:
   SSE and the REST and MCP readers see every entry as stored.
 - Each withheld entry is logged at ERROR the first time, with its index and
   the reason (`UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`, `OUT_OF_WINDOW`,
-  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`).
+  `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`,
+  `NO_SUCH_AGENT`).
 - **Cost.** A verifying member checks every agent entry before each turn, but
   each Ed25519 check is remembered on the node, so an entry costs one check
   per node, not one per turn. Each pass still reads each distinct speaker's

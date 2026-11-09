@@ -52,6 +52,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -909,7 +910,11 @@ public class RestAgentStore implements IRestAgentStore {
             // arrive AFTER the write was applied. Discarding the key then would leave an
             // agent that declares a key its vault no longer holds — it could not sign,
             // and every later save would be refused — so look before discarding.
-            newVersion = versionDeclaringKey(id, key, e);
+            newVersion = versionIfSaved(id, "Saving signing key v" + key.version(), saved -> declaresKey(saved, key), e);
+            if (newVersion == null) {
+                agentSigningService.discardKey(defaultTenantId, id, generated.version());
+                throw sneakyThrow(e);
+            }
         }
         advanceDescriptor(id, version, newVersion);
         log.infof("Generated signing key v%d for Agent %s (now at version %d)", generated.version(), sanitize(id), newVersion);
@@ -945,6 +950,7 @@ public class RestAgentStore implements IRestAgentStore {
             agentSigningService.discardKey(defaultTenantId, id, keyVersion);
             return keyChangeResponse(id, version, revoked);
         }
+        String legacyKey = legacy ? identity.getPublicKey() : null;
         if (legacy) {
             identity.setPublicKey(null);
         }
@@ -955,8 +961,18 @@ public class RestAgentStore implements IRestAgentStore {
         Integer newVersion;
         try {
             newVersion = agentStore.update(id, version, config, true);
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // The outcome is unknown, as when generating a key. Rethrowing a write that
+            // landed would leave the descriptor behind, and a retry could not repair it
+            // (the old version is refused as stale, the new one is already revoked). If
+            // it did not land, the key is still declared, so its private half stays.
+            newVersion = versionIfSaved(id, "Revoking signing key v" + keyVersion,
+                    saved -> !trustsKey(saved, keyVersion, legacyKey), e);
+            if (newVersion == null) {
+                throw sneakyThrow(e);
+            }
         }
         advanceDescriptor(id, version, newVersion);
         // The private half can sign nothing anyone will accept any more; it goes
@@ -989,36 +1005,51 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * After a write whose outcome is unknown: the version that holds {@code key} if
-     * the write landed after all, so the caller can carry on as if it had answered.
-     * If it did not land, the key's private half is taken back out of the vault and
-     * {@code failure} is rethrown. If the agent cannot be read to find out, the key
-     * is kept — a key left in the vault is swept by the agent's permanent delete,
-     * where a declared key that is gone breaks signing — and {@code failure} is
-     * rethrown.
+     * After a key change whose write failed with an outcome that is unknown: the
+     * agent's current version if it shows the change ({@code saved}), so the caller
+     * can carry on as if the write had answered; {@code null} if it did not land,
+     * for the caller to decide what happens to the private key. If the agent cannot
+     * be read to find out, the vault is left as it is — a key left behind is swept
+     * by the agent's permanent delete, where a declared key that is gone breaks
+     * signing — and {@code failure} is rethrown.
      */
-    private Integer versionDeclaringKey(String id, AgentPublicKey key, Exception failure) {
+    private Integer versionIfSaved(String id, String change, Predicate<AgentConfiguration> saved, Exception failure) {
         AgentConfiguration current;
         IResourceId currentId;
         try {
             currentId = agentStore.getCurrentResourceId(id);
             current = currentId == null ? null : agentStore.read(id, currentId.getVersion());
         } catch (Exception readFailure) {
-            log.errorf("Saving signing key v%d of Agent %s failed (%s) and the agent cannot be read to tell whether it was saved (%s). "
-                    + "The key stays in the vault.", key.version(), sanitize(id), sanitize(failure.getMessage()),
-                    sanitize(readFailure.getMessage()));
+            log.errorf("%s of Agent %s failed (%s) and the agent cannot be read to tell whether it was saved (%s). The vault is left as it is.",
+                    change, sanitize(id), sanitize(failure.getMessage()), sanitize(readFailure.getMessage()));
             throw sneakyThrow(failure);
         }
-        var identity = current != null ? current.getIdentity() : null;
-        boolean declared = identity != null && identity.getKeys() != null && identity.getKeys().stream()
-                .anyMatch(k -> k.version() == key.version() && Objects.equals(k.publicKeyB64(), key.publicKeyB64()));
-        if (!declared) {
-            agentSigningService.discardKey(defaultTenantId, id, key.version());
-            throw sneakyThrow(failure);
+        if (current == null || !saved.test(current)) {
+            return null;
         }
-        log.warnf("Saving signing key v%d of Agent %s reported a failure (%s), but version %d declares it: the save landed.",
-                key.version(), sanitize(id), sanitize(failure.getMessage()), currentId.getVersion());
+        log.warnf("%s of Agent %s reported a failure (%s), but version %d shows it: the save landed.", change, sanitize(id),
+                sanitize(failure.getMessage()), currentId.getVersion());
         return currentId.getVersion();
+    }
+
+    private static boolean declaresKey(AgentConfiguration config, AgentPublicKey key) {
+        var identity = config.getIdentity();
+        return identity != null && identity.getKeys() != null && identity.getKeys().stream()
+                .anyMatch(k -> k.version() == key.version() && Objects.equals(k.publicKeyB64(), key.publicKeyB64()));
+    }
+
+    /**
+     * Whether {@code config} still trusts key {@code keyVersion}: an entry of that
+     * version that is not revoked, or — for {@code legacyKey}, the legacy key being
+     * revoked — that key still declared as {@code identity.publicKey}.
+     */
+    private static boolean trustsKey(AgentConfiguration config, int keyVersion, String legacyKey) {
+        var identity = config.getIdentity();
+        if (identity == null) {
+            return false;
+        }
+        return (legacyKey != null && legacyKey.equals(identity.getPublicKey()))
+                || (identity.getKeys() != null && identity.getKeys().stream().anyMatch(k -> k.version() == keyVersion && !k.revoked()));
     }
 
     /**

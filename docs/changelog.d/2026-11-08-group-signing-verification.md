@@ -13,7 +13,7 @@ never enforced.
 
 - **Fail-closed.** `GroupSigningGuard.viewFor` gives one verdict per transcript entry
   (`VERIFIED`, `NOT_AGENT_AUTHORED`, `RECEIVERS_OWN`, `UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`,
-  `OUT_OF_WINDOW`, `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`). For a member
+  `OUT_OF_WINDOW`, `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`, `NO_SUCH_AGENT`). For a member
   that requires peer verification, every agent entry that must verify and does not is replaced, in place, by a
   `[withheld: ... because ...]` placeholder before that member's phase prompt
   (`GroupContextBuilder.buildPhaseInput`) and its `groupTranscript` context (`MemberTurnExecutor`)
@@ -44,7 +44,23 @@ never enforced.
 - **Revocation and windows.** A key revoked through the new admin endpoint (base branch) vouches for
   nothing, whatever time an entry claims (`REVOKED`); the signer does not sign with a revoked newest
   key. A `validFromMs`/`validUntilMs` window is enforced on both sides, but against the time the
-  signer wrote, so it limits honest use and does not stop a leaked key.
+  signer wrote, so it limits honest use and does not stop a leaked key. Revocation applies to every
+  prompt built after it; what a member was already shown stays in its own conversation history,
+  which its model sees again until the history window drops it (documented; a new discussion
+  clears it).
+- **Deleted agents.** Whether a speaker is an agent was decided by whether the agent store had a
+  current version of it. A soft delete (MongoDB throws, PostgreSQL returns null) or a permanent one
+  therefore turned every entry of that agent into a non-agent's: shown relabelled instead of
+  withheld. So revoking a compromised agent's key and then deleting it, the ordinary response,
+  put its revoked entries back in front of verifying members. Now an entry under an id with no
+  current agent is withheld (`NO_SUCH_AGENT`) when it carries a signature, which only agents give,
+  or when an agent turn of the discussion ran under that id (its member conversation is recorded
+  under it); a human member's or a nested group's entry still passes labelled. The placeholder
+  names the id followed by `(not an agent, unverified)`: the id is whatever the entry was stored
+  under, which no agent store vouches for, so a planted one cannot put unlabelled text in the
+  speaker's place. A deleted agent's
+  genuine signed entries are withheld too: the trust anchor is the speaker's current
+  configuration, and a deleted agent has none.
 - **Non-agent entries.** Which entries must verify is decided by the speaker id, while a prompt
   shows the display name; a store writer could put any text under an agent's name by giving it a
   non-agent id. A verifying member now sees such entries as `User`, `System` or
@@ -86,8 +102,7 @@ never enforced.
   [clustering](../clustering.md) say so); deleting the class is a follow-up. A signing agent that
   cannot sign now logs at ERROR, since peers that verify will withhold the entry.
 - **Docs, Manager, operator.** [`architecture.md`](../architecture.md#cryptographic-agent-identity)
-  (signing, replay, revocation, peer verification; the audit-signing sentence now points to the
-  audit ledger; "non-repudiation" dropped, since the deployment holds every key; the RFC 8785
+  (signing, replay, revocation, peer verification; "non-repudiation" dropped, since the deployment holds every key; the RFC 8785
   claim corrected) and a [Signed contributions](../group-conversations.md#signed-contributions)
   section. The Manager's "Require peer verification" description no longer says failures are only
   logged (all 11 locales). The Platform Operator's prompt says what a verifying agent sees and who
@@ -103,7 +118,8 @@ A group whose members share a display name, or with an agent member named `User`
 save until the names change; stored groups still load and run. A verifying member in a windowed
 discussion no longer gets the rolling summary. A member that both signs and verifies has its own
 unsigned entries (a signing failure, or answers from before signing was switched on) withheld from
-itself, as its verifying peers already do.
+itself, as its verifying peers already do. A continued discussion withholds from verifying members
+every entry of a member agent that has since been deleted.
 
 ### Not filtered yet
 

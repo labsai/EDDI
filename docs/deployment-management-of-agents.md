@@ -585,11 +585,13 @@ This will:
 5. Delete the agent itself
 
 > **`permanent=true` never cascades.** It applies to the resource named in the request — every
-> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault,
-> which no endpoint can regenerate. Cascaded resources are always **soft-deleted**, whatever
-> `permanent` says: the "is anyone else using this?" check can only speak for the versions it can
-> see, while `permanent` erases all of them. To erase a shared resource, delete it explicitly,
-> without cascade.
+> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault.
+> Those keys are destroyed for good: an agent restored from a backup afterwards cannot sign until an
+> admin generates it a new key with `POST /agentstore/agents/{id}/signing-keys` (`eddi-admin`) and
+> turns `security.signInterAgentMessages` back on. Cascaded resources are always **soft-deleted**,
+> whatever `permanent` says: the "is anyone else using this?" check can only speak for the versions
+> it can see, while `permanent` erases all of them. To erase a shared resource, delete it
+> explicitly, without cascade.
 
 > **`permanent=true` requires the current version.** It is ID-scoped, so a request naming a stale
 > version is refused with **409** before anything is deleted — as `cascade=true` already was. A

@@ -1639,6 +1639,121 @@ class RestAgentStoreTest {
             assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
         }
 
+        /**
+         * A socket error or a lost commit acknowledgement can arrive after the write
+         * was applied. The revoke used to rethrow it as it was: the agent stood at the
+         * new version with its descriptor still naming the old one, so every later save
+         * was answered 404 — and revoking again could not repair it, since the old
+         * version answers 409 and the new one already shows the key revoked.
+         */
+        @Test
+        @DisplayName("moves the descriptor and deletes the private key when a write that reported a failure landed after all")
+        void carriesOnWhenAnAmbiguousWriteLanded() throws Exception {
+            var landed = new AtomicReference<AgentConfiguration>();
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenAnswer(invocation -> {
+                landed.set(invocation.getArgument(2));
+                throw new IResourceStore.ResourceStoreException("socket closed after the write");
+            });
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenAnswer(invocation -> resourceId(AGENT_ID, landed.get() == null ? 1 : 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenAnswer(invocation -> landed.get());
+
+            Response response = store.revokeSigningKey(AGENT_ID, 1, 1);
+
+            assertEquals(200, response.getStatus());
+            assertTrue(response.getLocation().toString().endsWith(AGENT_ID + "?version=2"), response.getLocation().toString());
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            assertEquals(URI.create(IRestAgentStore.resourceURI + AGENT_ID + "?version=2"), descriptor.getResource());
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v2"), "the other key is untouched");
+        }
+
+        @Test
+        @DisplayName("tells a landed revoke of the legacy key (v0) by the legacy key being gone")
+        void carriesOnWhenAnAmbiguousLegacyRevokeLanded() throws Exception {
+            stored.getIdentity().setPublicKey(v1.publicKeyB64());
+            vault.storeIfAbsent(new SecretReference("default", "agent-signing-key:" + AGENT_ID), "legacy-private-key", null, null);
+            var landed = new AtomicReference<AgentConfiguration>();
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenAnswer(invocation -> {
+                landed.set(invocation.getArgument(2));
+                throw new IllegalStateException("socket closed after the write");
+            });
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenAnswer(invocation -> resourceId(AGENT_ID, landed.get() == null ? 1 : 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenAnswer(invocation -> landed.get());
+
+            Response response = store.revokeSigningKey(AGENT_ID, 0, 1);
+
+            assertEquals(200, response.getStatus());
+            verify(documentDescriptorStore).updateDescriptor(eq(AGENT_ID), eq(1), same(descriptor));
+            assertThrows(ISecretProvider.SecretNotFoundException.class, () -> vaultKey("agent-signing-key:" + AGENT_ID));
+        }
+
+        /**
+         * Unlike a generated key, the key being revoked is still declared and trusted
+         * when the write did not land, so its private half must stay.
+         */
+        @Test
+        @DisplayName("keeps the private key, and rethrows, when a write that reported a failure did not land")
+        void keepsTheKeyWhenAnAmbiguousWriteDidNotLand() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IllegalStateException("socket closed"));
+            when(AgentStore.read(AGENT_ID, 1)).thenAnswer(invocation -> {
+                // The re-read must see what the store holds, not the endpoint's edited copy.
+                var unchanged = new AgentConfiguration();
+                unchanged.setWorkflows(new ArrayList<>());
+                var identity = new AgentConfiguration.AgentIdentity();
+                identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()), AgentPublicKey.createCurrent(2,
+                        v2.publicKeyB64()))));
+                unchanged.setIdentity(identity);
+                return unchanged;
+            });
+
+            var e = assertThrows(IllegalStateException.class, () -> store.revokeSigningKey(AGENT_ID, 1, 1));
+
+            assertEquals("socket closed", e.getMessage());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"), "still declared unrevoked, so still needed");
+            verify(documentDescriptorStore, never()).updateDescriptor(anyString(), anyInt(), any());
+        }
+
+        /**
+         * The legacy key has no revoked flag: what tells a landed revoke apart is the
+         * key no longer being declared. A newer version written by someone else, with
+         * the key still there, is not this revoke.
+         */
+        @Test
+        @DisplayName("keeps the legacy key's private half when the current version still declares it")
+        void keepsTheLegacyKeyWhenAnAmbiguousRevokeDidNotLand() throws Exception {
+            stored.getIdentity().setPublicKey(v1.publicKeyB64());
+            vault.storeIfAbsent(new SecretReference("default", "agent-signing-key:" + AGENT_ID), "legacy-private-key", null, null);
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IllegalStateException("socket closed"));
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1), resourceId(AGENT_ID, 2));
+            when(AgentStore.read(AGENT_ID, 2)).thenAnswer(invocation -> {
+                var concurrent = new AgentConfiguration();
+                concurrent.setWorkflows(new ArrayList<>());
+                var identity = new AgentConfiguration.AgentIdentity();
+                identity.setPublicKey(v1.publicKeyB64());
+                identity.setKeys(new ArrayList<>(List.of(AgentPublicKey.createCurrent(1, v1.publicKeyB64()))));
+                concurrent.setIdentity(identity);
+                return concurrent;
+            });
+
+            assertThrows(IllegalStateException.class, () -> store.revokeSigningKey(AGENT_ID, 0, 1));
+
+            assertEquals("legacy-private-key", vaultKey("agent-signing-key:" + AGENT_ID), "still declared, so still needed");
+            verify(documentDescriptorStore, never()).updateDescriptor(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("keeps the private key, and rethrows, when it cannot tell whether a failed write landed")
+        void keepsTheKeyWhenTheRevokeOutcomeCannotBeRead() throws Exception {
+            when(AgentStore.update(eq(AGENT_ID), eq(1), any(), anyBoolean())).thenThrow(new IResourceStore.ResourceStoreException("socket closed"));
+            when(AgentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 1)).thenThrow(new IllegalStateException("store down"));
+
+            var e = assertThrows(IResourceStore.ResourceStoreException.class, () -> store.revokeSigningKey(AGENT_ID, 1, 1));
+
+            assertEquals("socket closed", e.getMessage());
+            assertNotNull(vaultKey("agent-signing-key:" + AGENT_ID + ":v1"));
+            verify(documentDescriptorStore, never()).updateDescriptor(anyString(), anyInt(), any());
+        }
+
         @Test
         @DisplayName("keeps the private key when the configuration cannot be written")
         void keepsTheKeyWhenTheWriteFails() throws Exception {

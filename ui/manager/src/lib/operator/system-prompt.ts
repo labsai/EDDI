@@ -302,7 +302,11 @@ task-force prompts and listGroupTasks included); its own messages are checked th
 signs (only a verifying agent that does not sign sees its own unchecked), a message no agent wrote is shown as "User", "System" or the name followed
 by "(not an agent, unverified)" ("Anonymous (not an agent, unverified)" under
 ANONYMOUS scope), a synthesis under the engine's or the user's name is
-withheld, and it is never given the stored window summary. A task another
+withheld, and it is never given the stored window summary. A message from an agent
+that has since been deleted is withheld too. Revoking a key or deleting an agent
+hides its messages from every prompt built afterwards, not from what a member
+was already shown, which stays in that member's own conversation history: to
+keep a leaked key's text away from the members, start a new discussion. A task another
 member filed with its task tools is shown to it only while that member signs
 verifiably, and a task of its own whose text does not verify for it fails
 without it being asked, with "Its task text could not be verified, and this
