@@ -70,15 +70,14 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
   it("renders security toggles (section auto-opens)", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
+      expect(screen.getByText(/Sign group-conversation messages/i)).toBeInTheDocument();
     });
   });
 
-  it("shows all three security toggle descriptions", async () => {
+  it("shows both security toggles", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
-      expect(screen.getByText(/Sign MCP invocations/i)).toBeInTheDocument();
+      expect(screen.getByText(/Sign group-conversation messages/i)).toBeInTheDocument();
       expect(screen.getByText(/Require peer verification/i)).toBeInTheDocument();
     });
   });

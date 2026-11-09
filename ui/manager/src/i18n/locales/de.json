@@ -403,7 +403,7 @@
     "publicKeys": "Öffentliche Schlüssel",
     "recallOrder": "Abrufreihenfolge",
     "requirePeer": "Peer-Verifizierung erforderlich",
-    "requirePeerDesc": "Prüft die Signaturen der Nachrichten früherer Sprecher, bevor dieser Agent in einer Gruppenunterhaltung antwortet. Nachrichten anderer Agenten, die sich nicht verifizieren lassen, werden ihm vorenthalten",
+    "requirePeerDesc": "Prüft die Signaturen der Nachrichten früherer Sprecher, bevor dieser Agent in einer Gruppenunterhaltung antwortet. Nachrichten anderer Agenten, die sich nicht verifizieren lassen, werden ihm vorenthalten. Sobald in einer Gruppe ein Mitglied, der Moderator oder der Facilitator die Verifizierung verlangt, zählen Abstimmungen, Verhandlungstabellen und Lektionen für alle nur signierte Beiträge; deshalb sollte jeder Agent, der dort schreibt, signieren. Ein verifizierender Agent erhält keine Artefakt-Werkzeuge",
     "securityFlags": "Signierung & Verifizierung",
     "securityIdentity": "Sicherheit & Identität",
     "sessionManagement": "Sitzungsverwaltung",

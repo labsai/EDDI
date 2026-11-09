@@ -404,7 +404,7 @@
     "publicKeys": "Clés publiques",
     "recallOrder": "Ordre de rappel",
     "requirePeer": "Exiger la vérification des pairs",
-    "requirePeerDesc": "Vérifie les signatures des messages des intervenants précédents avant que cet agent ne réponde dans une conversation de groupe. Les messages d'autres agents qui ne peuvent pas être vérifiés lui sont masqués",
+    "requirePeerDesc": "Vérifie les signatures des messages des intervenants précédents avant que cet agent ne réponde dans une conversation de groupe. Les messages d'autres agents qui ne peuvent pas être vérifiés lui sont masqués. Dans un groupe, dès qu'un membre, le modérateur ou le facilitateur exige la vérification, les votes, les tableaux de négociation et les leçons ne comptent pour tous que les entrées signées ; tout agent qui y écrit devrait donc signer. Un agent qui vérifie ne reçoit aucun outil d'artefact",
     "securityFlags": "Signature et vérification",
     "securityIdentity": "Sécurité et identité",
     "sessionManagement": "Gestion de session",
