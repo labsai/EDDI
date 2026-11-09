@@ -1396,11 +1396,20 @@ each of its turns:
 }
 ```
 
-- The signature covers the entry's content, type, speaker, target, round,
-  phase and key version, and the group conversation it belongs to. An entry
-  edited or retyped in the store, copied into another discussion, moved to
-  another phase or round, or repeated within one does not verify. Moving an
-  entry between repeats of one phase within a round is not detected.
+- The signature covers the entry's content, type, speaker id and display
+  name, target, error reason, round, phase index and name, and key version,
+  the group conversation it belongs to, and its own nonce and signing time. An
+  entry with any of those changed in the store (edited or retyped), copied into
+  another discussion, moved to another phase, or repeated does not verify. The
+  entry's stored `timestamp` is not covered: changing it is not detected, and
+  the changed value is what `groupTranscript` carries.
+- Round placement is checked in two ways: an entry of the current round must
+  sit after the round's start, and an earlier round's entry before it, and
+  signed rounds may never go backwards along the transcript. Within the earlier
+  rounds nothing more is checked, so a store writer can move a signed round-1
+  entry past the round-2 question (but not past a signed round-2 entry) and it
+  still verifies. Moving an entry between repeats of one phase within a round
+  is not detected either.
 - **Fail-closed.** Every entry another agent wrote that does not verify, or
   that carries no signature, reaches a verifying member as
   `[withheld: this message could not be verified, because ...]` in its phase
@@ -1456,7 +1465,9 @@ each of its turns:
   be named `Moderator` while the moderator is not a member, nor `Facilitator`
   while an enabled facilitator is another agent: the engine signs those roles'
   entries under these names. So two verified voices never share one name
-  either.
+  either, with one exception: a group saved before these checks still loads
+  with the names it has, so its two members can share a name until the group
+  is corrected and saved again.
 - A synthesis under the engine's or the user's name (speaker id `system`,
   `user` or none) is withheld from a verifying member: the engine never
   records one there, and a synthesis is quoted by its type, without its
