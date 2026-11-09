@@ -137,6 +137,10 @@ reformatted task-force verification entry are recorded unsigned, so a verifying 
 withheld. The entry "every prompt a verifying member receives is built from its verified view"
 filters those prompts and signs those entries for their agent.
 
+A follow-up (`followUpWithMember`) is not filtered either: the member it asks gets the stored
+transcript unfiltered in its `groupTranscript` context, even when it requires peer verification, so
+an entry altered by someone with write access to the store reaches it as written.
+
 The [group-conversations](../group-conversations.md#signed-contributions) page now names
 these limits too: an entry's stored `timestamp` is not covered by its signature, an earlier round's
 signed entry can be moved past a later round's question without being detected, and a group saved
