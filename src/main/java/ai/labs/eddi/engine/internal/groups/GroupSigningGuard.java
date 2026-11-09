@@ -522,21 +522,30 @@ public class GroupSigningGuard {
 
     /**
      * Everyone whose verification setting decides what the engine's records count:
-     * the members (recruits included, humans excluded), the moderator and the
-     * facilitator, when it is enabled.
+     * the members (recruits included, humans excluded), the moderator (unless it is
+     * a HUMAN member) and the facilitator, when it is enabled.
      */
     static Set<String> readersOf(AgentGroupConfiguration config, GroupConversation gc) {
         Set<String> readers = new LinkedHashSet<>();
         if (config == null) {
             return readers;
         }
+        Set<String> humans = new HashSet<>();
         for (GroupMember member : GroupConversationService.rosterWithRecruits(config, gc)) {
-            if (member != null && member.agentId() != null && member.memberType() != MemberType.HUMAN) {
+            if (member == null || member.agentId() == null) {
+                continue;
+            }
+            if (member.memberType() == MemberType.HUMAN) {
+                humans.add(member.agentId());
+            } else {
                 readers.add(member.agentId());
             }
         }
-        if (config.getModeratorAgentId() != null && !config.getModeratorAgentId().isBlank()) {
-            readers.add(config.getModeratorAgentId());
+        // A HUMAN member named as moderator is a person too (AgentGroupStore allows
+        // it): it has no verification setting to count.
+        String moderator = config.getModeratorAgentId();
+        if (moderator != null && !moderator.isBlank() && !humans.contains(moderator)) {
+            readers.add(moderator);
         }
         // A facilitator that is switched off is never consulted, as in
         // FacilitatorEngine.checkpoint and the save-time role-name check.
