@@ -4775,6 +4775,21 @@
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend {{productName}} pour des données réelles."
   },
+  "spendControl": {
+    "title": "Modifications en attente",
+    "description": "Proposées via MCP et non appliquées : chacune assouplirait le contrôle des dépenses. L'approbation l'applique en votre nom.",
+    "proposedBy": "Proposée par {{who}} le {{when}}",
+    "loosening": "Assouplit le contrôle des dépenses",
+    "allChanges": "Toutes les modifications",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "approveTitle": "Approuver cette modification ?",
+    "rejectTitle": "Rejeter cette modification ?",
+    "approveDesc": "Elle est appliquée maintenant, avec vous comme auteur, et assouplit le contrôle des dépenses : {{loosening}}",
+    "rejectDesc": "Rien n'est appliqué. L'auteur de la proposition peut la soumettre à nouveau.",
+    "approved": "Modification approuvée et appliquée",
+    "rejected": "Modification rejetée ; rien n'a été appliqué"
+  },
   "modelPrices": {
     "nav": "Prix des modèles",
     "title": "Prix des modèles",

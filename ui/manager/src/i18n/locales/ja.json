@@ -4725,6 +4725,21 @@
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには {{productName}} バックエンドを接続してください。"
   },
+  "spendControl": {
+    "title": "保留中の変更",
+    "description": "MCP 経由で提案され、未適用です。いずれも支出管理を緩めます。承認するとあなたの名前で適用されます。",
+    "proposedBy": "{{who}} が {{when}} に提案",
+    "loosening": "支出管理を緩める",
+    "allChanges": "すべての変更",
+    "approve": "承認",
+    "reject": "却下",
+    "approveTitle": "この変更を承認しますか？",
+    "rejectTitle": "この変更を却下しますか？",
+    "approveDesc": "あなたを実行者として今すぐ適用され、支出管理を緩めます: {{loosening}}",
+    "rejectDesc": "何も適用されません。提案者は再提出できます。",
+    "approved": "変更を承認して適用しました",
+    "rejected": "変更を却下しました。何も適用されていません"
+  },
   "modelPrices": {
     "nav": "モデル価格",
     "title": "モデル価格",

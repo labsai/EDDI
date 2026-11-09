@@ -413,6 +413,56 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         }
     }
 
+    /**
+     * One statement, so atomic: an insert that does nothing on conflict when no
+     * quota was expected, otherwise an update filtered on every column of the
+     * expected quota.
+     */
+    @Override
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        ensureSchema();
+        String sql = expected == null
+                ? """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO NOTHING
+                        """
+                : """
+                        UPDATE tenant_quotas SET max_conversations_per_day = ?, max_agents_per_tenant = ?,
+                            max_api_calls_per_minute = ?, max_monthly_cost_usd = ?, enabled = ?
+                        WHERE tenant_id = ? AND max_conversations_per_day = ? AND max_agents_per_tenant = ?
+                            AND max_api_calls_per_minute = ? AND max_monthly_cost_usd = ? AND enabled = ?
+                        """;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (expected == null) {
+                ps.setString(1, next.tenantId());
+                ps.setInt(2, next.maxConversationsPerDay());
+                ps.setInt(3, next.maxAgentsPerTenant());
+                ps.setInt(4, next.maxApiCallsPerMinute());
+                ps.setDouble(5, next.maxMonthlyCostUsd());
+                ps.setBoolean(6, next.enabled());
+            } else {
+                ps.setInt(1, next.maxConversationsPerDay());
+                ps.setInt(2, next.maxAgentsPerTenant());
+                ps.setInt(3, next.maxApiCallsPerMinute());
+                ps.setDouble(4, next.maxMonthlyCostUsd());
+                ps.setBoolean(5, next.enabled());
+                ps.setString(6, next.tenantId());
+                ps.setInt(7, expected.maxConversationsPerDay());
+                ps.setInt(8, expected.maxAgentsPerTenant());
+                ps.setInt(9, expected.maxApiCallsPerMinute());
+                ps.setDouble(10, expected.maxMonthlyCostUsd());
+                ps.setBoolean(11, expected.enabled());
+            }
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            LOGGER.errorf("Failed to compare-and-set quota for tenant '%s': %s", sanitize(next.tenantId()), sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
+    }
+
     @Override
     public List<TenantQuota> listQuotas() {
         ensureSchema();

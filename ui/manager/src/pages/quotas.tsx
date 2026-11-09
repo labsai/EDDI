@@ -24,11 +24,14 @@ import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
 import { TeamBudgetsTable } from "@/components/quotas/team-budgets-table";
+import { PendingSpendChanges } from "@/components/spend-control/pending-spend-changes";
+import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 
 const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
+  const isAdmin = useIsAdminOrUnknown();
   const { data: quota, isLoading: quotaLoading, isError: quotaError, error: quotaErr, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const {
     data: usage,
@@ -158,6 +161,8 @@ export function QuotasPage() {
           {quotaError && quota && (
             <RefetchErrorNotice onRetry={() => refetchQuota()} />
           )}
+
+          <PendingSpendChanges kind="TENANT_QUOTA" isAdmin={isAdmin} />
 
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (

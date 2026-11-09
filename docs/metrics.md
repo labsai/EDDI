@@ -333,6 +333,15 @@ eddi_team_budget_refusals_total             # New work refused for a spent budge
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
+### Spend-Control Change Metrics
+
+Writes to the model price catalog and tenant quotas over MCP, and the decisions on the looser ones
+([Spend-Control Changes](spend-control-changes.md)).
+
+```text
+eddi_spendcontrol_changes_total             # tags: kind (MODEL_PRICES|TENANT_QUOTA), result (APPLIED|PROPOSED|APPROVED|REJECTED|WITHDRAWN|STALE|EXPIRED)
+```
+
 ### Scheduled Trigger Metrics
 
 ```text

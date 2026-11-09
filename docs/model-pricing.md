@@ -131,8 +131,10 @@ The prices above illustrate the shape; take real prices from the provider.
 - **Writes are compare-and-set** on `revision`: send the revision you read (as
   `If-Match` or in the body); a stale one answers `409` with `currentRevision`.
 - **Only `eddi-admin` writes.** The catalog is a budget lever — lowering a price to $0
-  is raising a budget — so there is no MCP write tool and no Platform Operator write
-  grant. Editors can read it and resolve a model.
+  is raising a budget. Over MCP, `update_model_prices` applies only changes that make
+  spending stricter; anything that could lower what a call costs waits for an
+  administrator to approve it in the Manager (see [Spend-Control Changes](spend-control-changes.md)).
+  The Platform Operator has no write grant. Editors can read it and resolve a model.
 - **Limits**: at most 500 entries; `model` is 1–128 characters of `A–Z a–z 0–9 . _ : / @ + -`
   with `*` only as a leading and/or trailing wildcard; `provider` is a model type of
   this deployment or `*`; prices 0–10 000; `thresholdTokens` 1 000–10 000 000; `note`
@@ -294,3 +296,6 @@ exception is logged and swallowed.
 | GET | `/administration/model-prices/resolve?provider=&model=` | admin, editor | the entry that prices a model |
 | GET | `/administration/model-prices/reference` | admin | the bundled reference prices |
 | GET | `/administration/model-prices/unpriced` | admin, editor | unpriced sightings on this node |
+
+Changes an MCP client proposed and an administrator decides live under
+`/administration/spend-control-changes` — see [Spend-Control Changes](spend-control-changes.md).

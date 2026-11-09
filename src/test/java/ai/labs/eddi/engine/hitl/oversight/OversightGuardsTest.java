@@ -53,6 +53,14 @@ class OversightGuardsTest {
                     SelfUngatingGuard.refusal(method, "http://localhost:7070" + path, "{}", protection()));
         }
 
+        @ParameterizedTest
+        @CsvSource({"POST,/administration/spend-control-changes/c1/approve", "POST,/administration/spend-control-changes/c1/reject"})
+        @DisplayName("an approved call deciding a spend-control change is refused for every agent")
+        void spendControlApiRefused(String method, String path) {
+            assertEquals(OversightWriteGuard.SPEND_CONTROL_API_REASON,
+                    SelfUngatingGuard.refusal(method, "http://localhost:7070" + path, "{}", protection()));
+        }
+
         @Test
         @DisplayName("reading the oversight API is not refused")
         void readsAllowed() {

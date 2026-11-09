@@ -4725,6 +4725,21 @@
   "mockBanner": {
     "message": "데모 모드 — 샘플 데이터를 표시합니다. 실제 데이터를 보려면 {{productName}} 백엔드에 연결하세요."
   },
+  "spendControl": {
+    "title": "대기 중인 변경",
+    "description": "MCP로 제안되었으며 적용되지 않았습니다. 각 변경은 지출 통제를 완화합니다. 승인하면 귀하의 이름으로 적용됩니다.",
+    "proposedBy": "{{who}}이(가) {{when}}에 제안",
+    "loosening": "지출 통제 완화",
+    "allChanges": "모든 변경",
+    "approve": "승인",
+    "reject": "거부",
+    "approveTitle": "이 변경을 승인할까요?",
+    "rejectTitle": "이 변경을 거부할까요?",
+    "approveDesc": "귀하를 실행자로 하여 지금 적용되며 지출 통제를 완화합니다: {{loosening}}",
+    "rejectDesc": "아무것도 적용되지 않습니다. 제안자가 다시 제출할 수 있습니다.",
+    "approved": "변경이 승인되어 적용되었습니다",
+    "rejected": "변경이 거부되었습니다. 아무것도 적용되지 않았습니다"
+  },
   "modelPrices": {
     "nav": "모델 가격",
     "title": "모델 가격",

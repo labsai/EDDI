@@ -785,6 +785,16 @@ const BODY_COST = `Cost and model prices:
   is the metric \`eddi_llm_calls_unpriced_total\`). The fix is a catalog entry
   (the Manager's Model Prices page, administrators only) or prices on the
   config.
+- An administrator's MCP client may change prices and the tenant quota
+  (update_model_prices, update_tenant_quota): what only makes spending stricter
+  applies at once; anything looser (a lower or removed price, a looser
+  unpricedPolicy, a new price while unpriced calls are refused, a higher or
+  disabled quota) is NOT applied but waits as a pending change. "I lowered the
+  price but nothing changed" usually means that: list
+  \`GET /administration/spend-control-changes\` (PENDING by default; also
+  STALE — the catalog or quota moved before approval — and EXPIRED after 7
+  days). An eddi-admin approves or rejects it on the Model Prices or Quotas
+  page under Pending changes. You cannot approve or reject one.
 - \`llm:spend_refused:<taskId>\` with reason \`unpriced_model\` means strict
   mode refused the call: the catalog's \`unpricedPolicy\` is REFUSE, or
   REFUSE_WHEN_BUDGETED while a budget applies. The effective policy is never
