@@ -287,7 +287,7 @@ public class FacilitatorEngine {
         return switch (move) {
             case END_PHASE -> executeEndPhase(gc, fc, phase, ctx, parsed);
             case EXTEND_PHASE -> executeExtendPhase(gc, fc, phase, ctx, parsed);
-            case CALL_VOTE -> executeCallVote(gc, fc, phase, ctx, parsed);
+            case CALL_VOTE -> executeCallVote(gc, config, fc, phase, ctx, parsed);
             case RECRUIT -> executeRecruit(gc, config, fc, phase, ctx, parsed);
             case ESCALATE_HUMAN -> executeEscalate(gc, fc, phase, ctx, parsed);
             case CONTINUE -> FacilitatorAction.none(); // unreachable — handled above
@@ -326,8 +326,8 @@ public class FacilitatorEngine {
         return new FacilitatorAction(FacilitatorAction.Kind.EXTEND_PHASE, null, null);
     }
 
-    private FacilitatorAction executeCallVote(GroupConversation gc, FacilitatorConfig fc, DiscussionPhase phase,
-                                              CheckpointContext ctx, ParsedMove parsed) {
+    private FacilitatorAction executeCallVote(GroupConversation gc, AgentGroupConfiguration config, FacilitatorConfig fc,
+                                              DiscussionPhase phase, CheckpointContext ctx, ParsedMove parsed) {
         // Review findings: same no-overrule rule as END_PHASE/EXTEND_PHASE — a
         // phase that already ended by convergence or unanimous agreement is a
         // deterministic exit the facilitator must not append a vote to. And a
@@ -343,6 +343,15 @@ public class FacilitatorEngine {
         if (gc.getDecision() != null) {
             recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
                     "the discussion already carries a decision record — a facilitator vote would overwrite it");
+            return FacilitatorAction.none();
+        }
+        // The options are the facilitator's own text: every voter is asked to choose
+        // among them and the decision is recorded from them. Once a reader requires
+        // peer verification they are offered only while the facilitator signs
+        // verifiably, as a task an agent filed is shown (TaskRecordView).
+        if (!GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc)).vouchesFor(fc.agentId())) {
+            recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
+                    "a member requires peer verification and the facilitator does not sign verifiably, so its vote options cannot be offered");
             return FacilitatorAction.none();
         }
         List<String> options = new ArrayList<>();

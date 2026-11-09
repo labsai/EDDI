@@ -284,6 +284,9 @@ public class GroupContextBuilder {
                 // options come from the voter's own view: a synthesis withheld from a
                 // verifying voter offers it none, and the tally then has none either,
                 // since it counts only entries that verify once any reader requires it.
+                // EXPLICIT options are shown as they are: the author's config, or a
+                // facilitator's vote, which is called only while the facilitator signs
+                // verifiably once a reader verifies (FacilitatorEngine.executeCallVote).
                 var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
                 data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
                 data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));

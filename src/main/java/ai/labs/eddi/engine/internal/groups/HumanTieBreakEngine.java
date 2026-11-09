@@ -143,24 +143,27 @@ public final class HumanTieBreakEngine {
 
     /**
      * Re-reads the VOTE repeat's ballots from the transcript — the pause stores no
-     * ballot copies — and re-tallies them against the phase's options.
+     * ballot copies — and re-tallies them against the phase's options, as the
+     * group's records count them ({@code records}, taken of {@code gc}): the same
+     * options and ballots the live tally counted, so a ballot that does not verify
+     * for every reader cannot decide the tie at resume.
      */
     public static VoteTallyEngine.TallyOutcome rebuildOutcome(GroupConversation gc, DiscussionPhase phase, int phaseIdx,
-                                                              int transcriptFrom) {
+                                                              int transcriptFrom, GroupSigningGuard.View records) {
         VoteConfig voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
-        List<TranscriptEntry> snapshot;
-        synchronized (gc.getTranscript()) {
-            snapshot = List.copyOf(gc.getTranscript());
-        }
+        List<TranscriptEntry> snapshot = records.stored();
         List<TranscriptEntry> ballots = new ArrayList<>();
         for (int i = Math.max(0, transcriptFrom); i < snapshot.size(); i++) {
             TranscriptEntry entry = snapshot.get(i);
-            if (entry != null && entry.type() == TranscriptEntryType.VOTE && entry.phaseIndex() == phaseIdx) {
+            if (entry != null && entry.type() == TranscriptEntryType.VOTE && entry.phaseIndex() == phaseIdx && records.trusts(entry)) {
                 ballots.add(entry);
             }
         }
-        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, snapshot.subList(0, Math.min(Math.max(0, transcriptFrom),
-                snapshot.size())));
+        // The view keeps every entry in place (a withheld one as a placeholder), so
+        // a stored index is an index into it.
+        List<TranscriptEntry> visible = records.transcript();
+        List<String> options = VoteTallyEngine.resolveOptions(voteConfig, visible.subList(0, Math.min(Math.max(0, transcriptFrom),
+                visible.size())));
         int participants = participantsOf(gc.getDecision(), ballots.size());
         return VoteTallyEngine.tally(ballots, participants, options, voteConfig, phase.name());
     }

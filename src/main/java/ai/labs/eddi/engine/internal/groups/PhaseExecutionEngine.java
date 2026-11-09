@@ -114,6 +114,15 @@ public class PhaseExecutionEngine {
     }
 
     /**
+     * The transcript of {@code gc} as the group's own records count it (see
+     * {@link GroupSigningGuard#recordView}): what the vote tally, the SERVICE judge
+     * and a tie-break resumed later read.
+     */
+    GroupSigningGuard.View recordsOf(GroupConversation gc, AgentGroupConfiguration config) {
+        return GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
+    }
+
+    /**
      * Control-flow signal (I6): the phase reached a HUMAN member's turn and the
      * discussion must pause for their input. Thrown by the sequential loop and the
      * parallel human tail, caught ONLY by {@code executeDiscussion}'s phase
@@ -559,7 +568,7 @@ public class PhaseExecutionEngine {
         // Options and ballots as the group's records may count them: once any reader
         // requires peer verification, only what verifies for every reader, so the
         // options a tie-breaker is shown and the ballots counted are verified text.
-        var records = GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
+        var records = recordsOf(gc, config);
         List<String> options = VoteTallyEngine.resolveOptions(voteConfig, records.transcript());
         List<TranscriptEntry> transcriptSnapshot;
         synchronized (gc.getTranscript()) {
@@ -769,7 +778,7 @@ public class PhaseExecutionEngine {
         // entries as the group's records count them, like the vote tally does.
         Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = Optional.empty();
         if (serviceJudge != null) {
-            var records = GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc));
+            var records = recordsOf(gc, config);
             serviceVerdict = serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input.apply(records::of), parser, listener);
         }
         if (serviceVerdict.isPresent()) {

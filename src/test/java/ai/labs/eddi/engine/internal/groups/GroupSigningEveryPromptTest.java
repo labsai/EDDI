@@ -21,6 +21,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.FacilitatorConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.FacilitatorMove;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
@@ -334,6 +335,97 @@ class GroupSigningEveryPromptTest {
         assertEquals(note, guard.visibleTo(STRICT, gc, gc.getTranscript()).getLast(), "the signed note verifies for a verifying reader");
     }
 
+    /**
+     * A facilitator's CALL_VOTE options are its own text, which every voter is
+     * asked to choose among and the decision is recorded from. Once a reader
+     * verifies, the vote is called only by a facilitator that signs verifiably.
+     */
+    @Test
+    void aVoteTheFacilitatorCallsRunsOnlyOnOptionsItsSignatureVouchesFor() {
+        String move = "{\"move\": \"CALL_VOTE\", \"args\": {\"options\": [\"vendor X\", \"vendor Y\"]}, \"reason\": \"time to decide\"}";
+        replies.put(UNSIGNED, move);
+        replies.put(SIGNER, move);
+        var facilitator = new FacilitatorEngine(executor, () -> mock(IDeploymentStore.class), mock(AuditLedgerService.class),
+                new SimpleMeterRegistry());
+        facilitator.setSigningGuard(guard);
+        var phase = new DiscussionPhase("Opinions", PhaseType.OPINION);
+        var ctx = new FacilitatorEngine.CheckpointContext(0, 0, true, true, false, false);
+
+        var verifying = config(List.of(member(STRICT), member(LENIENT)));
+        verifying.setFacilitator(new FacilitatorConfig(true, UNSIGNED, List.of(FacilitatorMove.CALL_VOTE), null, 5, null));
+        var refused = facilitator.checkpoint(gc, verifying, phase, ctx, protocol(), QUESTION, null, new AtomicInteger(), 10);
+        assertEquals(FacilitatorEngine.FacilitatorAction.Kind.NONE, refused.kind());
+        assertTrue(gc.getTranscript().getLast().content().contains("does not sign verifiably"), gc.getTranscript().getLast().content());
+
+        verifying.setFacilitator(new FacilitatorConfig(true, SIGNER, List.of(FacilitatorMove.CALL_VOTE), null, 5, null));
+        assertEquals(FacilitatorEngine.FacilitatorAction.Kind.INSERT_VOTE,
+                facilitator.checkpoint(gc, verifying, phase, ctx, protocol(), QUESTION, null, new AtomicInteger(), 10).kind());
+
+        var lenient = config(List.of(member(LENIENT)));
+        lenient.setFacilitator(new FacilitatorConfig(true, UNSIGNED, List.of(FacilitatorMove.CALL_VOTE), null, 5, null));
+        assertEquals(FacilitatorEngine.FacilitatorAction.Kind.INSERT_VOTE,
+                facilitator.checkpoint(gc, lenient, phase, ctx, protocol(), QUESTION, null, new AtomicInteger(), 10).kind(),
+                "a group nobody in which verifies votes as before");
+    }
+
+    /**
+     * A tie a person is asked to break is re-tallied when it resumes, by the human
+     * choice or the moderator on timeout: from the same records the live tally
+     * counted, so an unsigned ballot cannot break the tie at resume.
+     */
+    @Test
+    void aTieBreakIsRebuiltFromTheBallotsTheLiveTallyCounted() {
+        add(signed(SIGNER, "Option A: vendor X\nOption B: vendor Y", TranscriptEntryType.SYNTHESIS));
+        int transcriptFrom = gc.getTranscript().size();
+        add(signed(SIGNER, "{\"vote\": \"vendor X\", \"confidence\": 0.9, \"statement\": \"cheaper\"}", TranscriptEntryType.VOTE, 2));
+        add(unsigned(UNSIGNED, "{\"vote\": \"vendor Y\", \"confidence\": 1.0, \"statement\": \"forged\"}", TranscriptEntryType.VOTE, 2));
+        add(unsigned(LENIENT, "{\"vote\": \"vendor Y\", \"confidence\": 1.0, \"statement\": \"also forged\"}", TranscriptEntryType.VOTE, 2));
+        var vote = new DiscussionPhase("Vote", PhaseType.VOTE);
+        var verifying = config(List.of(member(SIGNER), member(UNSIGNED), member(LENIENT), member(STRICT)));
+
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, vote, 2, transcriptFrom, phaseEngine().recordsOf(gc, verifying));
+        assertEquals(1, rebuilt.ballots().size(), "only the signed ballot counts: " + rebuilt.ballots());
+        assertEquals("vendor X", rebuilt.decision().winner());
+        assertTrue(VoteTallyEngine.losingDissents(rebuilt.ballots(), "vendor X").isEmpty(), "no unsigned statement becomes a dissent");
+
+        var lenient = config(List.of(member(SIGNER), member(UNSIGNED), member(LENIENT)));
+        assertEquals(3, HumanTieBreakEngine.rebuildOutcome(gc, vote, 2, transcriptFrom, phaseEngine().recordsOf(gc, lenient)).ballots().size(),
+                "nothing changes while no reader verifies");
+    }
+
+    @Test
+    void aTieBreakIsRebuiltOnlyOnOptionsThatVerify() {
+        add(unsigned(UNSIGNED, "Option A: vendor X\nOption B: vendor Y", TranscriptEntryType.SYNTHESIS));
+        int transcriptFrom = gc.getTranscript().size();
+        add(signed(SIGNER, "{\"vote\": \"vendor X\", \"confidence\": 0.9}", TranscriptEntryType.VOTE, 2));
+        var vote = new DiscussionPhase("Vote", PhaseType.VOTE);
+
+        var verifying = HumanTieBreakEngine.rebuildOutcome(gc, vote, 2, transcriptFrom,
+                phaseEngine().recordsOf(gc, config(List.of(member(SIGNER), member(STRICT)))));
+        var lenient = HumanTieBreakEngine.rebuildOutcome(gc, vote, 2, transcriptFrom, phaseEngine().recordsOf(gc, config(List.of(member(SIGNER)))));
+
+        assertNull(verifying.decision().winner(), "the unsigned synthesis offers no option: " + verifying.decision());
+        assertEquals("vendor X", lenient.decision().winner());
+    }
+
+    /**
+     * A facilitator that is switched off reads nothing and decides nothing, so its
+     * verification setting does not decide what the group's records count either.
+     */
+    @Test
+    void aDisabledFacilitatorIsNoReaderOfTheGroupsRecords() throws Exception {
+        add(unsigned(UNSIGNED, "Option A: vendor X\nOption B: vendor Y", TranscriptEntryType.SYNTHESIS));
+        var config = config(List.of(member(UNSIGNED), member(LENIENT)));
+        config.setFacilitator(new FacilitatorConfig(false, STRICT, null, null, 3, null));
+
+        assertFalse(GroupSigningGuard.recordView(guard, gc, GroupSigningGuard.readersOf(config, gc)).verifying());
+        nestedGroup("team-with-a-disabled-facilitator", config);
+        assertTrue(questionFor("team-with-a-disabled-facilitator").contains("Option A: vendor X"), "a parent asks it as before");
+
+        config.setFacilitator(new FacilitatorConfig(true, STRICT, null, null, 3, null));
+        assertTrue(GroupSigningGuard.recordView(guard, gc, GroupSigningGuard.readersOf(config, gc)).verifying(), "enabled, it reads");
+    }
+
     // ---- task force -------------------------------------------------------
 
     @Test
@@ -359,6 +451,46 @@ class GroupSigningEveryPromptTest {
         var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
                 .map(dependency -> dependency.get("result")).toList();
         assertEquals(List.of(TaskRecordView.WITHHELD, "signed references result", TaskRecordView.WITHHELD), results);
+    }
+
+    /**
+     * A member that signs and verifies has its own entries checked, so its own task
+     * results are too: one changed in the store after it was signed is withheld
+     * from it. A member that verifies without signing is shown its own results as
+     * its entries hold them.
+     */
+    @Test
+    void aSigningVerifierIsShownItsOwnResultsOnlyAsItSignedThem() throws Exception {
+        requirePeerVerification(SIGNER);
+        var tasks = new SharedTaskList();
+        var genuine = completedTask(tasks, "Check references", SIGNER, "signed references result");
+        add(signed(SIGNER, "signed references result", TranscriptEntryType.TASK_RESULT));
+        var planted = completedTask(tasks, "Check security", SIGNER, "security result as signed");
+        add(signed(SIGNER, "security result as signed", TranscriptEntryType.TASK_RESULT));
+        tasks.updateTask(withResult(tasks.findById(planted.id()), "security result rewritten in the store"));
+        var strictsOwn = completedTask(tasks, "Collect quotes", STRICT, "quotes as answered");
+        add(unsigned(STRICT, "quotes as answered", TranscriptEntryType.TASK_RESULT));
+        var signersTask = new TaskItem("Decide", "Pick the vendor", 1);
+        tasks.addTask(signersTask);
+        tasks.updateTask(dependingOn(tasks.findById(signersTask.id()), SIGNER, List.of(genuine.id(), planted.id())));
+        var strictsTask = new TaskItem("Summarize", "Summarize the quotes", 1);
+        tasks.addTask(strictsTask);
+        tasks.updateTask(dependingOn(tasks.findById(strictsTask.id()), STRICT, List.of(strictsOwn.id())));
+        gc.setTaskList(tasks);
+        var data = templateData();
+        var engine = taskForce(data.templating());
+
+        engine.buildTaskExecutionInput(tasks.findById(signersTask.id()), QUESTION, executePhase(ContextScope.TASK_WITH_DEPS), gc);
+        engine.buildTaskExecutionInput(tasks.findById(strictsTask.id()), QUESTION, executePhase(ContextScope.TASK_WITH_DEPS), gc);
+
+        @SuppressWarnings("unchecked")
+        var signers = ((List<Map<String, Object>>) data.captured().getAllValues().get(0).get("dependencyResults")).stream()
+                .map(dependency -> dependency.get("result")).toList();
+        assertEquals(List.of("signed references result", TaskRecordView.WITHHELD), signers);
+        @SuppressWarnings("unchecked")
+        var stricts = ((List<Map<String, Object>>) data.captured().getAllValues().get(1).get("dependencyResults")).stream()
+                .map(dependency -> dependency.get("result")).toList();
+        assertEquals(List.of("quotes as answered"), stricts, "a member that does not sign is shown its own result");
     }
 
     /**
@@ -1040,6 +1172,14 @@ class GroupSigningEveryPromptTest {
         var security = new AgentConfiguration.SecurityConfig();
         security.setSignInterAgentMessages(sign);
         config.setSecurity(security);
+        assertEquals(200, restAgentStore.updateAgent(agentId, version, config, false).getStatus());
+    }
+
+    /** Turns peer verification on for {@code agentId}, keeping whether it signs. */
+    private void requirePeerVerification(String agentId) throws Exception {
+        int version = currentVersion(agentId);
+        AgentConfiguration config = snapshot(agents.get(agentId).get(version - 1));
+        config.getSecurity().setRequirePeerVerification(true);
         assertEquals(200, restAgentStore.updateAgent(agentId, version, config, false).getStatus());
     }
 

@@ -30,9 +30,10 @@ import java.util.function.Predicate;
  * shown only when the entry it comes from is one the reader trusts (see
  * {@link GroupSigningGuard.View#trusts}), and is {@link #WITHHELD} otherwise.
  * <ul>
- * <li>A <b>result</b> of an agent's task is shown when the reader is its
- * assignee, or a trusted entry of the assignee holds exactly that text. So a
- * result whose entry is unsigned, or a result edited in the store, is not. A
+ * <li>A <b>result</b> of an agent's task is shown when a trusted entry of the
+ * assignee holds exactly that text. So a result whose entry is unsigned, or a
+ * result edited in the store, is not; the reader's own results included when it
+ * signs, while one that does not sign trusts its own entries as stored. A
  * result an approver replaced is the reviewer's text, which no agent wrote, and
  * is shown as a reviewer's synthesis edit is.</li>
  * <li>A <b>subject and description</b> are withheld when an untrusted
@@ -138,7 +139,7 @@ final class TaskRecordView {
     private boolean showsResult(TaskItem task) {
         String result = task.result();
         String assignee = task.assignedAgentId();
-        if (result == null || assignee == null || assignee.equals(readerId) || isHuman.test(assignee) || editedByReviewer.test(task.id())) {
+        if (result == null || assignee == null || isHuman.test(assignee) || editedByReviewer.test(task.id())) {
             return true;
         }
         return trustedContents().getOrDefault(assignee, Set.of()).contains(result);

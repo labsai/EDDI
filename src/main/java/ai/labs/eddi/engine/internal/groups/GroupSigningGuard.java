@@ -502,7 +502,7 @@ public class GroupSigningGuard {
     /**
      * Everyone whose verification setting decides what the engine's records count:
      * the members (recruits included, humans excluded), the moderator and the
-     * facilitator.
+     * facilitator, when it is enabled.
      */
     static Set<String> readersOf(AgentGroupConfiguration config, GroupConversation gc) {
         Set<String> readers = new LinkedHashSet<>();
@@ -517,8 +517,11 @@ public class GroupSigningGuard {
         if (config.getModeratorAgentId() != null && !config.getModeratorAgentId().isBlank()) {
             readers.add(config.getModeratorAgentId());
         }
-        if (config.getFacilitator() != null && config.getFacilitator().agentId() != null) {
-            readers.add(config.getFacilitator().agentId());
+        // A facilitator that is switched off is never consulted, as in
+        // FacilitatorEngine.checkpoint and the save-time role-name check.
+        var facilitator = config.getFacilitator();
+        if (facilitator != null && facilitator.enabled() && facilitator.agentId() != null && !facilitator.agentId().isBlank()) {
+            readers.add(facilitator.agentId());
         }
         return readers;
     }

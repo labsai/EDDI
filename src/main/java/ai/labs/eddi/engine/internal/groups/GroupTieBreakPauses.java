@@ -200,7 +200,8 @@ public class GroupTieBreakPauses {
                     "Content exceeds the maximum length of " + GroupHitlCoordinator.MAX_HUMAN_INPUT_LENGTH + " characters");
         }
         var context = loadContext(gc, pending);
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, context.phase(), pending.phaseIdx(), transcriptFrom(pending));
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, context.phase(), pending.phaseIdx(), transcriptFrom(pending),
+                phaseExecutionEngine.recordsOf(gc, context.config()));
         DecisionRecord decision = HumanTieBreakEngine.decisionFor(chosen, pending.displayName(), rebuilt.quorumReached(), rebuilt,
                 gc.getDecision(), context.phase().name(), rationale);
         String note = "Tie broken by " + pending.displayName() + ": \"" + chosen + "\""
@@ -408,7 +409,8 @@ public class GroupTieBreakPauses {
                         base.maxTurns(), ceiling, base.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
         var turnCounter = new AtomicInteger(Math.max(gc.getPausedTurnCount(), 0));
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending));
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending),
+                phaseExecutionEngine.recordsOf(gc, config));
         DecisionRecord moderatorDecision = phaseExecutionEngine.resolveTieByModerator(gc, config, phase, protocol, phaseIdx, rebuilt,
                 listener, turnCounter, maxTurns);
         if (moderatorDecision != null && moderatorDecision.type() == GroupConversation.DecisionType.VOTE) {
