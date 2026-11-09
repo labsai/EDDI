@@ -1635,8 +1635,13 @@ your tool schemas do not cover it, not as a routine first step:
   approves (or approves with an edit) the group makes that one call with the
   approved result as {task.result} (data, never template), at most once:
   recorded with the approval, claimed (RUNNING) before it is sent, never
-  resent; a crash mid-call reads OUTCOME_UNKNOWN. Rejected, RETRY-reset and
-  system:* (AUTO_APPROVE timeout) approvals send nothing (SKIPPED). The outcome
+  resent; a crash mid-call reads OUTCOME_UNKNOWN. That guarantee covers the
+  claim, not the call's own retries: postResponse.retryApiCallInstruction on
+  the referenced call can repeat the request, so for a non-idempotent publish
+  advise turning those retries off or deduplicating on the target with
+  {action.idempotencyKey}. Rejected and RETRY-reset tasks get no action record
+  at all (nothing to look for); a system:* approval (AUTO_APPROVE timeout) or a
+  discussion cancelled first gets a record with status SKIPPED. The outcome
   is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
   responseUrl, summary), audit task id group.approved_action, metric
   eddi_group_approved_action_total{outcome}. The call's \${vault:…} secrets
