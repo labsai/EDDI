@@ -817,6 +817,20 @@ mechanism behind DELPHI's rounds.
 approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
+**`onApproved`** (EXECUTE phases with `requiresApproval` at `TASK` granularity)
+makes one configured `httpcalls` call with each task a person approves — the
+approved, possibly edited result goes out exactly as approved, with no member
+turn in between. It is how a team publishes only human-approved text (a member's
+own gated tool call is rejected inside a group turn). Exactly-once rules,
+credentials and a GitHub-comment example: [Group Approved-Result
+Actions](group-approved-result-actions.md).
+
+```json
+{ "name": "Draft", "type": "EXECUTE", "requiresApproval": true,
+  "onApproved": { "action": { "uri": "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/<id>?version=1", "call": "postIssueComment" },
+                  "onFailure": "FAIL_TASK" } }
+```
+
 **`convergence` (I2)** ends a repeating phase early once the round stopped
 producing movement, so a group that agreed after round 2 does not pay for round
 5. A judge compares this round's contributions against the previous round's and
