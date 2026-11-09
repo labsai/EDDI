@@ -17,11 +17,13 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,7 +52,7 @@ public class ToolCostTracker {
      * name ({@code searchWeb}) that shares no key with this table and would price
      * every built-in at $0.00.
      */
-    static final Map<String, Double> DEFAULT_TOOL_PRICES = Map.of("websearch", 0.001, // $0.001 per search
+    static final Map<String, Double> DEFAULT_TOOL_PRICES = Map.of("websearch", 0.001, // $0.001 per search (duckduckgo)
             "weather", 0.0005, // $0.0005 per weather call
             "calculator", 0.0, // Free
             "datetime", 0.0, // Free
@@ -286,7 +288,44 @@ public class ToolCostTracker {
         Double priceOverride = invocation.priceOverride();
         return priceOverride != null && Double.isFinite(priceOverride)
                 ? Math.max(0.0, priceOverride)
-                : DEFAULT_TOOL_PRICES.getOrDefault(invocation.canonicalName(), 0.0);
+                : defaultPriceOf(invocation.canonicalName());
+    }
+
+    /**
+     * Default per-search price of the paid web-search providers, keyed on
+     * {@code eddi.tools.websearch.provider}: Brave Search API and Google Custom
+     * Search both list $5 per 1,000 requests. Any other provider keeps the
+     * {@link #DEFAULT_TOOL_PRICES} entry.
+     */
+    static final Map<String, Double> WEBSEARCH_PROVIDER_PRICES = Map.of("brave", 0.005, "google", 0.005);
+
+    /**
+     * The built-in default for {@code slug}. {@code websearch} is priced by the
+     * configured provider — a deployment-wide setting, so it is read from the
+     * config rather than carried on every invocation. A paid provider configured
+     * without its key falls back to DuckDuckGo but is still priced as configured:
+     * the safe direction for a budget, and the startup log already warns.
+     */
+    static double defaultPriceOf(String slug) {
+        return defaultPriceOf(slug, "websearch".equals(slug) ? configuredWebSearchProvider() : null);
+    }
+
+    static double defaultPriceOf(String slug, String webSearchProvider) {
+        if ("websearch".equals(slug) && webSearchProvider != null) {
+            Double providerPrice = WEBSEARCH_PROVIDER_PRICES.get(webSearchProvider.trim().toLowerCase(Locale.ROOT));
+            if (providerPrice != null) {
+                return providerPrice;
+            }
+        }
+        return DEFAULT_TOOL_PRICES.getOrDefault(slug, 0.0);
+    }
+
+    private static String configuredWebSearchProvider() {
+        try {
+            return ConfigProvider.getConfig().getOptionalValue("eddi.tools.websearch.provider", String.class).orElse("duckduckgo");
+        } catch (RuntimeException e) {
+            return "duckduckgo";
+        }
     }
 
     /**

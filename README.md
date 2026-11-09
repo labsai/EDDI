@@ -365,7 +365,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Tool                                           | Description                                                                   |
 | ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| 🔍 **Web Search**                              | DuckDuckGo or Google Custom Search                                            |
+| 🔍 **Web Search**                              | DuckDuckGo, Brave Search API, or Google Custom Search (until 2027-01-01)      |
 | 🧮 **Calculator**                              | Sandboxed recursive-descent math parser (no `eval()`, no code injection)      |
 | 🌐 **Web Scraper**                             | SSRF-protected, size-capped extraction of web pages as Markdown               |
 | 📄 **PDF Reader**                              | SSRF-protected document extraction                                            |

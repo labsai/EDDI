@@ -27,7 +27,7 @@ and replace **every character that is not a letter or a digit** with `_`. Both
 eddi.schedule.poll-interval         →  EDDI_SCHEDULE_POLL_INTERVAL
 eddi.vault.master-key               →  EDDI_VAULT_MASTER_KEY
 eddi.openai-compat.api-key          →  EDDI_OPENAI_COMPAT_API_KEY
-eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
+eddi.tools.websearch.brave.api-key  →  EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY
 ```
 
 > **Getting this wrong fails silently.** An unrecognised environment variable is
@@ -460,9 +460,10 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
 | `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
-| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
-| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
-| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
+| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key), `brave` (Brave Search API, $5 per 1,000 requests) or `google` (deprecated — Google shuts the Custom Search JSON API down on 2027-01-01; a startup WARN says so). A paid provider without its key falls back to `duckduckgo`. See [langchain.md → Web Search Tool](langchain.md#web-search-tool) |
+| `eddi.tools.websearch.brave.api-key` | *(empty)* | Required for the `brave` provider. A plain key or a `${vault:...}` reference; sent in the `X-Subscription-Token` header |
+| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the deprecated `google` provider |
+| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID, for the deprecated `google` provider |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |

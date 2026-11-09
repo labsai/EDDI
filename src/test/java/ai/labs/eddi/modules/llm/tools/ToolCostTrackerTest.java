@@ -523,4 +523,28 @@ class ToolCostTrackerTest {
         assertFalse(tracker.isWithinBudget("conv-cas", 0.0005),
                 "the shared total still reads $0, but this conversation already spent $0.001 on this node");
     }
+
+    @Nested
+    @DisplayName("websearch default price follows the configured provider")
+    class WebSearchProviderPrice {
+
+        @Test
+        void paidProvidersArePricedAtFiveDollarsPerThousand() {
+            assertEquals(0.005, ToolCostTracker.defaultPriceOf("websearch", "brave"));
+            assertEquals(0.005, ToolCostTracker.defaultPriceOf("websearch", " Google "));
+        }
+
+        @Test
+        void duckDuckGoAndUnknownProvidersKeepTheTableDefault() {
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "duckduckgo"));
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "bing"));
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", null));
+        }
+
+        @Test
+        void otherToolsIgnoreTheProvider() {
+            assertEquals(0.0005, ToolCostTracker.defaultPriceOf("weather", "brave"));
+            assertEquals(0.0, ToolCostTracker.defaultPriceOf("calculator", "brave"));
+        }
+    }
 }
