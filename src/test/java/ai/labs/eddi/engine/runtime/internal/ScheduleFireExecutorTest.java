@@ -1385,8 +1385,10 @@ class ScheduleFireExecutorTest {
         when(teamCadenceService.processScheduledFire(any(), any()))
                 .thenReturn(new TeamCadenceService.CadenceResult("group-1", "cadence-1", null, 0,
                         "No executable backlog tasks", null));
-        assertEquals(FireStatus.COMPLETED.name(), executor.fire(skipped, "instance-1", 1).status(),
-                "a deliberate skip is a successful fire, not a retryable failure");
+        ScheduleFireLog skip = executor.fire(skipped, "instance-1", 1);
+        assertEquals(FireStatus.COMPLETED.name(), skip.status(), "a deliberate skip is a successful fire, not a retryable failure");
+        assertEquals("No executable backlog tasks", skip.errorMessage(),
+                "the fire history says why the team did nothing, as it does for a skipped conversation fire");
 
         var failing = makeTeamCadenceSchedule("sched-cadence-3");
         when(teamCadenceService.processScheduledFire(any(), any()))

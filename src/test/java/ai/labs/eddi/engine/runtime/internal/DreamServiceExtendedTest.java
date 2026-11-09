@@ -513,7 +513,37 @@ class DreamServiceExtendedTest {
 
             assertTrue(dreamService.process("user-1", "housekeeper", dreamConfig).isSuccess());
 
-            verify(store).insertIfAbsent(argThat(entry -> "merged".equals(entry.key()) && "housekeeper".equals(entry.sourceAgentId())));
+            verify(store).insertIfAbsent(argThat(entry -> "merged".equals(entry.key()) && "housekeeper".equals(entry.sourceAgentId())
+                    && "housekeeper".equals(entry.lastWriterAgentId())));
+        }
+
+        /**
+         * The user's keys keep the user as owner when an agent overwrites them, so the
+         * owners alone said "no agent" for a merge that carries agent b's text, and
+         * every reader that requires peer verification loaded it as the user's.
+         */
+        @Test
+        @DisplayName("a merge of the user's keys is credited to the agent that last wrote one of them")
+        void aMergeOfValuesAnAgentWroteIsCreditedToThatAgent() throws Exception {
+            dreamConfig.setSummarizeGroupBy("all");
+            dreamConfig.setPreserveAgentProvenance(false);
+            dreamConfig.setSummarizeMinEntries(2);
+            dreamConfig.setCrossAgentMaintenance(true);
+
+            var entries = new ArrayList<>(List.of(
+                    new UserMemoryEntry("id1", "user-1", "k1", "the user's", "fact", Visibility.global, null, null, "source", false, 0,
+                            Instant.now().minusSeconds(100), Instant.now()),
+                    new UserMemoryEntry("id2", "user-1", "k2", "agent b's", "fact", Visibility.global, null, null, "source", false, 0,
+                            Instant.now().minusSeconds(90), Instant.now(), "agent-b")));
+            when(store.getAllEntries("user-1")).thenReturn(entries);
+            when(store.insertIfAbsent(any(UserMemoryEntry.class))).thenReturn("new-id");
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                    .thenReturn(new SummarizationResult("[{\"key\": \"merged\", \"value\": \"both\"}]", 0, 0));
+
+            assertTrue(dreamService.process("user-1", "housekeeper", dreamConfig).isSuccess());
+
+            verify(store).insertIfAbsent(argThat(entry -> "merged".equals(entry.key()) && entry.sourceAgentId() == null
+                    && "agent-b".equals(entry.lastWriterAgentId())));
         }
     }
 

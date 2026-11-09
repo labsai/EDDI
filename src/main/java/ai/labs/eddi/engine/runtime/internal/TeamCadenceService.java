@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -259,17 +260,26 @@ public class TeamCadenceService {
             // verification could not take its text as that agent's: the member would
             // fail it unasked on every run, and the question would quote it to them.
             Map<String, Boolean> trusted = new HashMap<>();
-            List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
-                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
-                    .filter(task -> task.createdByAgentId() == null || trusted.computeIfAbsent(task.createdByAgentId(),
-                            agent -> trustsHandoffsOf(groupId, cadenceId, agent)))
-                    .limit(cadence.maxBacklogTasksPerRun())
-                    .toList();
+            List<TaskItem> pulled = new ArrayList<>();
+            List<TaskItem> held = new ArrayList<>();
+            for (TaskItem task : workspace.getBacklog().findExecutableTasks().stream()
+                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed()).toList()) {
+                if (pulled.size() == cadence.maxBacklogTasksPerRun()) {
+                    break;
+                }
+                if (task.createdByAgentId() == null
+                        || trusted.computeIfAbsent(task.createdByAgentId(), agent -> trustsHandoffsOf(groupId, cadenceId, agent))) {
+                    pulled.add(task);
+                } else {
+                    held.add(task);
+                }
+            }
             if (pulled.isEmpty()) {
                 cadenceRunsSkipped.increment();
-                LOGGER.infof("Cadence %s for group %s: no executable backlog tasks — skipping this fire",
-                        LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId));
-                return CadenceResult.skipped(groupId, cadenceId, "No executable backlog tasks");
+                String reason = held.isEmpty() ? "No executable backlog tasks" : heldHandoffsReason(held);
+                LOGGER.infof("Cadence %s for group %s skips this fire: %s", LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId),
+                        LogSanitizer.sanitize(reason));
+                return CadenceResult.skipped(groupId, cadenceId, reason);
             }
 
             // 3. Prepare — the conversation is created so the claim can carry the
@@ -632,8 +642,9 @@ public class TeamCadenceService {
     /**
      * Whether group {@code groupId}'s records take the backlog tasks agent
      * {@code agentId} handed off as that agent's, so this fire may pull them. A
-     * task held back stays {@code PENDING} on the backlog and nothing else says
-     * why, so each fire that leaves one logs it.
+     * task held back stays {@code PENDING} on the backlog, so each fire that leaves
+     * one logs it; a fire it leaves with nothing to run also gives the reason in
+     * the fire history ({@link #heldHandoffsReason}).
      */
     private boolean trustsHandoffsOf(String groupId, String cadenceId, String agentId) {
         boolean trusted = groupConversationService.recordsTrustAgentText(groupId, agentId);
@@ -643,6 +654,20 @@ public class TeamCadenceService {
                     LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), LogSanitizer.sanitize(agentId));
         }
         return trusted;
+    }
+
+    /**
+     * Why a fire left with only held handoffs runs nothing. The tasks are
+     * {@code PENDING} with their dependencies met, so the backlog shows them as
+     * work to do; the fire history is where this says otherwise, and how to free
+     * them. It names the agents, never the tasks' text, which is theirs and
+     * unverified.
+     */
+    private static String heldHandoffsReason(List<TaskItem> held) {
+        String agents = held.stream().map(TaskItem::createdByAgentId).distinct().collect(Collectors.joining(", "));
+        return held.size() + " handed-off backlog task(s) wait unpulled: a reader of this team requires peer verification (or the team "
+                + "could not be read) and the agent(s) that filed them (" + agents + ") do not sign verifiably. Give the agent a signing key "
+                + "again (or turn its signing back on), or delete the task and file it again.";
     }
 
     /**

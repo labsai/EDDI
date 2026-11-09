@@ -111,30 +111,31 @@ class ConversationLongTermPersistenceTest {
 
     /**
      * An agent that requires peer verification is not shown a global memory whose
-     * value another agent wrote, so a longTerm property it sets for that key was
-     * set without it. Writing it would replace the other agent's fact, on every
-     * turn, since the agent never sees the stored value; a key whose value it may
-     * read (the user's here) is written as before.
+     * value another agent wrote. When the user tells it the fact again, its
+     * longTerm property is written like any agent's: dropped, the user's statement
+     * was lost on every turn, and the agent, never shown the stored value and never
+     * its writer, asked again in every conversation. Written, the agent is the
+     * value's last writer and is shown it from then on.
      */
     @Test
-    @DisplayName("a verifying agent does not overwrite a global memory another agent last wrote")
-    void aVerifyingAgentLeavesAnotherAgentsGlobalValueAlone() throws Exception {
+    @DisplayName("a verifying agent's global write replaces a value another agent last wrote, and the agent becomes its writer")
+    void aVerifyingAgentsGlobalWriteReplacesAnotherAgentsValue() throws Exception {
         memory.setPeerVerificationRequired(true);
         var othersValue = new UserMemoryEntry("e1", "user-1", "preferred_language", "de", "fact", Visibility.global, null, List.of(), "conv-o",
                 false, 0, Instant.now(), Instant.now(), "agent-o");
-        var usersValue = new UserMemoryEntry("e2", "user-1", "timezone", "CET", "fact", Visibility.global, "agent-o", List.of(), null, false,
-                0, Instant.now(), Instant.now(), null);
-        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(othersValue, usersValue));
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(othersValue));
 
         Conversation conversation = nextTurn();
         memory.getConversationProperties().put("preferred_language", new Property("preferred_language", "en", Scope.longTerm));
-        memory.getConversationProperties().put("timezone", new Property("timezone", "UTC", Scope.longTerm));
-        conversation.say("hi", new LinkedHashMap<>());
+        conversation.say("I speak English now", new LinkedHashMap<>());
 
         ArgumentCaptor<UserMemoryEntry> written = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(written.capture());
-        assertEquals("timezone", written.getValue().key());
-        assertTrue(memory.getPendingLongTermWrites().isEmpty(), "the refused write is not retried on every turn");
+        assertEquals("preferred_language", written.getValue().key());
+        assertEquals("en", written.getValue().value());
+        assertEquals(Visibility.global, written.getValue().visibility());
+        assertEquals("agent-1", written.getValue().lastWriterAgentId());
+        assertTrue(memory.getPendingLongTermWrites().isEmpty());
     }
 
     @Test
