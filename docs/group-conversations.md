@@ -1510,6 +1510,11 @@ each of its turns:
   each carries the agent's own text, which recorded as the engine's would pass
   for engine text. A task-failure note is the engine's own and is
   recorded as such, with the member as its target.
+- A record with no content (a skipped turn, an error, a pass) is written by
+  the engine unsigned, so nothing vouches for its text either. A verifying
+  member's `groupTranscript` keeps it in place with its speaker id, type,
+  phase index and target, named like a withheld entry, but without its
+  reason, display name or phase name. Its own such records are no exception.
 - A member that signs has its own entries checked like a peer's, since every
   honest one is signed: an answer planted under its id, or its own answer
   edited in the store, is withheld rather than quoted back to it as the answer
