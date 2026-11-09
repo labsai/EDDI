@@ -3505,6 +3505,8 @@
     "hitlSection": "Aprobación humana",
     "hitlApprovalPoints": "Aprobación en",
     "hitlOnTaskRejection": "Al rechazar",
+    "hitlApprovalCompletesBacklogTask": "La aprobación cuenta como hecha en el backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Equipos permanentes: una tarea que aprueba una persona queda hecha al volcar la ejecución de la cadencia, en lugar de volver al backlog y ejecutarse de nuevo. Las aprobaciones automáticas por tiempo de espera no cuentan.",
     "hitlEdit": "Editar",
     "hitlSaved": "Configuración de aprobación guardada",
     "hitlEnable": "Requerir aprobación humana",

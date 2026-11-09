@@ -122,4 +122,24 @@ describe("GroupHitlEditor", () => {
     fireEvent.click(screen.getByTestId("group-hitl-phase-Synthesis"));
     expect(screen.getByTestId("group-hitl-save")).not.toBeDisabled();
   });
+  it("TASK granularity offers 'approval counts as done' and saves it; PHASE drops it", () => {
+    const config = makeConfig({
+      style: "TASK_FORCE",
+      phases: [{ ...phase("Execute", true), type: "EXECUTE" } as DiscussionPhase],
+      hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", granularity: "TASK", onTaskRejection: "FAIL", approvalTimeout: null },
+    } as Partial<AgentGroupConfiguration>);
+    renderWithProviders(
+      <GroupHitlEditor config={config} groupId="g1" groupVersion={4} onDone={vi.fn()} />,
+    );
+    const box = screen.getByTestId("group-hitl-approval-completes-backlog");
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    fireEvent.click(screen.getByTestId("group-hitl-save"));
+    expect(mockMutate.mock.calls[0]![0].config.hitlConfig.approvalCompletesBacklogTask).toBe(true);
+
+    fireEvent.change(screen.getByTestId("group-hitl-granularity"), { target: { value: "PHASE" } });
+    expect(screen.queryByTestId("group-hitl-approval-completes-backlog")).toBeNull();
+    fireEvent.click(screen.getByTestId("group-hitl-save"));
+    expect(mockMutate.mock.calls[1]![0].config.hitlConfig.approvalCompletesBacklogTask).toBeUndefined();
+  });
 });

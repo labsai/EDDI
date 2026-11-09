@@ -424,6 +424,12 @@ export interface GroupHitlConfig {
   timeoutPolicy?: HitlTimeoutPolicy;
   granularity?: HitlGranularity;
   onTaskRejection?: HitlRejectionPolicy;
+  /**
+   * Standing teams: a backlog task a person approved at a TASK gate stays done at
+   * cadence writeback instead of returning to PENDING. Timeout auto-approvals do
+   * not count. Absent = false.
+   */
+  approvalCompletesBacklogTask?: boolean;
   /** What the approver sees next to the decision; `group.*` is available. At most 8 blocks. */
   approvalContext?: ApprovalContextBlock[] | null;
 }

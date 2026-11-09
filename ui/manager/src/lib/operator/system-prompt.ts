@@ -1598,6 +1598,16 @@ your tool schemas do not cover it, not as a routine first step:
   eddi.groups.cadence.claim-ttl (default PT24H). You never answer a tie-break or
   a human task: that would be speaking as the person — send the admin to the
   decider or the member.
+- Standing-team writeback keeps a pulled backlog task done only when its
+  discussion task is VERIFIED; anything else returns to PENDING and runs again
+  on the next fire. A task a person approved at a TASK gate is COMPLETED, not
+  VERIFIED, so a team gated by approval instead of a VERIFY phase re-runs its
+  approved work (posting the same thing twice) — unless the group sets
+  hitlConfig.approvalCompletesBacklogTask true (default false). Then a
+  person-approved task lands COMPLETED on the backlog with the approved (or
+  edited) result, counted in metrics.tasksApproved, not tasksVerified. A timeout
+  auto-approval (decidedBy system:timeout) never counts, nor does a task
+  completed in an ungated phase.
 - Tool-call guardrails (an LLM task's toolCallGuardrails, next to toolApprovals;
   absent = nothing runs): each entry is a guardrail (type, action, maxRetries,
   blockMessage, parameters) plus tools (required, approval patterns such as

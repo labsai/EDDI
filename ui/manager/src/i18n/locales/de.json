@@ -3474,6 +3474,8 @@
     "hitlSection": "Menschliche Freigabe",
     "hitlApprovalPoints": "Freigabe bei",
     "hitlOnTaskRejection": "Bei Ablehnung",
+    "hitlApprovalCompletesBacklogTask": "Freigabe gilt im Backlog als erledigt",
+    "hitlApprovalCompletesBacklogTaskHelp": "Ständige Teams: Eine Aufgabe, die eine Person freigibt, bleibt beim Zurückschreiben des Kadenzlaufs erledigt, statt ins Backlog zurückzukehren und erneut zu laufen. Automatische Freigaben nach Zeitüberschreitung zählen nicht.",
     "hitlEdit": "Bearbeiten",
     "hitlSaved": "Freigabe-Einstellungen gespeichert",
     "hitlEnable": "Menschliche Freigabe erforderlich",

@@ -3505,6 +3505,8 @@
     "hitlSection": "Approbation humaine",
     "hitlApprovalPoints": "Approbation à",
     "hitlOnTaskRejection": "En cas de rejet",
+    "hitlApprovalCompletesBacklogTask": "Une approbation vaut achèvement dans le backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Équipes permanentes : une tâche approuvée par une personne reste terminée lors de la réécriture du cycle, au lieu de revenir dans le backlog et d'être exécutée à nouveau. Les approbations automatiques après délai ne comptent pas.",
     "hitlEdit": "Modifier",
     "hitlSaved": "Paramètres d'approbation enregistrés",
     "hitlEnable": "Exiger une approbation humaine",
