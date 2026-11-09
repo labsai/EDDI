@@ -1470,12 +1470,14 @@ each of its turns:
   detected, here or for configured tasks. A verification note is withheld
   when it comes from a verifier entry that does not verify. A verifying member
   whose own task's text does not verify is not asked to do it: the task fails
-  with "Its task text could not be verified". A verifying verifier judges only
+  with "Its task text could not be verified". That uses no turn and is no
+  failure of the member, so under `onAgentFailure: ABORT` the discussion goes
+  on. A verifying verifier judges only
   the tasks whose text and result it may see: the others stay `COMPLETED`,
   unverified, with a note giving their count, and with none left it gets no
   turn, so a verdict that cannot be parsed never auto-verifies work it was not
-  shown. A bidder is announced only the tasks whose text it may see, and
-  `listGroupTasks` lists each subject as the calling member may see it.
+  shown. A bidder is announced, and can win, only the tasks whose text it may
+  see, and `listGroupTasks` lists each subject as the calling member may see it.
 - **The engine's own records.** Once any member, the moderator or the
   facilitator (an enabled one: a facilitator that is switched off reads
   nothing and counts for nothing) requires verification, what the engine
@@ -1510,6 +1512,11 @@ each of its turns:
   each carries the agent's own text, which recorded as the engine's would pass
   for engine text. A task-failure note is the engine's own and is
   recorded as such, with the member as its target.
+- A record with no content (a skipped turn, an error, a pass) is written by
+  the engine unsigned, so nothing vouches for its text either. A verifying
+  member's `groupTranscript` keeps it in place with its speaker id, type,
+  phase index and target, named like a withheld entry, but without its
+  reason, display name or phase name. Its own such records are no exception.
 - A member that signs has its own entries checked like a peer's, since every
   honest one is signed: an answer planted under its id, or its own answer
   edited in the store, is withheld rather than quoted back to it as the answer

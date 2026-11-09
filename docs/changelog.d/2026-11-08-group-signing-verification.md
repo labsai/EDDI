@@ -20,7 +20,11 @@ never enforced.
   are built. In place, so the raw indices window summaries are keyed on stay aligned. The
   placeholder names the speaker by its agent id and has no phase name, since the stored display
   name and phase name are as unverified as the content. Each withheld
-  entry is logged at ERROR the first time per conversation, then at DEBUG.
+  entry is logged at ERROR the first time per conversation, then at DEBUG. A record with no
+  content (a skip, an error, a pass; verdicts `STATUS_RECORD` and `NON_AGENT_STATUS_RECORD`) is
+  unsigned by design, so it keeps its place, speaker id, type, phase index and target but loses its
+  error reason, display name and phase name, which a store writer could otherwise fill under a
+  member agent's id for a verifying member's `groupTranscript` to carry.
 - **The member's own entries** are checked like a peer's when it signs: every honest one is signed,
   and REVISION and DEFENSE quote its latest entry from the group transcript as the answer it revises
   or defends, so an answer planted under its id, or its own signed answer edited in the store, is

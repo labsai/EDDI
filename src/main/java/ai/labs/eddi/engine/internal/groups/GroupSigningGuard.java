@@ -175,7 +175,8 @@ public class GroupSigningGuard {
                                                                 "it is not part of this conversation's transcript"), ENGINE_SYNTHESIS(
                                                                         "it is a synthesis under the engine's or the user's name, "
                                                                                 + "under which none is ever recorded"), NO_SUCH_AGENT(
-                                                                                        "the agent it is attributed to no longer exists");
+                                                                                        "the agent it is attributed to no longer exists"), STATUS_RECORD(
+                                                                                                null), NON_AGENT_STATUS_RECORD(null);
 
         private final String reason;
 
@@ -390,10 +391,10 @@ public class GroupSigningGuard {
      * when the receiver does not require peer verification. Otherwise a copy in
      * which every agent-authored entry that must verify and does not (another
      * agent's, or its own when it signs) is replaced, in place, by a
-     * {@code [withheld: ...]} placeholder (see {@link #isWithheld}), and every
-     * entry no agent authored is renamed so it cannot pass for a member agent's. In
-     * place, so transcript indices (which window summaries are keyed on) stay
-     * aligned.
+     * {@code [withheld: ...]} placeholder (see {@link #isWithheld}), every entry no
+     * agent authored is renamed so it cannot pass for a member agent's, and every
+     * record with no content loses its text fields. In place, so transcript indices
+     * (which window summaries are keyed on) stay aligned.
      * <p>
      * When the receiver's configuration cannot be read, the setting this node last
      * read for it applies. If there is none, the requirement is
@@ -521,21 +522,30 @@ public class GroupSigningGuard {
 
     /**
      * Everyone whose verification setting decides what the engine's records count:
-     * the members (recruits included, humans excluded), the moderator and the
-     * facilitator, when it is enabled.
+     * the members (recruits included, humans excluded), the moderator (unless it is
+     * a HUMAN member) and the facilitator, when it is enabled.
      */
     static Set<String> readersOf(AgentGroupConfiguration config, GroupConversation gc) {
         Set<String> readers = new LinkedHashSet<>();
         if (config == null) {
             return readers;
         }
+        Set<String> humans = new HashSet<>();
         for (GroupMember member : GroupConversationService.rosterWithRecruits(config, gc)) {
-            if (member != null && member.agentId() != null && member.memberType() != MemberType.HUMAN) {
+            if (member == null || member.agentId() == null) {
+                continue;
+            }
+            if (member.memberType() == MemberType.HUMAN) {
+                humans.add(member.agentId());
+            } else {
                 readers.add(member.agentId());
             }
         }
-        if (config.getModeratorAgentId() != null && !config.getModeratorAgentId().isBlank()) {
-            readers.add(config.getModeratorAgentId());
+        // A HUMAN member named as moderator is a person too (AgentGroupStore allows
+        // it): it has no verification setting to count.
+        String moderator = config.getModeratorAgentId();
+        if (moderator != null && !moderator.isBlank() && !humans.contains(moderator)) {
+            readers.add(moderator);
         }
         // A facilitator that is switched off is never consulted, as in
         // FacilitatorEngine.checkpoint and the save-time role-name check.
@@ -553,7 +563,9 @@ public class GroupSigningGuard {
         for (int i = 0; i < snapshot.size(); i++) {
             TranscriptEntry entry = snapshot.get(i);
             Verdict verdict = verdicts.get(i);
-            if (verdict == Verdict.NOT_AGENT_AUTHORED) {
+            if (verdict == Verdict.STATUS_RECORD || verdict == Verdict.NON_AGENT_STATUS_RECORD) {
+                visible.add(statusRecord(entry, verdict));
+            } else if (verdict == Verdict.NOT_AGENT_AUTHORED) {
                 visible.add(asNonAgent(entry));
             } else if (verdict.trusted()) {
                 visible.add(entry);
@@ -613,7 +625,14 @@ public class GroupSigningGuard {
     private Verdict verdict(GroupConversation gc, int index, TranscriptEntry entry, String receiverAgentId, Pass pass) {
         String speakerId = entry.speakerAgentId();
         if (entry.content() == null) {
-            return Verdict.NOT_AGENT_AUTHORED;
+            // A skip, an error or a pass: the engine records these unsigned, so nothing
+            // vouches for their text fields, the receiver's own included.
+            if (speakerId == null || ENGINE_SPEAKERS.contains(speakerId)) {
+                return Verdict.STATUS_RECORD;
+            }
+            return pass.speakers.computeIfAbsent(speakerId, this::lookUpSpeaker).isAgent()
+                    ? Verdict.STATUS_RECORD
+                    : Verdict.NON_AGENT_STATUS_RECORD;
         }
         if (speakerId == null || ENGINE_SPEAKERS.contains(speakerId)) {
             // The engine records no synthesis under its own name or the user's, and a
@@ -942,6 +961,24 @@ public class GroupSigningGuard {
         return new TranscriptEntry(speakerId, name,
                 "[withheld: this message could not be verified, because " + verdict.reason + "]",
                 entry.phaseIndex(), null, entry.type(), entry.timestamp(), WITHHELD_MARKER, entry.targetAgentId());
+    }
+
+    /**
+     * A record with no content (a skip, an error, a pass) as a verifying receiver
+     * sees it. The engine writes these unsigned, so like a withheld entry it keeps
+     * what decides where it appears (speaker id, phase index, type, target) and
+     * drops every text field: the reason, the stored display name and the phase
+     * name. The speaker is named by its agent id, by the engine's or the user's
+     * fixed label, or, for an id that names no live agent, with the non-agent
+     * label.
+     */
+    private static TranscriptEntry statusRecord(TranscriptEntry entry, Verdict verdict) {
+        String speakerId = entry.speakerAgentId();
+        String name = speakerId == null || ENGINE_SPEAKERS.contains(speakerId)
+                ? engineSpeakerName(speakerId)
+                : verdict == Verdict.NON_AGENT_STATUS_RECORD ? speakerId + AgentGroupStore.NOT_AN_AGENT_SUFFIX : speakerId;
+        return new TranscriptEntry(speakerId, name, null, entry.phaseIndex(), null, entry.type(), entry.timestamp(), null,
+                entry.targetAgentId());
     }
 
     private static TranscriptEntry unsignedBecause(TranscriptEntry entry, String why) {
