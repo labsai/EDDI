@@ -115,7 +115,10 @@ synthesizer, facilitator), or turn the flag off.
   vouches for nothing.)
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
   signer's rule for a key outside its window. `GroupSigningGuard` reads the flag before it signs, so
-  this holds when the vault delete failed and the private key is still there.
+  this holds when the vault delete failed and the private key is still there. "Newest" is
+  `AgentIdentity.signingKeyVersion()`, the newest version within `1..MAX_VERSION`, the same rule the
+  validator applies: a legacy entry outside that range, revoked or not, neither picks the signing
+  key nor silences a usable one.
 - A malformed key that is revoked no longer blocks a save, so revoking is the way out for an agent
   stored with a planted entry.
 - The import/sync report is a header and an `UpgradeResult` field, shown verbatim by one Manager
