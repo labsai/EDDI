@@ -207,3 +207,28 @@ permission rule.
 - The UI uses `status: null` to hide the status ring until H4, and `restricted: true` to show
   "You don't have access to this section".
 - All numbers come formatted from `unit` client-side, using the user's locale.
+
+## 11. UI requests
+
+Things the Manager UI (built against mocks) assumed because the contract above is silent. The backend should
+confirm or change them, and update this file when it does.
+
+1. **`resolutionRate.breakdown` semantics.** The UI reads each entry's `value` as that source's *contribution to the
+   rate* (a share of engaged sessions, so `confirmed + agentClosed + silence = value`), and computes the silence share
+   of the resolutions itself (`silence / sum`) for the "mostly assumed from silence" note (> 50 %). It works unchanged
+   if the values are counts, because only the proportions are used.
+2. **Report link list shape.** `GET …/health/reports` is assumed to return an array (a `{ "items": [...] }` wrapper is
+   also accepted) of `{ "id", "expiresAt", "sections", "createdAt", "createdBy" }`; only the first three are required.
+3. **Profile GET.** The UI tolerates a missing `critical`, `thresholds`, `budgets`, `slo` or `overrides` (treated as empty),
+   but needs `preset`, and uses `stored: false` to say "these are the defaults". A violation `path` should be a dotted
+   path into the body (`thresholds.resolutionRate.red`, `slo.agentTurnSuccess`) and `overrides[0].reason` for list
+   items; the UI shows a violation under the field whose path it equals or starts.
+4. **Drill-down evidence for "confirmed".** The UI opens the sessions list for the *confirmed* part of the resolution
+   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED` and `evidence=external_event|conversation_id_event|agent_action|self_reported`;
+   *agent closed* is `evidence=agent_closed` and *silence* is `evidence=silence`, both with `outcome=ASSUMED_RESOLVED`.
+5. **Origin default.** With no `origin` parameter the UI shows "Origins: default" and relies on the preset's interactive set.
+6. **Version options.** The UI offers versions `latest … 1` (capped at 25) for the version filter and for compare, taken
+   from the agent's latest version; a compare against a version with no turns should answer `404` or empty sections,
+   not a 5xx.
+7. **Export** is fetched with the bearer token (not an `<a href>`), so the endpoint may require the `Authorization` header.
+8. **Check states.** `checks[].state` is rendered for `PASS` and `FAIL`; anything else reads "Not run".
