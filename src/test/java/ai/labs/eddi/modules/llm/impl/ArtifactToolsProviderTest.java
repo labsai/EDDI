@@ -128,6 +128,24 @@ class ArtifactToolsProviderTest {
         assertEquals(4, provider().contribute(ctx(GC_ID)).specs().size(), "a member that does not verify");
     }
 
+    /**
+     * A member turn can outlive its discussion's leg: the guard is read with the
+     * membership, in one lookup, so a cleanup that unregisters the discussion
+     * between the two cannot leave a verifying member with an absent guard and the
+     * artifact tools.
+     */
+    @Test
+    void discussionUnregisteredMidAssembly_stillWithholdsTheToolsFromAVerifyingMember() throws Exception {
+        var gc = registry.get(GC_ID).orElseThrow();
+        registry.register(gc, guardFor(agentStoreReporting(true)));
+        when(groupStore.read(GROUP_ID, 1)).thenAnswer(invocation -> {
+            registry.unregister(GC_ID);
+            return groupWith(new ArtifactConfig(true, 5, List.of()));
+        });
+
+        assertTrue(provider().contribute(ctx(GC_ID)).specs().isEmpty());
+    }
+
     private static GroupSigningGuard guardFor(IAgentStore agentStore) {
         return new GroupSigningGuard(agentStore, mock(AgentSigningService.class), "default");
     }

@@ -184,7 +184,10 @@ public class GroupTaskTools {
 
     @Tool("List the group's shared tasks with their status, so you can see what is already planned before filing new work.")
     public String listGroupTasks() {
-        GroupConversation gc = liveDiscussion();
+        // The discussion and its guard from one lookup, so a cleanup between two
+        // cannot leave the task list found and the guard absent (which shows all).
+        var registration = registry.registration(groupConversationId).orElse(null);
+        GroupConversation gc = registration != null ? registration.groupConversation() : null;
         if (gc == null || gc.getTaskList() == null) {
             return "No task list is available for this discussion.";
         }
@@ -194,7 +197,7 @@ public class GroupTaskTools {
         }
         // The caller's own view: a member that requires peer verification is shown no
         // task text the engine's prompts withhold from it.
-        List<String> subjects = GroupSigningGuard.taskSubjectsSeenBy(registry.signingGuard(groupConversationId).orElse(null), agentId,
+        List<String> subjects = GroupSigningGuard.taskSubjectsSeenBy(registration.signingGuard(), agentId,
                 gc, tasks);
         var sb = new StringBuilder("Current tasks:\n");
         for (int i = 0; i < tasks.size(); i++) {

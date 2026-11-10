@@ -159,6 +159,16 @@ loads and recalls; [team-handoff.md](../team-handoff.md) and the Dynamic
 Agents section say what peer verification means for handoffs and for agents `create_sub_agent`
 makes, which cannot sign.
 
+- **Review round 5.** A HUMAN assignee's task prompt is built from the task records as stored
+  (`TaskForceEngine.taskRecords` passes no guard for a reader `GroupHumanTasks.isHumanAssignee`
+  names): a person has no `requirePeerVerification` setting, and looking its id up as an agent and
+  then as a nested group turned a group-store failure into an unknown requirement that withheld
+  its dependency results. `LiveDiscussionRegistry` now keeps a discussion and its signing guard in
+  one entry (`Registration`), and `ArtifactToolsProvider` and `GroupTaskTools.listGroupTasks` read
+  both from one lookup: read separately, a cleanup between the two left the discussion found and
+  the guard absent, which reads as "show everything" and handed a verifying member the artifact
+  tools.
+
 ### Design decisions
 
 - Readers reach the guard through setters with a `null` default (unfiltered), the existing

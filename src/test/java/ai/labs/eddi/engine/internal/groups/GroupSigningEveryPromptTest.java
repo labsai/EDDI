@@ -448,6 +448,37 @@ class GroupSigningEveryPromptTest {
         assertTrue(GroupSigningGuard.readersOf(config, gc).contains(STRICT), "an agent moderator still reads");
     }
 
+    /**
+     * A HUMAN member has no peer-verification setting, so its task prompt is built
+     * from the records as stored: its id is not looked up as an agent or a nested
+     * group, and a group store that fails on that lookup does not turn the person's
+     * dependency results into placeholders.
+     */
+    @Test
+    void aHumanAssigneeIsShownItsTaskRecordsAsStored() throws Exception {
+        String alice = "alice@example.com";
+        when(groupStore.getCurrentResourceId(alice)).thenThrow(new IllegalStateException("store down"));
+        var tasks = new SharedTaskList();
+        var fromUnsigned = completedTask(tasks, "Collect quotes", UNSIGNED, "unsigned quotes result");
+        add(unsigned(UNSIGNED, "unsigned quotes result", TranscriptEntryType.TASK_RESULT));
+        var task = new TaskItem("Decide", "Pick the vendor", 1);
+        tasks.addTask(task);
+        tasks.updateTask(new TaskItem(task.id(), task.subject(), task.description(), TaskStatus.ASSIGNED, alice, "Alice",
+                List.of(fromUnsigned.id()), task.result(), task.verificationNote(), task.verified(), task.priority(), task.createdAt(),
+                task.completedAt(), task.createdByAgentId(), task.bet()));
+        gc.setTaskList(tasks);
+        var config = config(List.of(member(UNSIGNED), new GroupMember(alice, "Alice", null, null, MemberType.HUMAN)));
+        var data = templateData();
+
+        assertThrows(PhaseExecutionEngine.HumanTurnRequired.class, () -> taskForce(data.templating()).executeTaskExecutionPhase(gc, config,
+                executePhase(ContextScope.TASK_WITH_DEPS), protocol(), QUESTION, 1, null, new AtomicInteger(), 10));
+
+        @SuppressWarnings("unchecked")
+        var results = ((List<Map<String, Object>>) data.captured().getValue().get("dependencyResults")).stream()
+                .map(dependency -> dependency.get("result")).toList();
+        assertEquals(List.of("unsigned quotes result"), results);
+    }
+
     // ---- task force -------------------------------------------------------
 
     @Test
