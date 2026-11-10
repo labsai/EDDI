@@ -82,11 +82,14 @@ class ArtifactToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         String callerConversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;
-        var live = liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId);
+        // The discussion and its guard come from one lookup: read separately, a
+        // cleanup between the two would leave the discussion found and the guard
+        // absent, which reads as "nothing to verify".
+        var live = liveDiscussionRegistry.registrationForMember(groupConversationId, callerConversationId);
         if (live.isEmpty()) {
             return ToolContribution.empty();
         }
-        AgentGroupConfiguration groupConfiguration = resolveGroup(live.get().getGroupId());
+        AgentGroupConfiguration groupConfiguration = resolveGroup(live.get().groupConversation().getGroupId());
         ArtifactConfig config = groupConfiguration != null ? groupConfiguration.getArtifactConfig() : null;
         if (config == null || !config.allowArtifactTools()) {
             return ToolContribution.empty();
@@ -94,7 +97,7 @@ class ArtifactToolsProvider implements ToolSourceProvider {
         // Artifacts are not signed: their content is any member's text as stored. A
         // member that requires peer verification (or whose setting cannot be read)
         // would be handed exactly what the transcript withholds from it.
-        var signingGuard = liveDiscussionRegistry.signingGuard(groupConversationId);
+        var signingGuard = live.get().guard();
         if (signingGuard.isPresent() && signingGuard.get().requiresVerification(ctx.agentId())) {
             LOGGER.debugf("Group artifact tools withheld from agent '%s': it requires peer verification and artifacts are not signed",
                     sanitize(ctx.agentId()));
