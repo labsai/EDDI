@@ -6,14 +6,57 @@ package ai.labs.eddi.engine.runtime.rest.interceptors;
 
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @DisplayName("LegacyPathRewriteFilter Tests")
 class LegacyPathRewriteFilterTest {
+
+    private static ContainerRequestContext request(String base, String path) {
+        ContainerRequestContext context = mock(ContainerRequestContext.class);
+        UriInfo info = mock(UriInfo.class);
+        when(context.getUriInfo()).thenReturn(info);
+        when(info.getBaseUri()).thenReturn(URI.create("http://host" + base));
+        when(info.getRequestUri()).thenReturn(URI.create("http://host" + path + "?x=1"));
+        return context;
+    }
+
+    @Test
+    @DisplayName("filter: under the default root a legacy path is rewritten as before")
+    void filterRewritesUnderTheDefaultRoot() {
+        ContainerRequestContext context = request("/", "/botstore/bots/abc");
+        new LegacyPathRewriteFilter().filter(context);
+        verify(context).setRequestUri(eq(URI.create("http://host/")), eq(URI.create("/agentstore/agents/abc?x=1")));
+    }
+
+    @Test
+    @DisplayName("filter: under quarkus.http.root-path the rules match below the root and the root is kept")
+    void filterRewritesBelowARootPath() {
+        ContainerRequestContext context = request("/eddi/", "/eddi/botstore/bots/abc");
+        new LegacyPathRewriteFilter().filter(context);
+        verify(context).setRequestUri(eq(URI.create("http://host/eddi/")), eq(URI.create("/eddi/agentstore/agents/abc?x=1")));
+    }
+
+    @Test
+    @DisplayName("filter: a path that is not legacy is left alone, under a root as well")
+    void filterLeavesCurrentPathsAlone() {
+        ContainerRequestContext context = request("/eddi/", "/eddi/agentstore/agents/abc");
+        new LegacyPathRewriteFilter().filter(context);
+        verify(context, never()).setRequestUri(any(URI.class), any(URI.class));
+    }
 
     @Nested
     @DisplayName("rewritePath — store path rewrites")

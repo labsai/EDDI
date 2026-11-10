@@ -17,7 +17,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | **repo root** | Java 25, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline, integration tests (`src/test/java/**/*IT.java`) |
 | **`ui/manager`** (this) | React 19, Vite, Tailwind | Admin dashboard — agents, workflows, extensions, chat |
 | **`ui/chat`** | React, TypeScript | Standalone chat widget |
-| **eddi-website** | Astro | Marketing site at eddi.labs.ai |
+| **eddi-website** | Astro | Marketing site at eddi.technology |
 
 ### Tech Stack
 
@@ -190,7 +190,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
 
 #### 2. Resource Type Config
 
-All 10 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
+The resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES` (the table lists the main ones; `testsuite` / `testsuitestore` / `testsuites` is the agent-test store):
 
 | Slug | Store | Plural |
 | --- | --- | --- |
@@ -267,8 +267,8 @@ what it finds. Off by default. Worth knowing before touching it:
   includes `GET /administration/docs{,/{name}}` (`@since 6.2.0`), and
   `findMissingEndpoints` refuses activation when the spec lacks an entry.
   **A path in the spec is not a usable tool.** The generator
-  (`McpApiToolBuilder`) maps only `application/json` and `text/plain` request
-  bodies; an operation that *requires* any other body, or a required header
+  (`McpApiToolBuilder`) maps only `application/json`, `application/json-patch+json` and `text/plain`
+  request bodies; an operation that *requires* any other body, or a required header
   parameter, is skipped and reported (`resources.unusableEndpoints` on the
   `setup-api` response). `findUnusableEndpoints` runs the same test against the
   fetched spec before anything is created, and activation also rolls back on the

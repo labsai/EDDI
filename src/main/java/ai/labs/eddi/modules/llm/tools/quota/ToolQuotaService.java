@@ -5,6 +5,9 @@
 package ai.labs.eddi.modules.llm.tools.quota;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.llm.model.ToolQuotaConfig;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
@@ -57,6 +60,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class ToolQuotaService {
 
     private static final Logger LOGGER = Logger.getLogger(ToolQuotaService.class);
+
+    /** Context key the group runtime sets on every member turn. */
+    static final String CONTEXT_GROUP_CONVERSATION_ID = "groupConversationId";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -149,8 +155,52 @@ public class ToolQuotaService {
 
     ToolQuotaKey keyFor(ToolQuotaRules.Resolved rule, ToolQuotaConfig config, IConversationMemory memory)
             throws ITemplatingEngine.TemplateEngineException {
+        if (rule.perRun()) {
+            // No time window: the run is part of the counter name (as a digest, so the
+            // name stays bounded) and the window start is the constant 0.
+            return new ToolQuotaKey(memory.getAgentId(), rule.counter() + "@run:" + digest(runIdFor(memory)).substring(0, 32),
+                    subjectFor(config, memory), 0L);
+        }
         return new ToolQuotaKey(memory.getAgentId(), rule.counter(), subjectFor(config, memory),
                 ToolQuotaRules.windowStart(clock.instant(), rule.window()));
+    }
+
+    /**
+     * What a {@code window: "RUN"} rule counts within: the scheduled fire if the
+     * turn carries one ({@link ScheduleConfiguration#CONTEXT_FIRE_ID}), else the
+     * group discussion the turn belongs to (context {@code groupConversationId},
+     * set by the group runtime for every member turn), else the conversation
+     * itself. Read from the current step only, like the per-fire cost allowance:
+     * the run belongs to the turn that set it.
+     * <p>
+     * A caller who can put its own context on a turn can choose these ids, so a run
+     * cap bounds an autonomous run (a schedule, a group cadence) and is not an
+     * abuse limit for end users; use a fixed window for that.
+     */
+    static String runIdFor(IConversationMemory memory) {
+        String fire = stepContext(memory, ScheduleConfiguration.CONTEXT_FIRE_ID);
+        if (fire != null) {
+            return "fire:" + fire;
+        }
+        String group = stepContext(memory, CONTEXT_GROUP_CONVERSATION_ID);
+        if (group != null) {
+            return "group:" + group;
+        }
+        return "conversation:" + memory.getConversationId();
+    }
+
+    private static String stepContext(IConversationMemory memory, String key) {
+        try {
+            var step = memory.getCurrentStep();
+            IData<Object> data = step == null ? null : step.getData("context:" + key);
+            if (data != null && data.getResult() instanceof Context context && context.getValue() != null) {
+                String value = String.valueOf(context.getValue()).strip();
+                return value.isEmpty() ? null : value;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Run context '%s' could not be read: %s", key, e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -201,10 +251,17 @@ public class ToolQuotaService {
     }
 
     Instant expiresAt(ToolQuotaKey key, ToolQuotaRules.Resolved rule) {
+        if (rule.perRun()) {
+            return clock.instant().plus(ToolQuotaRules.RUN_RETENTION);
+        }
         return resetAt(key, rule).plus(ToolQuotaRules.RETENTION_GRACE);
     }
 
+    /** When the window ends; {@code null} for a per-run rule, which has no end. */
     Instant resetAt(ToolQuotaKey key, ToolQuotaRules.Resolved rule) {
+        if (rule.perRun()) {
+            return null;
+        }
         return ToolQuotaRules.windowEnd(key.windowStart(), rule.window());
     }
 
@@ -255,6 +312,10 @@ public class ToolQuotaService {
      * read it as "the call never ran" and not as a failure to retry.
      */
     String overLimitRefusal(ToolQuotaRules.Resolved rule, Instant resetAt) {
+        if (rule.perRun()) {
+            return envelope("Not run: the limit of " + rule.limit() + " calls of this tool per run is reached. This is final: do not call "
+                    + "this tool again in this run, work with what you have, and say so if it limits your answer.");
+        }
         return envelope("Not run: the " + windowLabel(rule.window()) + " limit for this tool (" + rule.limit() + ") is reached; it resets at "
                 + resetAt + ". This is final: do not call this tool again in this conversation until then, and tell the user the limit is "
                 + "reached.");

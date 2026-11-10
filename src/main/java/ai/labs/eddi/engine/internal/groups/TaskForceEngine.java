@@ -39,6 +39,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -116,7 +117,7 @@ public class TaskForceEngine {
 
         switch (phase.type()) {
             case PLAN -> executeTaskPlanPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-            case EXECUTE -> executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            case EXECUTE -> executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
             case VERIFY -> executeTaskVerificationPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
             default -> LOGGER.warnf("Unexpected phase type %s routed to executeTaskPhase", phase.type());
         }
@@ -160,7 +161,8 @@ public class TaskForceEngine {
                             original.id(), original.subject(), original.description(),
                             original.status(), original.assignedAgentId(), original.assignedDisplayName(),
                             resolvedDepIds, original.result(), original.verificationNote(),
-                            original.verified(), original.priority(), original.createdAt(), original.completedAt());
+                            original.verified(), original.priority(), original.createdAt(), original.completedAt(),
+                            original.createdByAgentId(), original.bet());
                     gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
                 }
             }
@@ -249,7 +251,7 @@ public class TaskForceEngine {
                         Map<String, Object> md = new LinkedHashMap<>();
                         md.put("agentId", m.agentId());
                         md.put("displayName", m.displayName());
-                        md.put("capabilities", m.role() != null ? m.role() : "");
+                        md.put("capabilities", (GroupHumanTasks.isHuman(m) ? HUMAN_PLANNER_NOTE : "") + (m.role() != null ? m.role() : ""));
                         return md;
                     }).collect(Collectors.toList());
             data.put("members", memberList);
@@ -323,9 +325,23 @@ public class TaskForceEngine {
      * agent's pipeline. Tasks for different agents execute in parallel; tasks for
      * the same agent execute sequentially within a single CompletableFuture.
      */
-    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config,
                                           DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                           GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
+            throws GroupDiscussionException {
+        executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, true);
+    }
+
+    /**
+     * As above. {@code allowHumanPause} decides whether the loop may pause for a
+     * HUMAN-assigned task once no agent task is left ({@link GroupHumanTasks}); a
+     * VERIFY rework passes {@code false}, because a pause from inside VERIFY would
+     * replay the whole verification pass on resume.
+     */
+    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config,
+                                          DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
+                                          GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns,
+                                          boolean allowHumanPause)
             throws GroupDiscussionException {
 
         if ((gc.getTaskList() == null || gc.getTaskList().isEmpty()) && config.getTasks() != null && !config.getTasks().isEmpty()) {
@@ -382,9 +398,16 @@ public class TaskForceEngine {
 
             Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
                     .filter(t -> t.assignedAgentId() != null)
+                    // A person never sits inside a wave: HUMAN-assigned tasks pause
+                    // one at a time once the agents are done (GroupHumanTasks).
+                    .filter(t -> !GroupHumanTasks.isHumanAssignee(config, t.assignedAgentId()))
                     .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
 
             if (tasksByAgent.isEmpty()) {
+                var humanTurn = allowHumanPause ? nextHumanTurn(gc, config, question, phase, turnCounter, maxTurns) : null;
+                if (humanTurn != null) {
+                    throw humanTurn;
+                }
                 if (wave == 0) {
                     LOGGER.warn("EXECUTE phase: no assigned tasks found");
                 }
@@ -649,6 +672,23 @@ public class TaskForceEngine {
      *            the largest number of tasks assigned to one agent in this wave;
      *            values below 1 are treated as 1
      */
+    /** What the planner is told about a HUMAN member, ahead of their role. */
+    static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
+
+    /**
+     * The pause for the next executable HUMAN-assigned task, or {@code null} when
+     * there is none or the turn budget is spent (a human task is a turn).
+     */
+    private PhaseExecutionEngine.HumanTurnRequired nextHumanTurn(GroupConversation gc, AgentGroupConfiguration config, String question,
+                                                                 DiscussionPhase phase, AtomicInteger turnCounter, int maxTurns) {
+        if (maxTurns > 0 && turnCounter.get() >= maxTurns) {
+            return null;
+        }
+        var task = GroupHumanTasks.nextHumanTask(config, gc.getTaskList()).orElse(null);
+        GroupMember member = task != null ? findMember(config.getMembers(), task.assignedAgentId()) : null;
+        return member != null ? GroupHumanTasks.humanTurnFor(member, task, buildTaskExecutionInput(task, question, phase, gc)) : null;
+    }
+
     static long waveBudgetSeconds(ProtocolConfig protocol, int maxTasksPerAgent) {
         long perTurn = GroupConversationService.parallelBatchBudgetSeconds(protocol);
         return perTurn * Math.max(1, maxTasksPerAgent);
@@ -788,8 +828,10 @@ public class TaskForceEngine {
         // verifier's feedback and is checked again, up to maxReworks times per task.
         // Bounded twice: by round (each round reworks at least one task) and per task.
         int maxReworks = config.getMaxReworks();
+        var humanTasksNoted = new HashSet<String>();
         for (int round = 1; round <= maxReworks; round++) {
-            List<TaskItem> toRework = failedThisPass(gc, verified, maxReworks);
+            List<TaskItem> toRework = GroupHumanTasks.withoutHumanAssignees(gc, config, phase, phaseIdx,
+                    failedThisPass(gc, verified, maxReworks), humanTasksNoted);
             if (toRework.isEmpty()) {
                 return;
             }
@@ -816,7 +858,8 @@ public class TaskForceEngine {
                 addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — %s".formatted(
                         gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject(), feedback));
             }
-            executeTaskExecutionPhase(gc, config, speakers, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            executeTaskExecutionPhase(gc, config, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+                    false);
             // A rework that did not get to run (budget, cancel, a wave error) ends FAILED,
             // never stranded ASSIGNED.
             for (TaskItem failed : toRework) {
@@ -1393,12 +1436,14 @@ public class TaskForceEngine {
     public static String resolveAssignee(String assignToRole, List<GroupMember> members,
                                          String moderatorAgentId, int taskIndex) {
         if (assignToRole == null || "ALL".equalsIgnoreCase(assignToRole)) {
-            // Round-robin across non-moderator members (H3 fix)
-            List<GroupMember> eligible = members.stream()
+            // Round-robin across non-moderator members (H3 fix), never a HUMAN one —
+            // a person is assigned work explicitly or not at all.
+            List<GroupMember> eligible = GroupHumanTasks.nonHuman(members).stream()
                     .filter(m -> !m.agentId().equals(moderatorAgentId))
                     .toList();
             if (eligible.isEmpty()) {
-                return members.isEmpty() ? null : members.getFirst().agentId();
+                List<GroupMember> agents = GroupHumanTasks.nonHuman(members);
+                return agents.isEmpty() ? null : agents.getFirst().agentId();
             }
             return eligible.get(taskIndex % eligible.size()).agentId();
         }

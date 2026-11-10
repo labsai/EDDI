@@ -87,6 +87,25 @@ final class McpRoles {
      */
     static final List<String> HITL = List.of(ADMIN, EDITOR, USER, APPROVER);
 
+    /**
+     * HITL oversight reads — approval analytics, earned-autonomy states and the
+     * sampled-audit count: the {@code @RolesAllowed} of
+     * {@code IRestApprovalAnalytics}, {@code IRestAutonomy} and
+     * {@code IRestAuditSamples}. The approver is in it because reviewing how
+     * approvals turn out is part of approving; per-agent scoping
+     * ({@code OversightAccess}) still runs after this gate.
+     */
+    static final List<String> OVERSIGHT = List.of(ADMIN, EDITOR, APPROVER);
+
+    /**
+     * Team budget reads — one team's budget and history, and the cross-team
+     * listing: the read {@code @RolesAllowed} of {@code IRestGroupBudget} and
+     * {@code IRestTeamBudgets}, which admit {@code eddi-viewer} next to the
+     * authoring roles (a budget is counters, no conversation content). VIEW on the
+     * group still applies per call. Every budget write is {@link #ADMIN_ONLY}.
+     */
+    static final List<String> BUDGET_READ = List.of(ADMIN, EDITOR, VIEWER);
+
     private McpRoles() {
     }
 }

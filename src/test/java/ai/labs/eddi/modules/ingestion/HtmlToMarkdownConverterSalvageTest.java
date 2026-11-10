@@ -584,6 +584,21 @@ class HtmlToMarkdownConverterSalvageTest {
         assertEquals("The answer is here.", converter.convert(page, null, 1_000).trim());
     }
 
+    @Test
+    @DisplayName("list items count against the element allowance")
+    void listItemsAreCharged() {
+        // appendList writes its items itself, so they never passed through
+        // convertElement's visit(): a page of empty items was not bounded by
+        // MAX_ELEMENTS at all.
+        int items = HtmlToMarkdownConverter.MAX_ELEMENTS + 50_000;
+        String page = "<html><body><ul>" + "<li></li>".repeat(items) + "</ul></body></html>";
+
+        String result = converter.convert(page, null, Integer.MAX_VALUE);
+
+        assertTrue(occurrences(result, "- \n") < HtmlToMarkdownConverter.MAX_ELEMENTS,
+                "the walk must stop at its element allowance, wrote " + occurrences(result, "- \n") + " items");
+    }
+
     private static int occurrences(String haystack, String needle) {
         int count = 0;
         for (int at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length())) {

@@ -125,18 +125,59 @@ mode; empty (the application default) otherwise.
 
 {{/*
 NATS servers for EDDI: the in-chart StatefulSet's pods (all of them, so the
-client fails over without DNS) or nats.externalUrl.
+client fails over without DNS) or nats.externalUrl. tls:// when the in-chart
+NATS runs TLS, so the scheme says what the connection is; EDDI verifies the
+certificate's host names against these pod names
+(<fullname>-nats-<i>.<fullname>-nats — a SAN of *.<fullname>-nats covers them).
 */}}
 {{- define "eddi.natsUrl" -}}
 {{- if .Values.nats.enabled -}}
 {{- $fullname := include "eddi.fullname" . -}}
+{{- $scheme := ternary "tls" "nats" (and .Values.nats.tls.enabled true) -}}
 {{- $urls := list -}}
 {{- range $i := until (int .Values.nats.replicas) -}}
-{{- $urls = append $urls (printf "nats://%s-nats-%d.%s-nats:4222" $fullname $i $fullname) -}}
+{{- $urls = append $urls (printf "%s://%s-nats-%d.%s-nats:4222" $scheme $fullname $i $fullname) -}}
 {{- end -}}
 {{- join "," $urls -}}
 {{- else -}}
 {{- .Values.nats.externalUrl -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The NATS account of the in-chart NATS under nats.isolation (default EDDI).
+*/}}
+{{- define "eddi.natsAccount" -}}
+{{- $account := (.Values.nats.isolation | default dict).account | default "EDDI" | toString -}}
+{{- if not (regexMatch "^[A-Za-z0-9_-]+$" $account) -}}
+{{- fail (printf "nats.isolation.account %q may only contain letters, digits, '_' and '-'" $account) -}}
+{{- end -}}
+{{- $account -}}
+{{- end }}
+
+{{/*
+EDDI's reply-subject prefix (EDDI_NATS_INBOX_PREFIX): _INBOX_<account> under
+nats.isolation, so the user's subscribe permission can name it; jnats' default
+_INBOX otherwise, which every existing permission set allows.
+*/}}
+{{- define "eddi.natsInboxPrefix" -}}
+{{- if and .Values.nats.enabled (.Values.nats.isolation | default dict).enabled -}}
+_INBOX_{{ include "eddi.natsAccount" . }}
+{{- else -}}
+_INBOX
+{{- end -}}
+{{- end }}
+
+{{/*
+The CA EDDI trusts for NATS, as a Secret name with key ca.crt: the in-chart NATS'
+TLS Secret, or nats.externalCaSecretName for an external NATS. Empty: the JVM's
+default CAs.
+*/}}
+{{- define "eddi.natsCaSecret" -}}
+{{- if and .Values.nats.enabled .Values.nats.tls.enabled -}}
+{{- .Values.nats.tls.secretName -}}
+{{- else if and (not .Values.nats.enabled) .Values.nats.externalUrl -}}
+{{- .Values.nats.externalCaSecretName -}}
 {{- end -}}
 {{- end }}
 
@@ -153,4 +194,17 @@ the root credential. Hex, so it needs no URI encoding.
 {{- else -}}
 {{- printf "eddi-app:%s" (required "mongodb.rootPassword is required when mongodb.enabled=true" .Values.mongodb.rootPassword) | sha256sum -}}
 {{- end -}}
+{{- end }}
+
+{{- /*
+  A value written into a Java properties file (application-secrets.properties):
+  a backslash starts an escape and a line break ends the entry, so a credential
+  holding either would be read back changed, or inject another property. SmallRye
+  Config then expands "${...}" in the value (written "$${" to stay literal), and
+  Properties.load drops leading blanks (a leading one is written "\ ").
+*/}}
+{{- define "eddi.propertyValue" -}}
+{{- $v := . | toString | replace "\\" "\\\\" | replace "${" "$${" | replace "\n" "\\n" | replace "\r" "\\r" -}}
+{{- if or (hasPrefix " " $v) (hasPrefix "\t" $v) }}{{ "\\" }}{{ end -}}
+{{- $v -}}
 {{- end }}

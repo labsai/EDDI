@@ -27,6 +27,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.UsageMaps;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
@@ -421,7 +422,12 @@ class CascadingModelExecutor {
             LOGGER.debugf("Cascade strategy '%s' is not implemented; running sequentially", strategy);
         }
 
-        boolean useAgentMode = cascade.isEnableInAgentMode() && task.isAgentMode();
+        // answerMode "tool" answers through the reply tool, so every step needs the
+        // tool
+        // loop even when the task has no other tool (isAgentMode() is false then).
+        // enableInAgentMode does not gate it: a task with other tools and
+        // enableInAgentMode=false never reaches the cascade (LlmTask skips it).
+        boolean useAgentMode = (cascade.isEnableInAgentMode() && task.isAgentMode()) || AnswerTool.enabled(task);
         String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
         HeuristicConfig heuristicConfig = cascade.getHeuristic();
 
@@ -579,6 +585,8 @@ class CascadingModelExecutor {
             var stepExchange = new ToolExchangeRecorder(stepPrices);
 
             try {
+                // strict mode: a refused unpriced step fails like any other and escalates
+                UnpricedCallPolicy.require(stepPrices.override(), modelType, modelName, memory, cascade.getMaxCostPerRun() != null, "cascade_step");
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
                 // the confidence value — otherwise tokens could be sent for a step that then
                 // escalates. That is: the last step (always accepted), a null-threshold step
@@ -602,12 +610,12 @@ class CascadingModelExecutor {
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         stepPrices.inputPer1M(), stepPrices.outputPer1M(),
                         // the step's merged params, so a step-level responseSchema override applies
-                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId(), RescueOptions.of(task));
                 if (retryPolicy != null) {
                     // A re-ask of this step is checked with the earlier steps' cost as well.
                     retryPolicy = retryPolicy.withSpend(spend.plus(totals.runCostUsd()));
                 }
-                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null && !RescueOptions.of(task).wraps()
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
@@ -1008,7 +1016,8 @@ class CascadingModelExecutor {
             ticket.release();
         } else {
             var detection = convertToObject
-                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId())
+                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId(),
+                            RescueOptions.of(task))
                     : null;
             if (detection != null) {
                 ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
@@ -1426,7 +1435,8 @@ class CascadingModelExecutor {
             tokenUsage = extractTokenUsage(responseMetadata);
         }
 
-        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                judgeRequest(originalMessages, task));
         return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata,
                 evalResult.judgeTokenUsage(), unresolved, reasks);
     }
@@ -1436,6 +1446,15 @@ class CascadingModelExecutor {
      * wrapper is never used here — {@code evaluationStrategy} has already been
      * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
      */
+    /**
+     * What a {@code judge_model} grades a step's answer against: the user's latest
+     * request as the step's model saw it, and the cascade's acceptance criterion.
+     */
+    private static ConfidenceEvaluator.JudgeRequest judgeRequest(List<ChatMessage> messages, LlmConfiguration.Task task) {
+        ModelCascadeConfig cascade = task != null ? task.getModelCascade() : null;
+        return ConfidenceEvaluator.JudgeRequest.of(messages, cascade != null ? cascade.getAcceptanceCriterion() : null);
+    }
+
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
@@ -1485,7 +1504,8 @@ class CascadingModelExecutor {
             }
             String responseText = agentResult.response();
             Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
-            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                    judgeRequest(originalMessages, task));
             return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata(),
                     evalResult.judgeTokenUsage(), unresolved, reasks);
         }
@@ -1737,11 +1757,7 @@ class CascadingModelExecutor {
         if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
             return;
         }
-        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
-            if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
-                runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
-            }
-        }
+        UsageMaps.merge(runTokenUsage, stepTokenUsage, AgentOrchestrator.TOKEN_USAGE_FIELDS);
     }
 
     /**

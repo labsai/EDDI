@@ -34,17 +34,23 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetContext;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
+import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
+import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
@@ -53,6 +59,10 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.GroupTieBreakPauses;
+import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
+import ai.labs.eddi.engine.groups.lessons.LessonService;
+import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
@@ -62,11 +72,13 @@ import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
+import ai.labs.eddi.engine.internal.groups.ServiceConvergenceJudge;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
+import ai.labs.eddi.engine.runtime.internal.handoff.DecisionHandoffs;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
@@ -80,6 +92,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -241,6 +254,20 @@ public class GroupConversationService implements IGroupConversationService, User
     LiveDiscussionRegistry liveDiscussionRegistry;
 
     /**
+     * F6: the team monthly budget -- the admission gate and the spend meter. Same
+     * field-injection pattern and null-safety as {@link #attachmentStore}: null in
+     * direct-construction unit tests, which then run unbudgeted.
+     */
+    @Inject
+    TeamBudgetService teamBudgetService;
+
+    @Inject
+    TeamSpendMeter teamSpendMeter;
+
+    @Inject
+    TeamBudgetContext teamBudgetContext;
+
+    /**
      * I8's lesson store. Same field-injection pattern and null-safety as
      * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
      * where a RETRO phase runs but persists nothing (warned, never failed).
@@ -257,6 +284,21 @@ public class GroupConversationService implements IGroupConversationService, User
     ISharedArtifactStore sharedArtifactStore;
 
     /**
+     * Renders {@code hitlConfig.approvalContext} at pause commit. Same
+     * field-injection pattern and null-safety as {@link #sharedArtifactStore} —
+     * unresolvable in direct-construction unit tests, where no context is rendered.
+     */
+    @Inject
+    Instance<GroupApprovalContextRenderer> approvalContextRenderer;
+
+    /**
+     * The group approval-context renderer, or {@code null} when none is available.
+     */
+    public GroupApprovalContextRenderer approvalContextRenderer() {
+        return approvalContextRenderer != null && approvalContextRenderer.isResolvable() ? approvalContextRenderer.get() : null;
+    }
+
+    /**
      * Shared LLM summarization for I9 transcript windowing. Same field-injection
      * pattern and null-safety as {@link #attachmentStore} — {@code null} in the
      * direct-construction unit tests, where an enabled window falls back to the
@@ -264,6 +306,20 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     SummarizationService summarizationService;
+
+    /**
+     * The vault-grant rule the SERVICE judge re-checks before resolving its
+     * parameters.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
+    /**
+     * Files {@code handoffConfig.onDecision} rules once a discussion completes.
+     * Null in tests that build the service by hand: no rules fire.
+     */
+    @Inject
+    DecisionHandoffs decisionHandoffs;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -346,6 +402,8 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        this.phaseExecutionEngine
+                .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
@@ -358,6 +416,9 @@ public class GroupConversationService implements IGroupConversationService, User
         this.hitlCoordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, auditLedgerService,
                 signingGuard, discussionControls, executorService, callerIdentityContext, this,
                 counterGroupHitlPause, counterGroupHitlResume, counterGroupFailure);
+        this.hitlCoordinator.setTieBreakPauses(new GroupTieBreakPauses(groupStore, conversationStore, auditLedgerService, discussionControls,
+                executorService, callerIdentityContext, this, hitlCoordinator, phaseExecutionEngine, meterRegistry, counterGroupHitlPause,
+                counterGroupHitlResume));
     }
 
     @PreDestroy
@@ -498,7 +559,7 @@ public class GroupConversationService implements IGroupConversationService, User
      * discussion had left when it dispatched this one. Either side may be
      * {@code null} (unlimited); {@code null} only wins when BOTH are null.
      */
-    static Double effectiveCostCeiling(Double own, Double inherited) {
+    public static Double effectiveCostCeiling(Double own, Double inherited) {
         if (own == null) {
             return inherited;
         }
@@ -768,6 +829,11 @@ public class GroupConversationService implements IGroupConversationService, User
             counterGroupDiscussion.increment();
         }
 
+        // F6: charge what the previous leg left uncharged and set this leg's team
+        // ceiling.
+        if (teamSpendMeter != null) {
+            teamSpendMeter.beginLeg(gc, config);
+        }
         ProtocolConfig resolvedProtocol = resolveProtocol(config);
         // I1: a nested discussion runs under the tighter of its own ceiling and the
         // budget its parent had left. Applied here (once, at the top of the leg)
@@ -848,7 +914,15 @@ public class GroupConversationService implements IGroupConversationService, User
         // SYNTHESIS one, so the discussion concludes with an answer rather than
         // stopping mid-transcript. Deliberately NOT a break: "jump to the first
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
-        boolean costCeilingSynthesizeNow = false;
+        //
+        // Carried across a resume (gc.costCeilingSkipAhead): a synthesis that requires
+        // approval pauses the run under the skip-ahead, and the leg its approval starts
+        // must go on skipping the remaining work phases. A fresh leg (a new round)
+        // starts with it off.
+        if (startPhaseIndex == 0) {
+            gc.setCostCeilingSkipAhead(false);
+        }
+        boolean costCeilingSynthesizeNow = gc.isCostCeilingSkipAhead();
 
         try {
             // F1: publish the live instance this leg runs with. Covers both a fresh
@@ -889,6 +963,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
                     continue;
                 }
+                // A SYNTHESIS phase the skip-ahead lets through is executed work, not
+                // abandoned work: its answer is published, so its approval gate holds.
+                // Only the phase that trips the ceiling itself skips its gate below.
+                final boolean ranUnderSkipAhead = costCeilingSynthesizeNow;
 
                 // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
                 // (the negotiation's arbitration) is only needed when bargaining
@@ -1072,6 +1150,7 @@ public class GroupConversationService implements IGroupConversationService, User
                             return gc;
                         }
                         costCeilingSynthesizeNow = true;
+                        gc.setCostCeilingSkipAhead(true);
                         // Leave the REPEAT loop too, not just future phases: a phase
                         // with repeats > 1 (ROUND_TABLE's "Discussion" is repeats =
                         // rounds - 1 by default) would otherwise re-enter its executor
@@ -1248,9 +1327,10 @@ public class GroupConversationService implements IGroupConversationService, User
                     // fires decision_reached itself). Last repeat only, same reasoning
                     // as the verdict above — a re-balloting round's draft tally is not
                     // the decision.
+                    HumanTieBreakEngine.PendingTieBreak tieBreak = null;
                     if (phase.type() == PhaseType.VOTE && lastRepeat) {
-                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener,
-                                turnCounter, maxTurns);
+                        tieBreak = phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers,
+                                listener, turnCounter, maxTurns);
                     }
 
                     // I8: a completed RETRO phase harvests its lessons into
@@ -1299,6 +1379,9 @@ public class GroupConversationService implements IGroupConversationService, User
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
+                    // A human tie-break owns this boundary: a deferred escalation is
+                    // recorded and dropped (the decider is about to be asked anyway).
+                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase);
                     // I12: apply the checkpoint's stashed structural effects now that
                     // the repeat's own decisions are recorded and persisted.
                     if (deferredFacilitatorAction != null) {
@@ -1322,7 +1405,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // complete, so no boundary gate is owed yet and the
                                 // resumed leg still reaches it at phase end.
                                 boolean boundaryGateWillPause = !facilitatorMidPhaseResume
-                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)
                                         && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
                                                 || (gc.getTaskList() != null
                                                         && (gc.getTaskList().hasAwaitingApproval()
@@ -1354,6 +1437,14 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // decision block; NONE never lands here.
                             }
                         }
+                    }
+
+                    // tiePolicy HUMAN_DECIDES: the vote is persisted with its NONE
+                    // record; pause until the decider chooses (GroupTieBreakPauses).
+                    if (tieBreak != null) {
+                        hitlCoordinator.commitTieBreakPause(gc, phaseIdx, repeat, phase, tieBreak, turnCounter.get(), listener);
+                        convertPauseToCancelIfSignalled(gc, listener);
+                        return gc;
                     }
 
                     if (!outcome.isContinue()) {
@@ -1392,8 +1483,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 // appending a second identical SKIPPED entry and re-incrementing the
                 // hit counter, which is exactly the "one overspend reported as many"
                 // the repeat-loop break exists to prevent. The guard's own comment
-                // states this requirement; it just could not see this phase.
-                if (phase.requiresApproval() && !costCeilingSynthesizeNow) {
+                // states this requirement; it just could not see this phase. A
+                // SYNTHESIS phase that ran under the skip-ahead (ranUnderSkipAhead) is
+                // not that phase — its answer is about to be published, so it pauses.
+                if (phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)) {
                     if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause if tasks await approval — or if an
                         // aborted wave (timeout/error) left executable tasks behind.
@@ -1526,6 +1619,7 @@ public class GroupConversationService implements IGroupConversationService, User
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            gc.setCostCeilingSkipAhead(false);
             // I12: a facilitator's phase-list divergence is one-off for the round —
             // a continuation round starts from the config's phases again, and stale
             // extension counts would misattribute under next round's indices.
@@ -1537,6 +1631,14 @@ public class GroupConversationService implements IGroupConversationService, User
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
             persistWhileRunning(gc);
+
+            // Only past the CAS above: a discussion a human cancelled mid-flight must not
+            // file work for another team. Idempotent (deterministic dedupe keys), never
+            // throws.
+            if (decisionHandoffs != null) {
+                decisionHandoffs.afterCompleted(gc, config, listener);
+                persistDecisionHandoffs(gc);
+            }
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
@@ -1618,6 +1720,10 @@ public class GroupConversationService implements IGroupConversationService, User
             // already carrying the pre-pause total) contributes only what it newly
             // spent rather than double-counting the earlier leg's.
             groupCostDollars.add(Math.max(0.0, gc.getTotalCost() - costAtLegStart));
+            // F6: the last team charge of this leg (system costs recorded between turns).
+            if (teamSpendMeter != null) {
+                teamSpendMeter.endLeg(gc);
+            }
             // F1: unconditional, like the control-token removal below — a paused
             // discussion must not stay resolvable as "live" once this leg has
             // decided to stop. commitPause() persists AWAITING_APPROVAL and then
@@ -1726,6 +1832,27 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
+    }
+
+    /**
+     * Persists the filed-handoff records {@code afterCompleted} added to a
+     * COMPLETED document. The completion write above ran before them, and no later
+     * write follows on the normal path, so without this the stored discussion would
+     * omit {@code handoffState.filed}. Conditional on the stored state still being
+     * COMPLETED, and best-effort: filing is idempotent (deterministic dedupe keys),
+     * so a lost write only costs the record, never a duplicate hand-off.
+     */
+    private void persistDecisionHandoffs(GroupConversation gc) {
+        if (gc.getHandoffState() == null) {
+            return;
+        }
+        try {
+            conversationStore.updateIfState(gc, GroupConversationState.COMPLETED);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.warnf("Could not persist decision handoffs of group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    e.getMessage());
+        }
     }
 
     /**
@@ -1897,6 +2024,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        admitTeamBudgetForExisting(groupConversationId);
         return lifecycleOps().followUpWithMember(groupConversationId, targetAgentId, question);
     }
 
@@ -1905,6 +2033,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        admitTeamBudgetForExisting(groupConversationId);
         return withArtifacts(lifecycleOps().continueDiscussion(groupConversationId, question, listener));
     }
 
@@ -1928,6 +2057,55 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private void failConversation(GroupConversation gc) {
         lifecycleOps().failConversation(gc);
+    }
+
+    /**
+     * F6: a follow-up or continuation spends on an existing root discussion, so it
+     * is held to the same gate as a new one. A resume is not (work already running
+     * is not cut short). An unreadable discussion is left to the operation itself
+     * to report.
+     */
+    private void admitTeamBudgetForExisting(String groupConversationId) throws GroupDiscussionException {
+        if (teamBudgetService == null || groupConversationId == null) {
+            return;
+        }
+        GroupConversation existing;
+        try {
+            existing = conversationStore.read(groupConversationId);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            return;
+        }
+        if (existing != null && existing.getDepth() == 0 && existing.getGroupId() != null) {
+            teamBudgetService.admit(existing.getGroupId(), TeamBudgetService.Surface.FOLLOWUP);
+        }
+    }
+
+    /**
+     * F6: {@code context.teamBudget} / {@code context.teamBudgets} for a member
+     * turn of {@code gc}; empty for a group without a {@code teamBudget}. Each
+     * oversight team is shown only if the discussion's owner may view that group.
+     */
+    public Map<String, Object> teamBudgetTemplateValues(GroupConversation gc) {
+        if (teamBudgetContext == null || gc == null) {
+            return Map.of();
+        }
+        return teamBudgetContext.values(gc, groupId -> discussionOwnerMayView(groupId, gc.getUserId()));
+    }
+
+    boolean discussionOwnerMayView(String groupId, String principal) {
+        ResourceAccessGuard guard = resourceAccessGuard;
+        if (guard == null) {
+            return true;
+        }
+        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
+        return guard.principalMayView(groupId, principal, caller != null && caller.isAdminActingAs(principal));
+    }
+
+    /** F6: charges the increase of {@code gc}'s total cost to its root team. */
+    public void chargeTeamBudget(GroupConversation gc) {
+        if (teamSpendMeter != null) {
+            teamSpendMeter.charge(gc);
+        }
     }
 
     private GroupLifecycleOps lifecycleOps() {
@@ -2051,6 +2229,12 @@ public class GroupConversationService implements IGroupConversationService, User
      * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
      * and falls back to a default, so it would not catch this either.)
      * <p>
+     * F6: a follow-up is also a leg of the run for its team budget. This starts
+     * that leg ({@link TeamSpendMeter#beginLeg}: sweep what is uncharged, refresh
+     * the team ceiling) and tightens the result by the team ceiling, the same one
+     * every phase turn sees through {@code TeamBudgetCeilings}. The follow-up's
+     * cost is charged by its callback ({@link #chargeTeamBudget}).
+     * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
     public Double resolveEffectiveCostCeiling(GroupConversation gc)
@@ -2061,7 +2245,16 @@ public class GroupConversationService implements IGroupConversationService, User
         }
         AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
         Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
-        return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        Double ceiling = effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        if (teamSpendMeter != null && config != null) {
+            teamSpendMeter.beginLeg(gc, config);
+            TeamBudgetState state = gc.getTeamBudgetState();
+            Double team = state == null ? null : state.getCeilingUsd();
+            if (team != null && !team.isNaN() && (ceiling == null || team < ceiling)) {
+                ceiling = team;
+            }
+        }
+        return ceiling;
     }
 
     /**
@@ -2310,11 +2503,19 @@ public class GroupConversationService implements IGroupConversationService, User
         taskForceEngine.executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
+    /**
+     * {@code speakers} is unused on purpose: EXECUTE assigns work from the task
+     * list (agents and, since the human-task-executor change, HUMAN members by
+     * explicit assignment), not from the phase's speaking order, so
+     * {@link TaskForceEngine#executeTaskExecutionPhase} no longer takes it. The
+     * parameter stays because this delegator keeps the signature every phase
+     * delegator shares, which the characterization tests resolve by reflection.
+     */
     private void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                            DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                            GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
-        taskForceEngine.executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+        taskForceEngine.executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
     private void resetStrandedInProgressTasks(GroupConversation gc, String cause) {
@@ -2417,10 +2618,10 @@ public class GroupConversationService implements IGroupConversationService, User
     // requires the method to be declared directly on this class.
 
     private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      int timeoutSeconds, int phaseIdx,
                                                       DiscussionPhase phase, TranscriptEntryType entryType,
                                                       String targetAgentId) {
-        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
     }
 
     private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,
@@ -2473,7 +2674,15 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     private GroupConversation createGroupConversation(String groupId, String question, String userId, int depth)
-            throws IResourceStore.ResourceStoreException {
+            throws IResourceStore.ResourceStoreException, GroupDiscussionException {
+
+        // F6: a root discussion of a team with no budget left is refused before
+        // anything
+        // is created. A nested child is never gated: its parent already paid for the
+        // slot.
+        if (depth == 0 && teamBudgetService != null) {
+            teamBudgetService.admit(groupId, TeamBudgetService.Surface.DISCUSSION);
+        }
 
         GroupConversation gc = new GroupConversation();
         // The field initialiser is the LEGACY sentinel so key-less stored documents
@@ -2625,6 +2834,18 @@ public class GroupConversationService implements IGroupConversationService, User
     @Inject
     IClusterRpc clusterRpc;
 
+    /**
+     * Wires the team's reported outcomes into what a RETRO phase quotes.
+     * Initializer injection: the context builder exists from construction, the
+     * service only afterwards; builds made with {@code new} in tests quote nothing.
+     */
+    @Inject
+    void wireOutcomeDigest(OutcomeEventService outcomeEventService, LessonService lessonService) {
+        // What the RETRO phase quotes: the team's own reported outcomes, then the
+        // lessons other teams chose to share with it. Each is empty when off.
+        contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
+    }
+
     @Inject
     NodeIdentity nodeIdentity;
 
@@ -2634,18 +2855,49 @@ public class GroupConversationService implements IGroupConversationService, User
         return leaseManager != null && clusterRpc != null && leaseManager.isClustered() && clusterRpc.isClustered();
     }
 
+    /**
+     * Pauses between the tries of {@link #holdGroupLease}. The previous leg of a
+     * discussion persists its state and fires its completion before its
+     * {@code finally} releases the lease, so a continuation started on another node
+     * in that gap would otherwise take the discussion for running elsewhere.
+     */
+    long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
+
     void holdGroupLease(String groupConversationId) {
         if (clustered()) {
-            var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
+            String key = IConversationLeaseManager.GROUP + groupConversationId;
+            var lease = leaseManager.tryAcquireKey(key);
+            for (int i = 0; lease.isEmpty() && i < groupLeaseRetryMillis.length; i++) {
+                var current = leaseManager.peekKey(key);
+                if (current.isEmpty() || nodeIdentity == null || nodeIdentity.nodeId().equals(current.get().node())) {
+                    break;
+                }
+                try {
+                    Thread.sleep(groupLeaseRetryMillis[i]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                lease = leaseManager.tryAcquireKey(key);
+            }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
-            } else {
-                // Held elsewhere — most likely a stale lease of a node that died, which
-                // expires with its TTL. The discussion still runs; a cancel forwarded to
-                // that holder is answered "not here" and falls back to the database path.
-                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)",
-                        LogSanitizer.sanitize(groupConversationId));
+                return;
             }
+            // A11: the lease is exclusive. A lease of a node that died or restarted is
+            // taken over by tryAcquireKey itself, so one still held by another node means
+            // that node runs this discussion: running it here as well made two legs write
+            // the same discussion, and a cancel was forwarded to only one of them. This
+            // leg stops without writing (the persisted state stands).
+            var holder = leaseManager.peekKey(key);
+            if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
+                throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
+                        new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
+            }
+            // No holder could be read (NATS unreachable): the discussion runs, as every
+            // turn does in degraded mode; a cancel then takes the database path.
+            LOGGER.warnf("Group discussion %s runs without its group lease (NATS unreachable or the lease could not be read)",
+                    LogSanitizer.sanitize(groupConversationId));
         }
     }
 
@@ -2758,6 +3010,15 @@ public class GroupConversationService implements IGroupConversationService, User
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
         return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null));
+    }
+
+    @Override
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String choice,
+                                              String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        rejectIfShuttingDown();
+        return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, choice, submittedBy, null));
     }
 
     @Override

@@ -15,6 +15,12 @@ import {
   grantsKnowledgeBaseBinding,
   grantsRatingReads,
   grantsAlertReads,
+  grantsModelPriceReads,
+  grantsTeamHandoffReads,
+  grantsTeamLearningReads,
+  grantsTeamLessonReads,
+  grantsTeamBudgetReads,
+  grantsOversightReads,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -207,6 +213,25 @@ You can:
   guardrail's block message), and the call that crosses a limit completes, so
   a conversation can end slightly above it. It is part of the agent document,
   which you do not edit — point the user at the agent's page in the manager.
+  The tenant budget has a stricter opt-in mode, the deployment property
+  \`eddi.tenant.quota.cost-reservation.enabled\` (off by default, read at
+  startup, so it is not something you can change): a model call or priced tool
+  call first holds its maximum cost against the budget and is refused when the
+  hold does not fit, so the model call or priced tool call that would cross
+  the budget does not run. Do not promise the budget can never be exceeded:
+  smaller paid side calls (a re-ask, a cascade judge, a guardrail classifier,
+  summaries, Dream) are not reserved and are charged afterwards, and a model
+  hold is an estimate (prompt sized at three characters per token plus the
+  model's output cap), not a guaranteed maximum — so the month can still end a
+  little above the limit, far less than without the mode. Holds are released
+  when the turn is charged; one a dead node never released is dropped once no
+  new hold has been taken for \`eddi.tenant.quota.cost-reservation.ttl\`. A
+  refusal looks like the ordinary budget refusal (fallback answer, tool
+  error), and if the quota store cannot answer the call is refused too. A
+  per-run cap on a tool is the agent's \`toolQuotas\` rule with
+  \`"window": "RUN"\`: it counts within one scheduled fire (its retries
+  included), one group discussion, or otherwise one conversation, and starts
+  again with the next run.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait
@@ -263,6 +288,23 @@ const BODY_CLUSTER = `Cluster questions:
   two nodes may process one conversation; "reject": it answers 409 with
   Retry-After. A LOST node stopped heartbeating without leaving (killed,
   crashed or cut off from NATS); its leases expire within the lease TTL.
+- A node that reports NOT READY (/q/health/ready) while the others are fine
+  is, by default, one that has not connected to NATS once since it started
+  (eddi.cluster.readiness.require-first-connect) or whose NATS connection fails
+  for a reason retrying cannot heal: rejected credentials, a TLS certificate
+  that is untrusted or does not name the host, an unreadable trust store
+  (eddi.cluster.readiness.fail-on-misconfiguration). Such a node cannot take a
+  lease, so it is kept out of the load balancer on purpose. Its log names the
+  cause at ERROR, and eddi_cluster_nats_errors_total{cause} counts it (auth,
+  tls, config): have the admin read the reported error detail and fix the
+  client option it names, such as the credential, the trust store or the
+  client certificate.
+  If eddi.cluster.readiness.require-nats=true, a node that connected and then
+  became degraded is also not ready; that outage is logged at WARN and counted
+  as io or timeout, like a NATS outage.
+  But a node that has never connected is also not ready while NATS itself is
+  down or unreachable; that is logged at WARN and counted as io or timeout.
+  Check which cause is reported before ruling out a NATS outage.
 - For "why is conversation X stuck?" use the diagnose endpoint and relay its
   findings and suggested action. A lease flagged HOLDER_GONE or NOT_RENEWED is
   orphaned: the admin can force-release it from the Cluster screen, which is
@@ -718,6 +760,238 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
 - You cannot acknowledge alerts, retry a delivery, send a test alert or change
   a rule: the admin does that on the Alerts page in the manager
   (/manage/alerts).`;
+
+/**
+ * Cost and model prices — gated on {@link grantsModelPriceReads}: the section
+ * tells the operator to read the catalog, so it is absent when it cannot.
+ */
+const BODY_COST = `Cost and model prices:
+- \`audit:cost\` on a conversation is token spend at the resolved prices plus
+  tracked tool cost. A price resolves in this order: the config's own
+  \`inputPricePer1M\`/\`outputPricePer1M\` (an LLM task, a cascade step — never
+  the task's for a step —, a judge or classifier, a group summary, Dream), then
+  the task's or step's optional \`pricing\` object (cache and long-context
+  prices), then the deployment's price catalog, then fallbacks (cache at the
+  input price, long-context at the base price). No price anywhere is
+  UNPRICED: it costs $0 and is counted. An explicit 0 is a price.
+- Tokens: input includes cached tokens for every provider; output includes
+  thinking (Gemini). \`audit:token_usage\` has cacheReadTokens and
+  cacheWriteTokens.
+- "Why does my budget never stop anything?" is usually an unpriced model: its
+  spend counts $0 against every cost ceiling, tenant budget and team budget.
+  The deploy log says \`[unpriced-model] … has no price\`. Read the catalog,
+  resolve the model (provider = the model type, e.g. openai) and list the
+  unpriced sightings (this node only, since it started; the cluster-wide signal
+  is the metric \`eddi_llm_calls_unpriced_total\`). The fix is a catalog entry
+  (the Manager's Model Prices page, administrators only) or prices on the
+  config.
+- \`llm:spend_refused:<taskId>\` with reason \`unpriced_model\` means strict
+  mode refused the call: the catalog's \`unpricedPolicy\` is REFUSE, or
+  REFUSE_WHEN_BUDGETED while a budget applies. The effective policy is never
+  looser than the \`eddi.llm.pricing.unpriced-policy-floor\` property. Under
+  strict mode a router model such as openrouter/auto needs a catalog cap entry,
+  because the check runs before the routed model is known.
+- Where cost shows: \`llmDetail.pricing\` in the audit trail (calls,
+  unpricedCalls, sources, cache tokens); metrics \`eddi_llm_cost_usd_total\`,
+  \`eddi_llm_calls_unpriced_total\`, \`eddi_llm_pricing_refused_total\`. Group
+  window and stance summaries and a SERVICE convergence judge are charged too.
+- Reference prices ship with the release but are never active until an
+  administrator adopts them; an entry older than 120 days is shown as stale.
+- You cannot change a price: a price is a budget lever (a $0 price raises every
+  budget). Point the administrator at the Model Prices page.`;
+
+/**
+ * Cross-team handoff — gated on {@link grantsTeamHandoffReads}.
+ */
+const BODY_TEAM_HANDOFF = `Cross-team handoff (one team or agent files work into another team's backlog):
+- Consent is two-sided. The source lists the target: an LLM task's
+  \`teamHandoff.targets[]\` (each with alias, groupId and description; plus maxPerTurn and
+  maxPerConversation) or a group's \`handoffConfig.targets\`; the model calls the
+  tool \`team:handoff_to_team\` with an alias, never an id. The target lists the
+  source in \`handoffConfig.accept.from\` as \`agent:<id>\` or \`group:<id>\` —
+  exact ids, no wildcards — with a mode: REVIEW (the default) or AUTO.
+- REVIEW items wait in the receiving team's intake inbox, which no cadence pulls
+  from, until a person with EDIT on the group accepts (optionally editing
+  subject, description or priority) or declines. AUTO lands on the backlog at
+  once. Read the inbox with the handoffs read: \`inbox\` and the \`origins\` of
+  handed-off backlog tasks.
+- A group member's handoff cannot be approval-gated (a gated tool call inside a
+  group turn is auto-rejected), so REVIEW on the receiving side is the gate.
+  For a standalone agent, \`team:handoff_to_team\` or \`team:*\` in
+  toolApprovals pauses the turn like any tool.
+- Refusals the model sees, and their causes: not accepted (the target does not
+  list the source), a loop (the target is already in the work's lineage) or the
+  hop limit (\`eddi.groups.handoff.max-hops\`, default 3), the per-turn,
+  per-conversation or per-day caps (the message names the reset time), the
+  inbox or the backlog full (200 tasks), recently declined (an identical
+  handoff is refused for \`eddi.groups.handoff.decline-memory\`, default P30D),
+  and the receiving team's budget spent or unreadable.
+- Metric \`eddi_team_handoff_total\` by outcome; a steady not_accepted means a
+  source lists a team that has not accepted it.
+- You cannot accept, decline or delete a backlog task: an intake decision is a
+  person's, on the group's workspace page in the manager. Deleting is
+  \`DELETE /groupstore/groups/<groupId>/workspace/backlog/<taskId>\` (EDIT on the
+  group; the only way to shrink a full backlog; 409 while a cadence discussion
+  works the task) — human-only, not a call you can make.`;
+
+/**
+ * Team learning loop — gated on {@link grantsTeamLearningReads}.
+ */
+const BODY_TEAM_LEARNING = `Team learning loop (bets, outcomes, and what the retro sees):
+- A backlog task can be a bet: \`bet\` carries a hypothesis, a metric, an optional
+  target and a \`reviewDate\`. It is due from that date until somebody gives a
+  verdict (\`reviewedAt\`). Read what is due with the due-reviews read. Closing or
+  rescheduling a review is the team's, on the workspace page in the manager.
+- Outcomes are real-world results an external system reports against a backlog
+  task or an approval decision (\`reply_received\`, \`pr_merged\`, a metric
+  reading). They exist only for a group whose configuration has an
+  \`outcomeConfig\`; without it the endpoint answers 409 "not enabled" and nothing
+  is stored — that, not an error, is why a team shows none. Caps: maxPerSubject
+  (default 50), maxStored (2000), retentionDays (180); the team's RETRO phase
+  quotes the newest \`retroDigestSize\` (default 10; 0 keeps outcomes out of it).
+- Read a task's outcomes with the outcomes read (\`subjectId\`), and what came of
+  the team's approvals, per approval category, with the outcomes analytics read
+  (approver or admin role). A retry with the same \`idempotencyKey\` stores once.
+- You cannot record an outcome or give a bet its verdict: outcomes are facts the
+  observing system reports, and a verdict is the team's.`;
+
+/**
+ * Team lessons — gated on {@link grantsTeamLessonReads}.
+ */
+const BODY_TEAM_LESSONS = `Team lessons (what a team's RETRO phase learned, sharing between teams, consolidation):
+- A RETRO phase stores lessons as the team's own group memory (the \`retroConfig\` caps
+  apply: FIFO at maxStoredLessons). Read them with the lessons read.
+- Sharing needs BOTH sides, in each group's \`lessonConfig\`: the owning team lists the
+  reader in \`shareWith\`, and the reading team lists the owner in \`readFrom\`. Without a
+  \`lessonConfig\` a team shares and reads nothing. The shared read returns \`notShared\`:
+  the owners the reader asked for that did not grant it, which is the usual reason a
+  reader sees nothing. Shared lessons are quoted into the reader's RETRO input as the
+  other team's words, newest first, at most \`maxSharedLessons\` (default 10).
+- \`lessonConfig.consolidation\` is a scheduled job that merges lessons saying the same
+  thing and retires a lesson a later outcome contradicted (it must cite outcome ids it was
+  shown; there is no retirement without evidence). It needs \`llmProvider\` and \`llmModel\`
+  (a background job inherits none) and is capped by \`maxCostPerRun\` (default $0.10,
+  ceiling $5), checked BEFORE the call against a worst-case estimate: a run that could
+  exceed it drops lessons, and makes no call when it cannot fit. Runs start at
+  \`minLessons\` (default 6). The consolidation state read says whether it is configured,
+  has a model and is scheduled.
+- Nothing removed is lost: the history read lists each merged or retired lesson with its
+  text, reason and cited outcomes.
+- Metric \`eddi_group_lessons_total\` by outcome (merged, retired, rejected, skipped_changed,
+  run_completed, run_skipped, run_failed): \`rejected\` means the model proposed a change that
+  failed validation (an unknown key, a retirement without evidence).
+- You cannot schedule, run or remove the consolidation: it rewrites a team's memory and
+  spends budget, so it is done on the group's workspace page in the manager.`;
+
+/**
+ * Team budgets — gated on {@link grantsTeamBudgetReads}.
+ */
+const BODY_TEAM_BUDGETS = `Team budgets (a monthly dollar cap per standing team):
+- A group's \`teamBudget\`: \`monthlyBudgetUsd\` (required), \`onExhausted\`
+  (default: the group's \`protocol.onCostExceeded\`, else SYNTHESIZE_NOW) and
+  \`oversight.teams\` (other groups whose budgets its members may see in
+  templates). Absent = no team cap; the group is neither metered nor gated.
+  Changing it needs eddi-admin unless \`eddi.groups.team-budget.admin-only-edits\`
+  is false.
+- The window is the UTC calendar month. The cap is the base plus this month's
+  adjustment; next month starts at the base again.
+- The ROOT discussion's group pays: ad-hoc discussions, cadence runs, follow-ups
+  and continuations included; a nested child charges its parent. Only priced
+  spend counts (an unpriced model is $0 here too). Metering never fails a
+  discussion.
+- At the cap: a new discussion, follow-up or continuation is refused (409 "Team
+  '…' has spent $x of its $y budget for YYYY-MM; it resets …"); a cadence fire
+  is skipped, not failed; a cross-team handoff INTO the team is refused with the
+  same text. A budget that cannot be read refuses (reason \`unavailable\`, fail
+  closed). A running discussion is not cut by the gate: it stops at its team
+  ceiling with the transcript entry "Team budget reached (YYYY-MM): …" and the
+  \`onExhausted\` policy. A resume after a pause is not gated.
+- The tenant budget applies as well; \`limitedBy\` (TEAM or TENANT) says which
+  binds first. With tenant quotas disabled the tenant counter is 0.
+- Metrics \`eddi_team_budget_metering_total\`,
+  \`eddi_team_budget_refusals_total\` (by surface and reason),
+  \`eddi_team_budget_adjustments_total\`.
+- You cannot raise a cap or move budget: only an eddi-admin can. Give them the
+  exact call — \`PUT /groupstore/groups/<groupId>/budget/current-month\` with
+  capUsd and reason, or \`POST /administration/team-budgets/transfers\` with
+  fromGroupId, toGroupId, amountUsd and reason — or the team budget card on the
+  group's workspace page.
+- Agent operations tools (an agent reading its own team's numbers, asking for
+  budget, booking its own check-backs). Each is OFF unless its slug is in the
+  LLM task's \`builtInToolsWhitelist\` (with \`enableBuiltInTools\`); an omitted
+  whitelist does NOT admit them. Slugs: \`team_scorecard\` (tool
+  \`read_team_scorecard\`, read-only: spend, budget left, tasks done/failed per
+  week, approval outcomes with reason codes, retro lessons — for the agent's
+  group, its \`oversight.teams\` and \`agentOps.scorecard.groupIds\`, each only if
+  the conversation's user may view it), \`propose_team_budget\` (tools
+  \`propose_team_budget_raise\` and \`propose_team_budget_transfer\`) and
+  \`schedule_followup\` (\`schedule_followup\`, \`list_followups\`,
+  \`cancel_followup\`). Limits live in the task's \`agentOps\` block: scorecard
+  \`weeks\`, \`maxLessons\`, \`groupIds\`; budgetProposal \`maxPerTurn\` (1),
+  \`maxPerDay\` (3), \`maxAmountUsd\` (25); followUp \`maxPending\` (5),
+  \`maxPerTurn\` (2), \`maxHorizonDays\` (30, never above 90),
+  \`maxCostPerFireUsd\` (0.5, every fire is capped).
+- The budget proposal is only assembled when the task's effective
+  \`toolApprovals\` requires approval for BOTH budget tools (for example
+  \`requireApproval: ["propose_team_budget_*"]\`, and not exempted); otherwise the
+  agent silently has no such tool and the engine log warns. The change is applied
+  only after an \`eddi-admin\` approves the call; an approval by the owner or an
+  \`eddi-approver\` who is not an admin, or a timeout auto-approval, changes
+  nothing and the model is told why. The adjustment is recorded with the
+  approving admin as actor and \`[agent:<id>]\` in the reason. You cannot approve it.
+  Inside a group discussion a member's gated call is auto-rejected
+  (\`system:group\`) and never reaches an approver, so budget proposals must come
+  from a standalone oversight agent (an ordinary conversation reading the teams
+  via \`agentOps.scorecard.groupIds\`). followUp \`maxPending\` counts per agent
+  and booking user.
+  Follow-ups are ordinary one-shot schedules (metadata \`followupType:
+  agent_followup\`) in the schedule list; an agent sees and cancels only its own.`;
+
+/**
+ * HITL oversight — gated on {@link grantsOversightReads}.
+ */
+const BODY_OVERSIGHT = `Approval oversight (how human decisions turn out, and earned autonomy):
+- Every approval decision is analysed by approval category: \`tool:<pattern>\`
+  (the toolApprovals pattern that gated the call), a rule's
+  \`approvalCategory\`, or a sample rule's category. "Which categories are close
+  to autonomy?": read the analytics summary for the agent with
+  \`groupBy=category\` (decisions, unedited rate), the autonomy states (tiers),
+  and one category's evidence (eligible now, and why not).
+- Tiers: GATED (asks), READY (an open PROMOTE recommendation), PROMOTED (a
+  person applied it: the category stops asking and is sampled instead),
+  SUSPENDED (re-gated after a flagged sample, or by hand). \`suspended:<pattern>\`
+  as a gate reason on a pending call means an automatic demotion.
+- \`hitlConfig.oversight.sampledAudit\`: rules, each match, rate, category? (at
+  most 50; most specific wins; default category \`tool:<match>\`),
+  maxSamplesPerCategoryPerDay (50), reviewWithin (P3D), includeResult (false).
+  Only calls the gate ALLOWED are sampled — never mocked calls, calls without a
+  result, or group member turns.
+- \`hitlConfig.oversight.autonomyPolicy\`: \`defaults\` plus
+  \`categories\` keyed by category; only named categories are evaluated.
+  promoteAfter 30, minUneditedRate 0.9, window P30D (at most P365D),
+  demoteOnReasonCodes [] (from review.reasonCodes or the built-in set),
+  demoteOnFlaggedSamples 1, promotedSampleRate 0.10, cooldownAfterDemotion
+  P14D, evidenceChannels [MANAGER, REST, SLACK] (MCP may be added; TIMEOUT and
+  SYSTEM are refused). RULE and group categories get advisory recommendations
+  only.
+- Errors: 409 EVIDENCE_CHANGED (the evidence no longer holds), AGENT_CHANGED
+  (a newer agent version than the one reviewed), RECOMMENDATION_CHANGED,
+  SAMPLE_ALREADY_REVIEWED; 400 UNKNOWN_REASON_CODE, NOT_APPLICABLE (advisory),
+  WINDOW_TOO_LONG; 403 AGENT_ORIGINATED (an agent's tool call tried an
+  oversight write).
+- Deployment properties (all optional): \`eddi.hitl.samples.enabled\` (true;
+  false stops all sampling, cluster-wide), \`eddi.hitl.samples.retention\` (P180D),
+  \`eddi.hitl.analytics.retention\` (P400D, decision facts),
+  \`eddi.hitl.autonomy.maintenance-interval\` (PT1H, at least 60 s: expires
+  overdue samples, evaluates autonomy for at most
+  \`eddi.hitl.autonomy.max-agents-per-run\` (500) agents, deletes past
+  retention), \`eddi.hitl.autonomy.suspension-cache-ttl\` (PT15S: a suspension
+  reaches every pod within this time).
+- You cannot review samples, apply or dismiss a recommendation, suspend or
+  lift, and you cannot read the samples themselves (they carry users' tool
+  arguments). Those are a person's acts on the manager's Oversight page
+  (/manage/oversight). Applying writes a new agent version and does not deploy
+  it.`;
 
 const BODY_ARCHITECTURE = `How this platform is structured:
 - An agent references a workflow by id and version; the workflow's steps
@@ -1286,6 +1560,131 @@ your tool schemas do not cover it, not as a routine first step:
   auto-verifies, counted as eddi_group_verify_unparseable_total. A repeating
   phase's convergence.mode "VERDICT" ends it once the moderator's review of the
   latest repeat passes (default "SIMILARITY", the agreement score).
+- convergence.judge "SERVICE" with a convergence.service block (llmProvider,
+  llmModel, parameters, inputPricePer1M/outputPricePer1M, timeoutMs default
+  20000, at most 60000) makes ONE cheap direct model call per convergence check
+  instead of a moderator turn, and works without a moderator. Its spend shows in
+  memberCosts as system:judge:<phase>:<repeat>, counts toward
+  maxCostPerDiscussion (a price left out comes from the price catalog) and each
+  check counts against maxTurns. Without a service model it falls back to the
+  moderator with a warning (metric outcome fallback_moderator). A failed,
+  timed-out or unreadable reply never ends a phase. A credential-named
+  parameter (apiKey…) must be a vault or vars reference — a literal value or a
+  connection reference is a 400 at save; suggest a vault reference, never paste
+  a key.
+- Human tie-breaks: voteConfig.tiePolicy "HUMAN_DECIDES" with
+  voteConfig.humanTieBreak (decider, timeout, onTimeout). decider defaults to
+  the group's single HUMAN member (none or several is a 400 until one is named;
+  the decider need not be a member); timeout (ISO-8601) falls back to
+  humanMemberConfig.turnTimeout, neither = wait indefinitely; onTimeout
+  NO_DECISION (default), MODERATOR_DECIDES (needs a moderator; costs one turn) or
+  ABORT. A tie pauses the discussion AWAITING_HUMAN_INPUT with pendingKind
+  TIE_BREAK and pendingOptions; only the decider or an admin answers, with
+  choice = one option (content = optional rationale); the decision method is
+  vote+human-tiebreak. A human choice makes no model call and costs no turn;
+  the MODERATOR_DECIDES fallback costs one. A pod older than this release refuses to resume such a
+  discussion (schema v5, by design).
+- HUMAN members in task forces (PLAN/EXECUTE/VERIFY): only by explicit
+  assignment (assignToRole "ROLE:<role>", the person's principal id, an
+  agent-filed task, or the planner naming them) — round-robin "ALL" and bids
+  never pick a human. One AWAITING_HUMAN_INPUT pause per task, after the agents'
+  waves, with pendingKind TASK and pendingTaskId; the member answers with
+  content. That result completes the task — or, when the EXECUTE phase gates
+  tasks (hitlConfig.granularity TASK and requiresApproval), goes to approval
+  exactly as an agent's result would. A SKIP_TURN timeout fails the task, ABORT cancels the discussion;
+  maxReworks skips human tasks. Still refused at save: a HUMAN planner or
+  verifier, targetEachPeer phases with humans, nested groups containing humans.
+  For a standing team keep humanMemberConfig.turnTimeout well inside
+  eddi.groups.cadence.claim-ttl (default PT24H). You never answer a tie-break or
+  a human task: that would be speaking as the person — send the admin to the
+  decider or the member.
+- Tool-call guardrails (an LLM task's toolCallGuardrails, next to toolApprovals;
+  absent = nothing runs): each entry is a guardrail (type, action, maxRetries,
+  blockMessage, parameters) plus tools (required, approval patterns such as
+  mcp:add_issue_comment, http.post:/issues/*, builtin:*) and fields (optional
+  JSON pointers like /body or /items/*/text; absent = every string). They run
+  after the call caps and BEFORE the approval gate: block and reprompt refuse
+  the call (the model gets NOT_EXECUTED with reason tool_call_guardrail,
+  retryAllowed true for reprompt), redact rewrites the field so the approver sees
+  the redacted arguments. On resume every approved call is re-screened block-only
+  (an edited call by every type, an unedited one by the deterministic types).
+  Every built-in type runs on arguments, plus disclosure (adds a fixed label;
+  redact only; parameters text (required, <=500), position append (default) or
+  prepend, separator (default a blank line); a label already there is left
+  alone). Save-time 400s: unknown action, empty tools, a bad pattern or
+  pointer, disclosure without redact, onExhausted deliver-best, more than 32
+  entries/patterns or 16 fields; an unknown type refuses the deploy. "Could not
+  decide" follows failMode (closed by default for block/reprompt): the model is
+  unreachable, its spend is refused (cost ceiling or tenant budget),
+  arguments_unparseable (not JSON), arguments_too_large (over 256 fields or
+  256 KiB), or tool_guardrail_model_cap (over 20 judge/classifier checks per
+  tool-loop run). Judge and classifier checks are charged as the tool call
+  toolCallGuardrail, so they count toward maxBudgetPerConversation — only
+  with inputPricePer1M/outputPricePer1M in the entry's parameters. Audit
+  audit:guardrail:tool_call:<type> (tool, field, stage live|resume, reason,
+  action), a tool_call_guardrail step in the tool trace, metric
+  eddi_guardrail_toolcall_decisions_total by stage and outcome. You cannot write
+  toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
+  them is a person's job in the manager's LLM editor. Docs
+  "tool-call-guardrails".
+- Edit-on-approve: an agent's hitlConfig.review (allowAnswerEdits, default
+  false), screenEdits (OUTPUT_GUARDRAILS default, or NONE), maxEditChars
+  (default 16000), approvalCategory (default rule:<agentId>), reasonCodes (code
+  -> label; replaces the built-in FALSE_CLAIM, FACTUAL_ERROR, TONE, OFF_POLICY,
+  FORMAT, SCOPE, OTHER); toolApprovals.rules[].approvalCategory (default
+  tool:<pattern>); a group's hitlConfig.review (allowResultEdits, maxEditChars,
+  phaseCategories, reasonCodes). Approvers edit through the REST resume body
+  (editedAnswer, reasonCode, toolDecisions[].reasonCode), the group approve body
+  (taskDecisions; sending it with taskApprovals is a 400), MCP, the manager
+  banner or Slack's Edit & approve (regular conversations only: a tool pause
+  with exactly one call whose redacted arguments fit 3000 characters; a rule
+  pause only with allowAnswerEdits, platformConfig.hitlShareRuleDrafts "true"
+  on the integration — drafts reach Slack only then — and a draft that fits
+  3000 characters and holds no secret). Save-time 400s: a reasonCodes key is 2-40
+  characters, an upper-case letter then A-Z, 0-9 or _; at most 30 codes, labels <=120 characters; a
+  category must be lower-case letters, digits and . _ : / -, starting with a
+  letter or digit, <=128 characters (e.g. "github.reply"). Failure modes: 400 "this agent does not allow approving
+  with an edited answer"; "there is no model answer to edit" (put the pause rule
+  directly after the LLM task); a refused edit re-pauses with
+  pauseDetails.lastEditRefused (SCREENED_OUT or CONFIG_DRIFT); only a synthesis
+  phase's output is editable; a reason code on a plain approval is refused.
+  Audit: hitl.approval entries (schema 2) carry decisionOutcome (APPROVED,
+  APPROVED_EDITED, REJECTED, AUTO_APPROVED, AUTO_REJECTED, ABORTED; none for a
+  group human turn), approvalCategory, approvalCategorySource (CONFIG or
+  DERIVED), reasonCode, channel (REST, MANAGER, MCP, SLACK, TIMEOUT, SYSTEM),
+  latencyMs and per-unit edit metrics; a refused edit adds a hitl.edit.refused
+  entry (unitKind, reason, guardrail) joined to its decision by decisionId. You still never
+  approve, reject or edit. Docs "hitl-review-and-audit".
+- Approval card context: hitlConfig.approvalContext (agent, at most 8 blocks),
+  toolApprovals.rules[].context (at most 4, call.* available) and a group's
+  hitlConfig.approvalContext (at most 8, group.* available); a block has a
+  label (<=80), a template (<=4000) and maxChars (50..2900, default 1000). Templates read
+  what a prompt reads plus hitl.* (pauseType, reason, toolCalls[] with redacted
+  arguments, executedUngatedCalls[]) and group.* (phase, members, transcript,
+  lastByRole/lastByType/lastBySpeaker, tasksAwaitingApproval,
+  artifacts.<name>.content/json; a dashed name needs
+  group.artifacts.get('post-draft').content). A block that renders blank is
+  dropped (that is how a block is made conditional). Rendered ONCE at pause
+  time: a config edit does not change approvals already waiting. Save-time 400s:
+  too many blocks, blank or oversized label/template, maxChars out of range,
+  "does not parse", the vault:, eddivault:, connection: and caller: namespaces,
+  call.* outside a rule. Shown to the owner, an admin or an approver in the
+  manager, REST approval-status and MCP; in Slack only with
+  platformConfig.hitlApprovalContext "true". Never carried by the
+  pending-approvals list, the email notification or the in-thread Slack
+  notice. REST/MCP serve it as approvalContext: items[] (label, text,
+  truncated, source = agent, group or rule:<match>, callId, error), truncated
+  and digest (SHA-256 of what was shown); null when none is configured or the
+  conversation is not paused. An item with error render_failed
+  or too_large means the template threw or was too big — the pause still
+  happened; metric eddi_hitl_approval_context_render_total counts these as
+  outcome failed and too_large, and outcome empty usually means a wrong path.
+  Example: a writer agent with convertToObject and a responseSchema
+  (draft, sources, claims), stored by a postResponse fromObjectPath as the
+  property gtm, gets blocks reading properties.gtm.draft. Total is capped at 8000 characters
+  (eddi.hitl.approval-context.max-total-chars). You cannot change it on an
+  existing agent or group (their hitlConfig is not yours to write). Docs
+  "hitl-approval-context".
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
@@ -1470,7 +1869,15 @@ if the one you want is missing; this deployment may ship a subset):
 - embedding the chat widget in another site (iframe, frame-ancestors, token
   hand-off with auth on, image CSP): "chat-ui-embedding"
 - white-labeling (the Branding page, eddi.branding.* properties, the login
-  theme download): "white-labeling"`;
+  theme download): "white-labeling"
+- cost, prices and unpriced models: "model-pricing" · tenant budgets:
+  "tenant-quotas" · team budgets: "team-budgets"
+- cross-team handoff: "team-handoff" · SERVICE judge: "group-service-judge" ·
+  human tie-breaks and human tasks: "group-human-decisions"
+- tool-call guardrails: "tool-call-guardrails" · approver edits and the decision
+  audit: "hitl-review-and-audit" · approval card context:
+  "hitl-approval-context" · approval analytics and earned autonomy:
+  "hitl-oversight"`;
 
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.
@@ -1637,6 +2044,12 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     buildKnowledgeBaseSection(endpoints),
     ...(grantsRatingReads(endpoints) ? [BODY_RATINGS] : []),
     ...(grantsAlertReads(endpoints) ? [BODY_ALERTS] : []),
+    ...(grantsModelPriceReads(endpoints) ? [BODY_COST] : []),
+    ...(grantsTeamHandoffReads(endpoints) ? [BODY_TEAM_HANDOFF] : []),
+    ...(grantsTeamLearningReads(endpoints) ? [BODY_TEAM_LEARNING] : []),
+    ...(grantsTeamLessonReads(endpoints) ? [BODY_TEAM_LESSONS] : []),
+    ...(grantsTeamBudgetReads(endpoints) ? [BODY_TEAM_BUDGETS] : []),
+    ...(grantsOversightReads(endpoints) ? [BODY_OVERSIGHT] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

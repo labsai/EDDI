@@ -51,6 +51,21 @@ import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
+import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
+import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
+import ai.labs.eddi.datastore.postgres.PostgresLessonHistoryStore;
+import ai.labs.eddi.datastore.postgres.PostgresOutcomeEventStore;
+import ai.labs.eddi.engine.groups.lessons.ILessonHistoryStore;
+import ai.labs.eddi.engine.groups.lessons.mongo.MongoLessonHistoryStore;
+import ai.labs.eddi.engine.groups.outcomes.IOutcomeEventStore;
+import ai.labs.eddi.engine.groups.outcomes.mongo.MongoOutcomeEventStore;
+import ai.labs.eddi.datastore.postgres.PostgresAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.mongo.MongoApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.mongo.MongoAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.IAuditSampleStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.mongo.MongoAuditSampleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -71,6 +86,12 @@ import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
+import ai.labs.eddi.engine.pricing.IModelPriceCatalogStore;
+import ai.labs.eddi.engine.pricing.mongo.MongoModelPriceCatalogStore;
+import ai.labs.eddi.datastore.postgres.PostgresModelPriceCatalogStore;
+import ai.labs.eddi.engine.groups.budget.ITeamBudgetStore;
+import ai.labs.eddi.engine.groups.budget.MongoTeamBudgetStore;
+import ai.labs.eddi.engine.groups.budget.PostgresTeamBudgetStore;
 import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.MongoToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.PostgresToolQuotaStore;
@@ -108,6 +129,9 @@ import ai.labs.eddi.engine.security.spaces.notifications.PostgresWorkspaceNotifi
 import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.MongoWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.PostgresWorkspaceSettingsStore;
+import ai.labs.eddi.engine.updatecheck.ISystemSettingStore;
+import ai.labs.eddi.engine.updatecheck.MongoSystemSettingStore;
+import ai.labs.eddi.engine.updatecheck.PostgresSystemSettingStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -118,7 +142,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * CDI producer that selects the correct datastore implementation at
- * <b>runtime</b> based on the {@code eddi.datastore} configuration property.
+ * <b>runtime</b> based on the {@code eddi.datastore.type} configuration
+ * property.
  * <p>
  * Both MongoDB and PostgreSQL store implementations are compiled into the same
  * JAR. All stores are annotated {@code @DefaultBean}, so these non-default
@@ -128,7 +153,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * <b>Design rationale:</b> {@code @IfBuildProfile} is build-time only (requires
  * separate JARs per database). This producer enables a single Docker image that
  * supports both MongoDB and PostgreSQL, controlled by the
- * {@code EDDI_DATASTORE} environment variable.
+ * {@code EDDI_DATASTORE_TYPE} environment variable.
  *
  * @since 6.0.0
  */
@@ -173,6 +198,37 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConversationRatingStore conversationRatingStore(Instance<ConversationRatingStore> mongo,
                                                             Instance<PostgresConversationRatingStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IApprovalDecisionStore approvalDecisionStore(Instance<MongoApprovalDecisionStore> mongo,
+                                                        Instance<PostgresApprovalDecisionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ILessonHistoryStore lessonHistoryStore(Instance<MongoLessonHistoryStore> mongo, Instance<PostgresLessonHistoryStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IOutcomeEventStore outcomeEventStore(Instance<MongoOutcomeEventStore> mongo, Instance<PostgresOutcomeEventStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAuditSampleStore auditSampleStore(Instance<MongoAuditSampleStore> mongo, Instance<PostgresAuditSampleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAutonomyStateStore autonomyStateStore(Instance<MongoAutonomyStateStore> mongo, Instance<PostgresAutonomyStateStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -250,6 +306,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IToolQuotaStore toolQuotaStore(Instance<MongoToolQuotaStore> mongo, Instance<PostgresToolQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ITeamBudgetStore teamBudgetStore(Instance<MongoTeamBudgetStore> mongo, Instance<PostgresTeamBudgetStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -334,6 +396,13 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IModelPriceCatalogStore modelPriceCatalogStore(Instance<MongoModelPriceCatalogStore> mongo,
+                                                          Instance<PostgresModelPriceCatalogStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IUserDirectoryStore userDirectoryStore(Instance<MongoUserDirectoryStore> mongo, Instance<PostgresUserDirectoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
@@ -349,6 +418,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
                                                           Instance<PostgresWorkspaceSettingsStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ISystemSettingStore systemSettingStore(Instance<MongoSystemSettingStore> mongo, Instance<PostgresSystemSettingStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

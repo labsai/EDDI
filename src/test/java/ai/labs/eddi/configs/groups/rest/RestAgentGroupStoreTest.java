@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.groups.lessons.ILessonHistoryStore;
+import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -173,6 +175,46 @@ class RestAgentGroupStoreTest {
             inOrder.verify(scheduleStore).deleteSchedule("sched-1");
             inOrder.verify(scheduleStore).deleteSchedule("sched-2");
             inOrder.verify(workspaceStore).deleteByGroupId("group-1");
+        }
+
+        @Test
+        @DisplayName("a PERMANENT delete also drops the team's outcome events; a soft delete keeps them")
+        void permanentDelete_dropsOutcomes() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(createResourceId("group-1", 1));
+            var outcomes = mock(OutcomeEventService.class);
+            restStore.outcomeEventService = outcomes;
+
+            restStore.deleteGroup("group-1", 1, false);
+            verify(outcomes, never()).deleteForGroup(anyString());
+
+            restStore.deleteGroup("group-1", 1, true);
+            verify(outcomes).deleteForGroup("group-1");
+        }
+
+        @Test
+        @DisplayName("a PERMANENT delete also drops the team's lesson history; a soft delete keeps it")
+        void permanentDelete_dropsLessonHistory() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(createResourceId("group-1", 1));
+            var history = mock(ILessonHistoryStore.class);
+            restStore.lessonHistoryStore = history;
+
+            restStore.deleteGroup("group-1", 1, false);
+            verify(history, never()).deleteByGroup(anyString());
+
+            restStore.deleteGroup("group-1", 1, true);
+            verify(history).deleteByGroup("group-1");
+        }
+
+        @Test
+        @DisplayName("a PERMANENT delete also removes the lesson-consolidation schedule; a soft delete keeps it")
+        void permanentDelete_removesLessonConsolidationSchedule() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, false);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+
+            restStore.deleteGroup("group-1", 1, true);
+            verify(scheduleStore).deleteSchedulesByName("lesson-consolidation-group-1");
         }
 
         @Test

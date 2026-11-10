@@ -480,6 +480,23 @@ class SchedulePollerServiceTest {
     }
 
     @Test
+    void shutdownDuringAPoll_claimsNoFurtherSchedule() throws Exception {
+        poller.shutdownDrain = Duration.ofMillis(50);
+        var first = makeCronSchedule("sched-first", "0 9 * * *", "x");
+        var second = makeCronSchedule("sched-second", "0 9 * * *", "x");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(first, second));
+        // shutdown begins while the loop is already running, between two claims
+        when(scheduleStore.tryClaim(eq("sched-first"), any(), any(), any())).thenAnswer(inv -> {
+            poller.shutdownFires();
+            return true;
+        });
+
+        poller.pollDueSchedules();
+
+        verify(scheduleStore, never()).tryClaim(eq("sched-second"), any(), any(), any());
+    }
+
+    @Test
     void shutdown_letsAFireFinishInsideTheDrainPeriod() throws Exception {
         poller.shutdownDrain = Duration.ofSeconds(5);
         var schedule = makeCronSchedule("sched-drain", "0 9 * * *", "x");

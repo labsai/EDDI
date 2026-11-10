@@ -8,6 +8,12 @@
   DeploymentManifestsTest fails when the two differ. It is inserted verbatim, NOT
   through `tpl`: the rules' own {{ $labels.instance }} templates are for
   Prometheus to expand, and Helm must leave them alone.
+
+  In cluster mode the groups of files/eddi-cluster-alerts.yml (a copy of
+  docs/monitoring/eddi-cluster-alerts.yml) are appended to the same `groups:`
+  list: everything from that file's `groups:` line on, minus the line itself.
+  Without them a cluster release shipped no rule for degraded nodes, NATS
+  misconfiguration, takeovers or fenced writes.
 */}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -21,4 +27,7 @@ metadata:
     {{- end }}
 spec:
 {{ .Files.Get "files/eddi-alerts.yml" | indent 2 }}
+{{- if eq (include "eddi.messagingType" .) "nats" }}
+{{ regexReplaceAll "(?s)^.*?\ngroups:[^\n]*\n" (.Files.Get "files/eddi-cluster-alerts.yml" | replace "\r\n" "\n") "" | indent 2 }}
+{{- end }}
 {{- end }}

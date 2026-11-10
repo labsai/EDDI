@@ -19,6 +19,10 @@ import {
   grantsKnowledgeBaseBinding,
   grantsRatingReads,
   grantsAlertReads,
+  grantsModelPriceReads,
+  grantsTeamHandoffReads,
+  grantsTeamBudgetReads,
+  grantsOversightReads,
   grantedPatchEndpoints,
   grantsCredentialSafeEdits,
 } from "../tool-scopes";
@@ -383,6 +387,15 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });
 
+    it("never grants setup-api sync — one call rewrites an existing agent's whole toolset", () => {
+      // Re-sync regenerates an agent's tools from a spec the caller supplies; like
+      // setup-api's dryRun (hidden from the OpenAPI schema the operator's tools are
+      // generated from), it is an integrator's tool, not the operator's.
+      const all = [...READ_ENDPOINTS, ...WRITE_ENDPOINTS];
+      expect(all.filter((e) => e.includes("/setup-api/sync"))).toEqual([]);
+      expect(all.filter((e) => e.includes("{agentId}/setup-api"))).toEqual([]);
+    });
+
     it("is offered now that WRITE_ENDPOINTS is populated", () => {
       // The seam no longer gates on a previously verified gate or auth mode —
       // activation itself proves the gate about the agent it actually creates
@@ -657,6 +670,91 @@ describe("alerts", () => {
   it("needs every read before the prompt may describe them", () => {
     for (const missing of READS) {
       expect(grantsAlertReads(READS.filter((e) => e !== missing))).toBe(false);
+    }
+  });
+});
+
+/**
+ * The four 6.7 read surfaces: each is granted in both scopes, each keeps every
+ * write (and the content-carrying reads) out, and each prompt predicate needs
+ * every read its section names.
+ */
+describe.each([
+  {
+    area: "model prices",
+    reads: ["GET /administration/model-prices", "GET /administration/model-prices/resolve", "GET /administration/model-prices/unpriced"],
+    grants: grantsModelPriceReads,
+    // a price is a budget lever; the reference list only serves an edit
+    excluded: ["PUT /administration/model-prices", "GET /administration/model-prices/reference"],
+    prefix: "/administration/model-prices",
+  },
+  {
+    area: "team handoff intake",
+    reads: ["GET /groupstore/groups/{groupId}/workspace/handoffs"],
+    grants: grantsTeamHandoffReads,
+    // an intake decision is a person's
+    excluded: [
+      "POST /groupstore/groups/{groupId}/workspace/handoffs/{handoffId}/accept",
+      "POST /groupstore/groups/{groupId}/workspace/handoffs/{handoffId}/decline",
+      "DELETE /groupstore/groups/{groupId}/workspace/backlog/{taskId}",
+    ],
+    prefix: "/groupstore/groups/{groupId}/workspace",
+  },
+  {
+    area: "team budgets",
+    reads: [
+      "GET /groupstore/groups/{groupId}/budget",
+      "GET /groupstore/groups/{groupId}/budget/history",
+      "GET /administration/team-budgets",
+    ],
+    grants: grantsTeamBudgetReads,
+    // money moves stay with the administrator
+    excluded: ["PUT /groupstore/groups/{groupId}/budget/current-month", "POST /administration/team-budgets/transfers"],
+    prefix: "/budget",
+  },
+  {
+    area: "HITL oversight",
+    reads: ["GET /hitl/analytics/summary", "GET /hitl/autonomy", "GET /hitl/autonomy/{agentId}/category", "GET /hitl/samples/pending-count"],
+    grants: grantsOversightReads,
+    // samples carry users' tool arguments; decision rows name conversations and
+    // deciders; every write is evidence or ungating
+    excluded: [
+      "GET /hitl/samples",
+      "GET /hitl/samples/{sampleId}",
+      "GET /hitl/analytics/decisions",
+      "PATCH /hitl/samples/{sampleId}",
+      "POST /hitl/autonomy/{agentId}/apply",
+      "POST /hitl/autonomy/{agentId}/dismiss",
+      "POST /hitl/autonomy/{agentId}/suspend",
+      "POST /hitl/autonomy/{agentId}/lift",
+      "POST /hitl/analytics/rebuild",
+    ],
+    prefix: "/hitl/",
+  },
+])("$area", ({ reads, grants, excluded, prefix }) => {
+  it("grants the reads in both scopes, as reads", () => {
+    for (const scope of ["read_only", "read_write"] as const) {
+      const endpoints = endpointsForScope(scope);
+      expect(endpoints).toEqual(expect.arrayContaining(reads));
+      expect(grants(endpoints)).toBe(true);
+    }
+    for (const read of reads) {
+      expect(READ_ENDPOINTS).toContain(read);
+      expect(WRITE_ENDPOINTS).not.toContain(read);
+    }
+  });
+
+  it("grants none of the deliberately excluded endpoints, and no write under the area at all", () => {
+    const all = endpointsForScope("read_write");
+    for (const entry of excluded) {
+      expect(all, entry).not.toContain(entry);
+    }
+    expect(all.filter((e) => e.includes(prefix) && !e.startsWith("GET "))).toEqual([]);
+  });
+
+  it("needs every read before the prompt may describe them", () => {
+    for (const missing of reads) {
+      expect(grants(reads.filter((e) => e !== missing))).toBe(false);
     }
   });
 });

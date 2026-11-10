@@ -498,16 +498,13 @@ public final class SecretRedactionFilter {
      * <p>
      * Cost is gated to nearly nothing on the logging path: a message with no
      * apostrophe cannot have an apostrophe value, and one that does not begin like
-     * a JSON document needs no parse. Anything longer than
-     * {@link #MAXIMUM_CARRIER_CHECK_LENGTH} is assumed to BE a carrier, which is
-     * the safe default — bounding never tears a document, it only leaves an
+     * a JSON document needs no parse. Anything that would need one and is longer
+     * than {@link #MAXIMUM_CARRIER_CHECK_LENGTH} is assumed to BE a carrier, which
+     * is the safe default — bounding never tears a document, it only leaves an
      * embedded double quote in a Python-style secret.
      */
     private static boolean apostropheValuesMayContainDoubleQuotes(String message) {
         if (message.indexOf('\'') < 0) {
-            return false;
-        }
-        if (message.length() > MAXIMUM_CARRIER_CHECK_LENGTH) {
             return false;
         }
         String trimmed = message.stripLeading();
@@ -516,7 +513,13 @@ public final class SecretRedactionFilter {
         }
         char first = trimmed.charAt(0);
         if (first != '{' && first != '[' && first != '"') {
+            // Known not to be a JSON document without parsing anything, so the size
+            // bound below does not apply: assuming a carrier here let an embedded
+            // double quote end a long Python-style password early and publish the rest.
             return true;
+        }
+        if (message.length() > MAXIMUM_CARRIER_CHECK_LENGTH) {
+            return false;
         }
         return !isJsonDocument(message);
     }
@@ -834,7 +837,7 @@ public final class SecretRedactionFilter {
      * {@code cookie:} prefixes stays linear.
      */
     private static final Pattern COOKIE_HEADER = Pattern
-            .compile("(?i)(?<![A-Za-z0-9_])(?:set-)?+cookie(?:\\\\*+[\"'])?+\\s*+[:=]\\s*+(?:\\\\*+[\"'])?+");
+            .compile("(?i)(?<![A-Za-z0-9_])(set-)?+cookie(?:\\\\*+[\"'])?+\\s*+[:=]\\s*+(?:\\\\*+[\"'])?+");
 
     /**
      * {@code Set-Cookie} attributes: they describe the cookie, carry nothing
@@ -867,6 +870,14 @@ public final class SecretRedactionFilter {
         int resumeAt;
         do {
             int pos = matcher.end();
+            // Attributes (Path, Expires, ...) belong to Set-Cookie only: in a Cookie
+            // request header "Path" is a cookie's name and its value is a credential.
+            boolean setCookie = matcher.group(1) != null;
+            // The first name=value pair of a Set-Cookie is the cookie itself, whatever its
+            // name:
+            // "Set-Cookie: Path=<secret>" sets a cookie called Path. Only the pairs after
+            // it are attributes.
+            boolean firstPair = true;
             while (pos < length) {
                 int nameStart = pos;
                 while (nameStart < length && (text.charAt(nameStart) == ' ' || text.charAt(nameStart) == '\t')) {
@@ -878,9 +889,11 @@ public final class SecretRedactionFilter {
                 }
                 String name = text.substring(nameStart, nameEnd).toLowerCase(Locale.ROOT);
                 if (nameEnd == nameStart || nameEnd >= length || text.charAt(nameEnd) != '=') {
-                    // A bare Set-Cookie flag (Secure; HttpOnly) is stepped over; anything
-                    // else that is not a pair ends the header.
-                    if (COOKIE_ATTRIBUTES.contains(name) && nameEnd < length && (text.charAt(nameEnd) == ';' || text.charAt(nameEnd) == ',')) {
+                    // A bare flag (Secure; HttpOnly) is stepped over whichever header the walk
+                    // was matched as, so a pair after it is still reached; anything else that is
+                    // not a pair ends the header.
+                    if (COOKIE_ATTRIBUTES.contains(name) && nameEnd < length
+                            && (text.charAt(nameEnd) == ';' || text.charAt(nameEnd) == ',')) {
                         pos = nameEnd + 1;
                         continue;
                     }
@@ -888,18 +901,58 @@ public final class SecretRedactionFilter {
                     break;
                 }
                 int valueStart = nameEnd + 1;
+                int closeLength = 0;
+                int open = 0;
+                if (valueStart < length && text.charAt(valueStart) == '"') {
+                    open = 1;
+                } else if (valueStart + 1 < length && text.charAt(valueStart) == '\\' && text.charAt(valueStart + 1) == '"') {
+                    open = 2; // a JSON carrier's own escaping: sid=\"abc\"
+                }
+                if (open > 0) {
+                    // RFC 6265 allows sid="abc": mask the contents, keep the quotes. Only when a
+                    // closing quote follows a run of plain value characters, so a JSON carrier's
+                    // own closing quote (Cookie: sid=" ...) is never read as an opening one; a
+                    // run that starts with ':' is a JSON key's closing quote before its value.
+                    int close = valueStart + open;
+                    while (close < length && isQuotedCookieValueChar(text.charAt(close))) {
+                        close++;
+                    }
+                    boolean closed = open == 1
+                            ? close < length && text.charAt(close) == '"'
+                            : close + 1 < length && text.charAt(close) == '\\' && text.charAt(close + 1) == '"';
+                    if (closed && close > valueStart + open && !isJsonKeyBoundary(text, valueStart + open, close)) {
+                        closeLength = open;
+                        valueStart += open;
+                    }
+                }
+                boolean quoted = closeLength > 0;
                 int valueEnd = valueStart;
-                while (valueEnd < length && isCookieValueChar(text.charAt(valueEnd))) {
+                while (valueEnd < length && (quoted ? isQuotedCookieValueChar(text.charAt(valueEnd)) : isCookieValueChar(text.charAt(valueEnd)))) {
                     valueEnd++;
                 }
-                String value = text.substring(valueStart, valueEnd);
-                if (name.equals("expires")) {
-                    // An HTTP date carries a comma and spaces ("Wed, 21 Oct 2015 …"):
-                    // step to the next ';' rather than read the rest as further pairs.
+                boolean exemptAttributes = setCookie && !firstPair;
+                firstPair = false;
+                boolean attribute = exemptAttributes && COOKIE_ATTRIBUTES.contains(name);
+                if (quoted) {
+                    // valueEnd is the closing quote; step over it below.
+                    if (!attribute && !REDACTED.equals(text.substring(valueStart, valueEnd))) {
+                        out.append(text, copied, valueStart).append(REDACTED);
+                        copied = valueEnd;
+                    }
+                    valueEnd += closeLength;
+                } else if (name.equals("expires")) {
+                    // An HTTP date carries a comma and spaces ("Wed, 21 Oct 2015 …"): step to
+                    // the next ';' rather than read the rest as further pairs. On a Set-Cookie
+                    // it is an attribute and stays; in a Cookie request header it is a cookie
+                    // whose value is a credential, so the whole span is masked.
                     while (valueEnd < length && text.charAt(valueEnd) != ';' && isCookieSpanChar(text.charAt(valueEnd))) {
                         valueEnd++;
                     }
-                } else if (!value.isEmpty() && !REDACTED.equals(value) && !COOKIE_ATTRIBUTES.contains(name)) {
+                    if (!exemptAttributes && valueEnd > valueStart && !REDACTED.equals(text.substring(valueStart, valueEnd))) {
+                        out.append(text, copied, valueStart).append(REDACTED);
+                        copied = valueEnd;
+                    }
+                } else if (valueEnd > valueStart && !REDACTED.equals(text.substring(valueStart, valueEnd)) && !attribute) {
                     out.append(text, copied, valueStart).append(REDACTED);
                     copied = valueEnd;
                 }
@@ -918,6 +971,25 @@ public final class SecretRedactionFilter {
     private static boolean isCookieNameChar(char c) {
         return c > ' ' && c < 0x7f && c != '=' && c != ';' && c != ',' && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}'
                 && c != '[' && c != ']';
+    }
+
+    /**
+     * Whether the run between a quote pair is what follows a JSON key's closing
+     * quote rather than a cookie value: the key/value colon alone (before the
+     * value's own opening quote), or the colon right before an object or array
+     * value. A value that merely starts with a colon, {@code ":abc123"}, is a
+     * cookie and is redacted.
+     */
+    private static boolean isJsonKeyBoundary(String text, int runStart, int runEnd) {
+        if (text.charAt(runStart) != ':') {
+            return false;
+        }
+        return runEnd == runStart + 1 || text.charAt(runStart + 1) == '{' || text.charAt(runStart + 1) == '[';
+    }
+
+    /** Inside a double-quoted value RFC 6265 also allows an apostrophe. */
+    private static boolean isQuotedCookieValueChar(char c) {
+        return isCookieValueChar(c) || c == '\'';
     }
 
     private static boolean isCookieValueChar(char c) {

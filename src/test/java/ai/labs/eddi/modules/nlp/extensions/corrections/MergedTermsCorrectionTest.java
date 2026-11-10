@@ -12,6 +12,7 @@ import ai.labs.eddi.modules.nlp.model.Word;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -89,5 +90,45 @@ class MergedTermsCorrectionTest {
         assertTrue(result.isEmpty());
         // refused before a single substring was looked up
         verify(dictionary, never()).lookupTerm(anyString());
+    }
+
+    @Test
+    void correctWord_retriesShareOneTimeBudget() {
+        // Every lookup is individually bounded and a miss, so only a budget across the
+        // retries stops a slow dictionary from being asked once per prefix and suffix.
+        var slow = mock(IDictionary.class);
+        when(slow.lookupTerm(anyString())).thenAnswer(invocation -> {
+            Thread.sleep(40);
+            return IDictionary.NO_WORDS_FOUND;
+        });
+        correction.init(List.of(slow));
+
+        var result = correction.correctWord("a".repeat(ICorrection.MAX_CORRECTABLE_LENGTH), null, Collections.emptyList());
+
+        assertTrue(result.isEmpty());
+        // 100 prefixes plus 100 suffixes would be 8 s of lookups; the budget is 200 ms
+        verify(slow, atMost(12)).lookupTerm(anyString());
+    }
+
+    @Test
+    void correctWord_deadlineIsAlsoCheckedBetweenDictionaries() {
+        // A miss in a dictionary can cost a regex budget of its own, so three of them
+        // for one prefix must not all run once the word's budget has gone.
+        List<IDictionary> slow = new ArrayList<>();
+        for (int n = 0; n < 3; n++) {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.lookupTerm(anyString())).thenAnswer(invocation -> {
+                Thread.sleep(130);
+                return IDictionary.NO_WORDS_FOUND;
+            });
+            slow.add(dictionary);
+        }
+        correction.init(slow);
+
+        correction.correctWord("ab", null, Collections.emptyList());
+
+        int lookups = slow.stream().mapToInt(d -> mockingDetails(d).getInvocations().stream()
+                .filter(i -> i.getMethod().getName().equals("lookupTerm")).toList().size()).sum();
+        assertTrue(lookups <= 2, "the third dictionary was asked after the 200 ms budget had passed: " + lookups);
     }
 }

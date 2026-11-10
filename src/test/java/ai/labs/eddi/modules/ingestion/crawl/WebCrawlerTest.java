@@ -342,6 +342,22 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an oversized href whose tracking query canonicalizes short is still not followed")
+        void overlongLinkWithATrackingQueryIsNotFollowed() {
+            // canonicalize() strips utm_*, leaving a short id: the bound must see the URL
+            // that is fetched
+            String overlong = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong)).page(overlong, "<html><body>Long</body></html>")
+                    .page(SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertFalse(site.wasRequested(overlong));
+        }
+
+        @Test
         @DisplayName("a broken exclude pattern does not reduce the crawl to its seed")
         void brokenExcludeDoesNotBreakCrawl() {
             // The draft compiled patterns without escaping, and the resulting
@@ -408,6 +424,32 @@ class WebCrawlerTest {
             assertEquals(StopReason.PAGE_LIMIT, summary.stopReason());
             assertFalse(summary.coveredWholeSource(),
                     "a capped crawl saw a subset — the caller must not treat absence as deletion");
+        }
+
+        @Test
+        @DisplayName("short relative links under a long base URL cannot pin more than the frontier's character budget")
+        void frontierIsBoundedInCharacters() {
+            // Each "<a href=l1>" is a few bytes, but resolves against a ~7,000-character
+            // base into two retained strings of that length.
+            String base = SITE + "/" + "d".repeat(7_000) + "/";
+            StringBuilder html = new StringBuilder("<html><body>");
+            int links = 20_000;
+            for (int i = 0; i < links; i++) {
+                html.append("<a href=\"l").append(i).append("\">x</a>");
+            }
+            FakeSite site = new FakeSite().page(base, html.append("</body></html>").toString());
+
+            CrawlSummary summary = new WebCrawler(site).crawl(
+                    request(base, Scope.defaults(),
+                            new Limits(links * 2, links * 3, 0, 0, Duration.ofMinutes(1), Duration.ofSeconds(5))),
+                    new RecordingSink());
+
+            // Only the generated links: the seed, robots.txt and sitemap requests are not.
+            long admitted = site.requestedUrls().stream().filter(url -> url.startsWith(base + "l")).count();
+            assertFalse(summary.coveredWholeSource(),
+                    "links were dropped, so the queue emptying is not coverage of the source");
+            assertTrue(admitted > 0 && admitted < links,
+                    "the frontier admitted " + admitted + " of " + links + " links, 2 x 7,000 characters each");
         }
 
         @Test

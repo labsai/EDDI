@@ -80,6 +80,9 @@ services:
       - "QUARKUS_OIDC_TENANT_ENABLED=false"
       - "QUARKUS_ANALYTICS_DISABLED=true"
       - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
+      # The mock LLM is plain http://wiremock:8080. Since the vault allowedHosts transport check
+      # (#1175) a listed host still gets no secret over http unless the deployment says so.
+      - "EDDI_VAULT_ALLOW_PLAINTEXT_REMOTE_HOSTS=true"
       # With authentication off EDDI answers only localhost, IPs and these Host names (421 otherwise).
       # k6 sends its turns to lb:7070 and nginx forwards that Host (proxy_set_header Host $host); the
       # driver's own calls to a replica use its IP. eddi stays for anything that addresses the service.

@@ -34,12 +34,9 @@ public final class FileUtilities {
      * separator when the result names a directory (its last segment has no dot).
      * <p>
      * Null and empty segments are skipped rather than concatenated, and a single
-     * segment is legal. Both used to throw {@link StringIndexOutOfBoundsException}
-     * from this method's own internals: {@code buildPath("foo")} found no
-     * separator, so {@code lastIndexOf} returned -1 and {@code substring(-1)} blew
-     * up, and {@code buildPath("", "x")} did the same via {@code endsWith} on an
-     * empty builder. Callers pass values derived from {@code user.dir} and from
-     * request data, so neither shape is hypothetical.
+     * segment is legal ({@code buildPath("foo")}, {@code buildPath("", "x")}).
+     * Callers pass values derived from {@code user.dir} and from request data, so
+     * neither shape is hypothetical.
      */
     public static String buildPath(String... directories) {
         if (directories == null) {

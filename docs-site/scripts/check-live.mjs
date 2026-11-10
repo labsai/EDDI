@@ -13,11 +13,23 @@ import { buildRedirects, loadAll, REDIRECT_STATUS } from './redirects.mjs';
 import { routeOf } from './sync-docs.mjs';
 
 const args = process.argv.slice(2);
-const base = args[0]?.replace(/\/$/, '');
 const legacyFlag = args.indexOf('--legacy-base');
-const legacyBase = legacyFlag >= 0 ? args[legacyFlag + 1]?.replace(/\/$/, '') : null;
-if (!base || !/^https?:\/\//.test(base)) {
-  console.error('usage: node scripts/check-live.mjs <base-url> [--legacy-base <url>]');
+
+/** The URL without a trailing slash, or null when it is not a parseable http(s) URL. */
+function httpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? value.replace(/\/$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+const base = httpUrl(args[0]);
+// --legacy-base given without a usable value is an error, not "no legacy host"
+const legacyBase = legacyFlag >= 0 ? httpUrl(args[legacyFlag + 1]) : null;
+if (!base || (legacyFlag >= 0 && !legacyBase)) {
+  console.error('usage: node scripts/check-live.mjs <base-url> [--legacy-base <url>]  (both must be http(s) URLs)');
   process.exit(2);
 }
 

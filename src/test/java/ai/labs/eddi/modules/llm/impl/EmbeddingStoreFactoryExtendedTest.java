@@ -226,8 +226,8 @@ class EmbeddingStoreFactoryExtendedTest {
 
             var ex = assertThrows(IllegalArgumentException.class,
                     () -> factory.getOrCreate("kb", config));
-            assertTrue(ex.getMessage().contains("ChromaApiVersion"),
-                    "Error should mention ChromaApiVersion, got: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("storeParameters.apiVersion"),
+                    "Error should name storeParameters.apiVersion, got: " + ex.getMessage());
         }
     }
 

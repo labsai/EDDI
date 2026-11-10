@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.mongo.MongoTestBase;
 import com.mongodb.client.model.Filters;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -123,5 +126,26 @@ class GroupWorkspaceStoreMongoContainerTest extends MongoTestBase {
         assertTrue(store.casRevision(first));
         assertFalse(store.casRevision(stale),
                 "the \"or missing\" branch must not let a stale writer past a stamped revision");
+    }
+
+    @Test
+    @DisplayName("handoff state (origins, inbox, tombstones) survives a store round trip")
+    void handoffState_roundTrips() throws Exception {
+        GroupWorkspace ws = store.readOrCreate(GROUP_ID);
+        var origin = new WorkspaceHandoffs.HandoffOrigin("h-1", WorkspaceHandoffs.SourceKind.GROUP, "src-group", 2, "gc-9", "member-1",
+                WorkspaceHandoffs.Trigger.DECISION, "VOTE@1", "art-1", "the vote", 2, List.of("agent:a", "group:src-group"), "dk-1",
+                Instant.parse("2026-11-02T10:00:00Z"), WorkspaceHandoffs.Intake.PENDING, null);
+        ws.getHandoffs().addInbox(new WorkspaceHandoffs.InboxItem("h-1", "Research ACME", "details", 7, origin));
+        ws.getHandoffs().putOrigin("task-1", origin.reviewed(WorkspaceHandoffs.Intake.APPROVED_EDITED, Instant.parse("2026-11-02T11:00:00Z")));
+        ws.getHandoffs().tombstone("dk-declined", Instant.parse("2026-11-01T10:00:00Z"));
+        assertTrue(store.casRevision(ws));
+
+        WorkspaceHandoffs back = store.find(GROUP_ID).getHandoffs();
+        assertEquals(1, back.inboxSize());
+        assertEquals(origin, back.findInbox("h-1").origin());
+        assertEquals(7, back.findInbox("h-1").priority());
+        assertEquals(WorkspaceHandoffs.Intake.APPROVED_EDITED, back.originOf("task-1").intake());
+        assertEquals(List.of("agent:a", "group:src-group"), back.originOf("task-1").lineage());
+        assertTrue(back.isDeclinedSince("dk-declined", Instant.parse("2026-10-01T00:00:00Z")));
     }
 }

@@ -66,6 +66,8 @@ export interface ModelCascadeConfig {
   steps?: CascadeStep[];
   /** Judge model config — used when evaluationStrategy is "judge_model". */
   judgeModel?: CascadeJudgeModel;
+  /** One sentence the judge checks besides the request; only the judge reads it. */
+  acceptanceCriterion?: string;
   /** Overrides for the "heuristic" evaluation strategy. */
   heuristic?: CascadeHeuristic;
   /** Wall-clock ceiling across the whole cascade (ms). Must be > 0 when set. */
@@ -91,6 +93,38 @@ export interface LlmPostResponse {
   qrBuildInstructions?: QuickRepliesBuildingInstruction[];
 }
 
+/**
+ * Cache and long-context prices for a task's model (docs/model-pricing.md).
+ * Absent fields come from the deployment price catalog; a blank cache price is
+ * charged at the input price. The long-context threshold comes from the catalog.
+ */
+export interface TaskModelPricing {
+  cacheReadPricePer1M?: number | null;
+  cacheWritePricePer1M?: number | null;
+  longContext?: {
+    inputPricePer1M?: number | null;
+    outputPricePer1M?: number | null;
+    cacheReadPricePer1M?: number | null;
+    cacheWritePricePer1M?: number | null;
+  } | null;
+}
+
+/** Slugs of the agent-operations tools; off unless named in `builtInToolsWhitelist`. */
+export const AGENT_OPS_SLUGS = ["team_scorecard", "propose_team_budget", "schedule_followup"] as const;
+export type AgentOpsSlug = (typeof AGENT_OPS_SLUGS)[number];
+
+/** Limits of the agent-operations tools (`task.agentOps`); every field is optional. */
+export interface AgentOpsConfig {
+  scorecard?: { groupIds?: string[]; weeks?: number; maxLessons?: number };
+  budgetProposal?: { maxPerTurn?: number; maxPerDay?: number; maxAmountUsd?: number };
+  followUp?: {
+    maxPending?: number;
+    maxPerTurn?: number;
+    maxHorizonDays?: number;
+    maxCostPerFireUsd?: number;
+  };
+}
+
 export interface LlmTask {
   actions?: string[];
   id?: string;
@@ -107,6 +141,7 @@ export interface LlmTask {
   enableHttpCallTools?: boolean;
   enableMcpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
+  agentOps?: AgentOpsConfig;
   conversationHistoryLimit?: number;
   // Token-aware context window (Strategy 1)
   maxContextTokens?: number;
@@ -134,6 +169,7 @@ export interface LlmTask {
     maxBackoffDelayMs?: number;
     honorRetryAfter?: boolean;
     maxRetryAfterMs?: number;
+    jitterRatio?: number;
   };
   maxBudgetPerConversation?: number;
   enableCostTracking?: boolean;
@@ -141,6 +177,15 @@ export interface LlmTask {
   enableRateLimiting?: boolean;
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
+  /**
+   * Per-subject / per-run caps on tool calls. Absent = none; never sent unless
+   * set, because an older backend's strict config parser refuses an unknown
+   * field. `window` is an ISO-8601 duration (`PT1M`..`P31D`) or `RUN`.
+   */
+  toolQuotas?: {
+    subject?: string;
+    tools: Record<string, { limit?: number; window?: string; pool?: string }>;
+  };
   maxToolIterations?: number;
   /**
    * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).
@@ -192,6 +237,26 @@ export interface LlmTask {
    */
   nonBlankFields?: string[];
   /**
+   * Renames applied to top-level keys of the parsed `convertToObject` reply:
+   * `{ "htmlResponseStr": "htmlResponseText" }` renames the key when the target
+   * is absent (the target wins when both exist). Independent of
+   * `responseValidation.enabled`.
+   */
+  fieldAliases?: Record<string, string>;
+  /**
+   * How a `convertToObject` answer arrives. `text` (default) — the model writes
+   * the JSON as its reply; `tool` — it calls a terminal reply tool whose
+   * parameters are the `responseSchema` (needs an object-root JSON Schema).
+   */
+  answerMode?: 'text' | 'tool';
+  /** Name of the reply tool in `answerMode: "tool"` (default `reply`). */
+  answerToolName?: string;
+  /**
+   * `required` (default) forces a tool call where the provider supports it;
+   * `auto` lets the model choose.
+   */
+  answerToolChoice?: 'required' | 'auto';
+  /**
    * What the task does when its model phase fails outright. `fallback` serves
    * the configured fallback (see `ResponseValidation.fallbackMessage`) and
    * completes the turn; `error` (the default) fails it.
@@ -214,6 +279,12 @@ export interface LlmTask {
    * agent-level `hitlConfig.toolApprovals` for this task — no field merge.
    */
   toolApprovals?: ToolApprovalsConfig | null;
+  /**
+   * Guardrails on the ARGUMENTS of the tool calls the model asks for (EDDI
+   * 6.7+): run before the approval gate, and again, block-only, on an approved
+   * or edited call. Absent or empty = nothing runs. Never sent unless set.
+   */
+  toolCallGuardrails?: ToolCallGuardrailConfig[];
 
   /**
    * Token pricing (USD per 1M tokens) for this task's ORDINARY (non-cascade)
@@ -226,6 +297,8 @@ export interface LlmTask {
    */
   inputPricePer1M?: number | null;
   outputPricePer1M?: number | null;
+  /** Cache and long-context prices; see {@link TaskModelPricing}. */
+  pricing?: TaskModelPricing | null;
 
   /**
    * Guardrails that screen the user's message before the model is called
@@ -274,6 +347,18 @@ export interface GuardrailConfig {
   blockMessage?: string;
   /** Per-type settings as plain strings, e.g. `{ patterns: "email,ssn" }`. */
   parameters?: Record<string, string>;
+}
+
+/**
+ * One guardrail on tool-call arguments. Mirrors the backend
+ * `ToolCallGuardrailConfig`: a guardrail plus the calls it applies to (`tools`,
+ * tool-approval patterns, required) and the fields it screens (`fields`, JSON
+ * pointers; `*` is every element or member, `""` the whole arguments; absent =
+ * every string).
+ */
+export interface ToolCallGuardrailConfig extends GuardrailConfig {
+  tools: string[];
+  fields?: string[];
 }
 
 /**
@@ -334,6 +419,16 @@ export interface ResponseValidation {
    * `ignore`/`warn` keep the parsed object. Default `ignore`.
    */
   onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * With `onInvalidJson: "wrap"` (set it in the JSON view; the policy select does
+   * not offer it yet): the top-level property a plain-text reply is wrapped into.
+   * Required for `wrap`.
+   */
+  wrapField?: string;
+  /** Object merged next to `wrapField` in a wrapped reply, e.g. `{ "quickReplies": [] }`. */
+  wrapDefaults?: Record<string, unknown>;
+  /** Longest reply, in characters, that `wrap` wraps. Default 20000. */
+  wrapMaxChars?: number;
   /**
    * Action when the prompt exceeds the model's context window. `retry` re-sends
    * once with the history window halved. Default `error`.

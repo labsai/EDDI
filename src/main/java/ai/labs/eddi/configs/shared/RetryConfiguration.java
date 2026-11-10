@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -84,6 +85,28 @@ public class RetryConfiguration {
     private Long maxRetryAfterMs = DEFAULT_MAX_RETRY_AFTER_MS;
 
     static final long DEFAULT_MAX_RETRY_AFTER_MS = 10_000L;
+
+    /**
+     * Randomises each configured backoff downwards by up to this fraction: a
+     * {@code 1000} ms backoff with {@code 0.2} sleeps between 800 and 1000 ms.
+     * Without it, every conversation that hit the same provider outage retries on
+     * the same schedule and arrives in one burst again. Downwards only, so a
+     * jittered sleep never exceeds {@code maxBackoffDelayMs}, the total backoff
+     * budget or the turn deadline. A provider-requested wait
+     * ({@code honorRetryAfter}) is never shortened. {@code 0} turns it off; values
+     * outside {@code [0, 1]} are clamped.
+     */
+    private Double jitterRatio = DEFAULT_JITTER_RATIO;
+
+    static final double DEFAULT_JITTER_RATIO = 0.2;
+
+    public Double getJitterRatio() {
+        return jitterRatio;
+    }
+
+    public void setJitterRatio(Double jitterRatio) {
+        this.jitterRatio = jitterRatio;
+    }
 
     public Boolean getHonorRetryAfter() {
         return honorRetryAfter;
@@ -322,7 +345,7 @@ public class RetryConfiguration {
                 if (attempt < maxAttempts) {
                     LlmFailure failure = LlmFailureClassifier.classify(e);
                     if (failure.isRetryable()) {
-                        long wanted = currentBackoff;
+                        long wanted = jittered(currentBackoff, retryConfig);
                         Long retryAfter = failure.retryAfterMs();
                         if (retryAfter != null && honorRetryAfter(retryConfig)) {
                             long cap = effectiveMaxRetryAfterMs(retryConfig);
@@ -333,7 +356,7 @@ public class RetryConfiguration {
                                 throw new LifecycleException(actionDescription + " failed: provider requested a " + retryAfter
                                         + "ms wait (> maxRetryAfterMs " + cap + "ms) [" + failure.cls() + "]", e);
                             }
-                            wanted = Math.max(currentBackoff, retryAfter);
+                            wanted = Math.max(wanted, retryAfter);
                         }
                         long sleepFor = budgetedSleep(wanted, totalBackoff);
                         if (sleepFor < 0) {
@@ -597,7 +620,7 @@ public class RetryConfiguration {
         long maxDelay = effectiveMaxBackoffMs(retryConfig);
 
         int exponent = Math.max(0, attempt - 1);
-        long delay = Math.min((long) (baseDelay * Math.pow(multiplier, exponent)), maxDelay);
+        long delay = jittered(Math.min((long) (baseDelay * Math.pow(multiplier, exponent)), maxDelay), retryConfig);
         long sleepFor = budgetedSleep(delay, totalBackoffMs);
         if (sleepFor < 0) {
             return -1L;
@@ -608,6 +631,30 @@ public class RetryConfiguration {
             Thread.currentThread().interrupt();
         }
         return sleepFor;
+    }
+
+    /**
+     * {@code backoffMs} shortened by a random share of up to {@code jitterRatio}.
+     *
+     * @see #jittered(long, double, double)
+     */
+    static long jittered(long backoffMs, RetryConfiguration retryConfig) {
+        double ratio = retryConfig != null && retryConfig.getJitterRatio() != null ? retryConfig.getJitterRatio() : DEFAULT_JITTER_RATIO;
+        return jittered(backoffMs, ratio, ThreadLocalRandom.current().nextDouble());
+    }
+
+    /**
+     * The deterministic core of the jitter:
+     * {@code backoffMs * (1 - ratio * random)} with {@code ratio} clamped to
+     * {@code [0, 1]} ({@code NaN} counts as 0) and {@code random} in
+     * {@code [0, 1)}. Never negative, never above {@code backoffMs}.
+     */
+    static long jittered(long backoffMs, double ratio, double random) {
+        if (backoffMs <= 0L || !(ratio > 0.0)) {
+            return Math.max(0L, backoffMs);
+        }
+        double clamped = Math.min(1.0, ratio);
+        return Math.max(0L, Math.round(backoffMs * (1.0 - clamped * random)));
     }
 
     // ========================== Retryable Error Detection

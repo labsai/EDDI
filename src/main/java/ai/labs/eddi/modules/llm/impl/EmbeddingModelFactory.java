@@ -434,6 +434,8 @@ public class EmbeddingModelFactory {
                 .apiKey(params.get("apiKey"))
                 .outputDimensionality(outputDimensionality)
                 .taskType(taskType);
+        // Re-checks the destination per request, as for OpenAI (DNS rebinding).
+        builder.httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         applyBaseUrl(params, builder::baseUrl);
         applyTimeout(params, builder::timeout);
         applyInt(params, "maxRetries", builder::maxRetries);
@@ -458,6 +460,8 @@ public class EmbeddingModelFactory {
     private EmbeddingModel buildMistral(Map<String, String> params) {
         var builder = MistralAiEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "mistral-embed"))
                 .apiKey(params.get("apiKey"));
+        // Re-checks the destination per request, as for OpenAI (DNS rebinding).
+        builder.httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         applyBaseUrl(params, builder::baseUrl);
         applyTimeout(params, builder::timeout);
         applyInt(params, "maxRetries", builder::maxRetries);

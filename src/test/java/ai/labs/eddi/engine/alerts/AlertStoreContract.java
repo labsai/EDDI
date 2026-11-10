@@ -60,8 +60,13 @@ public interface AlertStoreContract {
     }
 
     private static AlertEvent event(String agentId, String dedupeKey, AlertEvent.State state, Instant firedAt, Instant nextAttemptAt) {
+        return event("6aba70011a25f8be7920e0aa", agentId, dedupeKey, state, firedAt, nextAttemptAt);
+    }
+
+    private static AlertEvent event(String ruleId, String agentId, String dedupeKey, AlertEvent.State state, Instant firedAt,
+                                    Instant nextAttemptAt) {
         DeliveryTarget slack = DeliveryTarget.slack("C0123ABC");
-        return new AlertEvent(null, "6aba70011a25f8be7920e0aa", "Unhappy users", AlertSource.RATING, AlertEvent.Kind.ALERT, agentId, 3,
+        return new AlertEvent(null, ruleId, "Unhappy users", AlertSource.RATING, AlertEvent.Kind.ALERT, agentId, 3,
                 "6aba70011a25f8be7920e0cc", firedAt, "Unhappy users: conversation rating 1",
                 new AlertMatch(List.of("comment"), null, "rating-1", -1, "FIVE_STAR", 1, 0.0, List.of("Too slow"), "It took forever"),
                 List.of(Delivery.pending(slack)), state, nextAttemptAt, dedupeKey, 0, null, null, null, null, 0);
@@ -379,12 +384,29 @@ public interface AlertStoreContract {
     }
 
     @Test
+    default void digestPendingRuleIdsPageInAscendingOrderAcrossRules() {
+        for (String ruleId : List.of("6aba70011a25f8be7920e0ac", "6aba70011a25f8be7920e0aa", "6aba70011a25f8be7920e0ab")) {
+            eventStore().insert(event(ruleId, AGENT, "k-" + ruleId, AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
+            eventStore().insert(event(ruleId, AGENT, "k2-" + ruleId, AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
+        }
+
+        List<String> first = eventStore().findDigestPendingRuleIds(null, 2);
+        assertEquals(List.of("6aba70011a25f8be7920e0aa", "6aba70011a25f8be7920e0ab"), first, "distinct, ascending, bounded");
+        List<String> second = eventStore().findDigestPendingRuleIds(first.get(first.size() - 1), 2);
+        assertEquals(List.of("6aba70011a25f8be7920e0ac"), second, "the next page starts after the cursor");
+        assertEquals(List.of(), eventStore().findDigestPendingRuleIds(second.get(0), 2));
+    }
+
+    @Test
     default void digestPendingRuleIdsAreDistinctAndOnlyHeldEvents() {
         eventStore().insert(event(AGENT, "a", AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
         eventStore().insert(event(AGENT, "b", AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
         eventStore().insert(event(AGENT, "c", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
 
         assertEquals(List.of("6aba70011a25f8be7920e0aa"), eventStore().findDigestPendingRuleIds(10));
+        assertEquals(List.of("6aba70011a25f8be7920e0aa"), eventStore().findDigestPendingRuleIds("", 10));
+        assertEquals(List.of(), eventStore().findDigestPendingRuleIds("6aba70011a25f8be7920e0aa", 10),
+                "a cursor at the last rule has nothing after it");
         assertEquals(2, eventStore().releaseDigestPending("6aba70011a25f8be7920e0aa"));
         assertEquals(List.of(), eventStore().findDigestPendingRuleIds(10), "a released event is no longer held");
     }

@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
 import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomyMaintenanceService;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomySchedules;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -107,7 +109,13 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    LessonConsolidationService lessonConsolidationService;
+
+    @Inject
     AlertMaintenanceService alertMaintenanceService;
+
+    @Inject
+    HitlAutonomyMaintenanceService hitlAutonomyMaintenanceService;
 
     @Inject
     ContinuationFireHandler continuationFireHandler;
@@ -237,6 +245,11 @@ public class ScheduleFireExecutor {
             // node run it at a time.
             return fireAlertMaintenance(schedule, instanceId, attemptNumber);
         }
+        if (HitlAutonomySchedules.isMaintenance(md)) {
+            // HITL oversight maintenance fast-path (sample expiry, earned-autonomy
+            // evaluation, retention) — a system job like alert maintenance.
+            return fireHitlAutonomyMaintenance(schedule, instanceId, attemptNumber);
+        }
         if (ConversationContinuations.isContinuationSchedule(md)) {
             // Self-continuation fast-path: the next turn of one conversation, armed by
             // the engine after the previous turn committed. Before the creator check
@@ -276,8 +289,19 @@ public class ScheduleFireExecutor {
             return fireTeamCadence(schedule, instanceId, attemptNumber);
         }
 
+        if (LessonConsolidationService.isLessonConsolidationSchedule(md)) {
+            // Team lesson consolidation fast-path — a maintenance job over a team's
+            // retro lessons, not a conversation turn. Same machinery as the Dream and
+            // team cadence fast-paths above.
+            return fireLessonConsolidation(schedule, instanceId, attemptNumber);
+        }
+
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
+        // What a window:"RUN" tool quota counts within: stable across the retries of
+        // one due fire, unlike fireLogId (one per attempt), so a retry cannot run again
+        // the tools a failed attempt already ran.
+        String runId = runIdOf(schedule);
         String conversationId = null;
         String errorMessage = null;
         String status;
@@ -289,7 +313,7 @@ public class ScheduleFireExecutor {
             Environment env = resolveEnvironment(schedule.getEnvironment());
 
             // 1. Resolve conversation
-            ResolvedConversation resolved = resolveConversation(schedule, env);
+            ResolvedConversation resolved = resolveConversation(schedule, env, runId);
             conversationId = resolved.id();
 
             // The fire log's cost column was hard-wired to 0.0 on this path, so the
@@ -302,6 +326,7 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            addFireId(inputData, runId);
             // A conversation this fire started already ran its startup workflow under
             // the allowance (createNewConversation); the turn gets what is left, so
             // startup and turn share ONE maxCostPerFire instead of each getting it.
@@ -824,6 +849,26 @@ public class ScheduleFireExecutor {
         return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "alert maintenance", false);
     }
 
+    private ScheduleFireLog fireHitlAutonomyMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            worthLogging = !hitlAutonomyMaintenanceService.run().isEmpty();
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] HITL oversight maintenance failed (schedule %s)", schedule.getId());
+        }
+        if (!worthLogging) {
+            return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        }
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "hitl oversight maintenance",
+                false);
+    }
+
     /**
      * Run one Dream memory-consolidation cycle for the schedule's user and record
      * the fire.
@@ -923,11 +968,50 @@ public class ScheduleFireExecutor {
                 interrupted);
     }
 
+    /**
+     * Run one team lesson consolidation and record the fire. A deliberate skip (too
+     * few lessons, cost cap, a transient model failure) is COMPLETED with the
+     * reason in the log; a real failure (no model configured, a permanent model
+     * error) is FAILED so it retries with backoff and eventually dead-letters
+     * instead of appearing to run while doing nothing.
+     */
+    private ScheduleFireLog fireLessonConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status;
+        String errorMessage = null;
+        double cost = 0.0;
+        boolean interrupted = false;
+
+        try {
+            LessonConsolidationService.Result result = lessonConsolidationService.processScheduledFire(schedule.getMetadata());
+            cost = result.estimatedCost();
+            if (result.isSuccess()) {
+                status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                LOGGER.infof("[SCHEDULE] Lesson consolidation '%s' (id=%s): %s", schedule.getName(), schedule.getId(), result.message());
+            } else {
+                status = ScheduleConfiguration.FireStatus.FAILED.name();
+                errorMessage = result.message();
+                LOGGER.errorf("[SCHEDULE] Lesson consolidation failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(),
+                        errorMessage);
+            }
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                interrupted = true;
+            }
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            LOGGER.errorf(e, "[SCHEDULE] Lesson consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
+        }
+
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, cost, "lesson-consolidation",
+                interrupted);
+    }
+
     /** The conversation a fire runs in, and whether this fire started it. */
     record ResolvedConversation(String id, boolean created) {
     }
 
-    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         String strategy = schedule.getConversationStrategy();
         if (strategy == null) {
             // Default: heartbeats use persistent, cron uses new
@@ -935,8 +1019,8 @@ public class ScheduleFireExecutor {
         }
 
         return switch (strategy) {
-            case "persistent" -> resolveOrCreatePersistent(schedule, env);
-            default -> new ResolvedConversation(createNewConversation(schedule, env), true); // "new" or unknown
+            case "persistent" -> resolveOrCreatePersistent(schedule, env, runId);
+            default -> new ResolvedConversation(createNewConversation(schedule, env, runId), true); // "new" or unknown
         };
     }
 
@@ -945,9 +1029,10 @@ public class ScheduleFireExecutor {
      * context: the agent's startup workflow (a CONVERSATION_START LLM task, say)
      * runs here, and with an empty context it spent outside the fire's allowance.
      */
-    private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private String createNewConversation(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         var userId = scheduleUserId(schedule);
         Map<String, Context> context = new HashMap<>();
+        context.put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, runId));
         double allowance = schedule.getMaxCostPerFire();
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
@@ -1029,7 +1114,7 @@ public class ScheduleFireExecutor {
         }
     }
 
-    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env, String runId) throws Exception {
         // Before the reuse path below, which returns an existing conversation without
         // ever starting one.
         requireUnreservedUserId(schedule);
@@ -1074,7 +1159,7 @@ public class ScheduleFireExecutor {
         // the next poll (15s by default, while a fire may run for minutes) matched it
         // again, claimed it again, and pushed a second concurrent turn into this very
         // same persistent conversation.
-        String newConversationId = createNewConversation(schedule, env);
+        String newConversationId = createNewConversation(schedule, env, runId);
         if (!carriedProperties.isEmpty()) {
             carryProperties(schedule, newConversationId, carriedProperties);
         }
@@ -1214,6 +1299,31 @@ public class ScheduleFireExecutor {
             return;
         }
         inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
+    }
+
+    /**
+     * The run a scheduled fire belongs to, for {@code toolQuotas} rules with
+     * {@code window: "RUN"}: the schedule plus its last COMPLETED fire. Only
+     * {@code markCompleted} moves {@code lastFired}; a failed attempt, its retries
+     * and a manual retry of it all leave it where it was, so they count as one run
+     * and a retry cannot re-run the tools an earlier attempt already ran. The next
+     * due fire after a completion is a new run. (A per-attempt id - the fire log id
+     * - gave every retry a fresh counter.)
+     */
+    static String runIdOf(ScheduleConfiguration schedule) {
+        Instant lastFired = schedule.getLastFired();
+        return schedule.getId() + "@" + (lastFired == null ? "first" : Long.toString(lastFired.toEpochMilli()));
+    }
+
+    /**
+     * Names the run on its turn, so a {@code toolQuotas} rule with
+     * {@code window: "RUN"} counts per run even on a persistent conversation.
+     */
+    static void addFireId(InputData inputData, String fireId) {
+        if (fireId == null || fireId.isBlank()) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, fireId));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

@@ -178,24 +178,35 @@ public class PdfTextExtractor implements DocumentTextExtractor {
      * unfiltered stream referenced thousands of times from a {@code /Contents}
      * array — each reference parsed in full, its operands retained until an
      * operator arrives — cost nothing; each reference is now charged its length.
+     * Public for the attachment extractor, which reads PDFs under the same budget.
      */
-    static void chargePageContents(PDPage page) throws IOException {
+    public static void chargePageContents(PDPage page) throws IOException {
         COSBase contents = page.getCOSObject().getDictionaryObject(COSName.CONTENTS);
         if (contents instanceof COSStream stream) {
             if (COSName.FLATE_DECODE.equals(stream.getFilters())) {
                 try (InputStream decoded = stream.createInputStream()) {
                     decoded.transferTo(OutputStream.nullOutputStream());
                 }
-            } else if (stream.getFilters() == null) {
+            } else if (isUnfiltered(stream)) {
                 PdfDecodeBudget.charge(stream.getLength());
             }
         } else if (contents instanceof COSArray array) {
             for (int i = 0; i < array.size(); i++) {
-                if (array.getObject(i) instanceof COSStream stream && stream.getFilters() == null) {
+                if (array.getObject(i) instanceof COSStream stream && isUnfiltered(stream)) {
                     PdfDecodeBudget.charge(stream.getLength());
                 }
             }
         }
+    }
+
+    /**
+     * Whether PDFBox reads the stream as it is stored: it takes a {@code /Filter}
+     * that is neither a name nor a non-empty array ({@code []}, a number, a string,
+     * a dictionary) as zero filters.
+     */
+    private static boolean isUnfiltered(COSStream stream) {
+        COSBase filters = stream.getFilters();
+        return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
     }
 
     /** Stops a page that runs too long or lays out too much. */

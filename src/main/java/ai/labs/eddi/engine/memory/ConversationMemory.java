@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.continuation.ContinuationPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -38,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -76,6 +78,11 @@ public class ConversationMemory implements IConversationMemory {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
     /**
+     * Cluster mode: whether this turn's lease is lost; see
+     * {@link #setLeaseLostCheck}.
+     */
+    private transient volatile BooleanSupplier leaseLostCheck;
+    /**
      * Optimistic-concurrency revision of the document this memory was loaded from.
      * See {@link IConversationMemory#getRevision()}.
      */
@@ -104,6 +111,7 @@ public class ConversationMemory implements IConversationMemory {
      * In-flight paid calls held against the ceiling; transient, never persisted.
      */
     private final transient SpendReservations spendReservations = new SpendReservations();
+    private final transient TenantCostHolds tenantCostHolds = new TenantCostHolds();
     /** The agent's self-continuation settings; NOT persisted. */
     private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
@@ -210,6 +218,11 @@ public class ConversationMemory implements IConversationMemory {
         IData<Object> pending = from != null ? from.getData(MemoryKeys.AUDIT_PENDING_COST) : null;
         if (pending != null && pending.getResult() instanceof Number owed) {
             currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, owed.doubleValue()));
+            // the attribution travels with the dollars, a zero marker included
+            IData<Object> attribution = from.getData(MemoryKeys.AUDIT_PENDING_SPEND);
+            if (attribution != null && attribution.getResult() != null) {
+                currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, attribution.getResult()));
+            }
         }
     }
 
@@ -589,6 +602,11 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public TenantCostHolds getTenantCostHolds() {
+        return tenantCostHolds;
+    }
+
+    @Override
     public ContinuationPolicy getContinuationPolicy() {
         return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
     }
@@ -656,7 +674,18 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public boolean isCancelled() {
-        return cancelled;
+        return cancelled || isLeaseLost();
+    }
+
+    @Override
+    public void setLeaseLostCheck(BooleanSupplier leaseLost) {
+        this.leaseLostCheck = leaseLost;
+    }
+
+    @Override
+    public boolean isLeaseLost() {
+        BooleanSupplier check = leaseLostCheck;
+        return check != null && check.getAsBoolean();
     }
 
     /**
@@ -695,6 +724,8 @@ public class ConversationMemory implements IConversationMemory {
     // tool-call batch. Persisted via ConversationMemorySnapshot like the bookmark.
     private transient String hitlPauseType;
     private transient PendingToolCallBatch hitlPendingToolCalls;
+    // Approval-card context rendered at pause commit; persisted like the bookmark.
+    private transient RenderedApprovalContext hitlApprovalContext;
     // The agent-level tool-approval config, carried onto memory at conversation
     // start; NOT persisted (re-resolved from the pinned agent config each turn).
     private transient ToolApprovalsConfig agentToolApprovalsConfig;
@@ -779,6 +810,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlPendingToolCalls(PendingToolCallBatch batch) {
         this.hitlPendingToolCalls = batch;
+    }
+
+    @Override
+    public RenderedApprovalContext getHitlApprovalContext() {
+        return hitlApprovalContext;
+    }
+
+    @Override
+    public void setHitlApprovalContext(RenderedApprovalContext context) {
+        this.hitlApprovalContext = context;
     }
 
     @Override

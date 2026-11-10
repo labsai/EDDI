@@ -76,7 +76,7 @@ public class PromptInjectionGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.INPUT);
+        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.TOOL_CALL);
     }
 
     /**

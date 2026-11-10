@@ -31,6 +31,10 @@
       "cardMode": "single",
       "viewport": "760x620"
     },
+    "AboutDialog": {
+      "cardMode": "single",
+      "viewport": "560x560"
+    },
     "AgentPicker": {
       "cardMode": "column"
     },
@@ -87,6 +91,9 @@
     "ResourceTypeBadge": "src/components/shared/resource-type-badge.tsx",
     "SecretKeyPicker": "src/components/shared/secret-key-picker.tsx",
     "ViewToggle": "src/components/shared/view-toggle.tsx",
+    "AboutDialog": "src/components/layout/about-dialog.tsx",
+    "BrandIcon": "src/components/layout/brand-logo.tsx",
+    "BrandWordmark": "src/components/layout/brand-logo.tsx",
     "MockDataBanner": "src/components/layout/mock-data-banner.tsx",
     "PageLoader": "src/components/layout/page-loader.tsx",
     "PlatformStatus": "src/components/layout/platform-status.tsx",
@@ -118,6 +125,9 @@
     "ResourceTypeBadge": "/** Resource slug. Known keys get a distinct color: agent, workflow, behavior,\n   *  rules, httpcalls, apicalls, langchain, llm, output, property, propertysetter,\n   *  dictionary, regulardictionary, mcpcalls, rag, snippet, snippets. Anything else\n   *  renders with a neutral fallback, and a trailing \".json\" is stripped. */\n  type: string;",
     "SecretKeyPicker": "/** Plain text, or a vault reference of the form vault:<keyName> */\n  value: string;\n  onChange: (value: string) => void;\n  readOnly?: boolean;\n  tenantId?: string;\n  placeholder?: string;\n  testId?: string;\n  /** Forwarded to the focusable control, so a caller's label htmlFor resolves. */\n  id?: string;\n  \"aria-invalid\"?: boolean;\n  \"aria-describedby\"?: string;\n  /** Refuse a literal: only a ${vault:…} / ${vars:…} reference is admissible. */\n  referenceOnly?: boolean;\n  /** The agent this field belongs to: a restricted key it is not granted gets a note. */\n  agentId?: string;",
     "ViewToggle": "view: \"card\" | \"list\";\n  onChange: (view: \"card\" | \"list\") => void;",
+    "AboutDialog": "open: boolean;\n  onOpenChange: (open: boolean) => void;\n  /** The server's version, or `null` when it is not known (demo mode, an error). */\n  version: string | null;",
+    "BrandIcon": "className?: string;\n  /** Empty for a decorative icon next to the product name. */\n  alt?: string;\n  testId?: string;",
+    "BrandWordmark": "className?: string;\n  /** Turn the unbranded EDDI wordmark dark on a light background (a pure white glyph vanishes on a light sidebar). */\n  invertInLight?: boolean;\n  testId?: string;",
     "MockDataBanner": "/** Takes no props — self-hides unless mock data is active. */",
     "PageLoader": "/** Takes no props — route-level skeleton. */",
     "PlatformStatus": "/** Takes no props — polls backend health and renders a status pill. */",

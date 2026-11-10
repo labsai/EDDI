@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
@@ -199,6 +200,9 @@ class ConversationStepRunner {
              */
             private volatile Map<String, Object> failure;
 
+            /** Whether {@link #call()} was entered: the turn started running. */
+            private volatile boolean started;
+
             @Override
             public void bindLease(LeaseHandle lease) {
                 this.lease = lease;
@@ -207,6 +211,15 @@ class ConversationStepRunner {
             @Override
             public Map<String, Object> describe() {
                 Map<String, Object> why = failure;
+                if (turnDescriptor != null && lease != null && !started) {
+                    // A9: dead-lettered although it never ran (the runtime refused it after
+                    // its lease was granted). Its caller is answered busy, retry (see
+                    // onDiscarded), so a replay of this entry would run it a second time on
+                    // top of that retry. Kept as a trace, not as something to replay.
+                    Map<String, Object> described = new LinkedHashMap<>(turnDescriptor);
+                    described.put(DeadLetterEntry.TURN_ANSWERED_RETRY, true);
+                    return described;
+                }
                 if (why == null || turnDescriptor == null) {
                     return turnDescriptor;
                 }
@@ -217,12 +230,17 @@ class ConversationStepRunner {
 
             @Override
             public Void call() throws Exception {
+                started = true;
                 try {
                     Void result = runConversationStep(environment, conversationMemory, conversationId, loggingContext,
                             identityBoundExecution,
                             rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier, lease,
                             processingTurn);
+                    // All three drained before any is acted on, so none outlives this turn and
+                    // is picked up by the conversation's next one.
                     TurnLeaseLostException lost = leaseLostTurns.remove(conversationId);
+                    ConversationFencedException fenced = fencedTurns.remove(conversationId);
+                    ConcurrentConversationModificationException conflicted = conflictedTurns.remove(conversationId);
                     if (lost != null) {
                         // Stopped at a task boundary because this node lost the lease: nothing
                         // was stored. Surfaced so the coordinator dead-letters it with its input —
@@ -230,12 +248,20 @@ class ConversationStepRunner {
                         failure = failureDetail(TurnLeaseLostException.REASON, lost.getFence(), null);
                         throw lost;
                     }
-                    ConversationFencedException fenced = fencedTurns.remove(conversationId);
                     if (fenced != null) {
                         // Surfaced so the coordinator dead-letters the turn with its input: the
                         // write was refused because another node took the conversation over.
                         failure = failureDetail("fenced", fenced.getToken(), fenced.getStoredFence());
                         throw fenced;
+                    }
+                    if (conflicted != null && lease != null) {
+                        // Cluster mode (A4): the turn's reply already went out, then its write
+                        // lost to another writer of the document (an undo, a degraded-mode turn
+                        // on another node, a resume). Logged and counted as before — and now
+                        // dead-lettered with its input as well, so a turn whose caller was told
+                        // it ran is not lost without a trace.
+                        failure = failureDetail(DeadLetterEntry.REASON_CONFLICT, lease.fence(), null);
+                        throw conflicted;
                     }
                     return result;
                 } finally {
@@ -279,6 +305,14 @@ class ConversationStepRunner {
                         // REST answers 409 with Retry-After; the input was not consumed.
                         LOGGER.warnf("Turn of conversation %s not run: %s — reporting it as busy; the input was not consumed",
                                 sanitize(conversationId), busy.getMessage());
+                        conversationMemory.setConversationState(ConversationState.IN_PROGRESS);
+                    } else if (lease != null) {
+                        // Cluster mode (A9): refused by the runtime after the lease was granted.
+                        // The input was not consumed, so the caller is told to retry, and the
+                        // dead letter the coordinator wrote for it is marked not replayable
+                        // (see describe()), so the retry and a replay cannot both run it.
+                        LOGGER.warnf("Turn of conversation %s not run: %s — reporting it as busy; the input was not consumed "
+                                + "(its dead letter is kept as a trace only)", sanitize(conversationId), cause.getMessage());
                         conversationMemory.setConversationState(ConversationState.IN_PROGRESS);
                     } else {
                         LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "
@@ -336,6 +370,13 @@ class ConversationStepRunner {
     private final Map<String, TurnLeaseLostException> leaseLostTurns = new ConcurrentHashMap<>();
 
     /**
+     * Turns whose write lost the optimistic-concurrency race after their reply had
+     * gone out, keyed by conversation; drained by the task, which dead-letters them
+     * in cluster mode (see {@code call()}).
+     */
+    private final Map<String, ConcurrentConversationModificationException> conflictedTurns = new ConcurrentHashMap<>();
+
+    /**
      * Whether the running turn of {@code conversationId} was cancelled because this
      * node lost its lease. The reply path asks before answering, so the client of
      * such a turn is told the message was not processed instead of getting a 200
@@ -343,6 +384,14 @@ class ConversationStepRunner {
      */
     boolean isLeaseLost(String conversationId) {
         return leaseLostConversations.contains(conversationId);
+    }
+
+    /**
+     * Whether the turn running on {@code memory} lost its lease: marked by the
+     * lease manager's callback, or read off the lease itself.
+     */
+    boolean isLeaseLost(String conversationId, IConversationMemory memory) {
+        return memory.isLeaseLost() || isLeaseLost(conversationId);
     }
 
     private static Map<String, Object> failureDetail(String reason, Long fence, Long storedFence) {
@@ -409,6 +458,25 @@ class ConversationStepRunner {
             LOGGER.debugf("Skipping queued turn for conversation %s: its caller stopped waiting before it could run",
                     sanitize(conversationId));
             conversationService.countTurnSkippedForCaller();
+            if (skipNotifier != null) {
+                skipNotifier.accept(submittedMemory);
+            }
+            return null;
+        }
+
+        // Fence first (cluster mode, A3): before this turn reads anything of the
+        // conversation — its state, its revision, a reloaded snapshot, the recorded
+        // Idempotency-Keys — the document is told this lease has started. A holder
+        // whose
+        // lease expired earlier can still be writing until then; raised afterwards, its
+        // append could land between this turn's read and its run, and this turn would
+        // run without that step and overwrite its properties, or run a duplicate
+        // Idempotency-Key a second time. A turn that cannot raise the fence, or whose
+        // lease is already gone, does not run: it is answered busy (409 + Retry-After)
+        // and its input is not consumed.
+        if (lease != null && lease.fence() != null && !fenceRaised(conversationId, lease)) {
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            submittedMemory.setConversationState(ConversationState.IN_PROGRESS);
             if (skipNotifier != null) {
                 skipNotifier.accept(submittedMemory);
             }
@@ -516,9 +584,10 @@ class ConversationStepRunner {
                 // this turn carries the lease's fencing token, so the store refuses it if
                 // another node took the conversation over in the meantime; and losing the
                 // lease stops the pipeline at the next task boundary.
+                // The fence itself was raised before anything was read (see above).
                 leaseLostConversations.remove(conversationId);
                 conversationMemory.setFenceToken(lease.fence());
-                raiseFence(conversationId, lease.fence());
+                conversationMemory.setLeaseLostCheck(lease::isLost);
                 final IConversationMemory leasedMemory = conversationMemory;
                 // Abandoned through the same seam as a watchdog timeout (abandonTurn), but
                 // aimed at THIS turn's
@@ -549,17 +618,36 @@ class ConversationStepRunner {
     /**
      * Cluster mode: tell the document this turn's lease has started, so a holder
      * whose lease expired earlier (a stalled node, an abandoned pipeline thread)
-     * can no longer write — see {@link IConversationMemoryStore#raiseFence}. A
-     * failure is logged and the turn goes on: the fence still guards every write
-     * this turn makes, and a database that cannot take this update cannot take the
-     * turn's own writes either.
+     * can no longer write — see {@link IConversationMemoryStore#raiseFence}.
+     * <p>
+     * Must run before the turn reads the conversation. A failure stops the turn
+     * before it runs: without the raise, a predecessor that is still writing can
+     * slip a step in between this turn's read and its run (A3). The lease is
+     * checked on both sides of the raise, so a turn whose lease went while the
+     * raise was in flight does not start either.
+     *
+     * @return {@code true} when the fence is raised and the lease still held
      */
-    void raiseFence(String conversationId, long fence) {
+    boolean fenceRaised(String conversationId, LeaseHandle lease) {
+        Long fence = lease.fence();
+        if (lease.isLost()) {
+            LOGGER.warnf("Turn of conversation %s not run: its lease was lost before it started — reporting it as busy; "
+                    + "the input was not consumed", sanitize(conversationId));
+            return false;
+        }
         try {
             conversationMemoryStore.raiseFence(conversationId, fence);
         } catch (Exception e) {
-            LOGGER.warnf("Could not raise the fence of conversation %s to %d: %s", sanitize(conversationId), fence, e.getMessage());
+            LOGGER.warnf("Turn of conversation %s not run: could not raise its fence to %d (%s) — reporting it as busy; the "
+                    + "input was not consumed", sanitize(conversationId), fence, e.getMessage());
+            return false;
         }
+        if (lease.isLost()) {
+            LOGGER.warnf("Turn of conversation %s not run: its lease was lost while the fence was raised — reporting it as "
+                    + "busy; the input was not consumed", sanitize(conversationId));
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -868,7 +956,9 @@ class ConversationStepRunner {
                             // belongs to a writer that succeeded. Breaking a healthy
                             // conversation because THIS turn lost the race would trade one
                             // wrong outcome for another.
-                            reportStoreConflict(loggingContext, conversationId, e);
+                            if (reportStoreConflict(loggingContext, conversationId, e)) {
+                                conflictedTurns.put(conversationId, e);
+                            }
                             conversationService.forgetUnpersistedTurn(conversationId);
                             refreshCachedState(conversationId);
                         } catch (ResourceStoreException e) {
@@ -995,7 +1085,12 @@ class ConversationStepRunner {
      *         settles
      */
     private boolean discardLeaseLostTurn(String conversationId, IConversationMemory conversationMemory) {
-        if (!leaseLostConversations.remove(conversationId)) {
+        // Either the lease manager's lost-callback marked it, or the lease reads as
+        // lost
+        // on the turn's own memory (it can be lost before the callback arrives — see
+        // IConversationMemory#setLeaseLostCheck).
+        boolean marked = leaseLostConversations.remove(conversationId);
+        if (!marked && !conversationMemory.isLeaseLost()) {
             return false;
         }
         LOGGER.warnf("Turn of conversation %s lost its lease — its outcome is discarded, the conversation state is "
@@ -1210,8 +1305,8 @@ class ConversationStepRunner {
      * <p>
      * The conversation state is left alone on purpose — see the call site.
      */
-    void reportStoreConflict(Map<String, String> loggingContext, String conversationId,
-                             ConcurrentConversationModificationException e) {
+    boolean reportStoreConflict(Map<String, String> loggingContext, String conversationId,
+                                ConcurrentConversationModificationException e) {
         conversationService.contextLogger.setLoggingContext(loggingContext);
         ConversationState storedState;
         try {
@@ -1227,13 +1322,14 @@ class ConversationStepRunner {
             // retry, and nothing for the conflict meter.
             LOGGER.infof("Turn of conversation %s was not persisted: the conversation was ended while the turn was "
                     + "running, and the end stands", sanitize(conversationId));
-            return;
+            return false;
         }
         conversationService.counterConversationStoreConflict.increment();
         LOGGER.errorf(e, "Turn of conversation %s was NOT persisted: the conversation document was written by another "
                 + "turn, resume, undo/redo or instance while this turn was running (this turn started from revision %d). "
                 + "The reply was already returned to the caller, so this turn's step is lost — the caller should retry it.",
                 conversationId, e.getExpectedRevision());
+        return true;
     }
 
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {

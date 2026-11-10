@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.memory.TenantCostHolds;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
@@ -19,6 +20,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.OptionalDouble;
 import java.util.List;
 
 /**
@@ -82,6 +84,28 @@ public class TenantQuotaService {
 
     @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default")
     String defaultTenantId;
+
+    /**
+     * Opt-in hard ceiling: hold a call's maximum cost against the monthly budget
+     * before the call, instead of only charging it afterwards. Off by default. See
+     * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation}.
+     */
+    @ConfigProperty(name = "eddi.tenant.quota.cost-reservation.enabled", defaultValue = "false")
+    boolean costReservationEnabled;
+
+    /**
+     * How long a hold that was never released (its node died mid-turn) may pin the
+     * budget before it is dropped.
+     */
+    @ConfigProperty(name = "eddi.tenant.quota.cost-reservation.ttl", defaultValue = "PT10M")
+    Duration costReservationTtl;
+
+    /**
+     * Output-token cap assumed for a model call that sets none of its own, when
+     * sizing its reservation.
+     */
+    @ConfigProperty(name = "eddi.tenant.quota.cost-reservation.default-max-output-tokens", defaultValue = "4096")
+    int costReservationDefaultMaxOutputTokens;
 
     // Metrics
     //
@@ -378,6 +402,37 @@ public class TenantQuotaService {
     }
 
     /**
+     * Whether {@code tenantId} has a monthly dollar budget in force — what the
+     * strict unpriced-call policy ({@code REFUSE_WHEN_BUDGETED}) asks. A store that
+     * cannot answer counts as budgeted: the stricter reading.
+     */
+    public boolean hasCostBudget(String tenantId) {
+        try {
+            TenantQuota quota = quotaFor(tenantId);
+            return quota != null && quota.enabled() && quota.maxMonthlyCostUsd() >= 0;
+        } catch (QuotaAccountingUnavailableException e) {
+            return true;
+        }
+    }
+
+    /**
+     * What is left of the tenant's monthly dollar budget (never negative), or empty
+     * when none is in force. Read-only, for callers that size their own ceiling
+     * against it (team budgets).
+     *
+     * @throws QuotaAccountingUnavailableException
+     *             when the quota or its counter cannot be read -- the caller
+     *             decides how to fail, this never answers "unlimited" for an outage
+     */
+    public OptionalDouble remainingCostUsd(String tenantId) {
+        TenantQuota quota = quotaFor(tenantId);
+        if (quota == null || !quota.enabled() || quota.maxMonthlyCostUsd() < 0) {
+            return OptionalDouble.empty();
+        }
+        return OptionalDouble.of(Math.max(0.0, quota.maxMonthlyCostUsd() - quotaStore.getMonthlyCost(tenantId)));
+    }
+
+    /**
      * {@link #checkCostBudget(String)} with spend the caller has made but the
      * monthly counter has not seen yet. The counter is charged when a turn settles
      * ({@code TurnCostMeter}), so a paid call later in the same turn — a re-ask, a
@@ -455,6 +510,140 @@ public class TenantQuotaService {
         }
 
         return result;
+    }
+
+    // ─── Hard ceiling: cost reservations ───
+
+    /** Whether the deployment turned reservations on at all (a cheap flag read). */
+    public boolean costReservationEnabled() {
+        return costReservationEnabled;
+    }
+
+    /** Output-token cap to size a reservation with when the model sets none. */
+    public int costReservationDefaultMaxOutputTokens() {
+        return costReservationDefaultMaxOutputTokens > 0 ? costReservationDefaultMaxOutputTokens : 4096;
+    }
+
+    /** Test hook; production configures these through the properties above. */
+    void configureCostReservation(boolean enabled, Duration ttl, int defaultMaxOutputTokens) {
+        this.costReservationEnabled = enabled;
+        this.costReservationTtl = ttl;
+        this.costReservationDefaultMaxOutputTokens = defaultMaxOutputTokens;
+    }
+
+    /**
+     * Holds {@code maxUsd} — the most a call can cost — against the monthly budget
+     * so it cannot be overshot by the call that crosses it, nor by calls running at
+     * the same time on any node. Refused when {@code cost so far + everything held
+     * + maxUsd} would pass the limit; a store that cannot answer refuses too (fail
+     * closed). Gives {@link CostReservationResult#notNeeded()} when reservations
+     * are off, the tenant has no enabled budget, or the amount is zero — then the
+     * ordinary read-only gate is the only check.
+     * <p>
+     * The hold stays until {@link #releaseReservation} — callers hold it until the
+     * turn is charged ({@code TurnCostMeter}) so the spend is never unaccounted for
+     * in between.
+     */
+    public CostReservationResult reserveCost(String tenantId, double maxUsd) {
+        if (!costReservationEnabled || !(maxUsd > 0.0) || !Double.isFinite(maxUsd)) {
+            return CostReservationResult.notNeeded();
+        }
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            countReservation("unavailable");
+            return CostReservationResult.refused(quotaUnreadable(tenantId, "cost"));
+        }
+        if (quota == null || !quota.enabled() || quota.maxMonthlyCostUsd() < 0) {
+            return CostReservationResult.notNeeded();
+        }
+        CostReservationResult result;
+        try {
+            result = quotaStore.tryReserveCost(tenantId, maxUsd, quota.maxMonthlyCostUsd(), reservationTtlMillis());
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Reserving cost for tenant '%s' failed — refusing the call (fail closed)", tenantId);
+            countReservation("unavailable");
+            return CostReservationResult.refused(quotaUnreadable(tenantId, "cost"));
+        }
+        if (result.granted()) {
+            countReservation("reserved");
+            meterRegistry.counter("eddi.tenant.cost.reservation.usd", "direction", "held").increment(maxUsd);
+        } else if (result.check().accountingUnavailable()) {
+            countReservation("unavailable");
+            recordDenial(result.check(), tenantId, "cost");
+        } else {
+            countReservation("refused");
+            recordDenial(result.check(), tenantId, "cost");
+        }
+        return result;
+    }
+
+    /**
+     * Gives back {@code amountUsd} of a hold. Never throws: a release that fails is
+     * counted and the hold falls away at its TTL, which is the safe side (the
+     * budget is under-used for a few minutes, never overspent).
+     */
+    public void releaseReservation(String tenantId, long generation, double amountUsd) {
+        if (!(amountUsd > 0.0) || !Double.isFinite(amountUsd)) {
+            return;
+        }
+        try {
+            quotaStore.releaseCost(tenantId, generation, amountUsd);
+            meterRegistry.counter("eddi.tenant.cost.reservation.usd", "direction", "released").increment(amountUsd);
+        } catch (RuntimeException e) {
+            countReservation("release_failed");
+            LOGGER.warnf("Releasing a $%.6f cost hold for tenant '%s' failed (%s); it expires after %s", amountUsd, tenantId, e.getMessage(),
+                    costReservationTtl);
+        }
+    }
+
+    /**
+     * Reserves {@code maxUsd} for one call and records the hold on the turn's
+     * {@code holds}, so it is shrunk and released with the turn.
+     *
+     * @return the check to act on: allowed (held, or nothing needed), or the
+     *         refusal — over budget, or the store could not answer
+     */
+    public QuotaCheckResult holdForCall(String tenantId, TenantCostHolds holds, double maxUsd) {
+        CostReservationResult result = reserveCost(tenantId, maxUsd);
+        if (result.granted() && holds != null) {
+            holds.add(result.reservation().generation(), result.reservation().amountUsd());
+        } else if (result.granted()) {
+            // No place to record it: give it straight back rather than leak it.
+            releaseReservation(tenantId, result.reservation().generation(), result.reservation().amountUsd());
+        }
+        return result.check();
+    }
+
+    /** Lowers the turn's holds to {@code keepUsd} and gives the rest back. */
+    public void shrinkHolds(String tenantId, TenantCostHolds holds, double keepUsd) {
+        if (holds == null || !costReservationEnabled) {
+            return;
+        }
+        for (TenantCostHolds.Hold hold : holds.shrinkTo(keepUsd)) {
+            releaseReservation(tenantId, hold.generation(), hold.amountUsd());
+        }
+    }
+
+    /** Gives back everything the turn holds — after its cost has been charged. */
+    public void releaseHolds(String tenantId, TenantCostHolds holds) {
+        if (holds == null) {
+            return;
+        }
+        for (TenantCostHolds.Hold hold : holds.drain()) {
+            releaseReservation(tenantId, hold.generation(), hold.amountUsd());
+        }
+    }
+
+    private long reservationTtlMillis() {
+        return costReservationTtl != null && !costReservationTtl.isNegative() && !costReservationTtl.isZero()
+                ? costReservationTtl.toMillis()
+                : Duration.ofMinutes(10).toMillis();
+    }
+
+    private void countReservation(String outcome) {
+        meterRegistry.counter("eddi.tenant.cost.reservation", "outcome", outcome).increment();
     }
 
     /**

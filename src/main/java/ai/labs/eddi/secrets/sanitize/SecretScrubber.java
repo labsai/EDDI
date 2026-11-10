@@ -369,6 +369,12 @@ public class SecretScrubber {
         if (embedded && WHOLE_POINTER.matcher(textValue).matches()) {
             return null;
         }
+        if (!isSecretFieldName(fieldName, parentFieldName) && isEmbeddedMapName(fieldName)) {
+            String map = scrubEmbeddedMap(fieldName, textValue);
+            if (map != null) {
+                return map.equals(textValue) ? null : map;
+            }
+        }
         boolean requestMaterial = embedded || isRequestMaterial(fieldName, parentFieldName);
         // A credential-named field is redacted whole below, whatever its shape. Only
         // request material, and a field that names itself a JSON document
@@ -397,6 +403,62 @@ public class SecretScrubber {
         }
         return isHeaderContainer(parentFieldName)
                 || (parentFieldName != null && REQUEST_MATERIAL_CONTAINERS.contains(normalizeFieldName(parentFieldName)));
+    }
+
+    /**
+     * A field whose string value is a header or query-parameter map serialized as
+     * JSON — an LLM task's {@code customHeaders} / {@code customQueryParams}. The
+     * editor read ({@code ConfigSecretRedactor}) judges each entry as if it sat in
+     * a real map; this scrubber saw one opaque string and kept a credential header
+     * whose value has no recognisable shape.
+     */
+    private static boolean isEmbeddedMapName(String fieldName) {
+        if (fieldName == null) {
+            return false;
+        }
+        String name = normalizeFieldName(fieldName);
+        return name.endsWith("headers") || name.endsWith("queryparams");
+    }
+
+    /**
+     * The map with each entry judged under the map's own name — so a header map's
+     * credential header names, and a query map's credential parameter names
+     * ({@code key}, {@code sig}, …), apply — re-serialised only when something was
+     * redacted. {@code null} when the value is not a JSON object.
+     */
+    private String scrubEmbeddedMap(String mapName, String textValue) {
+        String trimmed = textValue.trim();
+        if (!trimmed.startsWith("{")) {
+            return null;
+        }
+        try {
+            JsonNode original = objectMapper.readTree(trimmed);
+            if (!(original instanceof ObjectNode)) {
+                return null;
+            }
+            ObjectNode scrubbed = original.deepCopy();
+            boolean queryMap = normalizeFieldName(mapName).endsWith("queryparams");
+            Iterator<Map.Entry<String, JsonNode>> entries = scrubbed.properties().iterator();
+            while (entries.hasNext()) {
+                Map.Entry<String, JsonNode> entry = entries.next();
+                if (!entry.getValue().isTextual()) {
+                    scrubNode(entry.getValue(), entry.getKey(), true);
+                    continue;
+                }
+                String value = entry.getValue().asText();
+                String replacement = scrubTextValue(entry.getKey(), mapName, value, true);
+                if (replacement == null && queryMap && !value.isEmpty() && !WHOLE_POINTER.matcher(value).matches()
+                        && ConfigSecretRedactor.isCredentialQueryName(entry.getKey())) {
+                    replacement = REDACTED;
+                }
+                if (replacement != null) {
+                    entry.setValue(new TextNode(replacement));
+                }
+            }
+            return scrubbed.equals(original) ? textValue : objectMapper.writeValueAsString(scrubbed);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -520,7 +582,9 @@ public class SecretScrubber {
             boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
             boolean credential = !decoded.isEmpty() && !pointer
                     && (isSecretFieldName(name, null) || isSecretFieldName(decodedName, null) || UriRedactor.isSensitiveHeaderName(decodedName)
-                            || (queryString && ConfigSecretRedactor.isCredentialQueryName(name)) || redactFreeText(decoded) != null);
+                            || (queryString
+                                    && (ConfigSecretRedactor.isCredentialQueryName(name) || ConfigSecretRedactor.isCredentialQueryName(decodedName)))
+                            || redactFreeText(decoded) != null);
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return out.toString();
@@ -695,6 +759,8 @@ public class SecretScrubber {
                 continue;
             }
             String name = pair.substring(0, eq);
+            // Classified decoded as well: a server reads %73ig as sig.
+            String decodedName = UriRedactor.decodeQueryComponent(name);
             String rawValue = pair.substring(eq + 1);
             String decoded;
             try {
@@ -703,7 +769,7 @@ public class SecretScrubber {
                 decoded = rawValue;
             }
             boolean credential = !decoded.isEmpty() && !WHOLE_POINTER.matcher(decoded).matches()
-                    && ConfigSecretRedactor.isCredentialQueryName(name);
+                    && (ConfigSecretRedactor.isCredentialQueryName(name) || ConfigSecretRedactor.isCredentialQueryName(decodedName));
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return url.substring(0, queryStart) + "?" + out + fragment;

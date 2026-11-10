@@ -76,7 +76,8 @@ class GroupTaskToolsTest {
 
     @Test
     void filedTask_landsOnTheLiveDiscussion_andIsExecutableNextWave() {
-        String reply = tools().addGroupTask("Backfill migration", "The 003 migration never ran in staging.", null, null, null);
+        String reply = tools().addGroupTask("Backfill migration", "The 003 migration never ran in staging.", null, null, null, null, null, null,
+                null);
 
         assertTrue(reply.startsWith("Filed"), reply);
         assertEquals(1, tasks().size());
@@ -93,7 +94,7 @@ class GroupTaskToolsTest {
         // The mutation must land on the instance the loop holds. Writing to a copy
         // loaded from the store would be clobbered by the loop's next whole-document
         // write, which is the entire reason F1's registry exists.
-        tools().addGroupTask("A", "d", null, null, null);
+        tools().addGroupTask("A", "d", null, null, null, null, null, null, null);
 
         assertSame(gc, registry.get(GC_ID).orElseThrow());
         assertEquals(1, registry.get(GC_ID).orElseThrow().getTaskList().size());
@@ -103,7 +104,7 @@ class GroupTaskToolsTest {
     void dependenciesAreNamedBySubject_notById() {
         gc.getTaskList().addTask(new TaskItem("Write draft", "d", 0));
 
-        String reply = tools().addGroupTask("Review draft", "d", List.of("write draft"), null, null);
+        String reply = tools().addGroupTask("Review draft", "d", List.of("write draft"), null, null, null, null, null, null);
 
         assertTrue(reply.startsWith("Filed"), reply);
         TaskItem filed = tasks().get(1);
@@ -120,7 +121,7 @@ class GroupTaskToolsTest {
         // erase the author the moment the wave loop assigned the task — and the
         // discussion cap counts exactly this field, so the cap would silently reset
         // itself as tasks progressed.
-        tools().addGroupTask("Filed work", "d", null, null, null);
+        tools().addGroupTask("Filed work", "d", null, null, null, null, null, null, null);
         String id = tasks().get(0).id();
         // Filed tasks arrive ASSIGNED now, so the loop's next transition is start().
         assertEquals(AGENT, gc.getTaskList().findById(id).createdByAgentId(), "lost on assign");
@@ -151,7 +152,7 @@ class GroupTaskToolsTest {
     void unknownDependency_isRefusedRatherThanDropped() {
         // Filing it anyway would schedule the task immediately — the opposite of
         // what was asked for, and invisible.
-        String reply = tools().addGroupTask("B", "d", List.of("no such task"), null, null);
+        String reply = tools().addGroupTask("B", "d", List.of("no such task"), null, null, null, null, null, null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertTrue(reply.contains("no such task"), reply);
@@ -161,9 +162,9 @@ class GroupTaskToolsTest {
 
     @Test
     void duplicateSubject_isRefused() {
-        tools().addGroupTask("Fix the flake", "d", null, null, null);
+        tools().addGroupTask("Fix the flake", "d", null, null, null, null, null, null, null);
 
-        String reply = tools().addGroupTask("fix the flake", "d again", null, null, null);
+        String reply = tools().addGroupTask("fix the flake", "d again", null, null, null, null, null, null, null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertEquals(1, tasks().size(), "case-insensitive, or the same work gets filed twice with different capitalization");
@@ -176,13 +177,13 @@ class GroupTaskToolsTest {
         // Make A depend on the not-yet-existing B by id after B is filed; the cycle
         // only closes when B depends back on A.
         var tools = tools();
-        tools.addGroupTask("B", "d", List.of("A"), null, null);
+        tools.addGroupTask("B", "d", List.of("A"), null, null, null, null, null, null);
         var b = tasks().get(1);
         gc.getTaskList().updateTask(new TaskItem(a.id(), a.subject(), a.description(), a.status(),
                 a.assignedAgentId(), a.assignedDisplayName(), List.of(b.id()), a.result(), a.verificationNote(),
                 a.verified(), a.priority(), a.createdAt(), a.completedAt(), a.createdByAgentId()));
 
-        String reply = tools.addGroupTask("C", "d", List.of("B"), null, null);
+        String reply = tools.addGroupTask("C", "d", List.of("B"), null, null, null, null, null, null);
 
         // C itself does not close a cycle, but the list already contains one, so the
         // insert must be rolled back rather than left behind.
@@ -193,7 +194,8 @@ class GroupTaskToolsTest {
 
     @Test
     void oversizedSubject_isRefused() {
-        String reply = tools().addGroupTask("x".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1), "d", null, null, null);
+        String reply = tools().addGroupTask("x".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1), "d", null, null, null, null, null, null,
+                null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertTrue(reply.contains("description"), "tell the model where the detail belongs: " + reply);
@@ -202,7 +204,8 @@ class GroupTaskToolsTest {
 
     @Test
     void oversizedDescription_isRefused() {
-        String reply = tools().addGroupTask("A", "x".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1), null, null, null);
+        String reply = tools().addGroupTask("A", "x".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1), null, null, null, null, null, null,
+                null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertTrue(tasks().isEmpty());
@@ -210,8 +213,8 @@ class GroupTaskToolsTest {
 
     @Test
     void blankSubject_isRefused() {
-        assertFalse(tools().addGroupTask("   ", "d", null, null, null).startsWith("Filed"));
-        assertFalse(tools().addGroupTask(null, "d", null, null, null).startsWith("Filed"));
+        assertFalse(tools().addGroupTask("   ", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        assertFalse(tools().addGroupTask(null, "d", null, null, null, null, null, null, null).startsWith("Filed"));
         assertTrue(tasks().isEmpty());
     }
 
@@ -223,9 +226,9 @@ class GroupTaskToolsTest {
     void perTurnCap_stopsAtTheLimit() {
         var tools = tools(new GroupTaskConfig(true, 20, 2));
 
-        assertTrue(tools.addGroupTask("A", "d", null, null, null).startsWith("Filed"));
-        assertTrue(tools.addGroupTask("B", "d", null, null, null).startsWith("Filed"));
-        String third = tools.addGroupTask("C", "d", null, null, null);
+        assertTrue(tools.addGroupTask("A", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        assertTrue(tools.addGroupTask("B", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        String third = tools.addGroupTask("C", "d", null, null, null, null, null, null, null);
 
         assertFalse(third.startsWith("Filed"), third);
         assertTrue(third.contains("this turn"), third);
@@ -235,10 +238,10 @@ class GroupTaskToolsTest {
     @Test
     void perTurnCap_isPerInstance_soANewTurnStartsFresh() {
         var config = new GroupTaskConfig(true, 20, 1);
-        assertTrue(tools(config).addGroupTask("A", "d", null, null, null).startsWith("Filed"));
+        assertTrue(tools(config).addGroupTask("A", "d", null, null, null, null, null, null, null).startsWith("Filed"));
 
         // A new turn rebuilds the tool set, which is what makes the counter per-turn.
-        assertTrue(tools(config).addGroupTask("B", "d", null, null, null).startsWith("Filed"));
+        assertTrue(tools(config).addGroupTask("B", "d", null, null, null, null, null, null, null).startsWith("Filed"));
         assertEquals(2, tasks().size());
     }
 
@@ -247,8 +250,8 @@ class GroupTaskToolsTest {
         // Otherwise one malformed argument silences the rest of the turn.
         var tools = tools(new GroupTaskConfig(true, 20, 1));
 
-        assertFalse(tools.addGroupTask("", "d", null, null, null).startsWith("Filed"));
-        assertTrue(tools.addGroupTask("Real task", "d", null, null, null).startsWith("Filed"));
+        assertFalse(tools.addGroupTask("", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        assertTrue(tools.addGroupTask("Real task", "d", null, null, null, null, null, null, null).startsWith("Filed"));
     }
 
     @Test
@@ -261,9 +264,9 @@ class GroupTaskToolsTest {
         var config = new GroupTaskConfig(true, 2, 10);
         var tools = tools(config);
 
-        assertTrue(tools.addGroupTask("A", "d", null, null, null).startsWith("Filed"));
-        assertTrue(tools.addGroupTask("B", "d", null, null, null).startsWith("Filed"));
-        String third = tools.addGroupTask("C", "d", null, null, null);
+        assertTrue(tools.addGroupTask("A", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        assertTrue(tools.addGroupTask("B", "d", null, null, null, null, null, null, null).startsWith("Filed"));
+        String third = tools.addGroupTask("C", "d", null, null, null, null, null, null, null);
 
         assertFalse(third.startsWith("Filed"), third);
         assertTrue(third.contains("full"), third);
@@ -273,11 +276,11 @@ class GroupTaskToolsTest {
     @Test
     void discussionCap_survivesANewTurn() {
         var config = new GroupTaskConfig(true, 1, 10);
-        assertTrue(tools(config).addGroupTask("A", "d", null, null, null).startsWith("Filed"));
+        assertTrue(tools(config).addGroupTask("A", "d", null, null, null, null, null, null, null).startsWith("Filed"));
 
         // Unlike the per-turn cap, this one is read off the list itself, so a fresh
         // tool instance cannot reset it.
-        assertFalse(tools(config).addGroupTask("B", "d", null, null, null).startsWith("Filed"));
+        assertFalse(tools(config).addGroupTask("B", "d", null, null, null, null, null, null, null).startsWith("Filed"));
     }
 
     // =================================================================
@@ -286,7 +289,7 @@ class GroupTaskToolsTest {
 
     @Test
     void namedRole_filesTheTaskAlreadyAssigned() {
-        String reply = tools().addGroupTask("Review it", "d", null, null, "ROLE:REVIEWER");
+        String reply = tools().addGroupTask("Review it", "d", null, null, "ROLE:REVIEWER", null, null, null, null);
 
         assertTrue(reply.contains("Ben"), reply);
         TaskItem filed = tasks().get(0);
@@ -299,14 +302,14 @@ class GroupTaskToolsTest {
 
     @Test
     void directMemberName_alsoResolves() {
-        tools().addGroupTask("For Ann", "d", null, null, "Ann");
+        tools().addGroupTask("For Ann", "d", null, null, "Ann", null, null, null, null);
 
         assertEquals("agent-a", tasks().get(0).assignedAgentId());
     }
 
     @Test
     void unknownRole_isRefusedWithTheRosterNamed() {
-        String reply = tools().addGroupTask("X", "d", null, null, "ROLE:NOBODY");
+        String reply = tools().addGroupTask("X", "d", null, null, "ROLE:NOBODY", null, null, null, null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertTrue(reply.contains("REVIEWER"), "name the roles that do exist so the retry can succeed: " + reply);
@@ -321,8 +324,8 @@ class GroupTaskToolsTest {
         // PENDING therefore meant it silently never ran — and under TASK-granularity
         // HITL the leftover executable task re-paused the phase until the
         // no-progress guard failed the whole discussion.
-        tools().addGroupTask("A", "d", null, null, null);
-        tools().addGroupTask("B", "d", null, null, "ALL");
+        tools().addGroupTask("A", "d", null, null, null, null, null, null, null);
+        tools().addGroupTask("B", "d", null, null, "ALL", null, null, null, null);
 
         assertTrue(tasks().stream().allMatch(t -> t.status() == TaskStatus.ASSIGNED), "an unowned task never runs");
         assertTrue(tasks().stream().allMatch(t -> t.assignedAgentId() != null));
@@ -337,7 +340,7 @@ class GroupTaskToolsTest {
         // The gate that actually matters. findExecutableTasks() alone returns PENDING
         // unowned tasks too, so asserting only that was the test passing for the
         // wrong reason.
-        tools().addGroupTask("Real work", "d", null, null, null);
+        tools().addGroupTask("Real work", "d", null, null, null, null, null, null, null);
 
         assertTrue(gc.getTaskList().findExecutableTasks().stream()
                 .filter(t -> t.assignedAgentId() != null)
@@ -352,7 +355,7 @@ class GroupTaskToolsTest {
     void unregisteredDiscussion_refusesRatherThanWritingSomewhereElse() {
         registry.unregister(GC_ID);
 
-        String reply = tools().addGroupTask("A", "d", null, null, null);
+        String reply = tools().addGroupTask("A", "d", null, null, null, null, null, null, null);
 
         assertFalse(reply.startsWith("Filed"), reply);
         assertTrue(reply.contains("finished") || reply.contains("paused"), reply);
@@ -361,8 +364,8 @@ class GroupTaskToolsTest {
 
     @Test
     void listGroupTasks_reportsStatusAndBlocking() {
-        tools().addGroupTask("First", "d", null, null, "ROLE:REVIEWER");
-        tools().addGroupTask("Second", "d", List.of("First"), null, null);
+        tools().addGroupTask("First", "d", null, null, "ROLE:REVIEWER", null, null, null, null);
+        tools().addGroupTask("Second", "d", List.of("First"), null, null, null, null, null, null);
 
         String listing = tools().listGroupTasks();
 
@@ -395,7 +398,7 @@ class GroupTaskToolsTest {
                     start.await();
                     // Half the speakers contend for the SAME subject.
                     String subject = n % 2 == 0 ? "shared subject" : "unique-" + n;
-                    if (tools().addGroupTask(subject, "d", null, null, null).startsWith("Filed")) {
+                    if (tools().addGroupTask(subject, "d", null, null, null, null, null, null, null).startsWith("Filed")) {
                         filed.incrementAndGet();
                     }
                 } catch (InterruptedException e) {
@@ -414,4 +417,21 @@ class GroupTaskToolsTest {
                 "exactly one of the four contending calls may win the shared subject");
         assertEquals(5, tasks().size(), "4 unique + 1 shared");
     }
+
+    @Test
+    void aTaskFiledWithBetFieldsIsABet() {
+        String reply = tools().addGroupTask("Launch post", "d", null, null, null, "a post gets replies", "replies", ">= 5", "2026-12-01");
+
+        assertTrue(reply.startsWith("Filed"), reply);
+        assertEquals("replies", tasks().get(0).bet().metric());
+    }
+
+    @Test
+    void aHalfSpecifiedBetFilesNothingAndSaysWhatIsMissing() {
+        String reply = tools().addGroupTask("Launch post", "d", null, null, null, "only a hypothesis", null, null, null);
+
+        assertTrue(reply.contains("reviewDate"), reply);
+        assertEquals(0, tasks().size());
+    }
+
 }

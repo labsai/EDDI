@@ -259,8 +259,7 @@ bucket's count — the `agentVersion` filter matches one version exactly). It ho
 **no** rating write and no export: a review records the caller as the person who
 looked at the feedback, and that judgement stays with a human on the Feedback page;
 the export is a CSV of up to 100,000 rows that no chat answer needs. Operators
-activated before this change get the reads with the upgrade the Manager offers
-(revision 39).
+activated before this change get the reads with the upgrade the Manager offers.
 
 ## Lifetime and privacy
 
