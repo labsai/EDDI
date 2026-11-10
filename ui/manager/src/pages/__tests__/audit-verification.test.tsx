@@ -93,7 +93,7 @@ describe("audit integrity banner", () => {
     await searchConversation();
     const banner = await verdictShown();
     expect(banner.dataset.verdict).toBe("tampered");
-    expect(banner).toHaveTextContent(/do not match/);
+    expect(within(banner).getByTestId("tampered-content")).toBeInTheDocument();
     expect(screen.queryByText("VERIFIED")).not.toBeInTheDocument();
     // The failing entry is marked where it is shown.
     expect(within(screen.getByTestId("audit-entry-audit-2")).getByTestId("entry-verify-invalid")).toBeInTheDocument();
@@ -123,10 +123,10 @@ describe("audit integrity banner", () => {
     // The backend's own definition: the content is intact, the signature was
     // altered or forged. Saying the entry was changed would send an auditor after
     // edited content that does not exist.
-    expect(banner).toHaveTextContent(/1 agent signature\(s\) do not verify/);
-    expect(banner).not.toHaveTextContent(/changed after they were written/);
+    expect(within(banner).getByTestId("tampered-agent-signature")).toBeInTheDocument();
+    expect(within(banner).queryByTestId("tampered-content")).not.toBeInTheDocument();
     const entry = screen.getByTestId("audit-entry-audit-2");
-    expect(within(entry).getByTestId("entry-verify-invalid")).toHaveTextContent("Agent signature does not match");
+    expect(within(entry).getByTestId("entry-verify-invalid").dataset.problem).toBe("AGENT_SIGNATURE_INVALID");
     expect(within(entry).queryByTestId("entry-verify-unproven")).not.toBeInTheDocument();
   });
 
@@ -148,8 +148,8 @@ describe("audit integrity banner", () => {
     );
     await searchConversation();
     const banner = await verdictShown();
-    expect(banner).toHaveTextContent(/1 entry signature\(s\) do not match their content/);
-    expect(banner).toHaveTextContent(/1 agent signature\(s\) do not verify/);
+    expect(within(banner).getByTestId("tampered-content")).toBeInTheDocument();
+    expect(within(banner).getByTestId("tampered-agent-signature")).toBeInTheDocument();
   });
 
   it("reports an agent signature that cannot vouch as unverified, not tampered", async () => {
@@ -172,7 +172,7 @@ describe("audit integrity banner", () => {
     await searchConversation();
     const banner = await verdictShown();
     expect(banner.dataset.verdict).toBe("unverified");
-    expect(banner).toHaveTextContent(/1 entry\(ies\) whose agent signature is missing, revoked or can no longer be checked/);
+    expect(within(banner).getByTestId("unverified-reasons").dataset.reasons).toBe("agent-signature");
     expect(within(screen.getByTestId("audit-entry-audit-2")).getByTestId("entry-verify-unproven")).toBeInTheDocument();
   });
 
