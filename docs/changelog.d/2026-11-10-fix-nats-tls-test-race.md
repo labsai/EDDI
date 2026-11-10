@@ -28,7 +28,9 @@ which is why it passed locally.
   returns, so the listener has always adopted the connection by the time a test
   asserts. The race outcome that used to fail now and then is the one every run
   takes: putting the old `manager.shutdown()` back into the helper fails all
-  three CONNECTED tests every time (checked locally), instead of rarely.
+  three CONNECTED tests every time (checked locally), instead of rarely. If the
+  wait fails, the helper closes the connection itself, since the manager never
+  stored it and `@AfterEach` could not reach it.
 - `presentsTheClientCertificateToABrokerThatRequiresMutualTls` is re-enabled.
 
 `NatsConnectionManager` is unchanged: in production its listener is installed

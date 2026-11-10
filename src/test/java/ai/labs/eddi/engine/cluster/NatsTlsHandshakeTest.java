@@ -158,8 +158,17 @@ class NatsTlsHandshakeTest {
         NatsConnectionManager manager = new NatsConnectionManager(config, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
         managers.add(manager);
         Connection connection = Nats.connect(manager.buildOptions());
-        awaitAdopted(manager);
-        return connection;
+        boolean adopted = false;
+        try {
+            awaitAdopted(manager);
+            adopted = true;
+            return connection;
+        } finally {
+            if (!adopted) {
+                // The manager never stored it, so @AfterEach could not close it.
+                connection.close();
+            }
+        }
     }
 
     /**
