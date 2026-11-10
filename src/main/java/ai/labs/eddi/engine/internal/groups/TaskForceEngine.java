@@ -115,10 +115,14 @@ public class TaskForceEngine {
 
     /**
      * The task records as {@code readerId} may be shown them. {@code config}
-     * decides which assignees are human; {@code null} treats none as human.
+     * decides which assignees are human; {@code null} treats none as human. A HUMAN
+     * reader has no peer-verification setting, so it is shown them as stored: its
+     * id is never looked up as an agent or a nested group, where a store failure
+     * would read as an unknown requirement and withhold its task.
      */
     private TaskRecordView taskRecords(String readerId, GroupConversation gc, AgentGroupConfiguration config) {
-        return TaskRecordView.of(GroupSigningGuard.viewOf(signingGuard, readerId, gc), readerId, gc, config);
+        GroupSigningGuard guard = GroupHumanTasks.isHumanAssignee(config, readerId) ? null : signingGuard;
+        return TaskRecordView.of(GroupSigningGuard.viewOf(guard, readerId, gc), readerId, gc, config);
     }
 
     /**
