@@ -9,7 +9,6 @@ import io.nats.client.Connection;
 import io.nats.client.Nats;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -64,6 +63,7 @@ class NatsTlsHandshakeTest {
     private static Path serverTrust;
 
     private final List<FakeNatsServer> servers = new CopyOnWriteArrayList<>();
+    private final List<NatsConnectionManager> managers = new CopyOnWriteArrayList<>();
 
     @BeforeAll
     static void certificates() throws Exception {
@@ -76,8 +76,14 @@ class NatsTlsHandshakeTest {
         serverTrust = trustStore("server-trust", client);
     }
 
+    /**
+     * Managers go first, after each test has asserted on and closed its connection:
+     * {@link NatsConnectionManager#shutdown()} closes the connection its listener
+     * adopted, so shutting one down any earlier closes the connection under test.
+     */
     @AfterEach
-    void stopServers() {
+    void stopManagersThenServers() {
+        managers.forEach(NatsConnectionManager::shutdown);
         servers.forEach(FakeNatsServer::close);
     }
 
@@ -99,7 +105,6 @@ class NatsTlsHandshakeTest {
     }
 
     @Test
-    @Disabled("Quarantined for 6.7.0: on the Linux CI runner the connection intermittently comes back CLOSED while it passes locally and the sibling mutual-TLS test (JVM default key store) passes reliably; client-certificate presentation stays covered by presentsTheJvmDefaultClientCertificateWhenNoEddiKeyStoreIsConfigured and NatsConnectionSecurityIT. Root cause to be found in 6.8.")
     void presentsTheClientCertificateToABrokerThatRequiresMutualTls() throws Exception {
         FakeNatsServer server = start(goodServer, true);
 
@@ -151,10 +156,27 @@ class NatsTlsHandshakeTest {
         }
         config.natsConnectionTimeout = Duration.ofSeconds(3);
         NatsConnectionManager manager = new NatsConnectionManager(config, new NodeIdentity("node-a", "boot0001"), new SimpleMeterRegistry());
-        try {
-            return Nats.connect(manager.buildOptions());
-        } finally {
-            manager.shutdown();
+        managers.add(manager);
+        Connection connection = Nats.connect(manager.buildOptions());
+        awaitAdopted(manager);
+        return connection;
+    }
+
+    /**
+     * Waits until the manager's own connection listener has received CONNECTED and
+     * adopted the connection. jnats delivers that event on its executor thread,
+     * possibly after {@code Nats.connect} has returned; waiting for it here means
+     * the manager always holds the connection by the time a test asserts on it, so
+     * a manager shut down too early fails every time rather than now and then (the
+     * helper used to shut it down in a {@code finally}, which closed the connection
+     * whenever the event won the race — CLOSED instead of CONNECTED on slow
+     * runners).
+     */
+    private static void awaitAdopted(NatsConnectionManager manager) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!manager.isConnected()) {
+            assertTrue(System.nanoTime() < deadline, "the manager's listener never adopted the connection: " + manager.status());
+            Thread.sleep(10);
         }
     }
 
