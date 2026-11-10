@@ -81,6 +81,7 @@ const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "Chan
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
 const FeedbackPage = lazyPage(() => import("@/pages/feedback"), "FeedbackPage");
 const AlertsPage = lazyPage(() => import("@/pages/alerts"), "AlertsPage");
+const HealthOverviewPage = lazyPage(() => import("@/pages/health-overview"), "HealthOverviewPage");
 const OperatorPage = lazyPage(() => import("@/pages/operator"), "OperatorPage");
 const UpdatesPage = lazyPage(() => import("@/pages/updates"), "UpdatesPage");
 
@@ -207,6 +208,7 @@ export function App() {
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
             <Route path="/manage/feedback" element={<FeedbackPage />} />
             <Route path="/manage/alerts" element={<AlertsPage />} />
+            <Route path="/manage/health" element={<HealthOverviewPage />} />
             {/* Hidden under a brand unless it opts in (white-label plan, R5).
                 A literal path, not UPDATES_PATH: route-integrity.test.ts reads
                 the route table as text. brand.test.ts pins the two equal. */}

@@ -5,6 +5,7 @@ import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
+import { AgentHealthPanel } from "@/components/health/agent-health-panel";
 import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { useBrand } from "@/hooks/use-brand";
@@ -1124,6 +1125,7 @@ export function AgentDetailPage() {
 
       {/* Golden conversations: runs the SAVED version, so it sits outside the
           draft fieldset — nothing here edits the agent document. */}
+      <AgentHealthPanel key={`health-${id}`} agentId={id!} latestVersion={latestVersion} canEdit={access.canEdit} />
       <AgentTestsSection key={id} agentId={id!} agentVersion={resolvedVersion} />
 
       {/* Floating save bar — the header's controls scroll away on a page this
