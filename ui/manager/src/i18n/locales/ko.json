@@ -4298,7 +4298,9 @@
       "title": "버전 비교",
       "older": "이전",
       "newer": "최신",
-      "same": "서로 다른 두 버전을 선택하세요."
+      "same": "서로 다른 두 버전을 선택하세요.",
+      "olderWindow": "이전 버전의 마지막",
+      "needTwo": "이 에이전트에는 버전이 하나뿐이라 아직 비교할 것이 없습니다."
     },
     "profile": {
       "open": "프로필",
@@ -4321,14 +4323,18 @@
       "title": "상태 프로필",
       "noThresholds": "임계값 없음: 프리셋의 기본값이 적용됩니다.",
       "thresholdUnits": "비율은 퍼센트로, 다른 지표는 각자의 단위(달러, 밀리초)로 입력합니다.",
-      "overrideMeasure": "지표",
       "overrideUntil": "무시할 기한",
       "overrideReason": "이유",
       "overrideReasonPlaceholder": "이 지표를 무시하는 이유는 무엇인가요?",
       "removeOverride": "예외 제거",
       "addOverride": "예외 추가",
       "green": "{{measure}}: 초록 임계값",
-      "red": "{{measure}}: 빨강 임계값"
+      "red": "{{measure}}: 빨강 임계값",
+      "overrideTarget": "지표 또는 섹션",
+      "overrideSections": "섹션",
+      "overrideMeasures": "지표",
+      "badNumber": "숫자가 아닌 필드가 있습니다. 수정한 뒤 다시 저장하세요.",
+      "otherProblems": "기타 문제"
     },
     "reports": {
       "open": "보고서 링크",
@@ -4345,9 +4351,11 @@
       "existing": "활성 링크",
       "none": "아직 링크가 없습니다.",
       "revoke": "취소",
-      "days": "{{n}}일",
       "expiresOn": "{{date}} 만료",
-      "revokeLabel": "{{date}}에 만료되는 링크 취소"
+      "revokeLabel": "{{date}}에 만료되는 링크 취소",
+      "noUrl": "링크는 생성되었지만 서버가 반환하지 않았습니다. 아래에서 취소하고 새로 만드세요.",
+      "revokeConfirm": "이 링크를 영구적으로 취소할까요?",
+      "revokeYes": "예, 취소"
     },
     "forbidden": "이 에이전트의 상태를 볼 권한이 없습니다.",
     "allAgents": "모든 에이전트",
@@ -4363,7 +4371,8 @@
     "export": {
       "label": "내보내기",
       "json": "JSON 내보내기",
-      "csv": "CSV 내보내기"
+      "csv": "CSV 내보내기",
+      "note": "내보내기는 선택한 기간만 포함하며 버전이나 출처 필터는 적용되지 않습니다."
     },
     "filters": {
       "period": "기간",
@@ -4371,10 +4380,8 @@
       "allVersions": "모든 버전",
       "originsDefault": "출처: 기본값",
       "originsHint": "선택하지 않으면 프리셋의 대화형 출처를 사용합니다. 에이전트 테스트는 직접 선택하지 않는 한 항상 제외됩니다.",
-      "originsCount": "출처: {{n}}개 선택됨",
-      "days7d": "7일",
-      "days30d": "30일",
-      "days90d": "90일"
+      "originsCount_other": "출처: {{count}}개 선택됨",
+      "originsCount_one": "출처: {{count}}개 선택됨"
     },
     "delta": {
       "better": "개선",
@@ -4398,8 +4405,7 @@
       "empty": "아직 후보가 없습니다. 식별 가능한 동작으로 끝나는 세션이 너무 적습니다.",
       "howTitle": "매핑 적용 방법",
       "how": "에이전트 설정의 healthConfig.outcomes에 각 동작을 추가하세요. 예: \"order_confirmed\": \"RESOLVED\". 그런 다음 저장하고 새 버전을 배포합니다.",
-      "openConfig": "에이전트 설정 열기",
-      "sessions": "세션 {{n}}개"
+      "openConfig": "Agent Studio에서 에이전트 열기"
     },
     "resolution": {
       "noSplit": "확인됨, 에이전트 종료, 무응답으로의 구분은 아직 제공되지 않습니다.",
@@ -4409,7 +4415,11 @@
       "silence": "무응답",
       "confirmedHint": "결과 이벤트나 매핑된 동작이 문제가 해결되었음을 알렸습니다.",
       "agentClosedHint": "에이전트가 성공한 턴 이후 대화를 종료했습니다.",
-      "silenceHint": "성공한 턴 이후 사용자가 더 이상 글을 쓰지 않았습니다."
+      "silenceHint": "성공한 턴 이후 사용자가 더 이상 글을 쓰지 않았습니다.",
+      "selfReported": "자체 보고",
+      "selfReportedHint": "에이전트 자신의 모델이 문제가 해결되었다고 보고했습니다. 근거가 약합니다.",
+      "shareNote": "해결된 세션의 출처",
+      "whatMeans": "이 분류는 무슨 뜻인가요?"
     },
     "restricted": "이 섹션에 접근할 권한이 없습니다.",
     "noMeasures": "이 섹션에는 아직 지표가 없습니다.",
@@ -4432,7 +4442,8 @@
       "provisional": "잠정",
       "open": "열기",
       "more": "다음 페이지",
-      "evidence": "근거: {{list}}"
+      "evidence": "근거: {{list}}",
+      "previous": "이전 페이지"
     },
     "noTrend": "추세를 보여 줄 만큼 데이터가 있는 날이 충분하지 않습니다.",
     "sparklineLabel": "기간 중 {{label}}, {{min}}에서 {{max}}까지",
@@ -4446,11 +4457,12 @@
       "incidentTitle": "플랫폼 장애가 여러 에이전트에 영향을 주었습니다",
       "incidentBody": "이 실패는 모델 제공자나 플랫폼에서 비롯된 것이며 에이전트 설정 때문이 아니므로 에이전트의 실패로 집계하지 않습니다.",
       "empty": "일치하는 에이전트가 없습니다.",
-      "sessions": "세션 {{n}}개",
-      "incident": "{{failureClass}}: 에이전트 {{agents}}개, {{from}} ~ {{to}}",
       "sortAttention": "시급한 것 먼저",
       "sortName": "이름",
-      "sortTraffic": "트래픽"
+      "sortTraffic": "트래픽",
+      "incident_other": "{{failureClass}}: 에이전트 {{count}}개, {{from}} ~ {{to}}",
+      "loadMore": "더 보기",
+      "incident_one": "{{failureClass}}: 에이전트 {{count}}개, {{from}} ~ {{to}}"
     },
     "measures": {
       "agentFailureRate": "에이전트로 인한 실패",
@@ -4503,7 +4515,54 @@
       "deflected": "분산 처리된 세션",
       "confirmed": "해결이 확인된 세션",
       "agentClosed": "에이전트가 종료한 세션",
-      "silence": "무응답으로 해결된 것으로 간주한 세션"
+      "silence": "무응답으로 해결된 것으로 간주한 세션",
+      "selfReported": "에이전트가 해결되었다고 보고한 세션"
+    },
+    "count": {
+      "sessions_other": "세션 {{count}}개",
+      "sessions_one": "세션 {{count}}개"
+    },
+    "unit": {
+      "pp": "%p"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "해결됨",
+        "ASSUMED_RESOLVED": "해결된 것으로 간주",
+        "ESCALATED": "에스컬레이션됨",
+        "ABANDONED": "이탈",
+        "FAILED": "실패",
+        "DEFLECTED": "분산 처리됨",
+        "ENDED_QUIETLY": "조용히 종료",
+        "OPEN": "진행 중"
+      },
+      "evidence": {
+        "external_event": "외부 이벤트",
+        "conversation_id_event": "대화별 이벤트",
+        "agent_action": "에이전트 동작",
+        "agent_closed": "에이전트 종료",
+        "silence": "무응답",
+        "self_reported": "자체 보고",
+        "structural": "구조적",
+        "inferred": "추론",
+        "judged": "판정"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "이메일",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "스케줄",
+        "a2a": "A2A",
+        "group_member": "그룹 구성원",
+        "delegated": "위임됨",
+        "agent_test": "에이전트 테스트"
+      }
+    },
+    "markers": {
+      "title": "이 기간의 변경 사항"
     }
   },
   "hitl": {

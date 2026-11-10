@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
-import type { HealthProfile, MeasureUnit, ProfileOverride, ProfileViolation } from "@/lib/api/health";
+import { SECTION_IDS, type HealthProfile, type MeasureUnit, type ProfileOverride, type ProfileViolation } from "./api";
 import { Button, cn } from "./deps";
+import { measureLabel as labelOf, sectionTitle } from "./format";
 import { fromInput, inputClass, toInput, violationsAt } from "./profile-utils";
 
 export function Violations({ violations, path }: { violations: ProfileViolation[]; path: string }) {
@@ -14,6 +15,46 @@ export function Violations({ violations, path }: { violations: ProfileViolation[
         <li key={`${v.path}-${v.message}`}>{v.message}</li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * A number the person types. The text is kept exactly as typed — "0." stays
+ * "0.", a lone "-" stays — and parsed afterwards; echoing the parsed number back
+ * on every keystroke is what used to swallow the decimal point. The parent gets
+ * the parsed value (`undefined` when empty, `NaN` when it is not a number).
+ */
+export function NumberField({
+  value,
+  unit,
+  onValue,
+  label,
+  invalid,
+  testId,
+}: {
+  value: number | undefined;
+  unit: MeasureUnit | undefined;
+  onValue: (v: number | undefined) => void;
+  label: string;
+  invalid?: boolean;
+  testId?: string;
+}) {
+  const [text, setText] = useState(() => toInput(value, unit));
+  const parsed = fromInput(text, unit);
+  const bad = Number.isNaN(parsed);
+  return (
+    <input
+      aria-label={label}
+      aria-invalid={bad || invalid ? true : undefined}
+      data-testid={testId}
+      className={cn(inputClass, (bad || invalid) && "border-destructive")}
+      inputMode="decimal"
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onValue(fromInput(e.target.value, unit));
+      }}
+    />
   );
 }
 
@@ -32,8 +73,8 @@ export function ThresholdRows({
 }) {
   const { t } = useTranslation();
   const ids = Object.keys(profile.thresholds);
-  const set = (id: string, side: "green" | "red", text: string) => {
-    const next = { ...profile.thresholds[id], [side]: fromInput(text, units[id]) };
+  const set = (id: string, side: "green" | "red", v: number | undefined) => {
+    const next = { ...profile.thresholds[id], [side]: v };
     onChange({ ...profile, thresholds: { ...profile.thresholds, [id]: next } });
   };
   if (ids.length === 0) {
@@ -41,28 +82,31 @@ export function ThresholdRows({
   }
   return (
     <div className="space-y-2">
-      {ids.map((id) => (
-        <div key={id} data-testid={`health-threshold-${id}`}>
-          <div className="grid grid-cols-[1fr_6rem_6rem] items-center gap-2 text-xs">
-            <span className="truncate font-medium">{labels[id] ?? id}</span>
-            <input
-              aria-label={t("health.profile.green", { measure: labels[id] ?? id, defaultValue: "{{measure}}: green threshold" })}
-              className={cn(inputClass, violationsAt(violations, `thresholds.${id}.green`).length > 0 && "border-destructive")}
-              inputMode="decimal"
-              value={toInput(profile.thresholds[id]?.green, units[id])}
-              onChange={(e) => set(id, "green", e.target.value)}
-            />
-            <input
-              aria-label={t("health.profile.red", { measure: labels[id] ?? id, defaultValue: "{{measure}}: red threshold" })}
-              className={cn(inputClass, violationsAt(violations, `thresholds.${id}.red`).length > 0 && "border-destructive")}
-              inputMode="decimal"
-              value={toInput(profile.thresholds[id]?.red, units[id])}
-              onChange={(e) => set(id, "red", e.target.value)}
-            />
+      {ids.map((id) => {
+        const name = labels[id] ?? id;
+        return (
+          <div key={id} data-testid={`health-threshold-${id}`}>
+            <div className="grid grid-cols-[1fr_6rem_6rem] items-center gap-2 text-xs">
+              <span className="truncate font-medium">{name}</span>
+              <NumberField
+                label={t("health.profile.green", { measure: name, defaultValue: "{{measure}}: green threshold" })}
+                value={profile.thresholds[id]?.green}
+                unit={units[id]}
+                invalid={violationsAt(violations, `thresholds.${id}.green`).length > 0}
+                onValue={(v) => set(id, "green", v)}
+              />
+              <NumberField
+                label={t("health.profile.red", { measure: name, defaultValue: "{{measure}}: red threshold" })}
+                value={profile.thresholds[id]?.red}
+                unit={units[id]}
+                invalid={violationsAt(violations, `thresholds.${id}.red`).length > 0}
+                onValue={(v) => set(id, "red", v)}
+              />
+            </div>
+            <Violations violations={violations} path={`thresholds.${id}`} />
           </div>
-          <Violations violations={violations} path={`thresholds.${id}`} />
-        </div>
-      ))}
+        );
+      })}
       <p className="text-xs text-muted-foreground">
         {t("health.profile.thresholdUnits", "Ratios are entered in percent; other measures in their own unit (dollars, milliseconds).")}
       </p>
@@ -70,15 +114,18 @@ export function ThresholdRows({
   );
 }
 
+/** An override can silence one measure or a whole section. */
 export function OverrideRows({
   overrides,
   onChange,
   measureIds,
+  labels,
   violations,
 }: {
   overrides: ProfileOverride[];
   onChange: (next: ProfileOverride[]) => void;
   measureIds: string[];
+  labels: Record<string, string>;
   violations: ProfileViolation[];
 }) {
   const { t } = useTranslation();
@@ -89,15 +136,22 @@ export function OverrideRows({
         <div key={i} className="rounded-lg border border-border p-2" data-testid="health-override">
           <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
             <select
-              aria-label={t("health.profile.overrideMeasure", "Measure")}
+              aria-label={t("health.profile.overrideTarget", "Measure or section")}
               className={inputClass}
               value={o.measure}
               onChange={(e) => patch(i, { measure: e.target.value })}
             >
               <option value="">—</option>
-              {[...new Set([...measureIds, o.measure].filter(Boolean))].map((id) => (
-                <option key={id} value={id}>{id}</option>
-              ))}
+              <optgroup label={t("health.profile.overrideSections", "Sections")}>
+                {SECTION_IDS.map((id) => (
+                  <option key={id} value={id}>{sectionTitle(t, id)}</option>
+                ))}
+              </optgroup>
+              <optgroup label={t("health.profile.overrideMeasures", "Measures")}>
+                {[...new Set([...measureIds, o.measure])].filter((id) => id && !SECTION_IDS.includes(id as never)).map((id) => (
+                  <option key={id} value={id}>{labels[id] ?? labelOf(t, { id, label: id })}</option>
+                ))}
+              </optgroup>
             </select>
             <input
               type="date"
@@ -144,10 +198,10 @@ export function OverrideRows({
 export function Field({ label, children, violations, path }: { label: string; children: ReactNode; violations: ProfileViolation[]; path: string }) {
   return (
     <div>
-      <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
+      <div className="flex flex-col gap-1 text-xs font-medium text-foreground">
         {label}
         {children}
-      </label>
+      </div>
       <Violations violations={violations} path={path} />
     </div>
   );

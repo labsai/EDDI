@@ -4298,7 +4298,9 @@
       "title": "比较版本",
       "older": "较旧",
       "newer": "较新",
-      "same": "请选择两个不同的版本。"
+      "same": "请选择两个不同的版本。",
+      "olderWindow": "较旧版本的最后",
+      "needTwo": "此智能体只有一个版本，暂时没有可比较的内容。"
     },
     "profile": {
       "open": "配置文件",
@@ -4321,14 +4323,18 @@
       "title": "健康度配置",
       "noThresholds": "没有阈值：使用预设的默认值。",
       "thresholdUnits": "比率以百分比输入；其他指标使用各自的单位（美元、毫秒）。",
-      "overrideMeasure": "指标",
       "overrideUntil": "忽略至",
       "overrideReason": "原因",
       "overrideReasonPlaceholder": "为什么忽略此指标？",
       "removeOverride": "移除例外",
       "addOverride": "添加例外",
       "green": "{{measure}}：绿色阈值",
-      "red": "{{measure}}：红色阈值"
+      "red": "{{measure}}：红色阈值",
+      "overrideTarget": "指标或部分",
+      "overrideSections": "部分",
+      "overrideMeasures": "指标",
+      "badNumber": "有些字段不是数字。请修正后再保存。",
+      "otherProblems": "其他问题"
     },
     "reports": {
       "open": "报告链接",
@@ -4345,9 +4351,11 @@
       "existing": "有效链接",
       "none": "还没有链接。",
       "revoke": "撤销",
-      "days": "{{n}} 天",
       "expiresOn": "{{date}} 到期",
-      "revokeLabel": "撤销 {{date}} 到期的链接"
+      "revokeLabel": "撤销 {{date}} 到期的链接",
+      "noUrl": "链接已创建，但服务器没有返回它。请在下方撤销并重新创建。",
+      "revokeConfirm": "确定永久撤销此链接吗？",
+      "revokeYes": "是，撤销"
     },
     "forbidden": "您无权查看此智能体的健康度。",
     "allAgents": "所有智能体",
@@ -4363,7 +4371,8 @@
     "export": {
       "label": "导出",
       "json": "导出 JSON",
-      "csv": "导出 CSV"
+      "csv": "导出 CSV",
+      "note": "导出仅包含所选时间段，不含版本或来源筛选。"
     },
     "filters": {
       "period": "时间段",
@@ -4371,10 +4380,8 @@
       "allVersions": "所有版本",
       "originsDefault": "来源：默认",
       "originsHint": "未选择时使用预设的交互式来源。除非特意选择，否则始终排除智能体测试。",
-      "originsCount": "来源：已选 {{n}} 个",
-      "days7d": "7 天",
-      "days30d": "30 天",
-      "days90d": "90 天"
+      "originsCount_other": "来源：已选 {{count}} 个",
+      "originsCount_one": "来源：已选 {{count}} 个"
     },
     "delta": {
       "better": "更好",
@@ -4398,8 +4405,7 @@
       "empty": "暂无候选：以可识别操作结束的会话太少。",
       "howTitle": "如何应用映射",
       "how": "在智能体配置的 healthConfig.outcomes 下添加每个操作，例如 \"order_confirmed\": \"RESOLVED\"，然后保存并部署新版本。",
-      "openConfig": "打开智能体配置",
-      "sessions": "{{n}} 个会话"
+      "openConfig": "在 Agent Studio 中打开此智能体"
     },
     "resolution": {
       "noSplit": "暂时无法按已确认、智能体结束和沉默进行拆分。",
@@ -4409,7 +4415,11 @@
       "silence": "沉默",
       "confirmedHint": "结果事件或已映射的操作表明问题已解决。",
       "agentClosedHint": "智能体在一次成功的回合后结束了对话。",
-      "silenceHint": "用户在一次成功的回合后不再回复。"
+      "silenceHint": "用户在一次成功的回合后不再回复。",
+      "selfReported": "自行报告",
+      "selfReportedHint": "智能体自己的模型报告问题已解决。证据较弱。",
+      "shareNote": "已解决会话的来源",
+      "whatMeans": "这些分类是什么意思？"
     },
     "restricted": "您无权访问此部分。",
     "noMeasures": "此部分暂无指标。",
@@ -4432,7 +4442,8 @@
       "provisional": "暂定",
       "open": "打开",
       "more": "下一页",
-      "evidence": "依据：{{list}}"
+      "evidence": "依据：{{list}}",
+      "previous": "上一页"
     },
     "noTrend": "有数据的天数不足，无法显示趋势。",
     "sparklineLabel": "{{label}}在该时间段内，从 {{min}} 到 {{max}}",
@@ -4446,11 +4457,12 @@
       "incidentTitle": "一次平台事件影响了多个智能体",
       "incidentBody": "这些故障来自模型提供方或平台，而不是智能体的配置，因此不计入智能体的故障。",
       "empty": "没有匹配的智能体。",
-      "sessions": "{{n}} 个会话",
-      "incident": "{{failureClass}}：{{agents}} 个智能体，{{from}} 至 {{to}}",
       "sortAttention": "最需要处理的优先",
       "sortName": "名称",
-      "sortTraffic": "流量"
+      "sortTraffic": "流量",
+      "incident_other": "{{failureClass}}：{{count}} 个智能体，{{from}} 至 {{to}}",
+      "loadMore": "加载更多",
+      "incident_one": "{{failureClass}}：{{count}} 个智能体，{{from}} 至 {{to}}"
     },
     "measures": {
       "agentFailureRate": "智能体导致的故障",
@@ -4503,7 +4515,54 @@
       "deflected": "已分流的会话",
       "confirmed": "已确认解决的会话",
       "agentClosed": "由智能体结束的会话",
-      "silence": "因沉默而视为已解决的会话"
+      "silence": "因沉默而视为已解决的会话",
+      "selfReported": "智能体报告为已解决的会话"
+    },
+    "count": {
+      "sessions_other": "{{count}} 个会话",
+      "sessions_one": "{{count}} 个会话"
+    },
+    "unit": {
+      "pp": "个百分点"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "已解决",
+        "ASSUMED_RESOLVED": "推定已解决",
+        "ESCALATED": "已升级",
+        "ABANDONED": "已放弃",
+        "FAILED": "失败",
+        "DEFLECTED": "已分流",
+        "ENDED_QUIETLY": "无声结束",
+        "OPEN": "进行中"
+      },
+      "evidence": {
+        "external_event": "外部事件",
+        "conversation_id_event": "按对话的事件",
+        "agent_action": "智能体操作",
+        "agent_closed": "智能体结束",
+        "silence": "沉默",
+        "self_reported": "自行报告",
+        "structural": "结构性",
+        "inferred": "推断",
+        "judged": "评判"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "电子邮件",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "定时任务",
+        "a2a": "A2A",
+        "group_member": "群组成员",
+        "delegated": "委托",
+        "agent_test": "智能体测试"
+      }
+    },
+    "markers": {
+      "title": "此时间段内的变更"
     }
   },
   "hitl": {

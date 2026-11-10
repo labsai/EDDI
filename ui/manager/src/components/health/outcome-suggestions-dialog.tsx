@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Settings } from "lucide-react";
-import { useOutcomeSuggestions } from "@/hooks/use-agent-health";
+import { useOutcomeSuggestions } from "./use-agent-health";
 import { AccessibleDialog, Badge, Skeleton, getErrorMessage } from "./deps";
+import { enumLabel } from "./format";
 
 /**
  * Which of the agent's actions end sessions, with the outcome each probably
@@ -42,9 +43,9 @@ export function OutcomeSuggestionsDialog({ open, onClose, agentId }: { open: boo
                 <div className="flex flex-wrap items-center gap-2">
                   <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.action}</code>
                   <span aria-hidden="true">→</span>
-                  <Badge variant="secondary">{s.suggested}</Badge>
+                  <Badge variant="secondary">{enumLabel(t, "outcome", s.suggested)}</Badge>
                   <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-                    {t("health.suggestions.sessions", { n: s.sessionsEndingWith, defaultValue: "{{n}} sessions" })}
+                    {t("health.count.sessions", { count: s.sessionsEndingWith, defaultValue: "{{count}} sessions" })}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{s.reason}</p>
@@ -60,9 +61,9 @@ export function OutcomeSuggestionsDialog({ open, onClose, agentId }: { open: boo
               "Add each action under healthConfig.outcomes in the agent's configuration, for example \"order_confirmed\": \"RESOLVED\", then save and deploy the new version.",
             )}
           </p>
-          <Link to={`/manage/agentview/${encodeURIComponent(agentId)}`} onClick={onClose} className="mt-2 inline-flex items-center gap-1 text-primary hover:underline">
+          <Link to={`/manage/studio/${encodeURIComponent(agentId)}`} onClick={onClose} className="mt-2 inline-flex items-center gap-1 text-brand-700 hover:underline dark:text-brand-300" data-testid="health-suggestions-config-link">
             <Settings className="h-3 w-3" aria-hidden="true" />
-            {t("health.suggestions.openConfig", "Open the agent's configuration")}
+            {t("health.suggestions.openConfig", "Open the agent in Agent Studio")}
           </Link>
         </div>
       </div>

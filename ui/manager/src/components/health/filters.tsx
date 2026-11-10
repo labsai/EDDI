@@ -1,17 +1,14 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "@/lib/api/health";
+import { HEALTH_ORIGINS, HEALTH_PERIODS, type HealthPeriod } from "./api";
 import { cn } from "./deps";
-import { versionOptions } from "./format";
+import { enumLabel, formatDays, periodDays, selectClass, versionOptions } from "./format";
 
 export interface HealthFilterState {
   period: HealthPeriod;
   version: number | null;
   origins: string[];
 }
-
-const selectClass =
-  "h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Period (7/30/90 days), version and origin filters of the health view. */
 export function HealthFilters({
@@ -25,11 +22,33 @@ export function HealthFilters({
 }) {
   const { t } = useTranslation();
   const versionId = useId();
+  const originsRef = useRef<HTMLDetailsElement>(null);
   const toggleOrigin = (origin: string) =>
     onChange({
       ...value,
       origins: value.origins.includes(origin) ? value.origins.filter((o) => o !== origin) : [...value.origins, origin],
     });
+
+  // The origin list is a popover: it closes on a click elsewhere and on Escape.
+  useEffect(() => {
+    const close = (e: Event) => {
+      const el = originsRef.current;
+      if (!el?.open) return;
+      if (e instanceof KeyboardEvent) {
+        if (e.key !== "Escape") return;
+        el.open = false;
+        el.querySelector("summary")?.focus();
+      } else if (!el.contains(e.target as Node)) {
+        el.open = false;
+      }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
 
   return (
     <div className="flex flex-wrap items-center gap-3" data-testid="health-filters">
@@ -46,7 +65,7 @@ export function HealthFilters({
             )}
             data-testid={`health-period-${p}`}
           >
-            {t(`health.filters.days${p}`, `${p.replace("d", "")} days`)}
+            {formatDays(periodDays(p))}
           </button>
         ))}
       </div>
@@ -69,18 +88,18 @@ export function HealthFilters({
         </select>
       </label>
 
-      <details className="relative text-xs">
+      <details ref={originsRef} className="relative text-xs">
         <summary className="cursor-pointer rounded-lg border border-input px-2 py-1.5 text-muted-foreground hover:bg-secondary" data-testid="health-origin-filter">
           {value.origins.length === 0
             ? t("health.filters.originsDefault", "Origins: default")
-            : t("health.filters.originsCount", { n: value.origins.length, defaultValue: "Origins: {{n}} selected" })}
+            : t("health.filters.originsCount", { count: value.origins.length, defaultValue: "Origins: {{count}} selected" })}
         </summary>
-        <ul className="absolute z-10 mt-1 max-h-64 w-48 overflow-auto rounded-lg border border-border bg-popover p-2 shadow-lg">
+        <ul className="absolute z-10 mt-1 max-h-64 w-52 overflow-auto rounded-lg border border-border bg-popover p-2 shadow-lg">
           {HEALTH_ORIGINS.map((o) => (
             <li key={o}>
               <label className="flex items-center gap-2 py-0.5">
-                <input type="checkbox" checked={value.origins.includes(o)} onChange={() => toggleOrigin(o)} />
-                <span>{o}</span>
+                <input type="checkbox" checked={value.origins.includes(o)} onChange={() => toggleOrigin(o)} data-testid={`health-origin-${o}`} />
+                <span>{enumLabel(t, "origin", o)}</span>
               </label>
             </li>
           ))}

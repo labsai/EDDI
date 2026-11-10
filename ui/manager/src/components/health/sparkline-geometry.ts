@@ -1,4 +1,4 @@
-import type { HealthMarker, SeriesPoint } from "@/lib/api/health";
+import type { HealthMarker, SeriesPoint } from "./api";
 
 export const SPARK_W = 160;
 export const SPARK_H = 36;

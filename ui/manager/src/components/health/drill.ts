@@ -11,7 +11,8 @@ export interface DrillFilter {
 const BY_MEASURE: Record<string, DrillFilter> = {
   resolutionRate: { outcome: ["RESOLVED", "ASSUMED_RESOLVED"], title: ["health.drill.resolved", "Resolved sessions"] },
   escalationRate: { outcome: ["ESCALATED"], title: ["health.drill.escalated", "Escalated sessions"] },
-  abandonmentRate: { outcome: ["ABANDONED", "ENDED_QUIETLY"], title: ["health.drill.abandoned", "Abandoned sessions"] },
+  // ENDED_QUIETLY is its own outcome (not a failure to resolve), so it is not listed here.
+  abandonmentRate: { outcome: ["ABANDONED"], title: ["health.drill.abandoned", "Abandoned sessions"] },
   deflectionRate: { outcome: ["DEFLECTED"], title: ["health.drill.deflected", "Deflected sessions"] },
 };
 
@@ -21,10 +22,16 @@ export function drillForMeasure(measureId: string): DrillFilter | null {
 }
 
 const BY_RESOLUTION: Record<ResolutionKey, DrillFilter> = {
+  // External events and explicit agent actions only; the model's own report is separate.
   confirmed: {
     outcome: ["RESOLVED", "ASSUMED_RESOLVED"],
-    evidence: ["external_event", "conversation_id_event", "agent_action", "self_reported"],
+    evidence: ["external_event", "conversation_id_event", "agent_action"],
     title: ["health.drill.confirmed", "Sessions with a confirmed resolution"],
+  },
+  selfReported: {
+    outcome: ["RESOLVED", "ASSUMED_RESOLVED"],
+    evidence: ["self_reported"],
+    title: ["health.drill.selfReported", "Sessions the agent reported as resolved"],
   },
   agentClosed: {
     outcome: ["ASSUMED_RESOLVED"],

@@ -4490,7 +4490,9 @@
       "title": "مقارنة الإصدارات",
       "older": "الأقدم",
       "newer": "الأحدث",
-      "same": "اختر إصدارين مختلفين."
+      "same": "اختر إصدارين مختلفين.",
+      "olderWindow": "آخر أيام الإصدار الأقدم",
+      "needTwo": "لهذا الوكيل إصدار واحد فقط، لذا لا يوجد ما يمكن مقارنته بعد."
     },
     "profile": {
       "open": "الملف",
@@ -4513,14 +4515,18 @@
       "title": "ملف الصحة",
       "noThresholds": "لا حدود: تُطبَّق القيم الافتراضية للإعداد المسبق.",
       "thresholdUnits": "تُدخل النسب كنسبة مئوية؛ وتُدخل المقاييس الأخرى بوحدتها (دولار، مللي ثانية).",
-      "overrideMeasure": "المقياس",
       "overrideUntil": "تجاهل حتى",
       "overrideReason": "السبب",
       "overrideReasonPlaceholder": "لماذا يُتجاهل هذا المقياس؟",
       "removeOverride": "إزالة الاستثناء",
       "addOverride": "إضافة استثناء",
       "green": "{{measure}}: حد الأخضر",
-      "red": "{{measure}}: حد الأحمر"
+      "red": "{{measure}}: حد الأحمر",
+      "overrideTarget": "مقياس أو قسم",
+      "overrideSections": "الأقسام",
+      "overrideMeasures": "المقاييس",
+      "badNumber": "بعض الحقول ليست أرقاماً. صحّحها ثم احفظ مرة أخرى.",
+      "otherProblems": "مشكلات أخرى"
     },
     "reports": {
       "open": "روابط التقارير",
@@ -4537,9 +4543,11 @@
       "existing": "الروابط النشطة",
       "none": "لا روابط بعد.",
       "revoke": "إلغاء",
-      "days": "{{n}} يوماً",
       "expiresOn": "تنتهي في {{date}}",
-      "revokeLabel": "إلغاء الرابط الذي تنتهي صلاحيته في {{date}}"
+      "revokeLabel": "إلغاء الرابط الذي تنتهي صلاحيته في {{date}}",
+      "noUrl": "أُنشئ الرابط لكن الخادم لم يعده. ألغه أدناه وأنشئ رابطاً آخر.",
+      "revokeConfirm": "هل تريد إلغاء هذا الرابط نهائياً؟",
+      "revokeYes": "نعم، إلغاء"
     },
     "forbidden": "ليس لديك إذن لعرض صحة هذا الوكيل.",
     "allAgents": "كل الوكلاء",
@@ -4555,7 +4563,8 @@
     "export": {
       "label": "تصدير",
       "json": "تصدير JSON",
-      "csv": "تصدير CSV"
+      "csv": "تصدير CSV",
+      "note": "تشمل عمليات التصدير الفترة المحددة فقط، لا مرشحات الإصدار أو المصدر."
     },
     "filters": {
       "period": "الفترة",
@@ -4563,10 +4572,12 @@
       "allVersions": "كل الإصدارات",
       "originsDefault": "المصادر: الافتراضية",
       "originsHint": "عند عدم الاختيار تُستخدم المصادر التفاعلية للإعداد المسبق. تُستبعد اختبارات الوكيل دائماً ما لم تُختر.",
-      "originsCount": "المصادر: {{n}} محدد",
-      "days7d": "7 أيام",
-      "days30d": "30 يوماً",
-      "days90d": "90 يوماً"
+      "originsCount_zero": "المصادر: {{count}} محدد",
+      "originsCount_one": "المصادر: واحد محدد",
+      "originsCount_two": "المصادر: اثنان محددان",
+      "originsCount_few": "المصادر: {{count}} محددة",
+      "originsCount_many": "المصادر: {{count}} محدداً",
+      "originsCount_other": "المصادر: {{count}} محدد"
     },
     "delta": {
       "better": "أفضل",
@@ -4590,8 +4601,7 @@
       "empty": "لا مرشحات بعد: عدد قليل من الجلسات ينتهي بإجراء يمكن التعرف عليه.",
       "howTitle": "كيفية تطبيق الربط",
       "how": "أضف كل إجراء ضمن healthConfig.outcomes في إعدادات الوكيل، مثل \"order_confirmed\": \"RESOLVED\"، ثم احفظ الإصدار الجديد وانشره.",
-      "openConfig": "فتح إعدادات الوكيل",
-      "sessions": "{{n}} جلسة"
+      "openConfig": "فتح الوكيل في Agent Studio"
     },
     "resolution": {
       "noSplit": "التقسيم إلى مؤكَّد وأنهاه الوكيل وصمت غير متاح بعد.",
@@ -4601,7 +4611,11 @@
       "silence": "صمت",
       "confirmedHint": "أفاد حدث نتيجة أو إجراء مرتبط بأن المشكلة حُلّت.",
       "agentClosedHint": "أنهى الوكيل المحادثة بعد دور ناجح.",
-      "silenceHint": "توقف المستخدم ببساطة عن الكتابة بعد دور ناجح."
+      "silenceHint": "توقف المستخدم ببساطة عن الكتابة بعد دور ناجح.",
+      "selfReported": "أفاد به النموذج",
+      "selfReportedHint": "أفاد نموذج الوكيل نفسه بأن المشكلة حُلّت. دليل ضعيف.",
+      "shareNote": "مصدر الجلسات المحلولة",
+      "whatMeans": "ماذا تعني هذه الفئات؟"
     },
     "restricted": "ليس لديك صلاحية الوصول إلى هذا القسم.",
     "noMeasures": "لا مقاييس في هذا القسم بعد.",
@@ -4624,7 +4638,8 @@
       "provisional": "مؤقت",
       "open": "فتح",
       "more": "الصفحة التالية",
-      "evidence": "الدليل: {{list}}"
+      "evidence": "الدليل: {{list}}",
+      "previous": "الصفحة السابقة"
     },
     "noTrend": "لا توجد أيام كافية ذات بيانات لرسم اتجاه.",
     "sparklineLabel": "{{label}} خلال الفترة، من {{min}} إلى {{max}}",
@@ -4638,11 +4653,16 @@
       "incidentTitle": "حادثة في المنصة أثّرت على عدة وكلاء",
       "incidentBody": "تأتي هذه الإخفاقات من مزوّدي النماذج أو المنصة، لا من إعدادات الوكلاء، لذلك لا تُحتسب عليهم.",
       "empty": "لا وكلاء مطابقون.",
-      "sessions": "{{n}} جلسة",
-      "incident": "{{failureClass}}: {{agents}} وكيلاً، من {{from}} إلى {{to}}",
       "sortAttention": "الأكثر إلحاحاً أولاً",
       "sortName": "الاسم",
-      "sortTraffic": "حجم الاستخدام"
+      "sortTraffic": "حجم الاستخدام",
+      "incident_zero": "{{failureClass}}: {{count}} وكيل، من {{from}} إلى {{to}}",
+      "incident_one": "{{failureClass}}: وكيل واحد، من {{from}} إلى {{to}}",
+      "incident_two": "{{failureClass}}: وكيلان، من {{from}} إلى {{to}}",
+      "incident_few": "{{failureClass}}: {{count}} وكلاء، من {{from}} إلى {{to}}",
+      "incident_many": "{{failureClass}}: {{count}} وكيلاً، من {{from}} إلى {{to}}",
+      "incident_other": "{{failureClass}}: {{count}} وكيل، من {{from}} إلى {{to}}",
+      "loadMore": "تحميل المزيد"
     },
     "measures": {
       "agentFailureRate": "إخفاقات سببها الوكيل",
@@ -4695,7 +4715,58 @@
       "deflected": "الجلسات المحوَّلة",
       "confirmed": "جلسات بحل مؤكد",
       "agentClosed": "جلسات أنهاها الوكيل",
-      "silence": "جلسات اعتُبرت محلولة بسبب الصمت"
+      "silence": "جلسات اعتُبرت محلولة بسبب الصمت",
+      "selfReported": "جلسات أفاد الوكيل بأنها محلولة"
+    },
+    "count": {
+      "sessions_zero": "{{count}} جلسة",
+      "sessions_one": "جلسة واحدة",
+      "sessions_two": "جلستان",
+      "sessions_few": "{{count}} جلسات",
+      "sessions_many": "{{count}} جلسة",
+      "sessions_other": "{{count}} جلسة"
+    },
+    "unit": {
+      "pp": "نقطة مئوية"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "محلولة",
+        "ASSUMED_RESOLVED": "يُفترض أنها محلولة",
+        "ESCALATED": "مصعَّدة",
+        "ABANDONED": "متروكة",
+        "FAILED": "فاشلة",
+        "DEFLECTED": "محوَّلة",
+        "ENDED_QUIETLY": "انتهت بصمت",
+        "OPEN": "مفتوحة"
+      },
+      "evidence": {
+        "external_event": "حدث خارجي",
+        "conversation_id_event": "حدث بحسب المحادثة",
+        "agent_action": "إجراء الوكيل",
+        "agent_closed": "أنهاها الوكيل",
+        "silence": "صمت",
+        "self_reported": "أفاد به النموذج",
+        "structural": "هيكلي",
+        "inferred": "مستنتج",
+        "judged": "مُقيَّم"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "البريد الإلكتروني",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "جدولة",
+        "a2a": "A2A",
+        "group_member": "عضو مجموعة",
+        "delegated": "مفوَّض",
+        "agent_test": "اختبار وكيل"
+      }
+    },
+    "markers": {
+      "title": "التغييرات في هذه الفترة"
     }
   },
   "hitl": {

@@ -4346,7 +4346,9 @@
       "title": "Comparer les versions",
       "older": "Plus ancienne",
       "newer": "Plus récente",
-      "same": "Choisissez deux versions différentes."
+      "same": "Choisissez deux versions différentes.",
+      "olderWindow": "Derniers jours de l'ancienne version",
+      "needTwo": "Cet agent n'a qu'une version : il n'y a encore rien à comparer."
     },
     "profile": {
       "open": "Profil",
@@ -4369,14 +4371,18 @@
       "title": "Profil de santé",
       "noThresholds": "Aucun seuil : les valeurs par défaut du préréglage s'appliquent.",
       "thresholdUnits": "Les ratios se saisissent en pourcentage ; les autres mesures dans leur propre unité (dollars, millisecondes).",
-      "overrideMeasure": "Mesure",
       "overrideUntil": "Ignorer jusqu'au",
       "overrideReason": "Raison",
       "overrideReasonPlaceholder": "Pourquoi cette mesure est-elle ignorée ?",
       "removeOverride": "Supprimer la dérogation",
       "addOverride": "Ajouter une dérogation",
       "green": "{{measure}} : seuil vert",
-      "red": "{{measure}} : seuil rouge"
+      "red": "{{measure}} : seuil rouge",
+      "overrideTarget": "Mesure ou section",
+      "overrideSections": "Sections",
+      "overrideMeasures": "Mesures",
+      "badNumber": "Certains champs ne sont pas des nombres. Corrigez-les puis enregistrez à nouveau.",
+      "otherProblems": "Autres problèmes"
     },
     "reports": {
       "open": "Liens de rapport",
@@ -4393,9 +4399,11 @@
       "existing": "Liens actifs",
       "none": "Aucun lien pour l'instant.",
       "revoke": "Révoquer",
-      "days": "{{n}} jours",
       "expiresOn": "Expire le {{date}}",
-      "revokeLabel": "Révoquer le lien qui expire le {{date}}"
+      "revokeLabel": "Révoquer le lien qui expire le {{date}}",
+      "noUrl": "Le lien a été créé, mais le serveur ne l'a pas renvoyé. Révoquez-le ci-dessous et créez-en un autre.",
+      "revokeConfirm": "Révoquer ce lien définitivement ?",
+      "revokeYes": "Oui, révoquer"
     },
     "forbidden": "Vous n'avez pas l'autorisation de consulter la santé de cet agent.",
     "allAgents": "Tous les agents",
@@ -4411,7 +4419,8 @@
     "export": {
       "label": "Export",
       "json": "Exporter en JSON",
-      "csv": "Exporter en CSV"
+      "csv": "Exporter en CSV",
+      "note": "Les exports couvrent uniquement la période choisie, pas les filtres de version ou d'origine."
     },
     "filters": {
       "period": "Période",
@@ -4419,10 +4428,9 @@
       "allVersions": "Toutes les versions",
       "originsDefault": "Origines : par défaut",
       "originsHint": "Sans sélection, les origines interactives du préréglage s'appliquent. Les tests d'agent sont toujours exclus sauf s'ils sont choisis.",
-      "originsCount": "Origines : {{n}} sélectionnée(s)",
-      "days7d": "7 jours",
-      "days30d": "30 jours",
-      "days90d": "90 jours"
+      "originsCount_one": "Origine : {{count}} sélectionnée",
+      "originsCount_many": "Origines : {{count}} sélectionnées",
+      "originsCount_other": "Origines : {{count}} sélectionnées"
     },
     "delta": {
       "better": "mieux",
@@ -4446,8 +4454,7 @@
       "empty": "Aucun candidat pour l'instant : trop peu de sessions se terminent par une action reconnaissable.",
       "howTitle": "Comment appliquer une association",
       "how": "Ajoutez chaque action sous healthConfig.outcomes dans la configuration de l'agent, par exemple \"order_confirmed\": \"RESOLVED\", puis enregistrez et déployez la nouvelle version.",
-      "openConfig": "Ouvrir la configuration de l'agent",
-      "sessions": "Sessions : {{n}}"
+      "openConfig": "Ouvrir l'agent dans Agent Studio"
     },
     "resolution": {
       "noSplit": "La répartition entre confirmé, clos par l'agent et silence n'est pas encore disponible.",
@@ -4457,7 +4464,11 @@
       "silence": "Silence",
       "confirmedHint": "Un événement de résultat ou une action associée a indiqué que le problème était résolu.",
       "agentClosedHint": "L'agent a terminé la conversation après un tour réussi.",
-      "silenceHint": "L'utilisateur a simplement cessé d'écrire après un tour réussi."
+      "silenceHint": "L'utilisateur a simplement cessé d'écrire après un tour réussi.",
+      "selfReported": "Auto-déclaré",
+      "selfReportedHint": "Le modèle de l'agent a lui-même déclaré le problème résolu. Preuve faible.",
+      "shareNote": "D'où viennent les sessions résolues",
+      "whatMeans": "Que signifient ces catégories ?"
     },
     "restricted": "Vous n'avez pas accès à cette section.",
     "noMeasures": "Aucune mesure dans cette section pour l'instant.",
@@ -4480,7 +4491,8 @@
       "provisional": "provisoire",
       "open": "Ouvrir",
       "more": "Page suivante",
-      "evidence": "Preuve : {{list}}"
+      "evidence": "Preuve : {{list}}",
+      "previous": "Page précédente"
     },
     "noTrend": "Pas assez de jours avec des données pour une tendance.",
     "sparklineLabel": "{{label}} sur la période, de {{min}} à {{max}}",
@@ -4494,11 +4506,13 @@
       "incidentTitle": "Un incident de plateforme a touché plusieurs agents",
       "incidentBody": "Ces échecs viennent des fournisseurs de modèles ou de la plateforme, pas de la configuration des agents ; ils ne sont donc pas comptés contre eux.",
       "empty": "Aucun agent ne correspond.",
-      "sessions": "Sessions : {{n}}",
-      "incident": "{{failureClass}} : {{agents}} agents, du {{from}} au {{to}}",
       "sortAttention": "Urgent d'abord",
       "sortName": "Nom",
-      "sortTraffic": "Trafic"
+      "sortTraffic": "Trafic",
+      "incident_one": "{{failureClass}} : {{count}} agent, du {{from}} au {{to}}",
+      "incident_many": "{{failureClass}} : {{count}} d'agents, du {{from}} au {{to}}",
+      "incident_other": "{{failureClass}} : {{count}} agents, du {{from}} au {{to}}",
+      "loadMore": "Charger plus"
     },
     "measures": {
       "agentFailureRate": "Échecs imputables à l'agent",
@@ -4551,7 +4565,55 @@
       "deflected": "Sessions réorientées",
       "confirmed": "Sessions avec résolution confirmée",
       "agentClosed": "Sessions closes par l'agent",
-      "silence": "Sessions supposées résolues d'après le silence"
+      "silence": "Sessions supposées résolues d'après le silence",
+      "selfReported": "Sessions que l'agent a déclarées résolues"
+    },
+    "count": {
+      "sessions_one": "{{count}} session",
+      "sessions_many": "{{count}} de sessions",
+      "sessions_other": "{{count}} sessions"
+    },
+    "unit": {
+      "pp": "pts"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "Résolue",
+        "ASSUMED_RESOLVED": "Supposée résolue",
+        "ESCALATED": "Escaladée",
+        "ABANDONED": "Abandonnée",
+        "FAILED": "Échouée",
+        "DEFLECTED": "Réorientée",
+        "ENDED_QUIETLY": "Terminée sans suite",
+        "OPEN": "Ouverte"
+      },
+      "evidence": {
+        "external_event": "Événement externe",
+        "conversation_id_event": "Événement par conversation",
+        "agent_action": "Action de l'agent",
+        "agent_closed": "Clos par l'agent",
+        "silence": "Silence",
+        "self_reported": "Auto-déclaré",
+        "structural": "Structurelle",
+        "inferred": "Déduite",
+        "judged": "Jugée"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "E-mail",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "Planification",
+        "a2a": "A2A",
+        "group_member": "Membre de groupe",
+        "delegated": "Délégué",
+        "agent_test": "Test d'agent"
+      }
+    },
+    "markers": {
+      "title": "Changements sur la période"
     }
   },
   "hitl": {

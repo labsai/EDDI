@@ -1,16 +1,29 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { HealthProfile, MeasureUnit, ProfileViolation } from "@/lib/api/health";
-import { normalizeProfile, profileViolations } from "@/lib/api/health";
-import { useHealthPresets, useHealthProfile, useResetHealthProfile, useSaveHealthProfile } from "@/hooks/use-agent-health";
+import type { HealthProfile, MeasureUnit, ProfileViolation } from "./api";
+import { normalizeProfile, profileViolations } from "./api";
+import { useHealthPresets, useHealthProfile, useResetHealthProfile, useSaveHealthProfile } from "./use-agent-health";
 import { AccessibleDialog, Button, Skeleton, getErrorMessage } from "./deps";
-import { Field, OverrideRows, ThresholdRows, Violations } from "./profile-fields";
-import { fromInput, inputClass, toInput } from "./profile-utils";
+import { measureLabel } from "./format";
+import { Field, NumberField, OverrideRows, ThresholdRows, Violations } from "./profile-fields";
+import { inputClass, profileMeasureCatalog, unmatchedViolations } from "./profile-utils";
 
 export interface ProfileMeasureInfo {
   units: Record<string, MeasureUnit>;
   labels: Record<string, string>;
+}
+
+type SloKey = "agentTurnSuccess" | "apdexTMs" | "minTurnsForBurnAlert";
+
+/** A field holding text that is not a number blocks the save: NaN would serialise as null. */
+function hasInvalidNumber(p: HealthProfile): boolean {
+  const nums = [
+    ...Object.values(p.thresholds).flatMap((t) => [t.green, t.red]),
+    ...Object.values(p.budgets),
+    ...Object.values(p.slo),
+  ];
+  return nums.some((n) => typeof n === "number" && Number.isNaN(n));
 }
 
 function ProfileForm({
@@ -31,10 +44,26 @@ function ProfileForm({
   const [draft, setDraft] = useState<HealthProfile>(() => normalizeProfile(initial));
   const [violations, setViolations] = useState<ProfileViolation[]>([]);
   const [confirmReset, setConfirmReset] = useState(false);
-  const measureIds = Object.keys(info.units);
+  const [badNumber, setBadNumber] = useState(false);
+
+  const catalog = useMemo(
+    () => profileMeasureCatalog(info.units, draft, presets.data?.find((p) => p.id === draft.preset)),
+    [info.units, draft, presets.data],
+  );
+  const labels = useMemo(
+    () => Object.fromEntries(catalog.ids.map((id) => [id, info.labels[id] ?? measureLabel(t, { id, label: id })])),
+    [catalog.ids, info.labels, t],
+  );
+  const general = unmatchedViolations(violations, draft);
+  const addable = catalog.ids.filter((id) => !(id in draft.thresholds));
 
   const submit = () => {
     setViolations([]);
+    if (hasInvalidNumber(draft)) {
+      setBadNumber(true);
+      return;
+    }
+    setBadNumber(false);
     save.mutate(draft, {
       onSuccess: () => {
         toast.success(t("health.profile.saved", "Health profile saved"));
@@ -46,12 +75,14 @@ function ProfileForm({
 
   const toggleCritical = (id: string) =>
     setDraft({ ...draft, critical: draft.critical.includes(id) ? draft.critical.filter((c) => c !== id) : [...draft.critical, id] });
-  const setSlo = (key: "agentTurnSuccess" | "apdexTMs" | "minTurnsForBurnAlert", text: string) =>
-    setDraft({ ...draft, slo: { ...draft.slo, [key]: fromInput(text, key === "agentTurnSuccess" ? "ratio" : "count") } });
-  const unmatched = violations.filter(
-    (v) => !/^(preset|critical|thresholds|budgets|slo|overrides)/.test(v.path),
-  );
-  const addable = measureIds.filter((id) => !(id in draft.thresholds));
+  const setSlo = (key: SloKey, v: number | undefined) => setDraft((d) => ({ ...d, slo: { ...d.slo, [key]: v } }));
+  const setBudget = (v: number | undefined) =>
+    setDraft((d) => {
+      const budgets = { ...d.budgets };
+      if (v === undefined) delete budgets.costPerResolvedUsd;
+      else budgets.costPerResolvedUsd = v;
+      return { ...d, budgets };
+    });
 
   return (
     <form
@@ -67,15 +98,23 @@ function ProfileForm({
           {t("health.profile.defaults", "No profile saved yet: these are the defaults. Saving stores them for this agent.")}
         </p>
       )}
+      {badNumber && (
+        <p className="text-sm text-destructive" role="alert" data-testid="health-profile-bad-number">
+          {t("health.profile.badNumber", "Some fields are not numbers. Fix them and save again.")}
+        </p>
+      )}
       {save.isError && violations.length === 0 && (
         <p className="text-sm text-destructive" role="alert">{getErrorMessage(save.error)}</p>
       )}
-      {unmatched.length > 0 && (
-        <ul className="text-sm text-destructive" role="alert">
-          {unmatched.map((v) => (
-            <li key={v.path}>{`${v.path}: ${v.message}`}</li>
-          ))}
-        </ul>
+      {general.length > 0 && (
+        <div role="alert" data-testid="health-profile-general-violations">
+          <p className="text-sm font-medium text-destructive">{t("health.profile.otherProblems", "Other problems")}</p>
+          <ul className="text-sm text-destructive">
+            {general.map((v) => (
+              <li key={`${v.path}-${v.message}`}>{`${v.path}: ${v.message}`}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <Field label={t("health.profile.preset", "Preset")} violations={violations} path="preset">
@@ -92,10 +131,10 @@ function ProfileForm({
         <legend className="mb-1 text-xs font-medium">{t("health.profile.critical", "Critical measures")}</legend>
         <p className="mb-1 text-xs text-muted-foreground">{t("health.profile.criticalHint", "A critical measure in the red makes the whole agent need attention.")}</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {measureIds.map((id) => (
+          {catalog.ids.map((id) => (
             <label key={id} className="flex items-center gap-1.5 text-xs">
-              <input type="checkbox" checked={draft.critical.includes(id)} onChange={() => toggleCritical(id)} />
-              {info.labels[id] ?? id}
+              <input type="checkbox" checked={draft.critical.includes(id)} onChange={() => toggleCritical(id)} data-testid={`health-critical-${id}`} />
+              {labels[id]}
             </label>
           ))}
         </div>
@@ -104,17 +143,18 @@ function ProfileForm({
 
       <fieldset className="space-y-2">
         <legend className="mb-1 text-xs font-medium">{t("health.profile.thresholds", "Thresholds")}</legend>
-        <ThresholdRows profile={draft} onChange={setDraft} units={info.units} labels={info.labels} violations={violations} />
+        <ThresholdRows profile={draft} onChange={setDraft} units={catalog.units} labels={labels} violations={violations} />
         {addable.length > 0 && (
           <select
             className={inputClass}
             aria-label={t("health.profile.addThreshold", "Add a threshold")}
             value=""
             onChange={(e) => e.target.value && setDraft({ ...draft, thresholds: { ...draft.thresholds, [e.target.value]: {} } })}
+            data-testid="health-add-threshold"
           >
             <option value="">{t("health.profile.addThreshold", "Add a threshold")}</option>
             {addable.map((id) => (
-              <option key={id} value={id}>{info.labels[id] ?? id}</option>
+              <option key={id} value={id}>{labels[id]}</option>
             ))}
           </select>
         )}
@@ -123,27 +163,22 @@ function ProfileForm({
       <fieldset className="grid gap-3 sm:grid-cols-2">
         <legend className="mb-1 text-xs font-medium">{t("health.profile.budgetsAndSlo", "Budgets and service level")}</legend>
         <Field label={t("health.profile.costPerResolved", "Cost per resolved session (USD)")} violations={violations} path="budgets.costPerResolvedUsd">
-          <input
-            className={inputClass}
-            inputMode="decimal"
-            value={toInput(draft.budgets.costPerResolvedUsd, "usd")}
-            onChange={(e) => {
-              const v = fromInput(e.target.value, "usd");
-              const budgets = { ...draft.budgets };
-              if (v === undefined) delete budgets.costPerResolvedUsd;
-              else budgets.costPerResolvedUsd = v;
-              setDraft({ ...draft, budgets });
-            }}
+          <NumberField
+            label={t("health.profile.costPerResolved", "Cost per resolved session (USD)")}
+            testId="health-budget-costPerResolvedUsd"
+            value={draft.budgets.costPerResolvedUsd}
+            unit="usd"
+            onValue={setBudget}
           />
         </Field>
         <Field label={t("health.profile.sloSuccess", "Turn success target (%)")} violations={violations} path="slo.agentTurnSuccess">
-          <input className={inputClass} inputMode="decimal" value={toInput(draft.slo.agentTurnSuccess, "ratio")} onChange={(e) => setSlo("agentTurnSuccess", e.target.value)} />
+          <NumberField label={t("health.profile.sloSuccess", "Turn success target (%)")} value={draft.slo.agentTurnSuccess} unit="ratio" onValue={(v) => setSlo("agentTurnSuccess", v)} />
         </Field>
         <Field label={t("health.profile.sloApdex", "Apdex target time (ms)")} violations={violations} path="slo.apdexTMs">
-          <input className={inputClass} inputMode="numeric" value={toInput(draft.slo.apdexTMs, "ms")} onChange={(e) => setSlo("apdexTMs", e.target.value)} />
+          <NumberField label={t("health.profile.sloApdex", "Apdex target time (ms)")} value={draft.slo.apdexTMs} unit="ms" onValue={(v) => setSlo("apdexTMs", v)} />
         </Field>
         <Field label={t("health.profile.sloMinTurns", "Minimum turns before a burn alert")} violations={violations} path="slo.minTurnsForBurnAlert">
-          <input className={inputClass} inputMode="numeric" value={toInput(draft.slo.minTurnsForBurnAlert, "count")} onChange={(e) => setSlo("minTurnsForBurnAlert", e.target.value)} />
+          <NumberField label={t("health.profile.sloMinTurns", "Minimum turns before a burn alert")} value={draft.slo.minTurnsForBurnAlert} unit="count" onValue={(v) => setSlo("minTurnsForBurnAlert", v)} />
         </Field>
       </fieldset>
 
@@ -152,9 +187,10 @@ function ProfileForm({
         <p className="mb-1 text-xs text-muted-foreground">
           {t("health.profile.overridesHint", "Ignore a measure for a while, with a reason. An override that has expired is dropped silently.")}
         </p>
-        <OverrideRows overrides={draft.overrides} onChange={(overrides) => setDraft({ ...draft, overrides })} measureIds={measureIds} violations={violations} />
+        <OverrideRows overrides={draft.overrides} onChange={(overrides) => setDraft({ ...draft, overrides })} measureIds={catalog.ids} labels={labels} violations={violations} />
       </fieldset>
 
+      {reset.isError && <p className="text-sm text-destructive" role="alert" data-testid="health-profile-reset-error">{getErrorMessage(reset.error)}</p>}
       <div className="flex flex-wrap justify-between gap-2 border-t border-border pt-3">
         {initial.stored ? (
           <Button

@@ -4339,7 +4339,9 @@
       "title": "Compare versions",
       "older": "Older",
       "newer": "Newer",
-      "same": "Pick two different versions."
+      "same": "Pick two different versions.",
+      "olderWindow": "Older version's last",
+      "needTwo": "This agent has only one version, so there is nothing to compare yet."
     },
     "profile": {
       "open": "Profile",
@@ -4362,14 +4364,18 @@
       "title": "Health profile",
       "noThresholds": "No thresholds: the preset's defaults apply.",
       "thresholdUnits": "Ratios are entered in percent; other measures in their own unit (dollars, milliseconds).",
-      "overrideMeasure": "Measure",
       "overrideUntil": "Ignore until",
       "overrideReason": "Reason",
       "overrideReasonPlaceholder": "Why is this measure ignored?",
       "removeOverride": "Remove override",
       "addOverride": "Add override",
       "green": "{{measure}}: green threshold",
-      "red": "{{measure}}: red threshold"
+      "red": "{{measure}}: red threshold",
+      "overrideTarget": "Measure or section",
+      "overrideSections": "Sections",
+      "overrideMeasures": "Measures",
+      "badNumber": "Some fields are not numbers. Fix them and save again.",
+      "otherProblems": "Other problems"
     },
     "reports": {
       "open": "Report links",
@@ -4386,9 +4392,11 @@
       "existing": "Active links",
       "none": "No links yet.",
       "revoke": "Revoke",
-      "days": "{{n}} days",
       "expiresOn": "Expires {{date}}",
-      "revokeLabel": "Revoke the link that expires {{date}}"
+      "revokeLabel": "Revoke the link that expires {{date}}",
+      "noUrl": "The link was created, but the server did not return it. Revoke it below and create another.",
+      "revokeConfirm": "Revoke this link for good?",
+      "revokeYes": "Yes, revoke"
     },
     "forbidden": "You do not have permission to view this agent's health.",
     "allAgents": "All agents",
@@ -4404,7 +4412,8 @@
     "export": {
       "label": "Export",
       "json": "Export JSON",
-      "csv": "Export CSV"
+      "csv": "Export CSV",
+      "note": "Exports cover the selected period only, not the version or origin filters."
     },
     "filters": {
       "period": "Period",
@@ -4412,10 +4421,8 @@
       "allVersions": "All versions",
       "originsDefault": "Origins: default",
       "originsHint": "Nothing selected uses the preset's interactive origins. Agent tests are always excluded unless chosen.",
-      "originsCount": "Origins: {{n}} selected",
-      "days7d": "7 days",
-      "days30d": "30 days",
-      "days90d": "90 days"
+      "originsCount_one": "Origins: {{count}} selected",
+      "originsCount_other": "Origins: {{count}} selected"
     },
     "delta": {
       "better": "better",
@@ -4439,8 +4446,7 @@
       "empty": "No candidates yet: not enough sessions end with a recognisable action.",
       "howTitle": "How to apply a mapping",
       "how": "Add each action under healthConfig.outcomes in the agent's configuration, for example \"order_confirmed\": \"RESOLVED\", then save and deploy the new version.",
-      "openConfig": "Open the agent's configuration",
-      "sessions": "{{n}} sessions"
+      "openConfig": "Open the agent in Agent Studio"
     },
     "resolution": {
       "noSplit": "The split into confirmed, agent-closed and silence is not available yet.",
@@ -4450,7 +4456,11 @@
       "silence": "Silence",
       "confirmedHint": "An outcome event or a mapped action said the problem was solved.",
       "agentClosedHint": "The agent ended the conversation after a successful turn.",
-      "silenceHint": "The user simply stopped writing after a successful turn."
+      "silenceHint": "The user simply stopped writing after a successful turn.",
+      "selfReported": "Self-reported",
+      "selfReportedHint": "The agent's own model reported the problem as solved. Weak evidence.",
+      "shareNote": "Where the resolved sessions come from",
+      "whatMeans": "What do these mean?"
     },
     "restricted": "You don't have access to this section.",
     "noMeasures": "No measures in this section yet.",
@@ -4473,7 +4483,8 @@
       "provisional": "provisional",
       "open": "Open",
       "more": "Next page",
-      "evidence": "Evidence: {{list}}"
+      "evidence": "Evidence: {{list}}",
+      "previous": "Previous page"
     },
     "noTrend": "Not enough days with data for a trend.",
     "sparklineLabel": "{{label}} over the period, from {{min}} to {{max}}",
@@ -4487,11 +4498,12 @@
       "incidentTitle": "A platform incident touched several agents",
       "incidentBody": "These failures come from the model providers or the platform, not from the agents' configuration, so they are not counted against the agents.",
       "empty": "No agents match.",
-      "sessions": "{{n}} sessions",
-      "incident": "{{failureClass}}: {{agents}} agents, {{from}} to {{to}}",
       "sortAttention": "Needs me first",
       "sortName": "Name",
-      "sortTraffic": "Traffic"
+      "sortTraffic": "Traffic",
+      "incident_one": "{{failureClass}}: {{count}} agent, {{from}} to {{to}}",
+      "incident_other": "{{failureClass}}: {{count}} agents, {{from}} to {{to}}",
+      "loadMore": "Load more"
     },
     "measures": {
       "agentFailureRate": "Agent-caused failures",
@@ -4544,7 +4556,54 @@
       "deflected": "Deflected sessions",
       "confirmed": "Sessions with a confirmed resolution",
       "agentClosed": "Sessions the agent closed",
-      "silence": "Sessions assumed resolved from silence"
+      "silence": "Sessions assumed resolved from silence",
+      "selfReported": "Sessions the agent reported as resolved"
+    },
+    "count": {
+      "sessions_one": "{{count}} session",
+      "sessions_other": "{{count}} sessions"
+    },
+    "unit": {
+      "pp": "pp"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "Resolved",
+        "ASSUMED_RESOLVED": "Assumed resolved",
+        "ESCALATED": "Escalated",
+        "ABANDONED": "Abandoned",
+        "FAILED": "Failed",
+        "DEFLECTED": "Deflected",
+        "ENDED_QUIETLY": "Ended quietly",
+        "OPEN": "Open"
+      },
+      "evidence": {
+        "external_event": "External event",
+        "conversation_id_event": "Event by conversation",
+        "agent_action": "Agent action",
+        "agent_closed": "Agent closed",
+        "silence": "Silence",
+        "self_reported": "Self-reported",
+        "structural": "Structural",
+        "inferred": "Inferred",
+        "judged": "Judged"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "Email",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "Schedule",
+        "a2a": "A2A",
+        "group_member": "Group member",
+        "delegated": "Delegated",
+        "agent_test": "Agent test"
+      }
+    },
+    "markers": {
+      "title": "Changes in this period"
     }
   },
   "hitl": {

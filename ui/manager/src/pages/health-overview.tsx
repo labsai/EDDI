@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { CloudAlert, HeartPulse } from "lucide-react";
-import type { HealthPeriod, HealthStatus, PortfolioItem, PortfolioSort } from "@/lib/api/health";
-import { HEALTH_PERIODS } from "@/lib/api/health";
-import { useHealthPortfolio } from "@/hooks/use-agent-health";
-import { Skeleton, cn, getErrorMessage } from "@/components/health/deps";
+import type { HealthPeriod, HealthStatus, PortfolioItem, PortfolioSort } from "@/components/health/api";
+import { HEALTH_PERIODS } from "@/components/health/api";
+import { useHealthPortfolio } from "@/components/health/use-agent-health";
+import { Button, Skeleton, cn, getErrorMessage } from "@/components/health/deps";
 import { BandBadge, StatusBadge } from "@/components/health/band-badge";
-import { formatDelta, formatMeasureValue, measureLabel, STATUS_META } from "@/components/health/format";
+import { formatDateTime, formatDays, formatDelta, formatMeasureValue, formatSignedPercent, measureLabel, periodDays, selectClass, STATUS_META } from "@/components/health/format";
 
 const STATUS_ORDER: HealthStatus[] = ["NEEDS_ATTENTION", "WATCH", "HEALTHY", "NOT_ENOUGH_DATA"];
 const SORTS: PortfolioSort[] = ["attention", "name", "traffic"];
@@ -28,7 +28,7 @@ function Row({ item }: { item: PortfolioItem }) {
         {item.status !== null ? (
           <StatusBadge status={item.status} />
         ) : (
-          <span className="text-xs text-muted-foreground">{t("health.overview.noStatus", "Status not available yet")}</span>
+          <span className="text-xs text-muted-foreground" data-testid="health-row-no-status">{t("health.overview.noStatus", "Status not available yet")}</span>
         )}
         {item.platformIncident && (
           <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground" data-testid="health-row-incident">
@@ -37,10 +37,8 @@ function Row({ item }: { item: PortfolioItem }) {
           </span>
         )}
         <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {t("health.overview.sessions", { n: item.sessions, defaultValue: "{{n}} sessions" })}
-          {item.sessionsDelta !== null && item.sessionsDelta !== undefined && (
-            <span> ({item.sessionsDelta > 0 ? "+" : item.sessionsDelta < 0 ? "−" : "±"}{Math.abs(Math.round(item.sessionsDelta * 100))} %)</span>
-          )}
+          {t("health.count.sessions", { count: item.sessions, defaultValue: "{{count}} sessions" })}
+          {item.sessionsDelta !== null && item.sessionsDelta !== undefined && <span> ({formatSignedPercent(item.sessionsDelta)})</span>}
         </span>
       </div>
       {item.topReason && <p className="mt-1 text-sm text-foreground" data-testid="health-row-reason">{item.topReason.text}</p>}
@@ -54,8 +52,8 @@ function Row({ item }: { item: PortfolioItem }) {
               </div>
               <div className="mt-0.5 flex items-baseline gap-2">
                 <span className="text-base font-semibold tabular-nums">{formatMeasureValue(m.value, m.unit)}</span>
-                {m.delta !== null && m.delta !== undefined && (
-                  <span className="text-muted-foreground tabular-nums">{formatDelta(m.delta, m.unit)}</span>
+                {m.value !== null && m.delta !== null && m.delta !== undefined && (
+                  <span className="text-muted-foreground tabular-nums">{formatDelta(m.delta, m.unit, t("health.unit.pp", "pp"))}</span>
                 )}
               </div>
             </li>
@@ -74,7 +72,11 @@ export function HealthOverviewPage() {
   const [status, setStatus] = useState<HealthStatus[]>([]);
   const portfolio = useHealthPortfolio(period, sort, status);
   const toggleStatus = (s: HealthStatus) => setStatus((cur) => (cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]));
-  const select = "h-8 rounded-lg border border-input bg-background px-2 text-xs";
+  const select = selectClass;
+  const pages = portfolio.data?.pages ?? [];
+  const items = pages.flatMap((p) => p.items);
+  // Incidents are a property of the period, repeated on every page: the first is enough.
+  const incidents = pages[0]?.platformIncidents ?? [];
 
   return (
     <div className="mx-auto max-w-5xl space-y-5" data-testid="health-overview-page">
@@ -86,7 +88,7 @@ export function HealthOverviewPage() {
       <div className="flex flex-wrap items-center gap-3">
         <select className={select} value={period} aria-label={t("health.filters.period", "Period")} onChange={(e) => setPeriod(e.target.value as HealthPeriod)} data-testid="health-overview-period">
           {HEALTH_PERIODS.map((p) => (
-            <option key={p} value={p}>{t(`health.filters.days${p}`, `${p.replace("d", "")} days`)}</option>
+            <option key={p} value={p}>{formatDays(periodDays(p))}</option>
           ))}
         </select>
         <select className={select} value={sort} aria-label={t("health.overview.sort", "Sort")} onChange={(e) => setSort(e.target.value as PortfolioSort)} data-testid="health-overview-sort">
@@ -113,7 +115,7 @@ export function HealthOverviewPage() {
         </div>
       </div>
 
-      {portfolio.data && portfolio.data.platformIncidents.length > 0 && (
+      {incidents.length > 0 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm" role="status" data-testid="health-platform-incident">
           <CloudAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
           <div className="space-y-1">
@@ -122,14 +124,14 @@ export function HealthOverviewPage() {
               {t("health.overview.incidentBody", "These failures come from the model providers or the platform, not from the agents' configuration, so they are not counted against the agents.")}
             </p>
             <ul className="list-disc ps-5 text-xs text-muted-foreground">
-              {portfolio.data.platformIncidents.map((i) => (
+              {incidents.map((i) => (
                 <li key={`${i.failureClass}-${i.from}`}>
                   {t("health.overview.incident", {
                     failureClass: i.failureClass,
-                    agents: i.agents,
-                    from: new Date(i.from).toLocaleString(),
-                    to: new Date(i.to).toLocaleString(),
-                    defaultValue: "{{failureClass}}: {{agents}} agents, {{from}} to {{to}}",
+                    count: i.agents,
+                    from: formatDateTime(i.from),
+                    to: formatDateTime(i.to),
+                    defaultValue: "{{failureClass}}: {{count}} agents, {{from}} to {{to}}",
                   })}
                 </li>
               ))}
@@ -140,12 +142,17 @@ export function HealthOverviewPage() {
 
       {portfolio.isLoading && <Skeleton className="h-40 w-full" />}
       {portfolio.isError && <p className="text-sm text-destructive" role="alert">{getErrorMessage(portfolio.error)}</p>}
-      {portfolio.data && portfolio.data.items.length === 0 && (
+      {portfolio.data && items.length === 0 && (
         <p className="text-sm text-muted-foreground" data-testid="health-overview-empty">{t("health.overview.empty", "No agents match.")}</p>
       )}
       <ul className="space-y-3">
-        {portfolio.data?.items.map((item) => <Row key={item.agentId} item={item} />)}
+        {items.map((item) => <Row key={item.agentId} item={item} />)}
       </ul>
+      {portfolio.hasNextPage && (
+        <Button variant="outline" size="sm" disabled={portfolio.isFetchingNextPage} onClick={() => void portfolio.fetchNextPage()} data-testid="health-overview-more">
+          {t("health.overview.loadMore", "Load more")}
+        </Button>
+      )}
     </div>
   );
 }

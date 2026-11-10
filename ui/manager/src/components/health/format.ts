@@ -1,4 +1,4 @@
-import { formatDuration, formatUsd } from "./deps";
+import { activeLocale, formatDuration, formatUsd } from "./deps";
 import type { TFunction } from "i18next";
 import {
   SECTION_IDS,
@@ -8,7 +8,7 @@ import {
   type HealthStatus,
   type Measure,
   type MeasureUnit,
-} from "@/lib/api/health";
+} from "./api";
 
 /**
  * Pure formatting and interpretation for the Health UI — no React, no I/O.
@@ -16,13 +16,49 @@ import {
  * (contract §10).
  */
 
-function locale(): string | undefined {
-  if (typeof document === "undefined") return undefined;
-  return document.documentElement.lang || undefined;
+// One locale for every number and date here: the app's language, via the same
+// helper the cost formatter uses, so a figure and its neighbour never disagree.
+function number(value: number, opts: Intl.NumberFormatOptions): string {
+  return new Intl.NumberFormat(activeLocale(), opts).format(value);
 }
 
-function number(value: number, opts: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(locale(), opts).format(value);
+/** A whole number of days in the app's language ("7 days", "7 Tage"), with its plural forms from ICU. */
+export function formatDays(days: number): string {
+  return number(days, { style: "unit", unit: "day", unitDisplay: "long" });
+}
+
+/** The number of days a period id stands for ("30d" is 30). */
+export const periodDays = (p: string): number => Number.parseInt(p, 10);
+
+/** A date as the person reads it in their language ("3 Nov", "3. Nov."). */
+export function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat(activeLocale(), { day: "numeric", month: "short" }).format(d);
+}
+
+/** A date-time in the app's language. */
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium", timeStyle: "short" }).format(d);
+}
+
+/** "2 days ago" in the app's language; "—" for an unreadable timestamp. */
+export function formatAge(iso: string | null | undefined, now: number = Date.now()): string {
+  const at = iso ? Date.parse(iso) : Number.NaN;
+  if (!Number.isFinite(at)) return "—";
+  const seconds = Math.round((at - now) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(activeLocale(), { numeric: "auto" });
+  const steps: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+  ];
+  for (const [unit, size] of steps) {
+    if (Math.abs(seconds) >= size) return rtf.format(Math.trunc(seconds / size), unit);
+  }
+  return rtf.format(0, "second");
 }
 
 /** A ratio as a percentage: whole numbers from 10 %, one decimal below. */
@@ -54,17 +90,24 @@ export function formatMeasureValue(value: number | null | undefined, unit: Measu
 /**
  * A change in a measure's unit with an explicit sign. Ratios are percentage
  * POINTS ("+0.8 pp"), never a relative change — a move from 1 % to 2 % is one
- * point, not "+100 %".
+ * point, not "+100 %". `ppLabel` is the translated unit (`health.unit.pp`).
  */
-export function formatDelta(delta: number | null | undefined, unit: MeasureUnit): string {
+export function formatDelta(delta: number | null | undefined, unit: MeasureUnit, ppLabel = "pp"): string {
   if (delta === null || delta === undefined || !Number.isFinite(delta)) return "—";
   const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
   const abs = Math.abs(delta);
   if (unit === "ratio") {
     const pp = abs * 100;
-    return `${sign}${number(pp, { maximumFractionDigits: pp < 10 ? 1 : 0 })} pp`;
+    return `${sign}${number(pp, { maximumFractionDigits: pp < 10 ? 1 : 0 })} ${ppLabel}`;
   }
   return `${sign}${formatMeasureValue(abs, unit)}`;
+}
+
+/** A relative change with a sign ("−8%", "+12%"), for figures that are a ratio of themselves (session counts). */
+export function formatSignedPercent(change: number | null | undefined): string {
+  if (change === null || change === undefined || !Number.isFinite(change)) return "—";
+  const sign = change > 0 ? "+" : change < 0 ? "−" : "±";
+  return `${sign}${number(Math.abs(change), { style: "percent", maximumFractionDigits: 0 })}`;
 }
 
 /** "9 %–16 %" style range of a confidence interval, or null when there is none. */
@@ -90,18 +133,32 @@ export interface BandMeta {
   /** i18n key suffix under `health.band.` */
   key: "green" | "amber" | "red" | "grey";
   fallback: string;
-  /** Border, tint and text classes — semantic tokens only. */
+  /** Border, tint and text classes for a badge. */
   classes: string;
-  /** Text-colour classes; SVG marks use `currentColor` so they follow the theme. */
-  stroke: string;
+  /** The text colour alone, for text and for SVG marks (`currentColor`). */
+  text: string;
+  /** Border colour alone, for rings. */
+  border: string;
 }
 
+// Good/bad colours follow the Manager's existing convention (emerald for good,
+// `warning` for caution, `destructive` for bad); they are not brand tokens, so
+// a white-label brand does not recolour them.
+const GOOD_TEXT = "text-emerald-700 dark:text-emerald-400";
+
 export const BAND_META: Record<Band, BandMeta> = {
-  GREEN: { key: "green", fallback: "On target", classes: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", stroke: "text-emerald-600 dark:text-emerald-400" },
-  AMBER: { key: "amber", fallback: "Watch", classes: "border-warning/40 bg-warning/10 text-warning", stroke: "text-warning" },
-  RED: { key: "red", fallback: "Off target", classes: "border-destructive/40 bg-destructive/10 text-destructive", stroke: "text-destructive" },
-  GREY: { key: "grey", fallback: "Not rated", classes: "border-border bg-muted text-muted-foreground", stroke: "text-muted-foreground" },
+  GREEN: { key: "green", fallback: "On target", classes: `border-emerald-500/40 bg-emerald-500/10 ${GOOD_TEXT}`, text: GOOD_TEXT, border: "border-emerald-500" },
+  AMBER: { key: "amber", fallback: "Watch", classes: "border-warning/40 bg-warning/10 text-warning", text: "text-warning", border: "border-warning" },
+  RED: { key: "red", fallback: "Off target", classes: "border-destructive/40 bg-destructive/10 text-destructive", text: "text-destructive", border: "border-destructive" },
+  GREY: { key: "grey", fallback: "Not rated", classes: "border-border bg-muted text-muted-foreground", text: "text-muted-foreground", border: "border-border" },
 };
+
+/** Text colour of a change: better, worse or neutral. */
+export const TONE_CLASS = { better: GOOD_TEXT, worse: "text-destructive", neutral: "text-muted-foreground" } as const;
+
+/** One look for every `<select>` in the health UI. */
+export const selectClass =
+  "h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function bandMeta(band: Band | string | undefined): BandMeta {
   return BAND_META[(band as Band) ?? "GREY"] ?? BAND_META.GREY;
@@ -124,11 +181,12 @@ export const STATUS_META: Record<HealthStatus, StatusMeta> = {
 
 // ── Resolution split (plan §4.4, decision 3) ──────────────────────
 
-export const RESOLUTION_KEYS = ["confirmed", "agentClosed", "silence"] as const;
+/** `confirmed` is external events and explicit agent actions; `selfReported` is the weak LLM report. */
+export const RESOLUTION_KEYS = ["confirmed", "selfReported", "agentClosed", "silence"] as const;
 export type ResolutionKey = (typeof RESOLUTION_KEYS)[number];
 
 export interface ResolutionSplit {
-  /** Each source's value, as the backend sent it. */
+  /** Each source's value as the backend sent it, and its share of all resolutions (0..1). */
   parts: Array<{ key: ResolutionKey; value: number; n: number; share: number }>;
   total: number;
   /** Silence share of the resolutions, 0..1. */
@@ -190,6 +248,14 @@ export function statusLabelKey(status: HealthStatus): [key: string, fallback: st
   return [`health.status.${meta.key}`, meta.fallback];
 }
 
+/**
+ * A raw backend enum (outcome, evidence, origin) in the app's language. An
+ * unknown value renders as itself rather than as a missing key.
+ */
+export function enumLabel(t: TFunction, group: "outcome" | "evidence" | "origin", value: string): string {
+  return t(`health.enums.${group}.${value.replace(/[^A-Za-z0-9_]/g, "_")}`, value);
+}
+
 /** The version options: newest first, capped so a 200-version agent stays usable. */
 export function versionOptions(latest: number, cap = 25): number[] {
   const out: number[] = [];
@@ -200,7 +266,8 @@ export function versionOptions(latest: number, cap = 25): number[] {
 /** Known sections first, in the contract's order; any section the backend adds follows. */
 export function orderedSections(sections: AgentHealth["sections"]): string[] {
   const known: string[] = SECTION_IDS.filter((id) => sections[id]);
-  return [...known, ...Object.keys(sections).filter((id) => !known.includes(id))];
+  // A section the backend sent as null is skipped, not rendered.
+  return [...known, ...Object.keys(sections).filter((id) => !known.includes(id) && sections[id])];
 }
 
 /** The sections an owner report can carry. `quality` needs the creator to read ratings. */

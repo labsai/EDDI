@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createReportLink,
   deleteHealthProfile,
@@ -13,24 +13,48 @@ import {
   listReportLinks,
   putHealthProfile,
   revokeReportLink,
+  type HealthMarker,
+  type HealthPeriod,
   type HealthProfile,
   type HealthQuery,
-  type PortfolioSort,
-} from "@/lib/api/health";
+  type SeriesPoint,
+} from "./api";
 
 /** Health refreshes with the rollup, not the second: a minute is plenty. */
 const STALE_MS = 60_000;
 
-/** Query keys, nested general-to-specific so `healthKeys.agent(id)` sweeps one agent. */
+/** The backend accepts at most six measures per series call. */
+export const MAX_SERIES_MEASURES = 6;
+
+/** Filters that decide a sessions page; the cursor is separate. */
+export type SessionsFilter = HealthQuery & { outcome?: readonly string[]; evidence?: readonly string[] };
+
+/**
+ * A query with its origins sorted, so the same selection made in another order
+ * is one cache entry and one request.
+ */
+function normalize(q: HealthQuery): HealthQuery {
+  return { ...q, origins: q.origins ? [...q.origins].sort() : q.origins };
+}
+
+/**
+ * Query keys, nested general-to-specific so `healthKeys.agent(id)` sweeps one
+ * agent. They live here and not in `lib/query-keys.ts` on purpose: that file is
+ * shared and is moving into `@eddi/app-kit`, and nothing outside the health
+ * feature reads or invalidates these entries, so the keys stay with their only
+ * users and the health folder stays self-contained.
+ */
 export const healthKeys = {
   all: ["health"] as const,
   agent: (agentId: string) => [...healthKeys.all, "agent", agentId] as const,
-  summary: (agentId: string, q: HealthQuery) => [...healthKeys.agent(agentId), "summary", q] as const,
+  summary: (agentId: string, q: HealthQuery) => [...healthKeys.agent(agentId), "summary", normalize(q)] as const,
   series: (agentId: string, measures: readonly string[], q: HealthQuery) =>
-    [...healthKeys.agent(agentId), "series", measures, q] as const,
-  compare: (agentId: string, from: number, to: number) => [...healthKeys.agent(agentId), "compare", from, to] as const,
+    [...healthKeys.agent(agentId), "series", measures, normalize(q)] as const,
+  compare: (agentId: string, from: number, to: number, days: number | undefined) =>
+    [...healthKeys.agent(agentId), "compare", from, to, days] as const,
   profile: (agentId: string) => [...healthKeys.agent(agentId), "profile"] as const,
-  sessions: (agentId: string, q: unknown) => [...healthKeys.agent(agentId), "sessions", q] as const,
+  sessions: (agentId: string, f: SessionsFilter, cursor: string | undefined) =>
+    [...healthKeys.agent(agentId), "sessions", normalize(f), f.outcome, f.evidence, cursor] as const,
   suggestions: (agentId: string) => [...healthKeys.agent(agentId), "suggestions"] as const,
   reports: (agentId: string) => [...healthKeys.agent(agentId), "reports"] as const,
   portfolio: (period: string, sort: string, status: readonly string[]) =>
@@ -38,41 +62,71 @@ export const healthKeys = {
   presets: () => [...healthKeys.all, "presets"] as const,
 };
 
-export function useAgentHealth(agentId: string, query: HealthQuery) {
+/** The agent's health; nothing is requested while `enabled` is false (a collapsed panel). */
+export function useAgentHealth(agentId: string, query: HealthQuery, enabled = true) {
   return useQuery({
     queryKey: healthKeys.summary(agentId, query),
-    queryFn: () => getAgentHealth(agentId, query),
+    queryFn: () => getAgentHealth(agentId, normalize(query)),
+    enabled,
     staleTime: STALE_MS,
     placeholderData: keepPreviousData,
     retry: false,
   });
 }
 
-/** The series of the measures a panel draws; `enabled` waits for the summary. */
-export function useHealthSeries(agentId: string, measures: readonly string[], query: HealthQuery, enabled = true) {
+/** Splits measure ids into series calls of at most {@link MAX_SERIES_MEASURES}. */
+export function chunkMeasures(ids: readonly string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += MAX_SERIES_MEASURES) out.push(ids.slice(i, i + MAX_SERIES_MEASURES));
+  return out;
+}
+
+export interface HealthSeriesResult {
+  byMeasure: Map<string, SeriesPoint[]>;
+  markers: HealthMarker[];
+  isLoading: boolean;
+}
+
+/**
+ * The trend of every given measure. More than six are split over several calls,
+ * so none silently loses its sparkline.
+ */
+export function useHealthSeries(agentId: string, measures: readonly string[], query: HealthQuery, enabled = true): HealthSeriesResult {
+  const results = useQueries({
+    queries: chunkMeasures(measures).map((chunk) => ({
+      queryKey: healthKeys.series(agentId, chunk, query),
+      queryFn: () => getHealthSeries(agentId, chunk, normalize(query)),
+      enabled,
+      staleTime: STALE_MS,
+      placeholderData: keepPreviousData,
+      retry: false,
+    })),
+  });
+  const byMeasure = new Map<string, SeriesPoint[]>();
+  const markers = new Map<string, HealthMarker>();
+  for (const r of results) {
+    for (const s of r.data?.series ?? []) if (!s.group) byMeasure.set(s.measure, s.points);
+    for (const m of r.data?.markers ?? []) markers.set(m.id, m);
+  }
+  return { byMeasure, markers: [...markers.values()], isLoading: results.some((r) => r.isLoading) };
+}
+
+export function useHealthCompare(agentId: string, from: number | null, to: number | null, days?: number) {
   return useQuery({
-    queryKey: healthKeys.series(agentId, measures, query),
-    queryFn: () => getHealthSeries(agentId, measures, query),
-    enabled: enabled && measures.length > 0,
-    staleTime: STALE_MS,
-    placeholderData: keepPreviousData,
+    queryKey: healthKeys.compare(agentId, from ?? -1, to ?? -1, days),
+    queryFn: () => getHealthCompare(agentId, from!, to!, days),
+    enabled: from !== null && to !== null && from < to,
     retry: false,
   });
 }
 
-export function useHealthCompare(agentId: string, from: number | null, to: number | null) {
-  return useQuery({
-    queryKey: healthKeys.compare(agentId, from ?? -1, to ?? -1),
-    queryFn: () => getHealthCompare(agentId, from!, to!),
-    enabled: from !== null && to !== null && from !== to,
-    retry: false,
-  });
-}
-
-export function useHealthPortfolio(period: "7d" | "30d" | "90d", sort: PortfolioSort, status: readonly string[]) {
-  return useQuery({
-    queryKey: healthKeys.portfolio(period, sort, status),
-    queryFn: () => getPortfolio({ period, sort, status }),
+/** The portfolio, a page at a time: `fetchNextPage` follows `nextCursor`. */
+export function useHealthPortfolio(period: HealthPeriod, sort: "attention" | "name" | "traffic", status: readonly string[]) {
+  return useInfiniteQuery({
+    queryKey: healthKeys.portfolio(period, sort, [...status].sort()),
+    queryFn: ({ pageParam }) => getPortfolio({ period, sort, status, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: STALE_MS,
     placeholderData: keepPreviousData,
     retry: false,
@@ -104,12 +158,15 @@ export function useResetHealthProfile(agentId: string) {
   });
 }
 
-export function useHealthSessions(agentId: string, query: Parameters<typeof getHealthSessions>[1], enabled = true) {
+/**
+ * One page of sessions. No `keepPreviousData`: a page of another filter must
+ * never show under the new title, so a new key starts empty.
+ */
+export function useHealthSessions(agentId: string, filter: SessionsFilter, cursor: string | undefined, enabled = true) {
   return useQuery({
-    queryKey: healthKeys.sessions(agentId, query),
-    queryFn: () => getHealthSessions(agentId, query),
+    queryKey: healthKeys.sessions(agentId, filter, cursor),
+    queryFn: () => getHealthSessions(agentId, { ...normalize(filter), outcome: filter.outcome, evidence: filter.evidence, limit: 25, cursor }),
     enabled,
-    placeholderData: keepPreviousData,
     retry: false,
   });
 }

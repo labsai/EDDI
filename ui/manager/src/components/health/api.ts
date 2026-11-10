@@ -1,4 +1,4 @@
-import { api, ApiClientError, seg } from "@/components/health/deps";
+import { api, ApiClientError, seg } from "./deps";
 
 /**
  * Agent Health — the REST contract in planning/agent-health-api.md, section by
@@ -62,7 +62,7 @@ export interface HealthSection {
 export interface HealthCheck {
   id: string;
   label: string;
-  state: "PASS" | "FAIL" | "UNKNOWN" | string;
+  state: "PASS" | "FAIL" | "UNKNOWN";
   at: string | null;
   stale: boolean;
   version?: number | null;
@@ -274,25 +274,27 @@ export const listReportLinks = (agentId: string) => api.get<ReportLink[] | { ite
 export const revokeReportLink = (agentId: string, id: string) => api.delete<void>(healthPaths.report(agentId, id));
 
 /**
- * Download an export. Raw `fetch`: a blob body, and the auth header an `<a href>`
- * would not carry.
+ * Download an export through the API client's own request path (token renewal
+ * before sending, one retry on a 401, errors built by `apiErrorFromResponse`).
+ * The export carries the period only; version and origin filters do not apply.
  */
 export async function downloadHealthExport(
   agentId: string,
   o: { format: "json" | "csv"; period?: HealthPeriod; kind?: "daily" | "sessions" },
 ): Promise<void> {
-  const res = await fetch(`${api.getBaseUrl()}${healthPaths.export(agentId, o)}`, {
-    headers: { ...api.getAuthHeader(), Accept: o.format === "csv" ? "text/csv" : "application/json" },
+  const res = await api.getRaw(healthPaths.export(agentId, o), {
+    Accept: o.format === "csv" ? "text/csv" : "application/json",
   });
-  if (!res.ok) throw new ApiClientError(res.status, `Export failed: ${res.status} ${res.statusText}`);
   const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `agent-health-${o.kind ?? "daily"}.${o.format}`;
+  a.href = url;
+  a.download = `agent-health-${agentId}-${o.period ?? "30d"}-${o.kind ?? "daily"}.${o.format}`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(a.href);
+  // Revoked later: some browsers start the download after the click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
 // ── Error helpers ─────────────────────────────────────────────────

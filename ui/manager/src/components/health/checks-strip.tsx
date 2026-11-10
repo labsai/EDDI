@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, CircleDashed, Clock, XCircle, type LucideIcon } from "lucide-react";
-import type { HealthCheck } from "@/lib/api/health";
-import { cn, formatRelativeTime } from "./deps";
+import type { HealthCheck } from "./api";
+import { cn } from "./deps";
+import { formatAge } from "./format";
 
 interface CheckMeta {
   Icon: LucideIcon;
@@ -24,7 +25,6 @@ export function ChecksStrip({ checks }: { checks: HealthCheck[] }) {
     <ul className="flex flex-wrap gap-2" data-testid="health-checks">
       {checks.map((c) => {
         const meta = STATE[c.state] ?? UNKNOWN;
-        const at = c.at ? Date.parse(c.at) : NaN;
         return (
           <li
             key={c.id}
@@ -36,7 +36,7 @@ export function ChecksStrip({ checks }: { checks: HealthCheck[] }) {
             <span className="font-medium">{c.label}</span>
             <span>{t(`health.check.${meta.key}`, meta.fallback)}</span>
             {c.version !== undefined && c.version !== null && <span>{`v${c.version}`}</span>}
-            {Number.isFinite(at) && <span>{formatRelativeTime(at)}</span>}
+            {c.at && <span>{formatAge(c.at)}</span>}
             {c.stale && (
               <span className="inline-flex items-center gap-0.5 font-medium" data-testid="health-check-stale">
                 <Clock className="h-3 w-3" aria-hidden="true" />

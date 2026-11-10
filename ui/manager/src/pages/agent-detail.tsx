@@ -1108,7 +1108,7 @@ export function AgentDetailPage() {
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection
-        key={`${id}-${resolvedVersion}`}
+        key={`hitl-${id}-${resolvedVersion}`}
         agent={doc}
         onChange={editAgent}
         disabled={isSaving}
@@ -1123,9 +1123,10 @@ export function AgentDetailPage() {
       <RawConfigSection agent={doc} />
       </fieldset>
 
+      <AgentHealthPanel key={`health-${id}`} agentId={id!} latestVersion={latestVersion} canEdit={access.canEdit} />
+
       {/* Golden conversations: runs the SAVED version, so it sits outside the
           draft fieldset — nothing here edits the agent document. */}
-      <AgentHealthPanel key={`health-${id}`} agentId={id!} latestVersion={latestVersion} canEdit={access.canEdit} />
       <AgentTestsSection key={id} agentId={id!} agentVersion={resolvedVersion} />
 
       {/* Floating save bar — the header's controls scroll away on a page this

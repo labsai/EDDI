@@ -1,14 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { Lock, ListTree, Wand2 } from "lucide-react";
-import type { HealthQuery, HealthSection } from "@/lib/api/health";
-import { useHealthSeries } from "@/hooks/use-agent-health";
+import type { HealthQuery, HealthSection } from "./api";
+import { useHealthSeries } from "./use-agent-health";
 import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "./deps";
 import { drillForMeasure, drillForResolution, type DrillFilter } from "./drill";
-import { formatMeasureValue, sectionTitle } from "./format";
+import { formatMeasureValue, formatShortDate, sectionTitle } from "./format";
 import { MeasureCard } from "./measure-card";
-
-/** The backend accepts at most six measures per series call. */
-const MAX_SERIES_MEASURES = 6;
 
 export interface SectionCardProps {
   agentId: string;
@@ -22,9 +19,13 @@ export interface SectionCardProps {
 /** One section: its measures with their trends, or the access message when restricted. */
 export function SectionCard({ agentId, sectionId, section, query, onDrill, onMapOutcomes }: SectionCardProps) {
   const { t } = useTranslation();
-  const ids = section.measures.slice(0, MAX_SERIES_MEASURES).map((m) => m.id);
-  const series = useHealthSeries(agentId, ids, query, !section.restricted);
-  const byMeasure = new Map((series.data?.series ?? []).filter((s) => !s.group).map((s) => [s.measure, s.points]));
+  const measures = section.measures ?? [];
+  const series = useHealthSeries(
+    agentId,
+    measures.map((m) => m.id),
+    query,
+    !section.restricted,
+  );
 
   return (
     <Card data-testid={`health-section-${sectionId}`}>
@@ -42,18 +43,18 @@ export function SectionCard({ agentId, sectionId, section, query, onDrill, onMap
             <Lock className="h-4 w-4" aria-hidden="true" />
             {t("health.restricted", "You don't have access to this section.")}
           </p>
-        ) : section.measures.length === 0 ? (
+        ) : measures.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("health.noMeasures", "No measures in this section yet.")}</p>
         ) : (
-          section.measures.map((m) => {
+          measures.map((m) => {
             const drill = sectionId === "effectiveness" ? drillForMeasure(m.id) : null;
-            const lowCoverage = m.id === "outcomeCoverage";
+            const isCoverage = m.id === "outcomeCoverage";
             return (
               <MeasureCard
                 key={m.id}
                 measure={m}
-                points={byMeasure.get(m.id)}
-                markers={series.data?.markers}
+                points={series.byMeasure.get(m.id)}
+                markers={series.markers}
                 onResolutionDrill={sectionId === "effectiveness" ? (key) => onDrill(drillForResolution(key)) : undefined}
                 actions={
                   <>
@@ -63,7 +64,7 @@ export function SectionCard({ agentId, sectionId, section, query, onDrill, onMap
                         {t("health.viewSessions", "View sessions")}
                       </Button>
                     )}
-                    {lowCoverage && (
+                    {isCoverage && (
                       <Button size="sm" variant={m.band === "GREEN" ? "outline" : "primary"} onClick={onMapOutcomes} data-testid="health-map-outcomes">
                         <Wand2 className="me-1.5 h-3.5 w-3.5" aria-hidden="true" />
                         {t("health.mapOutcomes", "Map outcomes")}
@@ -75,7 +76,20 @@ export function SectionCard({ agentId, sectionId, section, query, onDrill, onMap
             );
           })
         )}
-        {!section.restricted && series.isLoading && ids.length > 0 && <Skeleton className="h-6 w-full" />}
+        {!section.restricted && series.isLoading && measures.length > 0 && <Skeleton className="h-6 w-full" />}
+        {/* The dashed lines on the trends, in words: reachable by keyboard and touch, not just a tooltip. */}
+        {!section.restricted && series.markers.length > 0 && measures.length > 0 && (
+          <div className="text-xs text-muted-foreground" data-testid="health-marker-list">
+            <p className="font-medium">{t("health.markers.title", "Changes in this period")}</p>
+            <ul className="mt-0.5 space-y-0.5">
+              {series.markers.map((m) => (
+                <li key={m.id}>
+                  <span className="tabular-nums">{formatShortDate(m.at)}</span>: {m.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

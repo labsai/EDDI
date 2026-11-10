@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight, GitCompareArrows, HeartPulse, LayoutList, Link2, SlidersHorizontal } from "lucide-react";
-import type { HealthQuery, MeasureUnit } from "@/lib/api/health";
-import { useAgentHealth } from "@/hooks/use-agent-health";
+import type { HealthQuery, MeasureUnit } from "./api";
+import { useAgentHealth } from "./use-agent-health";
 import { isApiError, Button, Skeleton, getErrorMessage } from "./deps";
 import { ChecksStrip } from "./checks-strip";
 import { CompareDialog } from "./compare-dialog";
 import type { DrillFilter } from "./drill";
 import { ExportButtons } from "./export-buttons";
 import { HealthFilters, type HealthFilterState } from "./filters";
-import { measureLabel, orderedSections } from "./format";
+import { formatShortDate, measureLabel, orderedSections } from "./format";
 import { OutcomeSuggestionsDialog } from "./outcome-suggestions-dialog";
 import { ProfileDialog } from "./profile-dialog";
 import { ReportLinksDialog } from "./report-links-dialog";
@@ -74,7 +74,8 @@ export function AgentHealthPanel({
     () => ({ period: filters.period, version: filters.version, origins: filters.origins }),
     [filters],
   );
-  const health = useAgentHealth(agentId, query);
+  // Nothing is requested while the section is collapsed.
+  const health = useAgentHealth(agentId, query, open);
   const data = health.data;
 
   const info = useMemo(() => {
@@ -96,22 +97,25 @@ export function AgentHealthPanel({
   const Chevron = open ? ChevronDown : ChevronRight;
   const forbidden = health.isError && isApiError(health.error) && health.error.status === 403;
   const canReadQuality = data?.sections.quality ? !data.sections.quality.restricted : false;
+  const bodyId = useId();
 
   return (
     <section ref={sectionRef} id="health" className="rounded-xl border border-border bg-card p-4" data-testid="agent-health-panel">
-      <button type="button" onClick={toggle} aria-expanded={open} className="flex w-full items-center gap-2 text-start" data-testid="agent-health-toggle">
-        <Chevron className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
-        <HeartPulse className="h-4 w-4 text-primary" aria-hidden="true" />
-        <h2 className="text-base font-semibold">{t("health.title", "Health")}</h2>
-        <span className="text-xs text-muted-foreground">{t("health.subtitle", "Is this agent doing its job?")}</span>
-      </button>
+      <h2 className="text-base font-semibold">
+        <button type="button" onClick={toggle} aria-expanded={open} aria-controls={bodyId} className="flex w-full items-center gap-2 text-start" data-testid="agent-health-toggle">
+          <Chevron className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
+          <HeartPulse className="h-4 w-4 text-primary" aria-hidden="true" />
+          {t("health.title", "Health")}
+          <span className="text-xs font-normal text-muted-foreground">{t("health.subtitle", "Is this agent doing its job?")}</span>
+        </button>
+      </h2>
 
       {open && (
-        <div className="mt-4 space-y-4">
+        <div id={bodyId} className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <HealthFilters value={filters} onChange={setFilters} latestVersion={latestVersion} />
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setDialog("compare")} disabled={latestVersion < 2} data-testid="health-open-compare">
+              <Button size="sm" variant="outline" onClick={() => setDialog("compare")} disabled={latestVersion < 2 || forbidden} data-testid="health-open-compare">
                 <GitCompareArrows aria-hidden="true" />
                 {t("health.compare.open", "Compare versions")}
               </Button>
@@ -127,7 +131,7 @@ export function AgentHealthPanel({
                   </Button>
                 </>
               )}
-              <ExportButtons agentId={agentId} period={filters.period} />
+              <ExportButtons agentId={agentId} period={filters.period} disabled={forbidden} />
             </div>
           </div>
 
@@ -146,13 +150,13 @@ export function AgentHealthPanel({
               {data.status !== null && <StatusRing status={data.status} reasons={data.reasons} />}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>
-                  {t("health.period", { from: data.period.from, to: data.period.to, defaultValue: "{{from}} to {{to}}" })}
+                  {t("health.period", { from: formatShortDate(data.period.from), to: formatShortDate(data.period.to), defaultValue: "{{from}} to {{to}}" })}
                 </span>
                 <span data-testid="health-data-through">
-                  {t("health.dataThrough", { date: data.dataThrough, defaultValue: "Data through {{date}}" })}
+                  {t("health.dataThrough", { date: formatShortDate(data.dataThrough), defaultValue: "Data through {{date}}" })}
                 </span>
                 <span>{t("health.preset", { preset: data.preset, defaultValue: "Preset: {{preset}}" })}</span>
-                <Link to="/manage/health" className="inline-flex items-center gap-1 text-primary hover:underline">
+                <Link to="/manage/health" className="inline-flex items-center gap-1 text-brand-700 hover:underline dark:text-brand-300">
                   <LayoutList className="h-3 w-3" aria-hidden="true" />
                   {t("health.allAgents", "All agents")}
                 </Link>

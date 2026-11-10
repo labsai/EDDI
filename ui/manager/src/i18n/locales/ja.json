@@ -4298,7 +4298,9 @@
       "title": "バージョンを比較",
       "older": "古い方",
       "newer": "新しい方",
-      "same": "異なる2つのバージョンを選択してください。"
+      "same": "異なる2つのバージョンを選択してください。",
+      "olderWindow": "古いバージョンの直近",
+      "needTwo": "このエージェントにはバージョンが1つしかないため、まだ比較するものがありません。"
     },
     "profile": {
       "open": "プロファイル",
@@ -4321,14 +4323,18 @@
       "title": "健全性プロファイル",
       "noThresholds": "しきい値なし: プリセットのデフォルトが適用されます。",
       "thresholdUnits": "割合はパーセントで、その他の指標は各自の単位（ドル、ミリ秒）で入力します。",
-      "overrideMeasure": "指標",
       "overrideUntil": "無視する期限",
       "overrideReason": "理由",
       "overrideReasonPlaceholder": "この指標を無視する理由は？",
       "removeOverride": "例外を削除",
       "addOverride": "例外を追加",
       "green": "{{measure}}: 緑のしきい値",
-      "red": "{{measure}}: 赤のしきい値"
+      "red": "{{measure}}: 赤のしきい値",
+      "overrideTarget": "指標またはセクション",
+      "overrideSections": "セクション",
+      "overrideMeasures": "指標",
+      "badNumber": "数値でない項目があります。修正してからもう一度保存してください。",
+      "otherProblems": "その他の問題"
     },
     "reports": {
       "open": "レポートリンク",
@@ -4345,9 +4351,11 @@
       "existing": "有効なリンク",
       "none": "リンクはまだありません。",
       "revoke": "取り消す",
-      "days": "{{n}} 日",
       "expiresOn": "{{date}} に期限切れ",
-      "revokeLabel": "{{date}} に期限切れとなるリンクを取り消す"
+      "revokeLabel": "{{date}} に期限切れとなるリンクを取り消す",
+      "noUrl": "リンクは作成されましたが、サーバーから返されませんでした。下で取り消して、作り直してください。",
+      "revokeConfirm": "このリンクを完全に取り消しますか？",
+      "revokeYes": "はい、取り消す"
     },
     "forbidden": "このエージェントの健全性を表示する権限がありません。",
     "allAgents": "すべてのエージェント",
@@ -4363,7 +4371,8 @@
     "export": {
       "label": "エクスポート",
       "json": "JSON をエクスポート",
-      "csv": "CSV をエクスポート"
+      "csv": "CSV をエクスポート",
+      "note": "エクスポートは選択した期間のみが対象で、バージョンや発信元の絞り込みは反映されません。"
     },
     "filters": {
       "period": "期間",
@@ -4371,10 +4380,8 @@
       "allVersions": "すべてのバージョン",
       "originsDefault": "発信元: デフォルト",
       "originsHint": "何も選択しない場合は、プリセットの対話型の発信元が使われます。エージェントのテストは、選択しない限り常に除外されます。",
-      "originsCount": "発信元: {{n}} 件選択",
-      "days7d": "7日間",
-      "days30d": "30日間",
-      "days90d": "90日間"
+      "originsCount_other": "発信元: {{count}} 件選択",
+      "originsCount_one": "発信元: {{count}} 件選択"
     },
     "delta": {
       "better": "改善",
@@ -4398,8 +4405,7 @@
       "empty": "候補はまだありません。判別できるアクションで終わるセッションが少なすぎます。",
       "howTitle": "対応付けの適用方法",
       "how": "エージェントの設定の healthConfig.outcomes に各アクションを追加します（例: \"order_confirmed\": \"RESOLVED\"）。その後、保存して新しいバージョンをデプロイしてください。",
-      "openConfig": "エージェントの設定を開く",
-      "sessions": "{{n}} セッション"
+      "openConfig": "Agent Studio でエージェントを開く"
     },
     "resolution": {
       "noSplit": "確認済み・エージェント終了・無反応への内訳はまだ利用できません。",
@@ -4409,7 +4415,11 @@
       "silence": "無反応",
       "confirmedHint": "結果イベントまたは対応付けたアクションが、問題の解決を示しました。",
       "agentClosedHint": "エージェントが成功したターンの後に会話を終了しました。",
-      "silenceHint": "成功したターンの後、ユーザーが書き込みをやめました。"
+      "silenceHint": "成功したターンの後、ユーザーが書き込みをやめました。",
+      "selfReported": "自己申告",
+      "selfReportedHint": "エージェント自身のモデルが問題の解決を報告しました。根拠は弱いです。",
+      "shareNote": "解決済みセッションの内訳",
+      "whatMeans": "これらは何を意味しますか？"
     },
     "restricted": "このセクションにはアクセスできません。",
     "noMeasures": "このセクションにはまだ指標がありません。",
@@ -4432,7 +4442,8 @@
       "provisional": "暫定",
       "open": "開く",
       "more": "次のページ",
-      "evidence": "根拠: {{list}}"
+      "evidence": "根拠: {{list}}",
+      "previous": "前のページ"
     },
     "noTrend": "傾向を示すには、データのある日数が足りません。",
     "sparklineLabel": "期間中の{{label}}（{{min}} から {{max}}）",
@@ -4446,11 +4457,12 @@
       "incidentTitle": "プラットフォーム障害が複数のエージェントに影響しました",
       "incidentBody": "これらの失敗はモデルプロバイダーまたはプラットフォームに起因し、エージェントの設定が原因ではないため、エージェントの失敗には数えません。",
       "empty": "一致するエージェントはありません。",
-      "sessions": "{{n}} セッション",
-      "incident": "{{failureClass}}: {{agents}} エージェント、{{from}} から {{to}}",
       "sortAttention": "要対応を先頭に",
       "sortName": "名前",
-      "sortTraffic": "トラフィック"
+      "sortTraffic": "トラフィック",
+      "incident_other": "{{failureClass}}: {{count}} エージェント、{{from}} から {{to}}",
+      "loadMore": "さらに読み込む",
+      "incident_one": "{{failureClass}}: {{count}} エージェント、{{from}} から {{to}}"
     },
     "measures": {
       "agentFailureRate": "エージェント起因の失敗",
@@ -4503,7 +4515,54 @@
       "deflected": "振り分けられたセッション",
       "confirmed": "解決が確認されたセッション",
       "agentClosed": "エージェントが終了したセッション",
-      "silence": "無反応により解決とみなしたセッション"
+      "silence": "無反応により解決とみなしたセッション",
+      "selfReported": "エージェントが解決済みと報告したセッション"
+    },
+    "count": {
+      "sessions_other": "{{count}} セッション",
+      "sessions_one": "{{count}} セッション"
+    },
+    "unit": {
+      "pp": "ポイント"
+    },
+    "enums": {
+      "outcome": {
+        "RESOLVED": "解決済み",
+        "ASSUMED_RESOLVED": "解決とみなし",
+        "ESCALATED": "エスカレーション",
+        "ABANDONED": "離脱",
+        "FAILED": "失敗",
+        "DEFLECTED": "振り分け",
+        "ENDED_QUIETLY": "無反応で終了",
+        "OPEN": "継続中"
+      },
+      "evidence": {
+        "external_event": "外部イベント",
+        "conversation_id_event": "会話別イベント",
+        "agent_action": "エージェントのアクション",
+        "agent_closed": "エージェント終了",
+        "silence": "無反応",
+        "self_reported": "自己申告",
+        "structural": "構造的",
+        "inferred": "推定",
+        "judged": "判定"
+      },
+      "origin": {
+        "api": "API",
+        "v1": "v1-API",
+        "mcp": "MCP",
+        "email": "メール",
+        "slack": "Slack",
+        "webhook": "Webhook",
+        "schedule": "スケジュール",
+        "a2a": "A2A",
+        "group_member": "グループメンバー",
+        "delegated": "委任",
+        "agent_test": "エージェントテスト"
+      }
+    },
+    "markers": {
+      "title": "この期間の変更"
     }
   },
   "hitl": {

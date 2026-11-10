@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Measure } from "@/lib/api/health";
+import type { Measure } from "../api";
 import {
   allowedReportSections,
   bandMeta,
@@ -98,7 +98,8 @@ describe("resolutionSplit", () => {
 
   it("splits the rate into its three sources with shares", () => {
     const split = resolutionSplit(measure(0.2, 0.3, 0.2))!;
-    expect(split.parts.map((p) => p.key)).toEqual(["confirmed", "agentClosed", "silence"]);
+    expect(split.parts.map((p) => p.key)).toEqual(["confirmed", "selfReported", "agentClosed", "silence"]);
+    expect(split.parts.find((p) => p.key === "selfReported")!.value).toBe(0);
     expect(split.total).toBeCloseTo(0.7);
     expect(split.parts[0]!.share).toBeCloseTo(0.3 / 0.7);
     expect(split.mostlySilence).toBe(false);

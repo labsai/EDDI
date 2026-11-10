@@ -17,6 +17,6 @@ export { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export { Badge } from "@/components/ui/badge";
 export { Skeleton } from "@/components/ui/skeleton";
 export { AccessibleDialog } from "@/components/ui/accessible-dialog";
-export { cn, formatRelativeTime, formatDuration, formatUsd } from "@/lib/utils";
+export { cn, activeLocale, formatDuration, formatUsd } from "@/lib/utils";
 export { api, ApiClientError, getErrorMessage, isApiError } from "@/lib/api-client";
 export { seg } from "@/lib/api/path-segment";

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { HealthMarker, MeasureUnit, SeriesPoint } from "@/lib/api/health";
+import type { HealthMarker, MeasureUnit, SeriesPoint } from "./api";
 import { cn } from "./deps";
 import { formatMeasureValue } from "./format";
 import { SPARK_H, SPARK_W, sparklineGeometry } from "./sparkline-geometry";
