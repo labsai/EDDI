@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "@/lib/api/health";
+import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "@/components/health/api";
 import {
   HEALTH_AGENTS,
   MARKERS,
@@ -118,6 +118,11 @@ export const healthHandlers = [
     const items = SESSION_ROWS.filter(
       (r) => (outcomes.length === 0 || outcomes.includes(r.outcome)) && (evidence.length === 0 || evidence.includes(r.evidence)),
     );
+    if (id === HEALTH_AGENTS.paged) {
+      // One row per page; the cursor is the index of the next row.
+      const at = Number(url.searchParams.get("cursor") ?? 0);
+      return HttpResponse.json({ items: items.slice(at, at + 1), nextCursor: at + 1 < items.length ? String(at + 1) : null });
+    }
     return HttpResponse.json({ items, nextCursor: null });
   }),
 
@@ -154,12 +159,19 @@ export const healthHandlers = [
   }),
 
   // Last among the agent routes: `/agents/:agentId/health` must not swallow the sub-paths above.
-  http.get("*/agents/:agentId/health", ({ params }) => HttpResponse.json(healthFor(String(params.agentId)))),
+  http.get("*/agents/:agentId/health", ({ params }) => {
+    if (params.agentId === HEALTH_AGENTS.denied) return HttpResponse.json({ error: "FORBIDDEN", message: "No access" }, { status: 403 });
+    return HttpResponse.json(healthFor(String(params.agentId)));
+  }),
 
   http.get("*/health/agents", ({ request }) => {
-    const statuses = new URL(request.url).searchParams.getAll("status");
+    const url = new URL(request.url);
+    const statuses = url.searchParams.getAll("status");
     const all = portfolioFixture();
-    return HttpResponse.json({ ...all, items: statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items });
+    const matching = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
+    // Pages of three: the cursor is the index of the next item.
+    const at = Number(url.searchParams.get("cursor") ?? 0);
+    return HttpResponse.json({ ...all, items: matching.slice(at, at + 3), nextCursor: at + 3 < matching.length ? String(at + 3) : null });
   }),
   http.get("*/health/presets", () => HttpResponse.json(PRESETS)),
 ];

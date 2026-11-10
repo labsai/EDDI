@@ -9,7 +9,7 @@ import type {
   PortfolioItem,
   Series,
   SeriesPoint,
-} from "@/lib/api/health";
+} from "@/components/health/api";
 
 /**
  * Fixtures for the Agent Health mocks, shaped like planning/agent-health-api.md.
@@ -26,6 +26,12 @@ export const HEALTH_AGENTS = {
   silence: "health-silence",
   noReview: "health-noreview",
   forbidden: "health-forbidden",
+  /** Sessions come one per page, so paging can be exercised. */
+  paged: "health-paged",
+  /** The whole health endpoint answers 403. */
+  denied: "health-denied",
+  /** Unknown section, unknown measure id, null value with a delta. */
+  unknown: "health-unknown",
 } as const;
 
 export function measure(partial: Partial<Measure> & Pick<Measure, "id" | "label" | "unit" | "value">): Measure {
@@ -68,10 +74,12 @@ function effectiveness(over: Record<string, Partial<Measure>> = {}, coverage = 0
       measure({
         id: "resolutionRate", label: "Resolution", unit: "ratio", value: 0.71, n: 1820, critical: true,
         interval: { low: 0.69, high: 0.73 }, baseline: 0.68, delta: 0.03, significant: true, thresholds: higher(0.7, 0.4),
+        // Contributions to the rate: they add up to `value`.
         breakdown: [
-          { key: "confirmed", label: "Confirmed", value: 0.39, n: 710 },
+          { key: "confirmed", label: "Confirmed", value: 0.3, n: 546 },
+          { key: "selfReported", label: "Self-reported", value: 0.05, n: 91 },
           { key: "agentClosed", label: "Agent closed", value: 0.2, n: 364 },
-          { key: "silence", label: "Silence", value: 0.12, n: 218 },
+          { key: "silence", label: "Silence", value: 0.16, n: 291 },
         ],
         ...over.resolutionRate,
       }),
@@ -159,11 +167,12 @@ export function healthFor(agentId: string): AgentHealth {
       });
       h.sections.effectiveness = effectiveness({
         resolutionRate: {
-          value: 0.41, baseline: 0.53, delta: -0.12, significant: true, band: "RED",
+          value: 0.41, baseline: 0.53, delta: -0.12, significant: true, band: "RED", interval: { low: 0.38, high: 0.44 },
           breakdown: [
-            { key: "confirmed", label: "Confirmed", value: 0.2, n: 360 },
+            { key: "confirmed", label: "Confirmed", value: 0.15, n: 273 },
+            { key: "selfReported", label: "Self-reported", value: 0.03, n: 55 },
             { key: "agentClosed", label: "Agent closed", value: 0.11, n: 200 },
-            { key: "silence", label: "Silence", value: 0.1, n: 180 },
+            { key: "silence", label: "Silence", value: 0.12, n: 218 },
           ],
         },
       });
@@ -197,9 +206,10 @@ export function healthFor(agentId: string): AgentHealth {
       h.reasons = [{ measureId: "resolutionRate", severity: "AMBER", text: "Resolution rate is mostly assumed from silence", markerId: null }];
       h.sections.effectiveness = effectiveness({
         resolutionRate: {
-          value: 0.7, band: "AMBER",
+          value: 0.7, band: "AMBER", interval: { low: 0.67, high: 0.73 },
           breakdown: [
-            { key: "confirmed", label: "Confirmed", value: 0.1, n: 180 },
+            { key: "confirmed", label: "Confirmed", value: 0.08, n: 146 },
+            { key: "selfReported", label: "Self-reported", value: 0.02, n: 36 },
             { key: "agentClosed", label: "Agent closed", value: 0.1, n: 180 },
             { key: "silence", label: "Silence", value: 0.5, n: 910 },
           ],
@@ -207,8 +217,24 @@ export function healthFor(agentId: string): AgentHealth {
       });
       return h;
     }
+    case HEALTH_AGENTS.unknown: {
+      const h = baseHealth(agentId, "Future Agent");
+      h.sections.reliability = {
+        restricted: false,
+        measures: [
+          // A measure id the UI has never heard of renders from its own fields.
+          measure({ id: "mystery:metric", label: "Mystery metric", unit: "count", value: 42, n: 10, kind: "INFORMATIONAL", band: "GREY" }),
+          // No value, but the backend still sent a delta: the UI must not show a change against nothing.
+          measure({ id: "apdex", label: "Apdex", unit: "score", value: null, n: 3, band: "GREY", delta: 0.2, significant: true, thresholds: higher(0.85, 0.7), hint: "Fewer than 30 engaged sessions" }),
+        ],
+      };
+      h.sections.carbon = { restricted: false, measures: [measure({ id: "gramsCo2", label: "Grams of CO2", unit: "count", value: 12, n: 5, kind: "INFORMATIONAL", band: "GREY" })] };
+      // A section sent as null is skipped, not rendered.
+      (h.sections as Record<string, unknown>).broken = null;
+      return h;
+    }
     default:
-      return baseHealth(agentId, agentId === HEALTH_AGENTS.healthy ? "Support" : "Support");
+      return baseHealth(agentId, "Support");
   }
 }
 
@@ -217,6 +243,8 @@ export function healthFor(agentId: string): AgentHealth {
 export const MARKERS: HealthMarker[] = [
   { id: "m-123", at: "2026-11-03T10:12:00Z", kind: "DEPLOYMENT", label: "v8 deployed (production)", version: 8 },
   { id: "m-124", at: "2026-10-25T08:00:00Z", kind: "SNIPPET_CHANGE", label: "Snippet \"tone\" edited" },
+  // A kind the UI does not know: shown by its label.
+  { id: "m-125", at: "2026-10-28T08:00:00Z", kind: "QUOTA_CHANGE", label: "Quota raised" },
 ];
 
 export function days(count: number, end = "2026-11-10"): string[] {
