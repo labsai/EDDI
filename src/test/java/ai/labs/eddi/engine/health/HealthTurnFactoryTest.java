@@ -267,6 +267,29 @@ class HealthTurnFactoryTest {
         assertEquals(3, turn.guardrailTrips());
     }
 
+    @Test
+    @DisplayName("a call answered with a refusal instead of a tool_result is a refusal, not a call")
+    void refusalTraceTypes() {
+        ConversationMemory memory = memory("u");
+        IWritableConversationStep step = memory.getCurrentStep();
+        List<Map<String, Object>> trace = new ArrayList<>();
+        for (String type : List.of("tool_repeat_refused", "tool_call_capped", "tool_not_activated", "hitl_self_conversation",
+                "hitl_self_ungating", "hitl_request_changed", "hitl_not_executed", "hitl_rejected")) {
+            trace.add(Map.of("type", "tool_call", "tool", "x"));
+            trace.add(Map.of("type", type, "tool", "x"));
+        }
+        // Ends the loop, answers no call; a guardrail finding is counted as a trip.
+        trace.add(Map.of("type", "tool_repeat_stopped", "refusals", 3));
+        trace.add(Map.of("type", "tool_call_guardrail", "tool", "x", "action", "block"));
+        put(step, MemoryKeys.LANGCHAIN_TRACE_PREFIX + "openai:t1", trace);
+
+        HealthTurn turn = turn(memory);
+
+        assertEquals(0, turn.toolCalls());
+        assertEquals(0, turn.toolFailures());
+        assertEquals(8, turn.toolRefusals());
+    }
+
     @Nested
     @DisplayName("engagement inputs")
     class Engagement {

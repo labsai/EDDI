@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Writes every failed LLM attempt of a step to
@@ -31,7 +32,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Each failure is recorded once, by the point that decides what happens next:
  * <ul>
  * <li>a same-model retry — {@link RetryObserver}, bound for the task by
- * {@link #observeRetries}: {@code retry} (the model is not known there);</li>
+ * {@link #observeRetries}: {@code retry} when a later attempt of the same retry
+ * loop succeeded (the model is not known there). The retries of a loop that
+ * failed share the fate of the failure that ended it: they are written with the
+ * next entry recorded on the task's thread — a cascade step's {@code cascade}
+ * or {@link #PENDING}, or {@link #settle}'s recovery — and as {@code none} if
+ * the task ends without one;</li>
  * <li>a cascade step — {@code CascadingModelExecutor}: {@code cascade} when it
  * escalates or an earlier step's answer is served; a last step whose failure
  * ends the cascade is left {@link #PENDING};</li>
@@ -56,14 +62,26 @@ final class LlmFailureRecords {
      */
     static final String PENDING = "pending";
 
+    /** The scope collecting the retries of the LLM task running on this thread. */
+    private static final ThreadLocal<RetryScope> CURRENT = new ThreadLocal<>();
+
     private LlmFailureRecords() {
     }
 
-    /** Appends one failed attempt. */
+    /**
+     * Appends one failed attempt. The same-model retries of loops that failed
+     * before it, collected on this thread, are written first and take the same
+     * {@code recovery}: they ended in this failure.
+     */
     static void record(IWritableConversationStep step, FailureClass failureClass, String model, String recovery) {
         if (step == null || failureClass == null) {
             return;
         }
+        drainRetries(step, recovery);
+        append(step, failureClass, model, recovery);
+    }
+
+    private static void append(IWritableConversationStep step, FailureClass failureClass, String model, String recovery) {
         try {
             List<Map<String, Object>> records = current(step);
             if (records.size() >= MAX_RECORDS) {
@@ -112,7 +130,8 @@ final class LlmFailureRecords {
                 Map<String, Object> entry = records.get(i);
                 Object previous = entry.get(HealthFailure.KEY_RECOVERY);
                 boolean inPhase = i >= mark;
-                phaseRecorded |= inPhase;
+                // A recovered same-model retry is not the phase's failure.
+                phaseRecorded |= inPhase && !HealthFailure.RETRY.equals(previous);
                 if (PENDING.equals(previous) || inPhase && HealthFailure.CASCADE.equals(previous)) {
                     entry.put(HealthFailure.KEY_RECOVERY, recovery);
                     settled = true;
@@ -120,8 +139,11 @@ final class LlmFailureRecords {
             }
             if (settled) {
                 step.storeData(new Data<>(MemoryKeys.HEALTH_LLM_FAILURES, records));
-            } else if (!phaseRecorded && failure != null && !(failure instanceof LlmCircuitOpenException)) {
-                record(step, LlmFailureClassifier.classify(failure).cls(), model, recovery);
+            }
+            // The retries of a loop that ended in this failure share its recovery.
+            drainRetries(step, recovery);
+            if (!settled && !phaseRecorded && failure != null && !(failure instanceof LlmCircuitOpenException)) {
+                append(step, LlmFailureClassifier.classify(failure).cls(), model, recovery);
             }
         } catch (RuntimeException e) {
             // Recording must never affect the turn.
@@ -130,42 +152,76 @@ final class LlmFailureRecords {
 
     /**
      * Collects the same-model retries of the LLM task running on this thread (and
-     * of the cascade steps it hands to other threads) until closed, then writes
-     * them to the memory's current step. Closed on the task's own thread, so the
-     * step is only ever written there.
+     * of the cascade steps it hands to other threads) until closed, and writes them
+     * to the memory's current step — on the task's own thread only: when an entry
+     * is recorded or settled there, and at the latest when the scope is closed.
      */
     static RetryScope observeRetries(IConversationMemory memory) {
         return new RetryScope(memory);
+    }
+
+    /**
+     * Writes the retries the current thread's scope collected so far: those of a
+     * loop that succeeded as {@code retry}, those of a loop that failed as
+     * {@code failedRecovery}.
+     */
+    private static void drainRetries(IWritableConversationStep step, String failedRecovery) {
+        RetryScope scope = CURRENT.get();
+        if (scope != null) {
+            scope.drain(step, failedRecovery);
+        }
+    }
+
+    /** The retries of one retry loop, and whether the loop succeeded. */
+    private record Retries(List<FailureClass> classes, boolean recovered) {
     }
 
     /** The binding {@link #observeRetries} returns. */
     static final class RetryScope implements AutoCloseable {
 
         private final IConversationMemory memory;
-        private final Queue<FailureClass> retried = new ConcurrentLinkedQueue<>();
+        private final Queue<Retries> retried = new ConcurrentLinkedQueue<>();
+        private final AtomicInteger collected = new AtomicInteger();
         private final RetryObserver.Binding binding;
+        private final RetryScope previous;
 
         private RetryScope(IConversationMemory memory) {
             this.memory = memory;
-            this.binding = RetryObserver.bind(failureClass -> {
-                if (retried.size() < MAX_RECORDS) {
-                    retried.add(failureClass);
+            this.binding = RetryObserver.bind((classes, recovered) -> {
+                if (collected.getAndAdd(classes.size()) < MAX_RECORDS) {
+                    retried.add(new Retries(classes, recovered));
                 }
             });
+            this.previous = CURRENT.get();
+            CURRENT.set(this);
         }
 
+        private void drain(IWritableConversationStep step, String failedRecovery) {
+            Retries retries;
+            while ((retries = retried.poll()) != null) {
+                for (FailureClass failureClass : retries.classes()) {
+                    append(step, failureClass, null, retries.recovered() ? HealthFailure.RETRY : failedRecovery);
+                }
+            }
+        }
+
+        /**
+         * Writes what is left: the retries of a loop that failed without its failure
+         * being recorded recovered nothing.
+         */
         @Override
         public void close() {
             binding.close();
+            if (previous == null) {
+                CURRENT.remove();
+            } else {
+                CURRENT.set(previous);
+            }
             if (memory == null || retried.isEmpty()) {
                 return;
             }
             try {
-                IWritableConversationStep step = memory.getCurrentStep();
-                FailureClass failureClass;
-                while ((failureClass = retried.poll()) != null) {
-                    record(step, failureClass, null, HealthFailure.RETRY);
-                }
+                drain(memory.getCurrentStep(), HealthFailure.NONE);
             } catch (RuntimeException e) {
                 // Recording must never affect the turn.
             }

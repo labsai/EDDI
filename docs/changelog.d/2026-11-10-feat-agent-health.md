@@ -109,6 +109,20 @@ retention, settings, metrics); [`LlmFailureRecords.java`](../../src/main/java/ai
 - Smaller: the recorder starts eagerly (gauge registered at boot), a row offered after shutdown counts
   `reason="shutdown"`, the Mongo stream closes its cursor, Postgres binds `LocalDate` directly.
 
+**Review fixes (PR #1386).** A same-model retry is now settled when its retry loop ends:
+`RetryConfiguration.executeWithRetry` opens a `RetryObserver.loop()` on every exit path, and a loop's retries
+are `retry` only when a later attempt succeeded — a call whose attempts all failed no longer counted as
+recovered; its retries take the outcome of the failure that ended it (`cascade`, `fallback` or `none`, via the
+cascade's record and `LlmFailureRecords.settle`). `StreamingLegacyChatExecutor` reports its own retries the
+same way (`TIMEOUT` for an empty timeout, the classifier's class for a provider error). `toolRefusals` also
+counts the refusals written instead of a `tool_result` (`tool_repeat_refused`, `tool_call_capped`,
+`tool_not_activated`, `hitl_self_conversation`, `hitl_self_ungating`, `hitl_request_changed`,
+`hitl_not_executed`, `hitl_rejected`). `MongoHealthTurnStore.upsert` retries the guarded upsert once on a
+duplicate key, so the newer of two concurrent first writes is not dropped (contract test with eight concurrent
+writers). [`agent-health.md`](../agent-health.md) now says a resumed turn changes its day's rollup, that a turn
+keeps at most 20 failure entries, and that turn rows outlive conversations when `eddi.health.facts-retention` is
+the longer setting (the conversation-retention sweep does not delete them; erasure does).
+
 ### What's next
 
 H2b (rollups, series, version compare, change markers — the marker store the H0 table says must be

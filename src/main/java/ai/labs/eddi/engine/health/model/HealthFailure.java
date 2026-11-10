@@ -23,7 +23,10 @@ import java.util.Map;
  */
 public record HealthFailure(String failureClass, String model, String recovery) {
 
-    /** Another attempt on the same model followed. */
+    /**
+     * A later attempt on the same model succeeded. A retry whose loop then failed
+     * takes the recovery of the failure that ended the loop instead.
+     */
     public static final String RETRY = "retry";
     /**
      * The cascade moved on to its next step, or served an earlier step's answer.

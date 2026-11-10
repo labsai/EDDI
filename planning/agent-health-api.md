@@ -81,8 +81,9 @@ Query: `period`, `from`/`to`, `version`, `origin`.
 - `value` is `null` when there is no data. `band` is then `GREY`, and `hint` says why ("Fewer than 30 engaged
   sessions").
 - `breakdown` is an optional list of `{ "key": "…", "label": "…", "value": …, "n": … }`. It is **mandatory** on
-  `resolutionRate`, with keys `confirmed`, `agentClosed`, `silence` (plan §4.4, decision 3), and is used for
-  failure classes and per-origin splits.
+  `resolutionRate`, with **four** keys (plan §4.4, decision 3): `confirmed` (external outcome events and explicit
+  agent actions only), `selfReported` (the model's own `report_conversation_outcome`, weak evidence), `agentClosed`
+  and `silence`. It is also used for failure classes and per-origin splits.
 - `thresholds` is `null` for `INFORMATIONAL` measures.
 
 ### Measure ids by section (the backend may add measures; the UI must render unknown ids generically)
@@ -207,3 +208,34 @@ permission rule.
 - The UI uses `status: null` to hide the status ring until H4, and `restricted: true` to show
   "You don't have access to this section".
 - All numbers come formatted from `unit` client-side, using the user's locale.
+
+## 11. UI requests
+
+Things the Manager UI (built against mocks) assumed because the contract above is silent. The backend should
+confirm or change them, and update this file when it does.
+
+1. **`resolutionRate.breakdown` semantics.** The four entries (`confirmed`, `selfReported`, `agentClosed`, `silence`)
+   are read as each source's *contribution to the rate* (a share of engaged sessions, so they add up to `value`). The UI
+   draws each part as its share of the resolved sessions (`part / sum`) and flags "mostly assumed from silence" when the
+   `silence` share alone is above 50 %. It works unchanged if the values are counts, because only the proportions are
+   used; a missing key counts as zero.
+2. **Report link list shape.** `GET …/health/reports` is assumed to return an array (a `{ "items": [...] }` wrapper is
+   also accepted) of `{ "id", "expiresAt", "sections", "createdAt", "createdBy" }`; only the first three are required.
+3. **Profile GET.** The UI tolerates a missing `critical`, `thresholds`, `budgets`, `slo` or `overrides` (treated as empty),
+   but needs `preset`, and uses `stored: false` to say "these are the defaults". A violation `path` should be a dotted
+   path into the body (`thresholds.resolutionRate.red`, `slo.agentTurnSuccess`) and `overrides[0].reason` for list
+   items; the UI shows a violation under the field whose path it equals or starts.
+4. **Drill-down evidence for "confirmed".** The UI opens the sessions list for the *confirmed* part of the resolution
+   with `outcome=RESOLVED&outcome=ASSUMED_RESOLVED` and `evidence=external_event|conversation_id_event|agent_action`;
+   *self-reported* is `evidence=self_reported` (same outcomes); *agent closed* is `evidence=agent_closed` and *silence*
+   is `evidence=silence`, both with `outcome=ASSUMED_RESOLVED`. The abandonment drill-down asks for `outcome=ABANDONED`
+   only (`ENDED_QUIETLY` is a separate outcome).
+5. **Origin default.** With no `origin` parameter the UI shows "Origins: default" and relies on the preset's interactive set.
+6. **Version options.** The UI offers versions `latest … 1` (capped at 25) for the version filter and for compare, taken
+   from the agent's latest version; a compare against a version with no turns should answer `404` or empty sections,
+   not a 5xx.
+7. **Export** is fetched through the API client (bearer token, one retry after a token refresh), not an `<a href>`, so the
+   endpoint may require the `Authorization` header. The UI sends `format`, `period` and `kind=daily` only; the version and
+   origin filters on screen are not sent, and the UI says so. (If the backend wants them in the export, add `version`
+   and `origin` to §8 and the UI will pass them.)
+8. **Check states.** `checks[].state` is rendered for `PASS` and `FAIL`; anything else reads "Not run".

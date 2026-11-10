@@ -14,6 +14,11 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -86,6 +91,37 @@ public interface HealthTurnStoreContract {
         HealthTurn stored = only("c1");
         assertEquals(0.40, stored.costUsd());
         assertFalse(stored.paused());
+    }
+
+    @Test
+    @DisplayName("concurrent first writes of one row: the newest write wins, whichever insert got there first")
+    default void concurrentFirstWritesKeepNewest() throws Exception {
+        int writers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(writers);
+        try {
+            for (int round = 0; round < 10; round++) {
+                String conversation = "race-" + round;
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<?>> writes = new ArrayList<>();
+                for (int w = 0; w < writers; w++) {
+                    HealthTurn turn = row(conversation, 1, "e1", T0.plusSeconds(w), 0.01 * (w + 1), false);
+                    writes.add(pool.submit(() -> {
+                        start.await();
+                        store().upsert(turn);
+                        return null;
+                    }));
+                }
+                start.countDown();
+                for (Future<?> write : writes) {
+                    write.get(30, TimeUnit.SECONDS);
+                }
+                HealthTurn stored = only(conversation);
+                assertEquals(T0.plusSeconds(writers - 1), stored.updatedAt(), "round " + round);
+                assertEquals(0.01 * writers, stored.costUsd(), 1e-9, "round " + round);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

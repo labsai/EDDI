@@ -133,17 +133,40 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         return conversationId + "|" + executionId;
     }
 
+    /**
+     * A duplicate key means the guarded filter matched nothing although the row
+     * exists: either the stored row is newer, or another node inserted the first
+     * version of the same row between this write's match and its insert — in which
+     * case this write may well be the newer one. One retry tells the two apart: it
+     * now finds the row and replaces it when this write is not older, and a second
+     * duplicate key is the stored row being newer, so the write is stale and
+     * ignored.
+     */
     @Override
     public void upsert(HealthTurn turn) {
         try {
-            turns.updateOne(guardedFilter(turn), replacePipeline(turn), new UpdateOptions().upsert(true));
+            guardedUpsert(turn);
         } catch (MongoException e) {
-            if (ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY) {
-                // The stored row is newer than this write: the write is stale and ignored.
-                return;
+            if (!isDuplicateKey(e)) {
+                throw new HealthStoreException("Could not store a health turn", e);
             }
-            throw new HealthStoreException("Could not store a health turn", e);
+            try {
+                guardedUpsert(turn);
+            } catch (MongoException retry) {
+                if (!isDuplicateKey(retry)) {
+                    throw new HealthStoreException("Could not store a health turn", retry);
+                }
+                // The stored row is newer than this write: the write is stale and ignored.
+            }
         }
+    }
+
+    private void guardedUpsert(HealthTurn turn) {
+        turns.updateOne(guardedFilter(turn), replacePipeline(turn), new UpdateOptions().upsert(true));
+    }
+
+    private static boolean isDuplicateKey(MongoException e) {
+        return ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY;
     }
 
     /** The row, unless the stored one is newer. */

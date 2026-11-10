@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("LlmFailureRecords — recovered LLM failures on the step")
@@ -175,6 +176,147 @@ class LlmFailureRecordsTest {
         List<HealthFailure> failures = asHealth(memory);
         assertEquals(3, failures.size(), "two retries on the task thread, one on the step thread, none for the side call");
         assertTrue(failures.stream().allMatch(f -> "TIMEOUT".equals(f.failureClass()) && "retry".equals(f.recovery()) && f.model() == null));
+    }
+
+    private static RetryConfiguration fast(int attempts) {
+        var config = new RetryConfiguration();
+        config.setMaxAttempts(attempts);
+        config.setBackoffDelayMs(0L);
+        return config;
+    }
+
+    private static Callable<String> alwaysTimesOut() {
+        return () -> {
+            throw new SocketTimeoutException("read timed out");
+        };
+    }
+
+    @Test
+    @DisplayName("a call whose attempts all fail: its retries recovered nothing, and the failure itself is recorded once")
+    void exhaustedRetriesNotRecovered() {
+        ConversationMemory memory = memory();
+        IWritableConversationStep step = memory.getCurrentStep();
+        try (var ignored = LlmFailureRecords.observeRetries(memory)) {
+            int mark = LlmFailureRecords.mark(step);
+            Exception failure;
+            try (var modelCall = RetryObserver.modelCall()) {
+                failure = assertThrows(Exception.class,
+                        () -> RetryConfiguration.executeWithRetry(alwaysTimesOut(), fast(3), "Chat model execution"));
+            }
+            LlmFailureRecords.settle(step, failure, "gpt-x", HealthFailure.NONE, mark);
+        }
+        List<HealthFailure> failures = asHealth(memory);
+        assertEquals(List.of(new HealthFailure("TIMEOUT", null, "none"), new HealthFailure("TIMEOUT", null, "none"),
+                new HealthFailure("TIMEOUT", "gpt-x", "none")), failures);
+        assertTrue(failures.stream().noneMatch(HealthFailure::recovered));
+    }
+
+    @Test
+    @DisplayName("exhausted retries absorbed by onError: fallback share the fallback")
+    void exhaustedRetriesFallback() {
+        ConversationMemory memory = memory();
+        IWritableConversationStep step = memory.getCurrentStep();
+        try (var ignored = LlmFailureRecords.observeRetries(memory)) {
+            int mark = LlmFailureRecords.mark(step);
+            Exception failure;
+            try (var modelCall = RetryObserver.modelCall()) {
+                failure = assertThrows(Exception.class,
+                        () -> RetryConfiguration.executeWithRetry(alwaysTimesOut(), fast(2), "Chat model execution"));
+            }
+            LlmFailureRecords.settle(step, failure, "gpt-x", HealthFailure.FALLBACK, mark);
+        }
+        assertEquals(List.of(new HealthFailure("TIMEOUT", null, "fallback"), new HealthFailure("TIMEOUT", "gpt-x", "fallback")),
+                asHealth(memory));
+    }
+
+    @Test
+    @DisplayName("a failed loop that nothing records afterwards (a swallowed failure) recovered nothing")
+    void unrecordedFailedLoop() {
+        ConversationMemory memory = memory();
+        try (var ignored = LlmFailureRecords.observeRetries(memory); var modelCall = RetryObserver.modelCall()) {
+            assertThrows(Exception.class,
+                    () -> RetryConfiguration.executeWithRetry(alwaysTimesOut(), fast(2), "x"));
+        }
+        assertEquals(List.of(new HealthFailure("TIMEOUT", null, "none")), asHealth(memory));
+    }
+
+    @Test
+    @DisplayName("cascade: a step whose retries are exhausted escalates — its retries share the cascade's recovery or its settlement")
+    void exhaustedRetriesInCascade() throws Exception {
+        ConversationMemory memory = memory();
+        IWritableConversationStep step = memory.getCurrentStep();
+        ExecutorService other = Executors.newSingleThreadExecutor();
+        try (var ignored = LlmFailureRecords.observeRetries(memory)) {
+            int mark = LlmFailureRecords.mark(step);
+            Callable<String> stepCall = RetryObserver.propagate(() -> {
+                try (var modelCall = RetryObserver.modelCall()) {
+                    return RetryConfiguration.executeWithRetry(alwaysTimesOut(), fast(2), "step");
+                }
+            });
+            // Step 1 fails on its own thread; the cascade escalates.
+            assertThrows(Exception.class, () -> other.submit(stepCall).get());
+            LlmFailureRecords.record(step, FailureClass.TIMEOUT, "cheap", HealthFailure.CASCADE);
+            // Step 2, the last, fails too: pending until the task decides.
+            assertThrows(Exception.class, () -> other.submit(stepCall).get());
+            LlmFailureRecords.record(step, FailureClass.TIMEOUT, "big", LlmFailureRecords.PENDING);
+
+            LlmFailureRecords.settle(step, new SocketTimeoutException("t"), null, HealthFailure.FALLBACK, mark);
+        } finally {
+            other.shutdownNow();
+        }
+        assertEquals(List.of(new HealthFailure("TIMEOUT", null, "fallback"), new HealthFailure("TIMEOUT", "cheap", "fallback"),
+                new HealthFailure("TIMEOUT", null, "fallback"), new HealthFailure("TIMEOUT", "big", "fallback")), asHealth(memory));
+    }
+
+    @Test
+    @DisplayName("cascade: exhausted retries of an escalated step are recovered by the cascade when a later step answers")
+    void exhaustedRetriesRecoveredByCascade() {
+        ConversationMemory memory = memory();
+        IWritableConversationStep step = memory.getCurrentStep();
+        AtomicInteger calls = new AtomicInteger();
+        try (var ignored = LlmFailureRecords.observeRetries(memory)) {
+            try (var modelCall = RetryObserver.modelCall()) {
+                assertThrows(Exception.class,
+                        () -> RetryConfiguration.executeWithRetry(alwaysTimesOut(), fast(2), "step 1"));
+            }
+            LlmFailureRecords.record(step, FailureClass.TIMEOUT, "cheap", HealthFailure.CASCADE);
+            try (var modelCall = RetryObserver.modelCall()) {
+                assertEquals("ok", assertDoesNotThrow(() -> RetryConfiguration.executeWithRetry(() -> {
+                    if (calls.incrementAndGet() < 2) {
+                        throw new SocketTimeoutException("t");
+                    }
+                    return "ok";
+                }, fast(3), "step 2")));
+            }
+        }
+        assertEquals(List.of(new HealthFailure("TIMEOUT", null, "cascade"), new HealthFailure("TIMEOUT", "cheap", "cascade"),
+                new HealthFailure("TIMEOUT", null, "retry")), asHealth(memory));
+        assertTrue(asHealth(memory).stream().allMatch(HealthFailure::recovered));
+    }
+
+    @Test
+    @DisplayName("a recovered retry earlier in the phase stays recovered, and does not stop settle recording the phase's failure")
+    void recoveredRetryThenPhaseFailure() {
+        ConversationMemory memory = memory();
+        IWritableConversationStep step = memory.getCurrentStep();
+        AtomicInteger calls = new AtomicInteger();
+        try (var ignored = LlmFailureRecords.observeRetries(memory)) {
+            int mark = LlmFailureRecords.mark(step);
+            try (var modelCall = RetryObserver.modelCall()) {
+                assertEquals("ok", assertDoesNotThrow(() -> RetryConfiguration.executeWithRetry(() -> {
+                    if (calls.incrementAndGet() < 2) {
+                        throw new SocketTimeoutException("t");
+                    }
+                    return "ok";
+                }, fast(3), "round 1")));
+            }
+            LlmFailureRecords.settle(step, new IllegalStateException("401 unauthorized"), "gpt-x", HealthFailure.NONE, mark);
+        }
+        List<HealthFailure> failures = asHealth(memory);
+        assertEquals(2, failures.size(), failures.toString());
+        assertEquals(new HealthFailure("TIMEOUT", null, "retry"), failures.get(0));
+        assertEquals("gpt-x", failures.get(1).model());
+        assertEquals("none", failures.get(1).recovery());
     }
 
     @Test

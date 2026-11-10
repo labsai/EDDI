@@ -21,6 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("RetryObserver — retries visible to whoever listens on the thread")
 class RetryObserverTest {
 
+    /** Records every retry the listener is handed, with the outcome of its loop. */
+    private record Seen(FailureClass failureClass, boolean recovered) {
+    }
+
+    private static RetryObserver.Listener into(List<Seen> seen) {
+        return (retries, recovered) -> retries.forEach(c -> seen.add(new Seen(c, recovered)));
+    }
+
     private static RetryConfiguration fast(int attempts) {
         var config = new RetryConfiguration();
         config.setMaxAttempts(attempts);
@@ -29,22 +37,72 @@ class RetryObserverTest {
     }
 
     @Test
-    @DisplayName("each retry is reported once; the final, unretried failure is not")
+    @DisplayName("each retry is reported once; the final, unretried failure is not; all attempts failed: nothing recovered")
     void reportsRetriesOnly() {
-        List<FailureClass> seen = new ArrayList<>();
-        try (var ignored = RetryObserver.bind(seen::add); var modelCall = RetryObserver.modelCall()) {
+        List<Seen> seen = new ArrayList<>();
+        try (var ignored = RetryObserver.bind(into(seen)); var modelCall = RetryObserver.modelCall()) {
             assertThrows(Exception.class, () -> RetryConfiguration.executeWithRetry(() -> {
                 throw new SocketTimeoutException("always");
             }, fast(3), "x"));
         }
-        assertEquals(List.of(FailureClass.TIMEOUT, FailureClass.TIMEOUT), seen);
+        assertEquals(List.of(new Seen(FailureClass.TIMEOUT, false), new Seen(FailureClass.TIMEOUT, false)), seen);
+    }
+
+    @Test
+    @DisplayName("fail, then succeed: the retry recovered — and it is handed over only once the loop has ended")
+    void recoveredWhenLaterAttemptSucceeds() throws Exception {
+        List<Seen> seen = new ArrayList<>();
+        int[] calls = {0};
+        try (var ignored = RetryObserver.bind(into(seen)); var modelCall = RetryObserver.modelCall()) {
+            assertEquals("ok", RetryConfiguration.executeWithRetry(() -> {
+                if (calls[0]++ == 0) {
+                    throw new SocketTimeoutException("once");
+                }
+                assertTrue(seen.isEmpty(), "not reported while the loop still runs");
+                return "ok";
+            }, fast(3), "x"));
+        }
+        assertEquals(List.of(new Seen(FailureClass.TIMEOUT, true)), seen);
+    }
+
+    @Test
+    @DisplayName("a retried failure that then ends in a non-retryable one recovered nothing")
+    void retryThenPermanentFailure() {
+        List<Seen> seen = new ArrayList<>();
+        int[] calls = {0};
+        try (var ignored = RetryObserver.bind(into(seen)); var modelCall = RetryObserver.modelCall()) {
+            assertThrows(Exception.class, () -> RetryConfiguration.executeWithRetry(() -> {
+                if (calls[0]++ == 0) {
+                    throw new SocketTimeoutException("once");
+                }
+                throw new IllegalArgumentException("bad input");
+            }, fast(3), "x"));
+        }
+        assertEquals(List.of(new Seen(FailureClass.TIMEOUT, false)), seen);
+    }
+
+    @Test
+    @DisplayName("loops nest: each hands over its own retries with its own outcome")
+    void nestedLoops() {
+        List<Seen> seen = new ArrayList<>();
+        try (var ignored = RetryObserver.bind(into(seen)); var modelCall = RetryObserver.modelCall()) {
+            try (var outer = RetryObserver.loop()) {
+                RetryObserver.retrying(FailureClass.RATE_LIMITED);
+                try (var inner = RetryObserver.loop()) {
+                    RetryObserver.retrying(FailureClass.TIMEOUT);
+                    inner.succeeded();
+                }
+                assertEquals(List.of(new Seen(FailureClass.TIMEOUT, true)), seen);
+            }
+        }
+        assertEquals(List.of(new Seen(FailureClass.TIMEOUT, true), new Seen(FailureClass.RATE_LIMITED, false)), seen);
     }
 
     @Test
     @DisplayName("a non-retryable failure is not a retry")
     void permanentFailure() {
-        List<FailureClass> seen = new ArrayList<>();
-        try (var ignored = RetryObserver.bind(seen::add); var modelCall = RetryObserver.modelCall()) {
+        List<Seen> seen = new ArrayList<>();
+        try (var ignored = RetryObserver.bind(into(seen)); var modelCall = RetryObserver.modelCall()) {
             assertThrows(Exception.class, () -> RetryConfiguration.executeWithRetry(() -> {
                 throw new IllegalArgumentException("bad input");
             }, fast(3), "x"));
@@ -53,25 +111,25 @@ class RetryObserverTest {
     }
 
     @Test
-    @DisplayName("bindings nest and restore; with none bound a retry notifies nobody")
+    @DisplayName("bindings nest and restore; outside a loop a retry is handed over at once, unrecovered; with none bound it notifies nobody")
     void nesting() {
-        List<FailureClass> outer = new ArrayList<>();
-        List<FailureClass> inner = new ArrayList<>();
-        try (var a = RetryObserver.bind(outer::add); var call = RetryObserver.modelCall()) {
-            try (var b = RetryObserver.bind(inner::add)) {
+        List<Seen> outer = new ArrayList<>();
+        List<Seen> inner = new ArrayList<>();
+        try (var a = RetryObserver.bind(into(outer)); var call = RetryObserver.modelCall()) {
+            try (var b = RetryObserver.bind(into(inner))) {
                 RetryObserver.retrying(FailureClass.TRANSIENT);
             }
             RetryObserver.retrying(null);
         }
         RetryObserver.retrying(FailureClass.AUTH);
-        assertEquals(List.of(FailureClass.TRANSIENT), inner);
-        assertEquals(List.of(FailureClass.UNKNOWN), outer);
+        assertEquals(List.of(new Seen(FailureClass.TRANSIENT, false)), inner);
+        assertEquals(List.of(new Seen(FailureClass.UNKNOWN, false)), outer);
     }
 
     @Test
     @DisplayName("a listener that throws cannot change the retry")
     void throwingListener() throws Exception {
-        try (var ignored = RetryObserver.bind(c -> {
+        try (var ignored = RetryObserver.bind((c, recovered) -> {
             throw new IllegalStateException("listener bug");
         }); var call = RetryObserver.modelCall()) {
             assertDoesNotThrow(() -> RetryObserver.retrying(FailureClass.TRANSIENT));
@@ -88,15 +146,15 @@ class RetryObserverTest {
     @Test
     @DisplayName("outside a model call a retry is not reported — side calls are not the task's model")
     void outsideModelCall() {
-        List<FailureClass> seen = new ArrayList<>();
-        try (var ignored = RetryObserver.bind(seen::add)) {
+        List<Seen> seen = new ArrayList<>();
+        try (var ignored = RetryObserver.bind(into(seen))) {
             RetryObserver.retrying(FailureClass.TRANSIENT);
             try (var call = RetryObserver.modelCall()) {
                 RetryObserver.retrying(FailureClass.TIMEOUT);
             }
             RetryObserver.retrying(FailureClass.TRANSIENT);
         }
-        assertEquals(List.of(FailureClass.TIMEOUT), seen);
+        assertEquals(List.of(new Seen(FailureClass.TIMEOUT, false)), seen);
     }
 
     @Test
@@ -104,9 +162,9 @@ class RetryObserverTest {
     void propagate() throws Exception {
         Callable<String> work = () -> "done";
         assertSame(work, RetryObserver.propagate(work));
-        List<FailureClass> seen = new ArrayList<>();
+        List<Seen> seen = new ArrayList<>();
         Callable<Void> wrapped;
-        try (var ignored = RetryObserver.bind(seen::add)) {
+        try (var ignored = RetryObserver.bind(into(seen))) {
             wrapped = RetryObserver.propagate(() -> {
                 try (var call = RetryObserver.modelCall()) {
                     RetryObserver.retrying(FailureClass.RATE_LIMITED);
@@ -123,6 +181,6 @@ class RetryObserverTest {
         });
         thread.start();
         thread.join();
-        assertEquals(List.of(FailureClass.RATE_LIMITED), seen);
+        assertEquals(List.of(new Seen(FailureClass.RATE_LIMITED, false)), seen);
     }
 }

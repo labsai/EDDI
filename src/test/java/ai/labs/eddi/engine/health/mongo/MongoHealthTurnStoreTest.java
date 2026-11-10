@@ -12,6 +12,7 @@ import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -93,15 +94,37 @@ class MongoHealthTurnStoreTest {
     }
 
     @Test
-    @DisplayName("upsert sends the guarded pipeline with upsert on; a newer stored row (duplicate key) is ignored")
+    @DisplayName("upsert sends the guarded pipeline with upsert on")
     void upsert() {
         store.upsert(turn(false));
         ArgumentCaptor<UpdateOptions> options = ArgumentCaptor.forClass(UpdateOptions.class);
         verify(collection).updateOne(any(Bson.class), anyList(), options.capture());
         assertTrue(options.getValue().isUpsert());
+    }
 
+    @Test
+    @DisplayName("a duplicate key from a concurrent first insert is retried once, and the retry stores the row")
+    void duplicateKeyRetried() {
+        when(collection.updateOne(any(Bson.class), anyList(), any(UpdateOptions.class))).thenThrow(new MongoException(11000, "E11000 duplicate key"))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
+        assertDoesNotThrow(() -> store.upsert(turn(false)));
+        verify(collection, times(2)).updateOne(any(Bson.class), anyList(), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("a second duplicate key is a newer stored row: the stale write is ignored, not retried again")
+    void duplicateKeyTwiceIgnored() {
         when(collection.updateOne(any(Bson.class), anyList(), any(UpdateOptions.class))).thenThrow(new MongoException(11000, "E11000 duplicate key"));
         assertDoesNotThrow(() -> store.upsert(turn(false)));
+        verify(collection, times(2)).updateOne(any(Bson.class), anyList(), any(UpdateOptions.class));
+    }
+
+    @Test
+    @DisplayName("a retry that fails otherwise is a HealthStoreException")
+    void duplicateKeyThenOtherFailure() {
+        when(collection.updateOne(any(Bson.class), anyList(), any(UpdateOptions.class))).thenThrow(new MongoException(11000, "E11000 duplicate key"))
+                .thenThrow(new MongoException("down"));
+        assertThrows(HealthStoreException.class, () -> store.upsert(turn(false)));
     }
 
     @Test

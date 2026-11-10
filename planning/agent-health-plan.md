@@ -116,12 +116,15 @@ period and evidence source.
 
 ### 4.2 Denominators: origin and engagement
 
-Every turn row and outcome carries an **origin**: `chat-ui`, `manager`, `v1-stateful`, `v1-stateless`,
-`email`, `slack`, `webhook`, `schedule`, `a2a`, `group-member`, `api` (aligned with the rating store's
-`channel`). A conversation counts as **engaged** only with ≥ 1 user turn after the agent's first output
-(the Intercom "involved" idea); greeting-only and empty sessions are counted but excluded from
-effectiveness denominators. Interactive origins feed effectiveness; `v1-stateless`, `schedule`,
-`webhook`, `a2a`, `group-member` feed the `task` view by default (designer can include them).
+Every turn row and outcome carries an **origin**, classified per turn as settled in H0 (§9):
+`api`, `v1`, `mcp`, `email`, `slack`, `webhook`, `schedule`, `a2a`, `group-member`, `delegated`,
+`agent-test`. The Chat UI and the Manager both record `api`, and both `/v1` modes record `v1`. Neither
+pair can be told apart server-side until a client hint exists. A conversation counts as **engaged** only
+with ≥ 1 user turn after the agent's first output (the Intercom "involved" idea). Greeting-only and empty
+sessions are counted but excluded from effectiveness denominators. By default, `api`, `v1`, `mcp`,
+`email` and `slack` feed effectiveness, while `schedule`, `webhook`, `a2a`, `group-member` and
+`delegated` feed the `task` view (the designer can include them). `agent-test` is always excluded unless
+asked for explicitly.
 
 ### 4.3 Measures — scored, informational, checks
 
@@ -270,13 +273,20 @@ outcome evaluation are `ScheduleFireExecutor` system jobs with CAS claims (like 
 | `healthdirty` | `(agentId, day)` | days to re-roll |
 | `healthprofiles` | agentId | §4.5 |
 
-**Write semantics.** The turn row is written by **replace-upsert** of the step's totals, not `$inc`.
-`executionId` is generated when a turn starts and kept on the step, so a HITL resume (same step,
-settled again) replaces its own row, while a say-after-undo at the same `stepIndex` gets a new
-execution id (the undone execution's row is marked discarded, matching `audit:discarded_cost`).
-Replace is idempotent across retries and late completions; the watchdog's abandoned-but-running turns
-can only overwrite their own row. Asynchronous on its own bounded executor; drops counted
-(`eddi_health_dropped_total`). Not billing-grade — quotas and ceilings stay authoritative.
+**Write semantics** (as settled in H0, §9). The turn row is keyed by `(conversationId, executionId)` and
+written by a **guarded replace** of the step's totals, not `$inc`.
+- `executionId` is stamped on the step at the **end** of its first execution and kept from then on. A
+  HITL resume or a rerun (the same step, settled again) therefore replaces its own row. A say after an
+  undo runs on a new step and gets a new id, and the undone executions are marked discarded, matching
+  `audit:discarded_cost`.
+- `day` and the first timestamp stay as first recorded.
+- A write older than the stored row's `updatedAt` is ignored.
+- `discarded` is sticky.
+- An **abandoned or cancelled** turn (watchdog timeout, client cancel) is insert-only. It never replaces
+  an existing row and never applies discards.
+
+The write runs asynchronously on its own bounded executor, and drops are counted
+(`eddi_health_dropped_total`). Health is not billing-grade: quotas and ceilings stay authoritative.
 
 **Rollups.** Every writer (turn, outcome, event, mapping change) enqueues `(agentId, day)` in
 `healthdirty`; the rollup job drains it and recomputes those days from turn and outcome rows. A

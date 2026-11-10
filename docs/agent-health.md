@@ -50,8 +50,10 @@ executionId)`; an execution id belongs to one step — never by increment:
   total: the sum of `costUsd` over all rows equals the sum of
   `costUsd + discardedCostUsd` over the rows that are not discarded;
 - **`day` and `timestamp` are first-recorded**: a turn paused on one day and
-  resumed on the next stays on the day it started, so a day already rolled up
-  does not change. `updatedAt` is when the row was last written;
+  resumed on the next stays on the day it started, so it is never counted on two
+  days. The rest of the row is replaced by the resume — its cost, tokens,
+  `paused`, outcome — so a rollup of the day it started has to be recomputed
+  (H2b marks that day dirty). `updatedAt` is when the row was last written;
 - **the newest capture wins**: a write whose `updatedAt` is older than the stored
   row's is ignored, so a stale paused row delayed in one node's queue cannot
   overwrite the finished row another node wrote (ordering is by the writing
@@ -86,9 +88,9 @@ authoritative counters, and a dropped row is a gap in a chart, nothing more.
 | `durationMs` | measured by the hook, from the start of its wait for the turn to the outcome (for the start turn, the whole `startConversation`) | Latency; for a resumed turn, the resumed part only — the human's wait is not the agent's latency |
 | `errorKind` | the turn's outcome: `TURN_ERROR`, `TURN_INTERRUPTED`, `TURN_DEADLINE`, `COST_CEILING`, `TENANT_BUDGET` | Reliability |
 | `paused` | the turn ended `AWAITING_HUMAN` | A paused turn is recorded; its resume replaces the row |
-| `failures` | `health:llm_failures` — every failed LLM attempt, **including recovered ones** | Provider trouble the user never saw |
+| `failures` | `health:llm_failures` — every failed LLM attempt, **including recovered ones**, at most 20 per turn | Provider trouble the user never saw. A turn with more failed attempts keeps its first 20 and under-reports the rest |
 | `fallbackServed` | `llm:fallback:*` | The agent answered with its configured fallback |
-| `toolCalls`, `toolFailures`, `toolRefusals` | the LLM tool traces: a `tool_result` entry is a call that **ran** (`toolCalls`, mocked ones included) — marked `failed` when it ran and failed (an exception, an HTTP error, a timeout, an unknown tool: `toolFailures`, a subset); a `tool_result` marked `notExecuted` (a quota, the turn deadline) or a `tool_error` entry (a budget, an approval cap, a credential-reference check) is a call that **never ran** (`toolRefusals`) | Tool reliability, apart from policy refusals |
+| `toolCalls`, `toolFailures`, `toolRefusals` | the LLM tool traces: a `tool_result` entry is a call that **ran** (`toolCalls`, mocked ones included) — marked `failed` when it ran and failed (an exception, an HTTP error, a timeout, an unknown tool: `toolFailures`, a subset); a `tool_result` marked `notExecuted` (a quota, the turn deadline), a `tool_error` entry (a budget, an approval cap, a credential-reference check, an argument-schema check) or a refusal written instead of a result — `tool_repeat_refused` (the repeat guard), `tool_call_capped` (a per-response call cap), `tool_not_activated` (a lazy tool not activated yet), `hitl_self_conversation` / `hitl_self_ungating` (a call into the agent's own conversation or approval gate), `hitl_request_changed` / `hitl_not_executed` / `hitl_rejected` (a HITL resume that refused, or a reviewer who declined, the call) — is a call that **never ran** (`toolRefusals`). Guardrail findings are counted in `guardrailTrips`, and `tool_repeat_stopped` (which ends the loop) in neither | Tool reliability, apart from policy refusals |
 | `guardrailTrips` | `audit:guardrail:*` | Informational |
 | `userInput` | `input:initial` is not blank and the turn is not a [self-continuation](long-jobs.md) | Engagement |
 | `agentOutput` | the step rendered output text | Engagement |
@@ -102,7 +104,7 @@ class (`TRANSIENT`, `RATE_LIMITED`, `TIMEOUT`, `QUOTA_EXHAUSTED`, `AUTH`, …),
 
 | `recovery` | Meaning |
 | --- | --- |
-| `retry` | Another attempt on the same model followed (from the task's `retry` settings) |
+| `retry` | A later attempt on the same model succeeded (from the task's `retry` settings). The retries of a call whose attempts **all** failed are not `retry`: they take the outcome of the failure that ended the call — `cascade` when the cascade escalated past it and answered, else `fallback` or `none` |
 | `cascade` | The [model cascade](model-cascade.md) escalated to its next step, or served an earlier step's answer — and the cascade ended in an answer. When the cascade itself ends in a failure, every step it escalated past takes the outcome of that failure (`fallback` or `none`): a turn that failed was not partly recovered |
 | `fallback` | `onError: fallback` served the configured answer |
 | `none` | Nothing recovered it: the failure ended the model phase |
@@ -111,9 +113,11 @@ Same-model retries are recorded only for the task's **own model calls** (the
 chat calls of the plain, tool-loop and re-ask paths, including those of a HITL
 revision). Not recorded: retries of side calls made on the same thread — a
 cascade judge, a summarisation, a tool-response truncation, an MCP call, a
-sub-agent conversation started from a tool (which records its own) — the
-streaming path's own reconnects, and the circuit breaker's refusals (the model
-was never called).
+sub-agent conversation started from a tool (which records its own) — and the
+circuit breaker's refusals (the model was never called). The streaming path's
+own retries of an empty timed-out or failed stream are recorded like any other
+same-model retry (`TIMEOUT` for a timeout, the provider error's class
+otherwise).
 
 ### Origins
 
@@ -164,9 +168,14 @@ permission.
 A daily sweep (`health-turn-retention`, on every node — it is one idempotent
 `delete where day < cutoff`, so no coordination is needed) deletes the rows of
 days older than `eddi.health.facts-retention`. It runs even with
-`eddi.health.enabled=false`. Turn rows are kept for less time than conversations
-(365 days by default), so a conversation removed by its own retention has no rows
-left; daily aggregates (H2b) will be kept longer and hold no personal data.
+`eddi.health.enabled=false`. With the defaults, turn rows are kept for less time
+than conversations (90 against 365 days), so a conversation removed by its own
+retention has no rows left. That holds only while `eddi.health.facts-retention`
+is the shorter of the two: the conversation-retention sweep does not delete
+health rows — only an explicit conversation delete does — so with a longer
+setting a conversation's rows outlive it until their own retention takes them.
+A user's [erasure](#gdpr) removes them whatever either setting says. Daily
+aggregates (H2b) will be kept longer and hold no personal data.
 
 ## GDPR
 

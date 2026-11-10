@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -69,6 +70,17 @@ public final class HealthTurnFactory {
     /** Flags {@code ToolLoopRunner} sets on a {@code tool_result} entry. */
     static final String TRACE_FAILED = "failed";
     static final String TRACE_NOT_EXECUTED = "notExecuted";
+    /**
+     * Trace entries of a call that was answered with a refusal instead of running,
+     * each written <em>instead of</em> a {@code tool_result}: the repeat guard, the
+     * per-response call caps, a call to a lazy tool not activated yet, a call into
+     * the agent's own conversation, and the HITL resume's refusals of an approved
+     * (or declined) call. {@code tool_repeat_stopped}, which ends the loop rather
+     * than answering a call, and the guardrail findings, counted as
+     * {@code guardrails}, are not among them.
+     */
+    static final Set<String> TRACE_REFUSALS = Set.of("tool_repeat_refused", "tool_call_capped", "tool_not_activated",
+            "hitl_self_conversation", "hitl_self_ungating", "hitl_request_changed", "hitl_not_executed", "hitl_rejected");
 
     private static final String FULL_WIDTH_QUESTION_MARK = "？";
 
@@ -273,7 +285,7 @@ public final class HealthTurnFactory {
                             tools[1]++;
                         }
                     }
-                } else if (TRACE_TOOL_ERROR.equals(type)) {
+                } else if (TRACE_TOOL_ERROR.equals(type) || type instanceof String name && TRACE_REFUSALS.contains(name)) {
                     tools[2]++;
                 }
             }
