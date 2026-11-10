@@ -146,6 +146,13 @@ class NatsTlsHandshakeTest {
         assertTrue(server.handshakes.getFirst().contains("CN=eddi-node"), server.handshakes.toString());
     }
 
+    /**
+     * Connects to {@code server} with the options {@link NatsConnectionManager}
+     * builds, and returns once the manager's listener has adopted the connection.
+     * The manager stays alive until {@link #stopManagersThenServers()}; the
+     * connection is the caller's to close, unless the wait fails, in which case it
+     * is closed here.
+     */
     private Connection connect(FakeNatsServer server, boolean withClientCertificate) throws Exception {
         ClusterConfig config = ClusterConfig.defaults().withNatsUrl("tls://localhost:" + server.port());
         config.natsTlsTruststorePath = Optional.of(clientTrust.toString());
