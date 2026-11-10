@@ -411,4 +411,45 @@ public final class MemoryKeys {
      * which sees keys as strings and never resolves a typed {@code MemoryKey}.
      */
     public static final String DYNAMIC_TORN_DOWN_AGENT_IDS = "dynamic:torn_down_agent_ids";
+
+    // ---- Agent Health ----
+
+    /**
+     * The id of the turn execution that ran this step ({@code String}, a UUID) —
+     * part of the Agent Health turn row's key. Written by {@code Conversation} at
+     * the end of the step's first execution, only when absent: a HITL resume and a
+     * rerun continue the same step and keep it, so their row replaces the earlier
+     * one, while a say after an undo runs on a new step and gets a new id. At the
+     * end, not the start, for the reason {@link #AGENT_VERSION} gives. Internal:
+     * not in the simple conversation snapshot.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_EXECUTION_ID = "health:execution_id";
+
+    /**
+     * The execution ids ({@code List<String>}) of the steps an undo moved to the
+     * redo cache and this step's turn then discarded — the Agent Health rows the
+     * recorder marks {@code discarded}. Written by {@code Conversation} on the new
+     * step, at its end; the counterpart of {@link #AUDIT_DISCARDED_COST}. Absent on
+     * every other step.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_DISCARDED_EXECUTIONS = "health:discarded_executions";
+
+    /**
+     * Every failed LLM attempt of this step, recovered or not ({@code List<Map>} of
+     * {@code {class, model, recovery}}): {@code class} a {@code FailureClass} name,
+     * {@code model} the model when known, and {@code recovery} what the engine did
+     * next — {@code retry} (same model again), {@code cascade} (escalated, or an
+     * earlier step's answer served), {@code fallback} ({@code onError: fallback})
+     * or {@code none}. Written by the LLM task's recovery path
+     * ({@code LlmFailureRecords}), at most {@code LlmFailureRecords.MAX_RECORDS}
+     * entries; read by Agent Health. Without it a retried or cascaded failure left
+     * no trace on the step — only untagged counters. Holds no message text.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_LLM_FAILURES = "health:llm_failures";
 }

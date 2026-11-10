@@ -265,6 +265,18 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 
 ---
 
+## Agent Health
+
+Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
+| `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+
+---
+
 ## Knowledge bases (RAG)
 
 | Property | Default | Description |

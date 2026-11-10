@@ -21,3 +21,95 @@ Both are recorded in its §0 with the evidence for each change.
 - **Health is derived and not billing-grade** — it never changes conversations; quotas and cost ceilings stay
   the authoritative counters.
 - The eight product decisions settled with the maintainer are in the plan's §9.
+
+## ✨ feat(health): Agent Health turn facts — one row per turn execution, recovered LLM failures on the step (2026-11-10)
+
+**Repo:** EDDI (`feat/agent-health`)
+
+### What changed and why
+
+Phase H0 + H2a of the [Agent Health plan](../../planning/agent-health-plan.md). H0 settled the open items
+from the code (the plan's §9 now has an "H0 decisions" table); H2a records the **turn facts** every later
+health view is computed from. Documented in [`agent-health.md`](../agent-health.md).
+
+- **One row per turn execution** — `healthturns` (MongoDB) / `health_turns` (PostgreSQL), keyed by
+  `(conversationId, stepIndex, executionId)` and written by **replace-upsert**, never `$inc`. It holds agent,
+  version (and the version moved from), user, origin, UTC day, the step's cost / discarded cost / tokens
+  (the same `audit:*` keys the ledger records), duration, `ErrorKind`, pause, every failed LLM attempt with
+  its recovery, fallback, tool calls and failures, guardrail trips, user input, output, a question-mark
+  heuristic and the actions. No text.
+- **`executionId`** — `health:execution_id`, minted by `Conversation` at the end of a step's first
+  execution (beside `recordAgentVersion`, so step data keeps its positions). A HITL resume or rerun keeps
+  it and replaces its row; a say after an undo gets a new one, and the undone executions are listed on the
+  new step (`health:discarded_executions`) and marked `discarded`. Spend stays equal to `conversationCost`.
+- **Collection** — `HealthTurnRecorder` on its **own** single-thread executor with a bounded queue
+  (`eddi.health.queue-capacity`, default 10,000): it copies the values on the turn's thread and never blocks
+  or throws. Hooked into `ConversationStepRunner.waitForExecutionFinishOrTimeout` (every say, rerun and
+  resume — clean, failed and paused) and the inline `CONVERSATION_START` turn in `startConversation`, which
+  never reached that hook. The alert path is unchanged; `eddi.alerts.enabled=false` does not stop health.
+- **Recovered LLM failures** — `health:llm_failures` on the step: `{class, model, recovery}` with
+  `retry` / `cascade` / `fallback` / `none`. Recorded by the cascade's existing `recordFailure`, the LLM
+  task's model-phase `catch` (`LlmFailureRecords.settle`) and, for same-model retries, a thread-bound
+  `RetryObserver` the retry loop notifies (carried onto cascade step threads). Recovery behaviour unchanged.
+- **Origin** — classified per turn from the stored user id and the step's own context
+  (`HealthOrigins`): `agent-test`, `group-member`, `delegated`, `schedule`, `a2a`, `email`, `slack`,
+  `webhook`, `v1`, `mcp`, `api`.
+- **GDPR** — `HealthTurnGdprParticipant` (`agentHealthTurns`) erases by user id and exports the rows;
+  `ConversationPurgeService` deletes a deleted conversation's rows (best effort).
+- **Retention** — `eddi.health.facts-retention=90d`, a daily idempotent `@Scheduled` sweep
+  (`HealthTurnRetention`; why not a system job is in its Javadoc).
+- **Metrics** — `eddi_health_recorded_total`, `eddi_health_dropped_total{reason=queue_full|store_error}`,
+  `eddi_health_queue_depth`; on the Full Metrics dashboard and in [`metrics.md`](../metrics.md).
+- `HealthTurnAggregator` adds rows up per (agent, version, origin, day) — store-agnostic, for the H2b rollup.
+
+**Files:** new package [`engine/health`](../../src/main/java/ai/labs/eddi/engine/health/) (model, store
+interface, Mongo and Postgres stores, recorder, factory, origins, execution ids, aggregator, GDPR,
+retention, settings, metrics); [`LlmFailureRecords.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/LlmFailureRecords.java),
+[`RetryObserver.java`](../../src/main/java/ai/labs/eddi/configs/shared/RetryObserver.java); small hooks in
+`Conversation`, `ConversationStepRunner`, `ConversationService`, `CascadingModelExecutor`, `LlmTask`,
+`RetryConfiguration`, `ConversationPurgeService`, `DataStoreProducers`, `MemoryKeys`; docs
+[`agent-health.md`](../agent-health.md), `configuration-reference.md`, `metrics.md`, `gdpr-compliance.md`,
+`SUMMARY.md`, the Full Metrics dashboard.
+
+### Design decisions
+
+- **Origin per turn, not stored once at start** — start paths pass contexts the integrations chose (A2A and
+  MCP none), so a stored-at-start value needed nine call-site changes; classification over stored step data
+  is deterministic and recomputable. A conversation's origin (H3) is its first non-`api` row.
+- **Execution id at the end of the step** — writing at the start would shift the positions detailed
+  snapshots are read by.
+- **Discard marks come from the new step**, collected where the redo cache is dropped — the same point
+  `audit:discarded_cost` arises — so no undo hook in `ConversationService` was needed.
+- **Retry capture is thread-bound** because the retry loop is shared with MCP and knows no conversation; with
+  nothing bound it does nothing.
+
+### Review fixes (same entry, before merge)
+
+- **Tool outcomes** — `ToolLoopRunner` marks a `tool_result` trace entry `failed` (ran and failed, as
+  `ToolOutcomeClassifier` reads it) or `notExecuted` (never ran). Rows count `toolCalls` (ran),
+  `toolFailures` (ran and failed) and `toolRefusals` (never ran — quotas, budgets, the deadline, approval
+  caps, credential-reference checks); `tool_call` entries are no longer counted.
+- **Unsettled turns** — an abandoned wait (timeout, interrupted wait), a cancelled, interrupted or
+  deadline turn is inserted only, never replaces a row and discards nothing (a cancelled say after an
+  undo used to mark the surviving undone execution discarded for good). A step not stamped yet gets a
+  fresh id per capture; `legacy-<n>` is only for a step that finished an execution before Agent Health.
+- **Write rules** — identity `(conversationId, executionId)`; `day` and `timestamp` first-recorded (a
+  resume after midnight stays on its day), a new `updatedAt` orders writes (a stale one is ignored), and
+  `discarded` is sticky with a marker when the discard arrives before the row. MongoDB uses one
+  pipeline update; PostgreSQL `COALESCE`, `OR` and a `WHERE` guard on the conflict update.
+- **Retry attribution** — retries are reported only inside the task's own model calls
+  (`RetryObserver.modelCall`, opened by `AgentExecutionHelper`); judge, summarisation, truncation, MCP
+  and sub-agent retries are not attributed to the model. `reviseAnswer` (HITL REVISE) observes retries
+  like `execute`.
+- **Cascade** — a cascade that ends in a failure settles every entry it recorded to that failure's
+  outcome (`none` / `fallback`), so a failed turn is not "partly recovered".
+- **Integration tests** — `MongoHealthTurnStoreIT` and `PostgresHealthTurnStoreIT` run a shared
+  `HealthTurnStoreContract` (replace, first-recorded day, stale writes, insert-only, sticky discard and
+  early markers, streaming, every delete, idempotent DDL).
+- Smaller: the recorder starts eagerly (gauge registered at boot), a row offered after shutdown counts
+  `reason="shutdown"`, the Mongo stream closes its cursor, Postgres binds `LocalDate` directly.
+
+### What's next
+
+H2b (rollups, series, version compare, change markers — the marker store the H0 table says must be
+added) and H3 (outcomes) can start. A load test under `scripts/loadtest/` is still open from the H2a row.

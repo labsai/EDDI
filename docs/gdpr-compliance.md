@@ -176,6 +176,13 @@ principal, not a user: erasing or exporting it is refused with 400.
     carries the user's counters (tool or pool, window start, count) under `counters` in the
     `toolQuotas` section of `additionalData`, at most 1,000; past that the section says
     `"truncated": true` and the bundle reports `complete: false`
+18. **Agent Health turn rows** (`agentHealthTurns`) — **permanently deleted** by the
+    `agentHealthTurns` participant: every row whose user is the erased user (group member
+    conversations are owned by the discussion's user, so they are included). A row holds ids,
+    counts, failure classes and action names of one turn, no text. Rows also go when their
+    conversation is deleted, and expire after `eddi.health.facts-retention` (90 days). The export
+    carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
+    at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -197,6 +204,9 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   download API
 - Linked OAuth accounts (`connectionGrants`: tenant, connection, status, scopes and
   dates) — never token material
+- Agent Health turn rows of the user's conversations (`agentHealthTurns`: conversation, step,
+  agent and version, origin, time, cost, tokens, duration, outcome, LLM failure classes, tool and
+  guardrail counts, actions; capped at 10,000)
 - Conversation ratings the user gave (`conversationRatings`: conversation and step,
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)

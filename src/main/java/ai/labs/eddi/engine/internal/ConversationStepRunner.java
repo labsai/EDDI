@@ -1050,8 +1050,11 @@ class ConversationStepRunner {
      */
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
+        long waitStarted = System.nanoTime();
         TurnWait wait = awaitTurn(loggingContext, conversationId, memory, future);
         reportTurnOutcome(memory, wait);
+        // Agent Health records every turn, clean or not, on its own worker.
+        conversationService.reportHealthTurn(memory, wait, (System.nanoTime() - waitStarted) / 1_000_000L);
         return wait == TurnWait.TIMED_OUT || wait == TurnWait.INTERRUPTED || wait == TurnWait.ABANDONED_WHILE_PAUSED;
     }
 

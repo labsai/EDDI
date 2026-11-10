@@ -35,6 +35,7 @@ import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.health.HealthTurnRecorder;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -761,6 +762,10 @@ public class ConversationService implements IConversationService, UserErasurePar
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
+            // The CONVERSATION_START turn ran inline and never reaches the step runner's
+            // hook; recorded once the conversation is sure to exist.
+            reportHealthTurn(conversationMemory, conversationId, ConversationStepRunner.TurnWait.COMPLETED,
+                    (System.nanoTime() - startTime) / 1_000_000L);
             armContinuation(conversationId, conversationMemory, environment);
             // Announced only once the conversation is final: a failed descriptor write
             // discards it again, and an observer (the email notifier) must not have
@@ -871,6 +876,13 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     OutputMatchHook outputMatchHook;
+
+    /**
+     * Agent Health: records every turn on its own worker; {@code null} in unit
+     * tests that build the service by hand.
+     */
+    @Inject
+    HealthTurnRecorder healthTurnRecorder;
 
     /** How long a request waits for an agent another node has just deployed. */
     static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
@@ -2999,6 +3011,33 @@ public class ConversationService implements IConversationService, UserErasurePar
         Event<TurnOutcome> event = turnOutcomeEvent;
         if (event != null) {
             event.fire(outcome);
+        }
+    }
+
+    /**
+     * Hands a finished turn — clean, failed or paused — to Agent Health, which
+     * copies what it needs and writes on its own worker. Independent of the alert
+     * hook and of {@code eddi.alerts.enabled}; never throws.
+     */
+    void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs) {
+        reportHealthTurn(memory, null, wait, durationMs);
+    }
+
+    /**
+     * As above, naming the conversation when the memory does not carry its id yet
+     * (the start turn).
+     */
+    void reportHealthTurn(IConversationMemory memory, String conversationId, ConversationStepRunner.TurnWait wait, long durationMs) {
+        HealthTurnRecorder recorder = healthTurnRecorder;
+        if (recorder == null || memory == null) {
+            return;
+        }
+        try {
+            // An abandoned wait: the turn may still run, and what it leaves is unknown.
+            boolean abandoned = wait == ConversationStepRunner.TurnWait.TIMED_OUT || wait == ConversationStepRunner.TurnWait.INTERRUPTED;
+            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not hand a turn to Agent Health: %s", e.getMessage());
         }
     }
 

@@ -350,6 +350,7 @@ public class RetryConfiguration {
                                     + "ms and retry [" + failure.cls() + "]", e);
                         }
 
+                        RetryObserver.retrying(failure.cls());
                         LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts
                                 + "), retrying after " + sleepFor + "ms: " + e.getMessage());
 
