@@ -907,13 +907,24 @@ rule on `outcome="gave_up"` is in the
 eddi_health_recorded_total          # Agent Health turn rows written
 eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown)
 eddi_health_queue_depth             # Gauge: turn records waiting for the health worker
+eddi_health_rollup_duration_seconds # Timer: one pass of the health-rollup system job
+eddi_health_rollup_days_total       # Agent days the rollup recomputed
+eddi_health_rollup_rows_total       # Daily rows the rollup wrote
+eddi_health_rollup_failures_total   # Agent days whose rollup failed (retried next pass)
+eddi_health_rollup_pending          # Gauge: agent days waiting for the rollup, as the last pass left them
+eddi_health_rollup_lag_seconds      # Gauge: age of the oldest waiting agent day, as the last pass left it
 ```
 
 No tag carries an agent id. `eddi_health_dropped_total` should stay at zero:
 `queue_full` means the health worker cannot keep up with the turn rate (raise
 `eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
 that writes fail, `shutdown` that rows were offered while the node stopped. A dropped row is a gap in the health views, never a slower or
-failed turn. See [Agent Health](agent-health.md).
+failed turn. `eddi_health_rollup_lag_seconds` should stay below a few rollup
+intervals (`eddi.health.rollup-interval`, 5 minutes by default); a lag that keeps
+growing, or a rising `eddi_health_rollup_failures_total`, means the daily rows —
+and with them the health views — are falling behind the turns. The rollup gauges
+are set by the node that ran the last pass; on the others they keep the value of
+their own last pass (or 0). See [Agent Health](agent-health.md#daily-rollup).
 
 ### Agent Identity & Signing Metrics
 

@@ -239,3 +239,28 @@ confirm or change them, and update this file when it does.
    origin filters on screen are not sent, and the UI says so. (If the backend wants them in the export, add `version`
    and `origin` to §8 and the UI will pass them.)
 8. **Check states.** `checks[].state` is rendered for `PASS` and `FAIL`; anything else reads "Not run".
+
+## 12. Backend notes (H2b)
+
+What the H2b backend does where this contract leaves room, and its answers to §11. Nothing above changed shape.
+
+- **§11.5 Origin default — confirmed, made precise.** Without `origin` the agent's preset decides: an agent with
+  interactive traffic in the period (or none at all) is `support` and counts `api`, `v1`, `mcp`, `email`, `slack`; an
+  agent driven only by schedules, webhooks, A2A, groups or delegation is `task` and counts every origin but
+  `agent-test`. `preset` and the effective `origins` are in the response.
+- **§11.6 Version compare — confirmed:** a version without turns gets a side with empty values (all `value: null`),
+  never a 5xx. An unknown *agent* is `404`.
+- **§11.8 Check states — confirmed:** `PASS`, `FAIL`, `UNKNOWN`.
+- **§11.1 Resolution breakdown — unchanged until H3:** the four keys are present with `value: null, n: 0`.
+- **`significant`** is always a boolean. It is `false` for measures with no variance to test (`turnDurationP95`,
+  `costPerSession`, `tokensPerTurn`, `turnsPerSession`, `guardrailTripRate`) and whenever either period is below the
+  measure's minimum sample.
+- **Series** accept every measure id of §1; an unknown id is `400`. Measures without daily values yet (the
+  effectiveness ones, `costPerResolvedSession`, `returningUserShare`) and rating measures the caller may not read
+  answer all-null points rather than an error. Rating measures have points only with `groupBy=none`.
+- **Portfolio:** `status` is `null` for every agent until H4, so a `status=` filter returns no items (the values are
+  still validated). `keyMeasures` are `agentFailureRate`, `apdex`, `costPerSession`. `platformIncidents[].from/to` are
+  days (`YYYY-MM-DD`), because incidents are detected per day. `nextCursor` is an opaque string.
+- **Errors:** a bad parameter is `400` with `{"error": "bad_request", "message": "<names the parameter>"}`; an unknown
+  agent is `404` with `{"error": "not_found", ...}`; no VIEW is `403`.
+- **`dataThrough`** is the day before the earliest day of the agent still waiting for the rollup, else today.

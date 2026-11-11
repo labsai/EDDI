@@ -291,7 +291,10 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 |---|---|---|
 | `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
 | `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
-| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily. Also the oldest day the rollup can recompute, and the reach of people and session counts |
+| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` system job turns dirty agent days into daily rows — how far today's numbers may lag. At least 15 s; read when the schedule is created |
+| `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept; swept daily |
+| `eddi.health.apdex-t` | `4s` | The Apdex threshold T: a turn of at most T satisfies, one of at most 4T is tolerated. Applies to days rolled up after a change |
 
 ---
 
