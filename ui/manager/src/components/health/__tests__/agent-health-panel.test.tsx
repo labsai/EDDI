@@ -347,13 +347,13 @@ describe("health profile editor", () => {
   const openProfile = async () => {
     await screen.findByTestId("health-status");
     await userEvent.click(screen.getByTestId("health-open-profile"));
-    await screen.findByLabelText(/Resolution: red threshold/);
+    await screen.findByTestId("health-threshold-resolutionRate-red");
   };
 
   it("shows the server's violation under the field it names", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
-    const red = screen.getByLabelText(/Resolution: red threshold/);
+    const red = screen.getByTestId("health-threshold-resolutionRate-red");
     expect(red).toHaveValue("40");
     await userEvent.clear(red);
     await userEvent.type(red, "70");
@@ -435,7 +435,7 @@ describe("health profile editor", () => {
     // fallbackRate has no data in this fixture but is a contract measure.
     expect(screen.getByTestId("health-critical-fallbackRate")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByTestId("health-add-threshold"), "fallbackRate");
-    const green = screen.getByLabelText(/Fallback rate: green threshold/);
+    const green = screen.getByTestId("health-threshold-fallbackRate-green");
     await userEvent.type(green, "5");
     expect(green).toHaveValue("5");
   });
@@ -443,7 +443,7 @@ describe("health profile editor", () => {
   it("lets an override target a whole section", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
-    await userEvent.click(screen.getByRole("button", { name: /Add override/ }));
+    await userEvent.click(screen.getByTestId("health-add-override"));
     const select = within(screen.getByTestId("health-override")).getAllByRole("combobox")[0]!;
     expect(within(select).getByRole("option", { name: "Business outcomes" })).toBeInTheDocument();
   });
@@ -543,7 +543,7 @@ describe("owner report links", () => {
 
 describe("export", () => {
   it("goes through the API client with its auth header, and names the file after the agent and period", async () => {
-    const createObjectURL = vi.fn((_blob: Blob) => "blob:health");
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:health");
     const revokeObjectURL = vi.fn();
     const original = { c: URL.createObjectURL, r: URL.revokeObjectURL };
     URL.createObjectURL = createObjectURL as never;

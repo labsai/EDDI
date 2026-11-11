@@ -93,6 +93,7 @@ export function ThresholdRows({
                 value={profile.thresholds[id]?.green}
                 unit={units[id]}
                 invalid={violationsAt(violations, `thresholds.${id}.green`).length > 0}
+                testId={`health-threshold-${id}-green`}
                 onValue={(v) => set(id, "green", v)}
               />
               <NumberField
@@ -100,6 +101,7 @@ export function ThresholdRows({
                 value={profile.thresholds[id]?.red}
                 unit={units[id]}
                 invalid={violationsAt(violations, `thresholds.${id}.red`).length > 0}
+                testId={`health-threshold-${id}-red`}
                 onValue={(v) => set(id, "red", v)}
               />
             </div>
@@ -187,6 +189,7 @@ export function OverrideRows({
         size="sm"
         variant="outline"
         onClick={() => onChange([...overrides, { measure: "", state: "IGNORED", reason: "", until: "" }])}
+        data-testid="health-add-override"
       >
         <Plus aria-hidden="true" />
         {t("health.profile.addOverride", "Add override")}
@@ -198,10 +201,10 @@ export function OverrideRows({
 export function Field({ label, children, violations, path }: { label: string; children: ReactNode; violations: ProfileViolation[]; path: string }) {
   return (
     <div>
-      <div className="flex flex-col gap-1 text-xs font-medium text-foreground">
+      <label className="flex flex-col gap-1 text-xs font-medium text-foreground">
         {label}
         {children}
-      </div>
+      </label>
       <Violations violations={violations} path={path} />
     </div>
   );
