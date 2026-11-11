@@ -37,6 +37,10 @@ The endpoint now builds its answer from the trace as written:
   `toolCallGuardrails` entry refused (one entry per finding, no call id) and an
   approved call replayed from the HITL journal (no result in the trace).
 
+### What this breaks
+
+**Breaking REST response shape.** A client of `GET /llm/tools/history/{conversationId}` that reads `totalCost`, `totalExecutionTimeMs`, `cacheHits`, `cacheMisses`, `toolMetrics` or a call's `executionTimeMs`, `cost`, `fromCache` or `timestamp` no longer finds it (those fields were always zero or empty). The upgrade guide ([Changes after 6.7.0](../upgrading-from-6.5.md#changes-after-670)) says so.
+
 ### Response shape (a REST client notices)
 
 The body is now `{"toolCalls": [...], "hasErrors": bool}`, each call
