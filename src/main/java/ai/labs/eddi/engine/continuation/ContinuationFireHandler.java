@@ -145,12 +145,15 @@ public class ContinuationFireHandler {
         if (conversationId == null || number == null || number < 1) {
             return Result.stopped("the schedule names no conversation or continuation number");
         }
+        // Absent on a chain booked before the marker existed: that chain is not
+        // re-checked (see refusalForAccess).
+        Boolean bookedByAdmin = metadata.get(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY) instanceof Boolean b ? b : null;
         try {
-            Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
+            Result refused = refusalBeforeRun(conversationId, number, scheduleUserId, bookedByAdmin);
             if (refused != null) {
                 return refused;
             }
-            return run(conversationId, number, max, scheduleUserId, input, timeout);
+            return run(conversationId, number, max, scheduleUserId, input, timeout, bookedByAdmin);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Result.failed("Interrupted while waiting for continuation " + number);
@@ -164,7 +167,7 @@ public class ContinuationFireHandler {
      * other than the schedule's user, ended, paused, or already ran this
      * continuation. {@code null} when the turn may run.
      */
-    private Result refusalBeforeRun(String conversationId, int number, String scheduleUserId)
+    private Result refusalBeforeRun(String conversationId, int number, String scheduleUserId, Boolean bookedByAdmin)
             throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot;
         try {
@@ -184,7 +187,7 @@ public class ContinuationFireHandler {
         if (ConversationContinuations.ranIn(snapshot, number)) {
             return stop(ConversationContinuations.REASON_DUPLICATE, conversationId, "continuation " + number + " already ran");
         }
-        Result revoked = refusalForAccess(conversationId, snapshot);
+        Result revoked = refusalForAccess(conversationId, snapshot, bookedByAdmin);
         if (revoked != null) {
             return revoked;
         }
@@ -207,18 +210,24 @@ public class ContinuationFireHandler {
      * ({@link ConversationContinuations#REASON_ACCESS_REVOKED}). A descriptor store
      * that cannot answer fails the fire, so it is retried rather than run
      * unchecked. With workspaces off everything is admitted, as everywhere else.
+     * <p>
+     * A chain an administrator booked in their own conversation is admitted, as
+     * {@code creatorAdmin} admits a schedule: the schedule records it
+     * ({@link ConversationContinuations#METADATA_BOOKED_BY_ADMIN_KEY}). A chain
+     * booked before that marker existed carries none and is not re-checked —
+     * stopping it would break long jobs already running.
      */
-    private Result refusalForAccess(String conversationId, ConversationMemorySnapshot snapshot) {
+    private Result refusalForAccess(String conversationId, ConversationMemorySnapshot snapshot, Boolean bookedByAdmin) {
         String owner = snapshot.getUserId();
         String agentId = snapshot.getAgentId();
-        if (resourceAccessGuard == null || owner == null || owner.isBlank() || agentId == null || agentId.isBlank()) {
+        if (bookedByAdmin == null || resourceAccessGuard == null || owner == null || owner.isBlank() || agentId == null || agentId.isBlank()) {
             return null;
         }
         List<String> teams = ownerTeams(owner);
         if (teams == null) {
             return null;
         }
-        ResourceAccessGuard.UseCheck check = resourceAccessGuard.checkPrincipalUse(agentId, owner, teams, false);
+        ResourceAccessGuard.UseCheck check = resourceAccessGuard.checkPrincipalUse(agentId, owner, teams, bookedByAdmin);
         if (check == ResourceAccessGuard.UseCheck.DENIED) {
             return stop(ConversationContinuations.REASON_ACCESS_REVOKED, conversationId,
                     "the conversation's owner may no longer use its agent");
@@ -256,12 +265,13 @@ public class ContinuationFireHandler {
         return null;
     }
 
-    private Result run(String conversationId, int number, Integer max, String scheduleUserId, String input, Duration timeout)
+    private Result run(String conversationId, int number, Integer max, String scheduleUserId, String input, Duration timeout,
+                       Boolean bookedByAdmin)
             throws Exception {
         var latch = new CountDownLatch(1);
         var outcome = new AtomicReference<SimpleConversationMemorySnapshot>();
         var skipped = new AtomicBoolean(false);
-        conversationService.say(conversationId, false, true, List.of(), inputData(number, max, input), false,
+        conversationService.say(conversationId, false, true, List.of(), inputData(number, max, input, bookedByAdmin), false,
                 new IConversationService.ConversationResponseHandler() {
                     @Override
                     public void onComplete(SimpleConversationMemorySnapshot snapshot) {
@@ -283,7 +293,7 @@ public class ContinuationFireHandler {
         }
         ConversationState state = outcome.get() != null ? outcome.get().getConversationState() : null;
         if (skipped.get()) {
-            return afterSkip(conversationId, number, scheduleUserId, state);
+            return afterSkip(conversationId, number, scheduleUserId, state, bookedByAdmin);
         }
         if (state == ConversationState.ERROR) {
             return Result.failed("Continuation " + number + " failed (state ERROR)");
@@ -335,9 +345,10 @@ public class ContinuationFireHandler {
      * recorded, or a conversation that was paused or busy when the turn's lease
      * came. The stored document decides which.
      */
-    private Result afterSkip(String conversationId, int number, String scheduleUserId, ConversationState skippedIn)
+    private Result afterSkip(String conversationId, int number, String scheduleUserId, ConversationState skippedIn,
+                             Boolean bookedByAdmin)
             throws IResourceStore.ResourceStoreException {
-        Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
+        Result refused = refusalBeforeRun(conversationId, number, scheduleUserId, bookedByAdmin);
         if (refused != null) {
             return refused;
         }
@@ -378,6 +389,15 @@ public class ContinuationFireHandler {
      * number, and the automatic {@code Idempotency-Key}.
      */
     public static InputData inputData(int number, Integer max, String input) {
+        return inputData(number, max, input, null);
+    }
+
+    /**
+     * {@link #inputData(int, Integer, String)}, carrying the chain's
+     * booked-by-administrator marker on to the turn, which hands it to the next
+     * continuation it books ({@code ConversationContinuations#bookedByAdmin}).
+     */
+    public static InputData inputData(int number, Integer max, String input, Boolean bookedByAdmin) {
         Map<String, Object> marker = new LinkedHashMap<>();
         marker.put("number", number);
         if (max != null) {
@@ -387,6 +407,7 @@ public class ContinuationFireHandler {
         context.put(ConversationContinuations.CONTEXT_KEY, new Context(Context.ContextType.object, marker));
         var inputData = new InputData(input != null ? input : "", context);
         inputData.setContinuationNumber(number);
+        inputData.setContinuationBookedByAdmin(bookedByAdmin);
         inputData.setIdempotencyKey(IDEMPOTENCY_KEY_PREFIX + number);
         return inputData;
     }

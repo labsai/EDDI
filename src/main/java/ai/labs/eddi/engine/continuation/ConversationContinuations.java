@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -95,6 +97,11 @@ public class ConversationContinuations {
     public static final String STEP_NEXT = "continuation:next";
     /** Step key: why this turn's {@code CONTINUE_CONVERSATION} was ignored. */
     public static final String STEP_REFUSED = "continuation:refused";
+    /**
+     * Step key of a continuation turn: whether its chain was booked by an
+     * administrator — see {@link #bookedByAdmin}.
+     */
+    public static final String STEP_BOOKED_BY_ADMIN = "continuation:bookedByAdmin";
 
     /** Context key of a continuation turn, reserved for the engine. */
     public static final String CONTEXT_KEY = ClientContextGuard.KEY_SELF_CONTINUATION;
@@ -109,6 +116,13 @@ public class ConversationContinuations {
     public static final String METADATA_NUMBER_KEY = "continuationNumber";
     /** Metadata key: the agent's {@code maxContinuations} when it was armed. */
     public static final String METADATA_MAX_KEY = "maxContinuations";
+    /**
+     * Metadata key: whether the chain was booked by an administrator acting in
+     * their own conversation ({@link #bookedByAdmin}). Absent on a chain booked
+     * before it existed. Engine-written only: a schedule write from outside that
+     * carries the continuation marker is refused.
+     */
+    public static final String METADATA_BOOKED_BY_ADMIN_KEY = "bookedByAdmin";
 
     private static final String NAME_PREFIX = "continuation-";
 
@@ -161,6 +175,14 @@ public class ConversationContinuations {
     private final MeterRegistry meterRegistry;
     private final Clock clock;
 
+    /**
+     * The caller bound to the booking turn, read by {@link #bookedByAdmin}.
+     * Field-injected so the tests that construct this class keep working; null
+     * there, where no booking counts as an administrator's.
+     */
+    @Inject
+    CallerIdentityContext callerIdentityContext;
+
     @Inject
     public ConversationContinuations(IScheduleStore scheduleStore, MeterRegistry meterRegistry) {
         this(scheduleStore, meterRegistry, Clock.systemUTC());
@@ -190,6 +212,11 @@ public class ConversationContinuations {
         var marker = new Data<Object>(STEP_NUMBER, inputData.getContinuationNumber());
         marker.setPublic(false);
         step.storeData(marker);
+        if (inputData.getContinuationBookedByAdmin() != null) {
+            var booked = new Data<Object>(STEP_BOOKED_BY_ADMIN, inputData.getContinuationBookedByAdmin());
+            booked.setPublic(false);
+            step.storeData(booked);
+        }
     }
 
     // --- step 2: decide, before the persist
@@ -357,7 +384,12 @@ public class ConversationContinuations {
             schedule.setNextFire(now);
             schedule.setEnabled(true);
             schedule.setCreatedAt(now);
-            schedule.setMetadata(metadata(conversationId, number.intValue(), policy.maxContinuations()));
+            Map<String, Object> metadata = metadata(conversationId, number.intValue(), policy.maxContinuations());
+            Boolean bookedByAdmin = bookedByAdmin(memory, step);
+            if (bookedByAdmin != null) {
+                metadata.put(METADATA_BOOKED_BY_ADMIN_KEY, bookedByAdmin);
+            }
+            schedule.setMetadata(metadata);
             createWithRetry(schedule);
             if (memory.isCancelled()) {
                 // The cancel landed while the schedule was being written: its disarm
@@ -412,6 +444,31 @@ public class ConversationContinuations {
                 }
             }
         }
+    }
+
+    /**
+     * Whether the chain this continuation belongs to was booked by an administrator
+     * acting in their own conversation — the continuation's equivalent of a
+     * schedule's {@code creatorAdmin}, which the fire-time {@code USE} re-check
+     * honours ({@code ContinuationFireHandler}).
+     * <p>
+     * A turn a person drove answers from the live caller bound to it. A
+     * continuation turn has no caller, so it carries on what the schedule that
+     * started it recorded ({@value #STEP_BOOKED_BY_ADMIN}, set from the schedule by
+     * the fire). {@code null} — no marker is written — for a continuation of a
+     * chain booked before the marker existed, which is therefore not re-checked, as
+     * before.
+     */
+    Boolean bookedByAdmin(IConversationMemory memory, IConversationStep step) {
+        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
+        if (caller != null && caller.isAdminActingAs(memory.getUserId())) {
+            return Boolean.TRUE;
+        }
+        if (step.getData(STEP_NUMBER) != null) {
+            IData<Object> inherited = step.getData(STEP_BOOKED_BY_ADMIN);
+            return inherited != null && inherited.getResult() instanceof Boolean b ? b : null;
+        }
+        return Boolean.FALSE;
     }
 
     public static Map<String, Object> metadata(String conversationId, int number, int max) {

@@ -31,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -300,13 +301,19 @@ class ContinuationFireHandlerTest {
             return guard;
         }
 
+        private Map<String, Object> booked(int number, Boolean byAdmin) {
+            var md = new LinkedHashMap<>(metadata(number));
+            md.put(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY, byAdmin);
+            return md;
+        }
+
         @Test
         @DisplayName("enforced workspaces: an owner whose USE on the agent was revoked gets no further continuation")
         void revokedOwnerStopsTheChain() throws Exception {
             ownedOnAgent();
             enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
 
-            var result = handler.fire(metadata(2), "owner", "", TIMEOUT);
+            var result = handler.fire(booked(2, false), "owner", "", TIMEOUT);
 
             assertEquals(FireStatus.COMPLETED.name(), result.status(), "the chain stops, it is not retried");
             assertTrue(result.error().contains("may no longer use its agent"), result.error());
@@ -321,7 +328,7 @@ class ContinuationFireHandlerTest {
             var guard = enforcingGuard(ResourceAccessGuard.UseCheck.ALLOWED);
             turnSettles(ConversationState.READY, false);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
             verify(guard).checkPrincipalUse("agent-1", "owner", List.of("team:ops"), false);
             assertEquals(1.0, run());
         }
@@ -332,8 +339,35 @@ class ContinuationFireHandlerTest {
             ownedOnAgent();
             enforcingGuard(ResourceAccessGuard.UseCheck.UNKNOWN);
 
-            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            assertEquals(FireStatus.FAILED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
             verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("an administrator's chain continues on an agent nobody shared with them, and hands the marker on")
+        void adminOwnedChainContinues() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            when(guard.checkPrincipalUse(eq("agent-1"), eq("owner"), any(), eq(true))).thenReturn(ResourceAccessGuard.UseCheck.ALLOWED);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(booked(1, true), "owner", "", TIMEOUT).status());
+            verify(guard).checkPrincipalUse("agent-1", "owner", List.of("team:ops"), true);
+            ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+            verify(conversationService).say(any(), any(), any(), any(), input.capture(), anyBoolean(), any());
+            assertEquals(Boolean.TRUE, input.getValue().getContinuationBookedByAdmin());
+        }
+
+        @Test
+        @DisplayName("a chain booked before the marker existed is not re-checked, so it keeps running")
+        void legacyChainWithoutMarkerContinues() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            verify(guard, never()).checkPrincipalUse(any(), any(), any(), anyBoolean());
+            assertEquals(1.0, run());
         }
 
         @Test
