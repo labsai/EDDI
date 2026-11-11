@@ -123,6 +123,34 @@ class HealthPortfolioServiceTest {
     }
 
     @Test
+    @DisplayName("sessions that cannot be counted are null with a hint, cost per session says why, and traffic sorts by turns")
+    void uncounted() {
+        when(reports.dailyRows(any(), any(), any()))
+                .thenReturn(List.of(row("small", TODAY, 10, 0, 0, Map.of()), row("big", TODAY, 500, 0, 0, Map.of())));
+        when(reports.portfolioSessions(any(), any())).thenReturn(Map.of("small", HealthPortfolioSessions.UNCOUNTED, "big",
+                HealthPortfolioSessions.UNCOUNTED));
+        Portfolio p = service.portfolio(List.of(new AgentRef("small", "Small"), new AgentRef("big", "Big")), WINDOW, "traffic", List.of(), 100, 0);
+        assertEquals(List.of("big", "small"), p.items().stream().map(PortfolioItem::agentId).toList());
+        PortfolioItem big = p.items().get(0);
+        assertNull(big.sessions());
+        assertNull(big.sessionsDelta());
+        assertEquals(HealthMeasures.HINT_USAGE_UNAVAILABLE, big.hint());
+        assertNull(big.keyMeasures().get(2).value(), "costPerSession");
+        assertEquals(HealthMeasures.HINT_USAGE_UNAVAILABLE, big.keyMeasures().get(2).hint());
+    }
+
+    @Test
+    @DisplayName("a counted window with an uncounted baseline has sessions but no delta")
+    void baselineUncounted() {
+        when(reports.dailyRows(any(), any(), any())).thenReturn(List.of(row("a", TODAY, 10, 0, 0, Map.of())));
+        when(reports.portfolioSessions(any(), any())).thenReturn(Map.of("a", new HealthPortfolioSessions(7L, 7L, null, null)));
+        PortfolioItem item = service.portfolio(List.of(new AgentRef("a", "A")), WINDOW, "name", List.of(), 100, 0).items().get(0);
+        assertEquals(7L, item.sessions());
+        assertNull(item.sessionsDelta());
+        assertNull(item.hint());
+    }
+
+    @Test
     @DisplayName("an empty portfolio reads nothing and lists nothing")
     void empty() {
         Portfolio p = service.portfolio(List.of(), WINDOW, "attention", List.of(), 100, 0);

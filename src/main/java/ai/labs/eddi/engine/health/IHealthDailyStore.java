@@ -40,10 +40,12 @@ public interface IHealthDailyStore {
     List<HealthTurnAggregate> findForAgents(Collection<String> agentIds, LocalDate from, LocalDate to);
 
     /**
-     * The first day each version of the agent has a row — what the
-     * {@code VERSION_FIRST_TURN} markers are derived from.
+     * The first day each version of the agent has a row of one of {@code origins} —
+     * what the {@code VERSION_FIRST_TURN} markers and the version compare's windows
+     * are derived from. Callers leave out {@code agent-test}, so a test run before
+     * a version went live does not count as its first turn.
      */
-    Map<Integer, LocalDate> firstDayByVersion(String agentId);
+    Map<Integer, LocalDate> firstDayByVersion(String agentId, Collection<String> origins);
 
     /** Deletes the rows of every day before {@code day} (retention). */
     long deleteOlderThan(LocalDate day);

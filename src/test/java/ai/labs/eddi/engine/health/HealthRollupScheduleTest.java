@@ -90,6 +90,6 @@ class HealthRollupScheduleTest {
         participant.dirtyDays = instance;
 
         assertEquals(3L, participant.erase("alice"));
-        verify(dirty).noteAll(days);
+        verify(dirty).markDeleted(days);
     }
 }

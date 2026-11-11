@@ -70,7 +70,12 @@ public class HealthPortfolioService {
         this.reports = reports;
     }
 
-    private record Row(PortfolioItem item, double worsening, int worstBand) {
+    /**
+     * @param traffic
+     *            what {@code sort=traffic} orders by: the sessions, or the turns of
+     *            the daily rows when sessions cannot be counted
+     */
+    private record Row(PortfolioItem item, double worsening, int worstBand, long traffic) {
     }
 
     public Portfolio portfolio(List<AgentRef> agents, Window window, String sort, List<String> statuses, int limit, int offset) {
@@ -90,12 +95,17 @@ public class HealthPortfolioService {
             Set<String> origins = Set.copyOf(HealthPeriods.defaultOrigins(preset));
             boolean task = HealthDefaults.PRESET_TASK.equals(preset);
             HealthPortfolioSessions agentTraffic = traffic.getOrDefault(agent.agentId(), HealthPortfolioSessions.NONE);
-            long sessions = task ? agentTraffic.allNow() : agentTraffic.interactiveNow();
-            long sessionsBefore = task ? agentTraffic.allBefore() : agentTraffic.interactiveBefore();
+            Long sessions = task ? agentTraffic.allNow() : agentTraffic.interactiveNow();
+            Long sessionsBefore = task ? agentTraffic.allBefore() : agentTraffic.interactiveBefore();
             List<HealthTurnAggregate> now = agentRows.stream().filter(r -> origins.contains(r.origin()) && window.contains(r.day())).toList();
             List<HealthTurnAggregate> before = agentRows.stream().filter(r -> origins.contains(r.origin()) && baseline.contains(r.day())).toList();
-            PeriodData current = new PeriodData(Totals.of(now), new HealthUsage(sessions, 0, 0, 0, 0), null, nowExposure);
-            PeriodData previous = new PeriodData(Totals.of(before), new HealthUsage(sessionsBefore, 0, 0, 0, 0), null, beforeExposure);
+            // Sessions that cannot be counted are null usage, as in the report: cost per
+            // session then says why it has no value, and cost itself still comes from
+            // the daily rows.
+            Totals nowTotals = Totals.of(now);
+            PeriodData current = new PeriodData(nowTotals, sessions == null ? null : new HealthUsage(sessions, 0, 0, 0, 0), null, nowExposure);
+            PeriodData previous = new PeriodData(Totals.of(before), sessionsBefore == null ? null : new HealthUsage(sessionsBefore, 0, 0, 0, 0),
+                    null, beforeExposure);
             List<Measure> key = new ArrayList<>();
             double worsening = 0;
             int worstBand = 0;
@@ -106,11 +116,16 @@ public class HealthPortfolioService {
                 worstBand = Math.max(worstBand, bandRank(m.band()));
             }
             // Relative to the baseline at the window's exposure (today is not over yet).
-            double expected = sessionsBefore * (nowExposure / beforeExposure);
-            Double delta = expected > 0 ? (sessions - expected) / expected : null;
+            Double delta = null;
+            if (sessions != null && sessionsBefore != null) {
+                double expected = sessionsBefore * (nowExposure / beforeExposure);
+                delta = expected > 0 ? (sessions - expected) / expected : null;
+            }
+            String hint = sessions == null ? HealthMeasures.HINT_USAGE_UNAVAILABLE : null;
+            long trafficKey = sessions != null ? sessions : nowTotals.turns();
             collectHits(agent.agentId(), now, window, hits);
-            rows.add(new Row(new PortfolioItem(agent.agentId(), agent.agentName(), null, preset, null, sessions, delta, key, false), worsening,
-                    worstBand));
+            rows.add(new Row(new PortfolioItem(agent.agentId(), agent.agentName(), null, preset, null, sessions, delta, key, false, hint), worsening,
+                    worstBand, trafficKey));
         }
 
         List<PlatformIncident> incidents = new ArrayList<>();
@@ -120,7 +135,7 @@ public class HealthPortfolioService {
             PortfolioItem i = row.item();
             boolean hit = affected.contains(i.agentId());
             listed.add(new Row(new PortfolioItem(i.agentId(), i.agentName(), i.status(), i.preset(), i.topReason(), i.sessions(), i.sessionsDelta(),
-                    i.keyMeasures(), hit), row.worsening(), row.worstBand()));
+                    i.keyMeasures(), hit, i.hint()), row.worsening(), row.worstBand(), row.traffic()));
         }
         // Until H4 no agent has a status, so any status filter matches none.
         if (statuses != null && !statuses.isEmpty()) {
@@ -136,7 +151,7 @@ public class HealthPortfolioService {
 
     private static Comparator<Row> comparator(String sort) {
         Comparator<Row> byName = Comparator.comparing(r -> r.item().agentName() == null ? "" : r.item().agentName().toLowerCase(Locale.ROOT));
-        Comparator<Row> byTraffic = Comparator.comparingLong((Row r) -> r.item().sessions()).reversed();
+        Comparator<Row> byTraffic = Comparator.comparingLong(Row::traffic).reversed();
         return switch (sort) {
             case "name" -> byName.thenComparing(r -> r.item().agentId());
             case "traffic" -> byTraffic.thenComparing(byName);

@@ -93,10 +93,18 @@ public interface HealthRollupStoresContract {
         assertEquals(4, daily().findForAgents(List.of("agent", "other"), DAY.minusDays(5), DAY).size());
         assertEquals(1, daily().findForAgents(List.of("other"), DAY, DAY).size());
         assertTrue(daily().findForAgents(List.of(), DAY, DAY).isEmpty());
-        assertEquals(Map.of(1, DAY.minusDays(3), 2, DAY), daily().firstDayByVersion("agent"));
+        assertEquals(Map.of(1, DAY.minusDays(3), 2, DAY), daily().firstDayByVersion("agent", List.of("api")));
 
         assertEquals(1, daily().deleteOlderThan(DAY.minusDays(1)));
-        assertEquals(Map.of(1, DAY, 2, DAY), daily().firstDayByVersion("agent"));
+        assertEquals(Map.of(1, DAY, 2, DAY), daily().firstDayByVersion("agent", List.of("api")));
+
+        // A golden-suite run of version 3 two days before it went live is not its first
+        // turn.
+        daily().replaceDay("agent", DAY.minusDays(2), List.of(aggregate(3, "agent-test", DAY.minusDays(2), 5, Map.of())));
+        daily().replaceDay("agent", DAY.plusDays(1), List.of(aggregate(3, "api", DAY.plusDays(1), 5, Map.of())));
+        assertEquals(DAY.plusDays(1), daily().firstDayByVersion("agent", List.of("api", "v1")).get(3));
+        assertEquals(DAY.minusDays(2), daily().firstDayByVersion("agent", List.of("api", "agent-test")).get(3));
+        assertTrue(daily().firstDayByVersion("agent", List.of()).isEmpty());
     }
 
     private static Comparator<HealthTurnAggregate> order() {
@@ -184,6 +192,13 @@ public interface HealthRollupStoresContract {
         assertEquals(2, markers().findGlobal(List.of("default", "t.other"), t, t.plusSeconds(86_400), 10).size());
         assertTrue(markers().findGlobal(List.of(), t, t.plusSeconds(86_400), 10).isEmpty());
         assertEquals(1, markers().deleteOlderThan(t.minusSeconds(86_400)));
+
+        // A long tenant id: the coalesced id still fits the id column.
+        String tenant = "t." + "y".repeat(200);
+        String id = HealthChangeMarkers.coalescedId(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, tenant, t);
+        markers().append(new HealthMarker(id, null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, tenant));
+        markers().append(new HealthMarker(id, null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, tenant));
+        assertEquals(List.of(id), markers().findGlobal(List.of(tenant), t, t.plusSeconds(3600), 10).stream().map(HealthMarker::id).toList());
     }
 
     // ------------------------------------------------------------------ usage

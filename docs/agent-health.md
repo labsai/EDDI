@@ -230,7 +230,7 @@ at the moment of the change; nothing in it ever fails the change itself:
 | `DEPLOYMENT` | a deploy reached `READY` and actually deployed (re-deploying a version that was already up records nothing) — "v8 deployed (production)" | the agent |
 | `GLOBAL_VARIABLE_CHANGE` | a global variable was written or deleted — "Global variables changed" | the agents of the variable's tenant: `default` concerns every agent, a space's tenant the agents of that space |
 | `SNIPPET_CHANGE` | a prompt snippet was created, updated or deleted — "Prompt snippets changed" | every agent (snippets are not tenant-scoped) |
-| `VERSION_FIRST_TURN` | derived, not stored: the first day a version has a daily row ("First turn on v8", at 00:00 UTC of that day) | the agent |
+| `VERSION_FIRST_TURN` | derived, not stored: the first day a version has a daily row of a real origin — `agent-test` only when asked for, so a golden-suite run before going live does not count ("First turn on v8", at 00:00 UTC of that day). The version compare's windows use the same day | the agent |
 
 The labels of global-variable and snippet markers do not name the variable or
 snippet: those concern many agents, and a viewer of one agent's health has no
@@ -270,7 +270,10 @@ over. A version without turns gets empty sections, not an error. Each side is
 computed on its own; `deltas` lists every measure with a value on both sides,
 with `significant` and `better` (null for a measure with no direction).
 
-**Portfolio.** `status` is null for every agent until health profiles exist, so
+**Portfolio.** `sessions` is null (with a `hint`) when the period reaches past
+the turn-row retention, and `sessionsDelta` when its baseline does — so the
+90-day portfolio has sessions but no session change; `sort=traffic` then falls
+back to the daily rows' turns. `status` is null for every agent until health profiles exist, so
 a `status=` filter matches none. `sort=attention` puts first the agents whose key
 measures (`agentFailureRate`, `apdex`, `costPerSession`) got **significantly**
 worse — by the largest such change, absolute for rates, relative for the rest —

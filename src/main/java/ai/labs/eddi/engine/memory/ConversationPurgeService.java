@@ -228,13 +228,18 @@ public class ConversationPurgeService {
         if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
             return;
         }
+        IHealthTurnStore turns = healthTurnStore.get();
+        Map<String, Set<LocalDate>> days = Map.of();
         try {
-            IHealthTurnStore turns = healthTurnStore.get();
-            Map<String, Set<LocalDate>> days = turns.agentDaysOfConversation(conversationId);
+            days = turns.agentDaysOfConversation(conversationId);
+        } catch (RuntimeException e) {
+            // Best effort, like the erasure: the delete must not depend on it.
+        }
+        try {
             turns.deleteByConversationId(conversationId);
             if (healthDirtyDays != null && healthDirtyDays.isResolvable()) {
                 // The daily rows of those days are recomputed without the conversation.
-                healthDirtyDays.get().noteAll(days);
+                healthDirtyDays.get().markDeleted(days);
             }
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",

@@ -87,3 +87,17 @@ presets, status and reasons.
 - **Apdex** names its T in the label; a period mixing T values is GREY with a hint.
 - **Distinct users** count every user id of the rows in both stores (a conversation with two users counts both).
 - Contract notes in `planning/agent-health-api.md` §12 (count baselines, Apdex label, cursor, markers); docs updated.
+
+## 🐛 fix(health): H2b review follow-ups — marker ids, deletion marks, first turns, portfolio retention (2026-11-10)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- Coalesced marker ids are `g-` plus 40 hex characters of a SHA-256 of kind, tenant and hour: fixed length, so a long
+  tenant id no longer overflows the Postgres id column.
+- Deletion marks (erasure, conversation delete, orphan sweep, the recorder's post-write cleanup) are written to the dirty
+  store at once (`HealthDirtyDays.markDeleted`), falling back to the debounced queue only when that write fails: the
+  self-heal pass cannot find deleted rows.
+- The days of a conversation's rows are read best effort; a failed lookup never skips the delete.
+- A version's first turn (markers, compare windows) ignores `agent-test` rows unless they are asked for.
+- Portfolio: sessions are `null` with a hint when the period reaches past the turn-row retention, and `sessionsDelta`
+  when the baseline does; `sort=traffic` falls back to daily-row turns.
