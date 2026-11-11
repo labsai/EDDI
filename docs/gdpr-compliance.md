@@ -194,16 +194,19 @@ principal, not a user: erasing or exporting it is refused with 400.
     conversations are owned by the discussion's user, so they are included). A row holds ids,
     counts, failure classes and action names of one turn, no text. Rows also go when their
     conversation is deleted, and expire after `eddi.health.facts-retention` (90 days). Rows still
-    queued on a node's health worker do not land after the erasure: step 0 fences the user on every
-    node (`agentHealthErasureFence`), and a row written while the fence went up — or for a
-    conversation that no longer exists — is deleted right after the write
-    ([details](agent-health.md#gdpr)). If a node did not confirm the erasure's cluster stop, the
-    conversation check cannot answer, or the clean-up delete fails, the row stays — with a WARN —
-    until the next daily orphan sweep, which deletes the rows of conversations that no longer exist
-    (the erasure deletes the user's conversations). That sweep only looks at rows written within
-    `eddi.health.orphan-sweep-window` (48 hours) and keeps a row whenever the conversation store
-    cannot answer, so a failure that outlasts the window leaves the row until
-    `eddi.health.facts-retention` removes it. The export
+    queued on a node's health worker are withheld or removed on a **best-effort** basis — this is
+    not a guarantee: step 0 fences the user (`agentHealthErasureFence`) for 15 minutes on every node
+    that confirms the erasure's cluster stop, and a row written while the fence is up — or for a
+    conversation that no longer exists — is deleted right after the write when that check and the
+    clean-up succeed ([details](agent-health.md#gdpr)). If a node did not confirm the cluster stop,
+    the fence had expired, the conversation check cannot answer, or the clean-up delete fails, the
+    row stays — with a WARN — until a daily orphan sweep finds its conversation gone (the erasure
+    deletes the user's conversations) and deletes it. That sweep only looks at rows written within
+    `eddi.health.orphan-sweep-window` (48 hours, by the time the row was captured, not written),
+    checks at most `eddi.health.orphan-sweep-max` conversations per run without resuming where it
+    stopped, and keeps a row whenever the conversation store cannot answer. A failure that outlasts
+    the window, a row delayed past it, or a conversation beyond the cap therefore leaves the row
+    until `eddi.health.facts-retention` removes it. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 

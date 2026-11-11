@@ -246,6 +246,11 @@ public class HealthTurnRecorder {
      */
     private boolean conversationGone(String conversationId) {
         if (conversations == null || !conversations.isResolvable()) {
+            if (due(lastCleanupWarning)) {
+                LOGGER.warnf("No conversation store to check whether conversation %s still exists; if it was deleted meanwhile, "
+                        + "its Agent Health rows are removed by the daily orphan sweep or expire with eddi.health.facts-retention",
+                        sanitize(conversationId));
+            }
             return false;
         }
         StateAndRevision stored = conversations.get().getStateAndRevision(conversationId);
