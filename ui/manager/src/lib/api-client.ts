@@ -396,6 +396,44 @@ class ApiClient {
   }
 
   /**
+   * One request through the token machinery: renew the token before sending
+   * (one that expired while the tab was throttled or asleep is not renewed by
+   * keycloak's timer until the tab wakes), and on a 401 force one refresh and
+   * retry once. If that does not help the session is over, and the owner of the
+   * auth flow (not this client) decides how to ask for a new one.
+   */
+  private async sendWithRefresh(
+    url: string,
+    method: string,
+    path: string,
+    body: unknown,
+    requestHeaders?: Record<string, string>,
+  ): Promise<Response> {
+    await this.refreshToken(false);
+    let response = await this.send(url, method, path, body, requestHeaders);
+    if (response.status === 401 && this.tokenRefresher) {
+      const refreshed = await this.refreshToken(true);
+      if (refreshed) {
+        response = await this.send(url, method, path, body, requestHeaders);
+      }
+      if (response.status === 401) this.unauthorizedHandler?.();
+    }
+    return response;
+  }
+
+  /**
+   * GET that hands back the raw `Response` — for downloads (CSV, a JSON file)
+   * that must not be parsed — through the same token refresh and 401 retry as
+   * every other call. A non-2xx throws the usual `ApiClientError`.
+   */
+  async getRaw(path: string, requestHeaders?: Record<string, string>): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await this.sendWithRefresh(url, "GET", path, undefined, requestHeaders);
+    if (!response.ok) throw await apiErrorFromResponse(response, response.statusText, url);
+    return response;
+  }
+
+  /**
    * As {@link request}, but keeps the status and headers.
    *
    * One implementation, not two: the body handling below is subtle enough
@@ -412,23 +450,7 @@ class ApiClient {
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${path}`;
 
-    // A token that expired while the tab was throttled or asleep is not renewed
-    // by keycloak's timer until the tab wakes, so renew it before the request
-    // rather than sending a stale one and failing with a 401.
-    await this.refreshToken(false);
-
-    let response = await this.send(url, method, path, body, requestHeaders);
-
-    if (response.status === 401 && this.tokenRefresher) {
-      // The server rejected the token anyway. Force one refresh and retry once;
-      // if that does not help the session is over, and the owner of the auth
-      // flow (not this client) decides how to ask for a new one.
-      const refreshed = await this.refreshToken(true);
-      if (refreshed) {
-        response = await this.send(url, method, path, body, requestHeaders);
-      }
-      if (response.status === 401) this.unauthorizedHandler?.();
-    }
+    const response = await this.sendWithRefresh(url, method, path, body, requestHeaders);
 
     if (!response.ok) {
       throw await apiErrorFromResponse(response, response.statusText, url);
