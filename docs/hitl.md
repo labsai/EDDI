@@ -546,7 +546,7 @@ Approved tool executions are protected by a write-ahead journal (`IHitlToolJourn
 
 ### Slack
 
-The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a `TOOL_CALL` pause posts an interactive approval card that additionally renders one context block per pending call — `toolName` plus its **redacted, 300-char-truncated arguments** (max 5 calls, then `+N more`) — so a reviewer sees *what* they are approving. The raw argument value is never accessed. The in-thread pause notice stays pause-reason-only. Slack buttons decide the whole batch; a single-call batch can also be **edited and approved** in a Slack modal ([HITL Review & Audit](hitl-review-and-audit.md#slack-edit-and-reject-modals)). Per-call verdicts for several calls require the REST resume body or the MCP `resume_conversation` tool's `toolDecisionsJson`. See [Slack Integration](#slack-integration).
+The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a `TOOL_CALL` pause posts an interactive approval card that additionally renders one context block per pending call — `toolName` plus its **redacted, 300-char-truncated arguments** (max 5 calls, then `+N more`) — so a reviewer sees *what* they are approving. A call whose arguments are longer than the card shows says so on the card and points to the full view (the Manager's approval inbox or `approval-status`): the card's Approve button decides the whole call, not just the part on the card. The raw argument value is never accessed. The in-thread pause notice stays pause-reason-only. Slack buttons decide the whole batch; a single-call batch can also be **edited and approved** in a Slack modal ([HITL Review & Audit](hitl-review-and-audit.md#slack-edit-and-reject-modals)). Per-call verdicts for several calls require the REST resume body or the MCP `resume_conversation` tool's `toolDecisionsJson`. See [Slack Integration](#slack-integration).
 
 ### Group members
 
@@ -595,7 +595,9 @@ Approve/reject/cancel/status require, in order: the **conversation owner**, the 
 - **`allowArgumentAmendments: false`** — `amendedArguments` is refused with `400`; the decider approves what was shown or rejects it.
 - **`requirePauseId: true`** (or deployment-wide `eddi.hitl.require-pause-id=true`) — a person's decision must name the `pauseId` from `approval-status`; without it the decision would land on whatever pause is current, which after a resume and re-pause is a request the decider never saw. Refused with `400`, and the pause is left untouched. Engine decisions (`system:timeout`, `system:no-progress`, `system:group`) are exempt. The deployment-wide switch also applies to group approvals.
 
-Under the default `eddi.hitl.tool.task-approvals.mode=strict` a task-level `toolApprovals` can narrow these but never widen them (`ROLE_ONLY`, `false` and `true` win respectively); under `replace` the task block decides alone, as for every other field.
+A task-level `toolApprovals` can narrow these three but never widen them (`ROLE_ONLY`, `false` and `true` win respectively) — in **both** `eddi.hitl.tool.task-approvals.mode`s. They are exempt from `replace` semantics: under `replace` every other field comes from the task block alone, these three still keep an agent-level restriction.
+
+Every route to a decision applies `deciders`: REST `/resume` and `/resume/stream` and MCP `resume_conversation` go through `HitlAccessGuard`; Slack decides only for its configured approver list (a conversation owner not on it is refused, as before); email notifications carry no decision. A member agent's gated tool call inside a group discussion is never decided by a person at all — the group rejects it (`system:group`) and the member answers without the tool — so the group approve endpoints cannot bypass `ROLE_ONLY`. System decisions (timeouts with `AUTO_APPROVE` / `AUTO_REJECT`, no-progress) are not affected by `deciders`.
 
 ```json
 {

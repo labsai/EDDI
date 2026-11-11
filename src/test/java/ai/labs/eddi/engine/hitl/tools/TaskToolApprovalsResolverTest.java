@@ -58,6 +58,31 @@ class TaskToolApprovalsResolverTest {
     }
 
     @Test
+    void decisionRestrictionsAreExemptFromReplaceSemantics() {
+        var agent = agentGate();
+        agent.setDeciders(ToolApprovalsConfig.Deciders.ROLE_ONLY);
+        agent.setAllowArgumentAmendments(false);
+        agent.setRequirePauseId(true);
+        var task = new ToolApprovalsConfig();
+        task.setRequireApproval(List.of("transfer_funds"));
+
+        var replaced = TaskToolApprovalsResolver.resolve(agent, task, Mode.REPLACE);
+
+        assertEquals(List.of("transfer_funds"), replaced.getRequireApproval(), "everything else is still the task's");
+        assertEquals(ToolApprovalsConfig.Deciders.ROLE_ONLY, replaced.getDeciders());
+        assertEquals(Boolean.FALSE, replaced.getAllowArgumentAmendments());
+        assertEquals(Boolean.TRUE, replaced.getRequirePauseId());
+        assertNull(task.getDeciders(), "the stored task config is not mutated");
+    }
+
+    @Test
+    void replaceWithoutAgentRestrictionsStillHandsBackTheTaskConfig() {
+        var task = new ToolApprovalsConfig();
+        task.setRequireApproval(List.of("transfer_funds"));
+        assertSame(task, TaskToolApprovalsResolver.resolve(agentGate(), task, Mode.REPLACE));
+    }
+
+    @Test
     void taskMayNarrowWhoMayDecideAndHow() {
         var task = new ToolApprovalsConfig();
         task.setDeciders(ToolApprovalsConfig.Deciders.ROLE_ONLY);

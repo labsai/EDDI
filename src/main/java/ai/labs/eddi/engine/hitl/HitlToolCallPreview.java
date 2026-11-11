@@ -41,6 +41,14 @@ public final class HitlToolCallPreview {
      */
     public static final String TRUNCATED_NOTICE = " [arguments too large to show in full — approving will not execute this call]";
 
+    /**
+     * Appended to a call whose arguments are longer than this card shows. The
+     * card's Approve button decides the whole call, so the approver is told the
+     * card is not the whole of it and where the whole of it is.
+     */
+    public static final String SHORTENED_NOTICE = " [arguments shortened on this card — review the full call (Manager approval "
+            + "inbox or approval-status) before approving]";
+
     private HitlToolCallPreview() {
     }
 
@@ -56,9 +64,12 @@ public final class HitlToolCallPreview {
         int rendered = Math.min(calls.size(), MAX_RENDERED_CALLS);
         for (int i = 0; i < rendered; i++) {
             var call = calls.get(i);
-            String line = safe(call.getToolName()) + " — " + truncateForDisplay(SecretRedactionFilter.redact(call.getArgumentsRedacted()));
+            String arguments = SecretRedactionFilter.redact(call.getArgumentsRedacted());
+            String line = safe(call.getToolName()) + " — " + truncateForDisplay(arguments);
             if (call.isArgsTruncated()) {
                 line += TRUNCATED_NOTICE;
+            } else if (safe(arguments).length() > ARGS_DISPLAY_MAX_CHARS) {
+                line += SHORTENED_NOTICE;
             }
             lines.add(line);
         }

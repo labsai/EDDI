@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HitlToolCallPreviewTest {
@@ -30,6 +31,15 @@ class HitlToolCallPreviewTest {
 
         assertEquals(1, lines.size());
         assertTrue(lines.get(0).endsWith(HitlToolCallPreview.TRUNCATED_NOTICE));
+    }
+
+    @Test
+    void argumentsLongerThanTheCardSaySoAndPointToTheFullView() {
+        String args = "{\"note\":\"" + "x".repeat(HitlToolCallPreview.ARGS_DISPLAY_MAX_CHARS) + "\",\"to\":\"attacker\"}";
+        var lines = HitlToolCallPreview.lines(batchOf(args, false));
+
+        assertTrue(lines.get(0).endsWith(HitlToolCallPreview.SHORTENED_NOTICE));
+        assertFalse(lines.get(0).contains("attacker"));
     }
 
     @Test
