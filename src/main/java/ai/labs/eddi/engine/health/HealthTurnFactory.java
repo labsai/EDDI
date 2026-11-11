@@ -92,11 +92,13 @@ public final class HealthTurnFactory {
      *            for an unsettled turn
      * @param settled
      *            the turn's outcome is what the conversation keeps: not abandoned
-     *            by the watchdog, not cancelled, not interrupted. An unsettled
-     *            turn's row is only <em>inserted</em>, never replaces one, and
-     *            discards nothing: its snapshot may be thrown away (a cancelled say
-     *            after an undo leaves the undone step in the redo cache), and an
-     *            abandoned rerun or resume leaves the persisted step as it was
+     *            by the watchdog, not cancelled, not interrupted, and its snapshot
+     *            was stored (a pause whose compare-and-store lost is not). An
+     *            unsettled turn's row is only <em>inserted</em>, never replaces
+     *            one, and discards nothing: its snapshot may be thrown away (a
+     *            cancelled say after an undo leaves the undone step in the redo
+     *            cache), and an abandoned rerun or resume leaves the persisted step
+     *            as it was
      */
     public record Capture(HealthTurn turn, List<String> discardedExecutionIds, boolean settled) {
         public Capture {
@@ -123,6 +125,20 @@ public final class HealthTurnFactory {
      */
     public static Capture capture(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, Instant now,
                                   boolean abandoned) {
+        return capture(memory, conversationId, kind, durationMs, now, abandoned, true);
+    }
+
+    /**
+     * As above.
+     *
+     * @param committed
+     *            the turn's snapshot was stored. {@code false} — the write lost its
+     *            compare-and-store, conflicted, was fenced or failed — makes the
+     *            capture unsettled, and its row is not {@code paused}: the live
+     *            memory may say {@code AWAITING_HUMAN}, but no pause exists
+     */
+    public static Capture capture(IConversationMemory memory, String conversationId, ErrorKind kind, Long durationMs, Instant now,
+                                  boolean abandoned, boolean committed) {
         if (memory == null) {
             return null;
         }
@@ -134,7 +150,7 @@ public final class HealthTurnFactory {
         int stepIndex = Math.max(0, memory.size() - 1);
         IConversationStep step = memory.getCurrentStep();
         String userId = memory.getUserId();
-        boolean paused = memory.getConversationState() == ConversationState.AWAITING_HUMAN;
+        boolean paused = committed && memory.getConversationState() == ConversationState.AWAITING_HUMAN;
         Instant timestamp = now != null ? now : Instant.now();
 
         Integer version = memory.getAgentVersion();
@@ -193,7 +209,7 @@ public final class HealthTurnFactory {
             // overwrite the last one — a fresh id records each.
             executionId = UUID.randomUUID().toString();
         }
-        boolean settled = !abandoned && !memory.isCancelled() && kind != ErrorKind.TURN_INTERRUPTED && kind != ErrorKind.TURN_DEADLINE;
+        boolean settled = committed && !abandoned && !memory.isCancelled() && kind != ErrorKind.TURN_INTERRUPTED && kind != ErrorKind.TURN_DEADLINE;
         HealthTurn turn = new HealthTurn(id, stepIndex, executionId, agentId, version, previousVersion, userId, origin,
                 LocalDate.ofInstant(timestamp, ZoneOffset.UTC), timestamp, timestamp, cost, discardedCost, inputTokens, outputTokens,
                 totalTokens, durationMs == null || durationMs < 0 ? null : durationMs, kind == null ? null : kind.name(), paused, failures,

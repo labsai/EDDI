@@ -188,6 +188,25 @@ Turn rows are personal data about a user's use of an agent:
   `agentHealthTurns.turns`.
 - **Deleting a conversation** deletes its rows (best effort — a failure is
   logged and the rows expire with the retention).
+- **A row still queued does not come back.** Rows are written on the health
+  worker's queue, so a turn finished just before an erasure or a delete can
+  reach the store after it. The erasure's first step raises a fence for the user
+  on every node (through the cluster stop in cluster mode); while it lasts (15
+  minutes) the worker writes none of the user's rows or discard markers. After
+  every write the worker checks again, and deletes the conversation's rows when
+  the user is now fenced or the conversation no longer exists — both the erasure
+  and a conversation delete remove the conversation before its rows, so one of
+  the two always sees the other, on whichever node the row was queued. Withheld
+  and removed rows count as `eddi_health_dropped_total{reason="erased"}`. That
+  second check costs one primary-key read of the conversation per recorded
+  turn, on the worker. What it cannot cover: a node that did not confirm the
+  erasure's cluster stop (the erasure then reports `clusterStop` as failed and
+  must be re-run), a conversation store that cannot answer, or a cleanup delete
+  that fails — such a row stays until the retention removes it, with a WARN.
+- **A turn whose snapshot was not stored** — a pause that lost its
+  compare-and-store to a concurrent end or cancel, a write conflict, a fenced or
+  failed write — is recorded unsettled: inserted only if absent, never as
+  paused, discarding nothing.
 
 See [GDPR & CCPA compliance](gdpr-compliance.md).
 

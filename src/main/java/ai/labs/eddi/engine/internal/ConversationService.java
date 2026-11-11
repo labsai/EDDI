@@ -112,6 +112,7 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
@@ -3235,16 +3236,25 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Hands a finished turn — clean, failed or paused — to Agent Health, which
      * copies what it needs and writes on its own worker. Independent of the alert
      * hook and of {@code eddi.alerts.enabled}; never throws.
+     *
+     * @param committed
+     *            the turn's snapshot was stored; {@code false} records it unsettled
+     *            (see {@link HealthTurnRecorder#record})
      */
-    void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs) {
-        reportHealthTurn(memory, null, wait, durationMs);
+    void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs, boolean committed) {
+        reportHealthTurn(memory, null, wait, durationMs, committed);
     }
 
     /**
      * As above, naming the conversation when the memory does not carry its id yet
-     * (the start turn).
+     * (the start turn, recorded once stored).
      */
     void reportHealthTurn(IConversationMemory memory, String conversationId, ConversationStepRunner.TurnWait wait, long durationMs) {
+        reportHealthTurn(memory, conversationId, wait, durationMs, true);
+    }
+
+    void reportHealthTurn(IConversationMemory memory, String conversationId, ConversationStepRunner.TurnWait wait, long durationMs,
+                          boolean committed) {
         HealthTurnRecorder recorder = healthTurnRecorder;
         if (recorder == null || memory == null) {
             return;
@@ -3252,7 +3262,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             // An abandoned wait: the turn may still run, and what it leaves is unknown.
             boolean abandoned = wait == ConversationStepRunner.TurnWait.TIMED_OUT || wait == ConversationStepRunner.TurnWait.INTERRUPTED;
-            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned);
+            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned, committed);
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not hand a turn to Agent Health: %s", e.getMessage());
         }
@@ -3261,6 +3271,12 @@ public class ConversationService implements IConversationService, UserErasurePar
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
         return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
+    }
+
+    /** See {@link ConversationStepRunner#waitForExecutionFinishOrTimeout}. */
+    boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
+                                            IConversationMemory memory, Future<Void> future, BooleanSupplier committed) {
+        return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future, committed);
     }
 
     /** See {@link ConversationStepRunner#fenceRaised}. */

@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -80,10 +81,11 @@ class ConversationStepRunnerHealthHookTest {
         store = mock(IHealthTurnStore.class);
         Instance<IHealthTurnStore> instance = mock(Instance.class);
         when(instance.get()).thenReturn(store);
-        recorder = new HealthTurnRecorder(instance, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()));
+        recorder = new HealthTurnRecorder(instance, null, null, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()));
         service.healthTurnRecorder = recorder;
-        doCallRealMethod().when(service).reportHealthTurn(any(), any(TurnWait.class), anyLong());
+        doCallRealMethod().when(service).reportHealthTurn(any(), any(TurnWait.class), anyLong(), anyBoolean());
         doCallRealMethod().when(service).reportHealthTurn(any(), any(), any(TurnWait.class), anyLong());
+        doCallRealMethod().when(service).reportHealthTurn(any(), any(), any(TurnWait.class), anyLong(), anyBoolean());
         ICache<String, ConversationState> stateCache = mock(ICache.class);
         runner = new ConversationStepRunner(service, mock(IConversationMemoryStore.class), mock(IConversationDescriptorStore.class),
                 mock(IRuntime.class), stateCache, new ConcurrentHashMap<>(), 60);
@@ -141,13 +143,45 @@ class ConversationStepRunnerHealthHookTest {
     }
 
     @Test
+    @DisplayName("a pause whose store was committed is recorded settled, as paused")
+    void committedPause() {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), "conv-1", memory(ConversationState.AWAITING_HUMAN), CompletableFuture.completedFuture(null),
+                () -> true);
+
+        assertTrue(written().paused());
+        verify(store, never()).insertIfAbsent(any());
+    }
+
+    @Test
+    @DisplayName("a pause whose compare-and-store lost is recorded unsettled: insert-only, not paused")
+    void rejectedPauseWrite() {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), "conv-1", memory(ConversationState.AWAITING_HUMAN), CompletableFuture.completedFuture(null),
+                () -> false);
+
+        ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
+        verify(store, timeout(5_000)).insertIfAbsent(row.capture());
+        assertFalse(row.getValue().paused());
+        verify(store, never()).upsert(any());
+    }
+
+    @Test
+    @DisplayName("a normal committed turn is unaffected by the commit tracking")
+    void committedCleanTurn() {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), "conv-1", memory(ConversationState.READY), CompletableFuture.completedFuture(null),
+                () -> true);
+
+        assertNull(written().errorKind());
+        verify(store, never()).insertIfAbsent(any());
+    }
+
+    @Test
     @DisplayName("a watchdog timeout is recorded insert-only under a fresh id per timeout, and repeated timeouts do not overwrite each other")
     void timedOutTurn() {
         ConversationMemory memory = memory(ConversationState.IN_PROGRESS);
         memory.startNextStep(); // the new say step, not stamped yet: the body is still running
 
-        service.reportHealthTurn(memory, TurnWait.TIMED_OUT, 60_000L);
-        service.reportHealthTurn(memory, TurnWait.TIMED_OUT, 60_000L);
+        service.reportHealthTurn(memory, TurnWait.TIMED_OUT, 60_000L, true);
+        service.reportHealthTurn(memory, TurnWait.TIMED_OUT, 60_000L, true);
 
         ArgumentCaptor<HealthTurn> rows = ArgumentCaptor.forClass(HealthTurn.class);
         verify(store, timeout(5_000).times(2)).insertIfAbsent(rows.capture());
@@ -182,6 +216,7 @@ class ConversationStepRunnerHealthHookTest {
 
         ConversationService bare = mock(ConversationService.class);
         doCallRealMethod().when(bare).reportHealthTurn(any(), any(), any(TurnWait.class), anyLong());
+        doCallRealMethod().when(bare).reportHealthTurn(any(), any(), any(TurnWait.class), anyLong(), anyBoolean());
         IConversationMemory memory = memory(ConversationState.READY);
         assertDoesNotThrow(() -> bare.reportHealthTurn(memory, null, TurnWait.COMPLETED, 1L));
         verify(bare).reportHealthTurn(eq(memory), isNull(), eq(TurnWait.COMPLETED), eq(1L));
