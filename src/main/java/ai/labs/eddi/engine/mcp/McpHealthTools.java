@@ -7,15 +7,18 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentHealth;
 import ai.labs.eddi.engine.api.IRestHealthPortfolio;
+import ai.labs.eddi.engine.health.model.HealthProfile;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -178,6 +181,61 @@ public class McpHealthTools {
             return jsonSerialization.serialize(health.suggestOutcomes(agentId.trim(), period, null, null, version, list(origins)));
         } catch (Exception e) {
             return codedFailure(LOGGER, "suggest_outcome_mappings", e);
+        }
+    }
+
+    @Tool(name = "read_agent_health_profile", description = "Read an agent's health profile — how its health is judged: the preset "
+            + "(support, sales, assistant, task), the critical measures (a red one makes the status NEEDS_ATTENTION), band thresholds per "
+            + "measure, budgets (costPerResolvedUsd, costPerSessionUsd, tokensPerTurn), the SLO (agentTurnSuccess, apdexTMs, "
+            + "minTurnsForBurnAlert) and overrides that leave a measure or section out of the status until a day. stored=false means "
+            + "nothing is stored and these are the preset's defaults. Use it to explain why an agent's status is what it is.")
+    public String readAgentHealthProfile(@ToolArg(description = "Agent id (required)") String agentId) {
+        requireAnyRole(identity, authEnabled, McpRoles.HEALTH_READ);
+        if (agentId == null || agentId.isBlank()) {
+            return errorJson("agentId is required", "BAD_REQUEST", null);
+        }
+        try {
+            return jsonSerialization.serialize(health.readProfile(agentId.trim()));
+        } catch (Exception e) {
+            return codedFailure(LOGGER, "read_agent_health_profile", e);
+        }
+    }
+
+    @Tool(name = "list_health_presets", description = "List the Agent Health presets — support, sales, assistant, task — with their "
+            + "critical measures and band thresholds. A health profile picks one and overrides any part of it.")
+    public String listHealthPresets() {
+        requireAnyRole(identity, authEnabled, McpRoles.HEALTH_READ);
+        try {
+            return jsonSerialization.serialize(portfolio.listPresets());
+        } catch (Exception e) {
+            return codedFailure(LOGGER, "list_health_presets", e);
+        }
+    }
+
+    @Tool(name = "update_agent_health_profile", description = "Store an agent's health profile (replaces the stored one; every field is "
+            + "optional and falls back to the preset). Changes the bands and the status at once and leaves a PROFILE_CHANGE marker on the "
+            + "charts. Needs EDIT on the agent. Invalid fields come back as violations with a dotted path (thresholds.resolutionRate.red, "
+            + "overrides[0].reason). Example: {\"preset\":\"support\",\"critical\":[\"agentFailureRate\",\"resolutionRate\"],"
+            + "\"thresholds\":{\"resolutionRate\":{\"green\":0.7,\"red\":0.4}},\"budgets\":{\"costPerResolvedUsd\":0.5},"
+            + "\"slo\":{\"agentTurnSuccess\":0.99},\"overrides\":[{\"measure\":\"business\",\"state\":\"IGNORED\",\"reason\":\"CRM outage\","
+            + "\"until\":\"2026-11-14\"}]}. Read the profile first and send back the whole of it with your change.")
+    public String updateAgentHealthProfile(@ToolArg(description = "Agent id (required)") String agentId,
+                                           @ToolArg(description = "The profile as JSON (required)") String profile) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (agentId == null || agentId.isBlank()) {
+            return errorJson("agentId is required", "BAD_REQUEST", null);
+        }
+        if (profile == null || profile.isBlank()) {
+            return errorJson("profile is required", "BAD_REQUEST", null);
+        }
+        try {
+            HealthProfile body = jsonSerialization.deserialize(profile, HealthProfile.class);
+            Response response = health.updateProfile(agentId.trim(), body);
+            return jsonSerialization.serialize(response.getEntity());
+        } catch (IOException e) {
+            return errorJson("profile is not valid JSON: " + e.getMessage(), "BAD_REQUEST", null);
+        } catch (Exception e) {
+            return codedFailure(LOGGER, "update_agent_health_profile", e);
         }
     }
 

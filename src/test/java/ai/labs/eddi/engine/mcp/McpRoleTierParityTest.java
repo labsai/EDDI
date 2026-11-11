@@ -133,7 +133,7 @@ class McpRoleTierParityTest {
 
     /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
     private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health",
-            "list_agent_health_sessions", "suggest_outcome_mappings");
+            "list_agent_health_sessions", "suggest_outcome_mappings", "read_agent_health_profile", "list_health_presets");
 
     /**
      * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
@@ -241,7 +241,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(112, measured.size());
+        assertEquals(115, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -336,7 +336,7 @@ class McpRoleTierParityTest {
         // read_agent_health, compare_agent_versions_health, list_agent_health_sessions,
         // suggest_outcome_mappings
         mirrors.put(IRestAgentHealth.class, McpRoles.HEALTH_READ);
-        mirrors.put(IRestHealthPortfolio.class, McpRoles.HEALTH_READ); // list_agent_health
+        mirrors.put(IRestHealthPortfolio.class, McpRoles.HEALTH_READ); // list_agent_health, list_health_presets
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());

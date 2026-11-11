@@ -109,7 +109,10 @@ public class McpToolFilter implements ToolFilter {
             "list_alert_events", "acknowledge_alert_event",
             // Agent Health (McpHealthTools) — read-only, same tier and VIEW scoping as
             // the REST /agents/{agentId}/health and /health/agents resources
-            "read_agent_health", "list_agent_health", "compare_agent_versions_health", "list_agent_health_sessions", "suggest_outcome_mappings");
+            "read_agent_health", "list_agent_health", "compare_agent_versions_health", "list_agent_health_sessions", "suggest_outcome_mappings",
+            // Agent Health profiles (H4) — the read at the health tier, the write at the
+            // authoring tier and EDIT on the agent, like the REST PUT
+            "read_agent_health_profile", "list_health_presets", "update_agent_health_profile");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {
