@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rag.model;
 import ai.labs.eddi.configs.rag.model.IngestionSource.IngestionSettings;
 import ai.labs.eddi.configs.rag.model.IngestionSource.UploadSource;
 import ai.labs.eddi.configs.rag.model.IngestionSource.WebSource;
+import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -146,6 +147,26 @@ class IngestionSourceValidationTest {
         assertTrue(settingsRefusal(s -> s.setTimeBudgetMinutes(24 * 60 + 1)).startsWith("timeBudgetMinutes"));
         assertTrue(settingsRefusal(s -> s.setCostPerThousandSegments(-0.01)).startsWith("costPerThousandSegments"));
         assertTrue(settingsRefusal(s -> s.setMaxBytesPerPage(0L)).startsWith("maxBytesPerPage"));
+    }
+
+    @Test
+    void maxBytesPerPageHasACeiling() {
+        // Every page is buffered whole up to this cap: Long.MAX_VALUE let one source
+        // hold the heap with a single response.
+        assertTrue(settingsRefusal(s -> s.setMaxBytesPerPage(Long.MAX_VALUE)).startsWith("maxBytesPerPage"));
+        assertTrue(settingsRefusal(s -> s.setMaxBytesPerPage(IngestionSettings.MAX_BYTES_PER_PAGE_CEILING + 1)).startsWith("maxBytesPerPage"));
+        var atCeiling = new IngestionSettings();
+        atCeiling.setMaxBytesPerPage(IngestionSettings.MAX_BYTES_PER_PAGE_CEILING);
+        var source = web("https://docs.example.com/");
+        source.setSettings(atCeiling);
+        assertDoesNotThrow(source::validate);
+
+        // A document stored before the ceiling existed is clamped, not trusted.
+        var stored = new IngestionSettings();
+        stored.setMaxBytesPerPage(Long.MAX_VALUE);
+        assertEquals(IngestionSettings.MAX_BYTES_PER_PAGE_CEILING, stored.maxBytesPerPageOrDefault());
+        assertEquals(CrawlRequest.Limits.MAX_BYTES_PER_PAGE,
+                new CrawlRequest.Limits(1, 1, Long.MAX_VALUE, 1, null, null).maxBytesPerPage());
     }
 
     @Test

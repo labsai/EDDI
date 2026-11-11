@@ -637,9 +637,15 @@ public class WebCrawler {
             if (!CrawlUrls.isSameSite(host, seedHost, request.scope().includeSubdomains())) {
                 return false;
             }
+            // The host alone let an https seed follow http:// and :8443 links on it.
+            if (!CrawlUrls.isSameSchemeAndPort(url, request.seedUrl())) {
+                return false;
+            }
         }
+        // One canonical path for the prefix and the excludes (robots reads its encoded
+        // form): dot segments, encoded ones included, already resolved.
         String path = CrawlUrls.path(url);
-        if (!CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())) {
+        if (path == null || !CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())) {
             return false;
         }
         return !UrlPattern.anyMatches(excludes, path);

@@ -309,6 +309,54 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an encoded dot segment cannot climb out of the path prefix or past an exclude")
+        void encodedDotSegmentsStayOutOfScope() {
+            // nginx and Apache decode %2e%2e and serve /users/evil; the prefix and the
+            // exclude were checked against a decoded but unresolved /docs/../users/evil.
+            String climbing = SITE + "/docs/%2e%2e/users/evil";
+            String tomcat = SITE + "/docs/..;/users/evil";
+            String excluded = SITE + "/x/%2E%2E/users/evil";
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/docs/", linkTo(climbing, tomcat, SITE + "/docs/a"))
+                    .page(SITE + "/docs/a", "<html><body>A</body></html>")
+                    .page(climbing, "<html><body>EVIL</body></html>")
+                    .page(tomcat, "<html><body>EVIL</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(
+                    request(SITE + "/docs/", new Scope(true, false, "/docs/", 3, List.of()), Limits.defaults()), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/docs/a"));
+            assertFalse(site.wasRequested(climbing), "%2e%2e must not climb out of /docs/");
+            assertFalse(site.wasRequested(tomcat), "..; must not climb out of /docs/");
+
+            FakeSite second = new FakeSite()
+                    .page(SITE + "/", linkTo(excluded, SITE + "/ok"))
+                    .page(SITE + "/ok", "<html><body>OK</body></html>")
+                    .page(excluded, "<html><body>EVIL</body></html>");
+            new WebCrawler(second).crawl(
+                    request(SITE + "/", new Scope(true, false, "/", 3, List.of("/users/**")), Limits.defaults()), new RecordingSink());
+            assertFalse(second.wasRequested(excluded), "the exclude must see /users/evil");
+        }
+
+        @Test
+        @DisplayName("an https seed does not follow http:// or another port on its host")
+        void scopeKeepsSchemeAndPort() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo("http://example.com/plain", SITE + ":8443/admin", SITE + "/ok"))
+                    .page(SITE + "/ok", "<html><body>OK</body></html>")
+                    .page("http://example.com/plain", "<html><body>P</body></html>")
+                    .page(SITE + ":8443/admin", "<html><body>A</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/ok"));
+            assertFalse(site.wasRequested("http://example.com/plain"));
+            assertFalse(site.wasRequested(SITE + ":8443/admin"));
+        }
+
+        @Test
         @DisplayName("applies exclude globs against the path")
         void appliesExcludes() {
             FakeSite site = new FakeSite()

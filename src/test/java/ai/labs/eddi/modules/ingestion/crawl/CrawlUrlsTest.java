@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -191,6 +192,38 @@ class CrawlUrlsTest {
             assertEquals("/", CrawlUrls.path("https://example.com"));
             assertEquals("/docs/guide", CrawlUrls.path("https://example.com/docs/guide"));
             assertEquals("/", CrawlUrls.path("nonsense"));
+        }
+
+        @Test
+        @DisplayName("encoded dot segments are resolved as the server resolves them")
+        void encodedDotSegmentsResolved() {
+            assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/%2e%2e/users/evil"));
+            assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/%2E./users/evil"));
+            assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/..;/users/evil"));
+            assertEquals("/docs/a", CrawlUrls.path("https://example.com/docs/%2e/a"));
+            assertEquals("/", CrawlUrls.path("https://example.com/%2e%2e/%2e%2e/"));
+            assertEquals("/café/", CrawlUrls.path("https://example.com/caf%C3%A9/"), "other encodings still decode");
+            assertEquals("/users/evil?x=1", CrawlUrls.pathAndQuery("https://example.com/docs/%2e%2e/users/evil?x=1"));
+            assertEquals("/caf%C3%A9/", CrawlUrls.pathAndQuery("https://example.com/caf%C3%A9/"), "robots keeps the wire encoding");
+        }
+
+        @Test
+        @DisplayName("an encoded slash or backslash makes the path ambiguous, so it has none")
+        void encodedSeparatorsAreAmbiguous() {
+            assertNull(CrawlUrls.path("https://example.com/docs/..%2fusers/evil"));
+            assertNull(CrawlUrls.path("https://example.com/docs/..%5Cusers/evil"));
+            assertNull(CrawlUrls.canonicalRawPath("/a%2Fb"));
+        }
+
+        @Test
+        @DisplayName("scheme and port must match the seed, except an http seed upgraded to https")
+        void schemeAndPort() {
+            assertTrue(CrawlUrls.isSameSchemeAndPort("https://example.com/a", "https://example.com:443/"));
+            assertFalse(CrawlUrls.isSameSchemeAndPort("http://example.com/a", "https://example.com/"));
+            assertFalse(CrawlUrls.isSameSchemeAndPort("https://example.com:8443/a", "https://example.com/"));
+            assertTrue(CrawlUrls.isSameSchemeAndPort("https://example.com/a", "http://example.com/"));
+            assertFalse(CrawlUrls.isSameSchemeAndPort("https://example.com:8443/a", "http://example.com/"));
+            assertTrue(CrawlUrls.isSameSchemeAndPort("http://example.com:8080/a", "http://example.com:8080/"));
         }
     }
 

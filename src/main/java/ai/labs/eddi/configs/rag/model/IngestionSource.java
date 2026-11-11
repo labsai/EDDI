@@ -565,7 +565,16 @@ public class IngestionSource {
                 throw new IllegalArgumentException(
                         "maxBytesPerPage of ingestion source '" + sourceName + "' must be positive");
             }
+            // Each page is buffered whole in memory up to this cap, so an unbounded value
+            // let one source pin the heap with a single large response.
+            UploadSource.requirePositiveAtMost(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING, "maxBytesPerPage", sourceName);
         }
+
+        /**
+         * The largest {@code maxBytesPerPage}: the same ceiling as an uploaded file.
+         * The crawler buffers a page in memory up to the cap.
+         */
+        public static final long MAX_BYTES_PER_PAGE_CEILING = 50L * 1024 * 1024;
 
         public int maxContentLengthOrDefault() {
             return maxContentLength == null ? 100_000 : maxContentLength;
@@ -580,7 +589,8 @@ public class IngestionSource {
         }
 
         public long maxBytesPerPageOrDefault() {
-            return maxBytesPerPage == null ? 5L * 1024 * 1024 : maxBytesPerPage;
+            // Clamped for documents stored before the ceiling was validated.
+            return maxBytesPerPage == null ? 5L * 1024 * 1024 : Math.min(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING);
         }
 
         public int timeBudgetMinutesOrDefault() {

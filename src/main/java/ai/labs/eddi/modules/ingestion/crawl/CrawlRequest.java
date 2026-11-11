@@ -101,7 +101,7 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
         public Limits {
             maxPages = maxPages > 0 ? maxPages : 200;
             maxFetchAttempts = maxFetchAttempts > 0 ? maxFetchAttempts : Math.max(maxPages * 3, maxPages);
-            maxBytesPerPage = maxBytesPerPage > 0 ? maxBytesPerPage : 5L * 1024 * 1024;
+            maxBytesPerPage = maxBytesPerPage > 0 ? Math.min(maxBytesPerPage, MAX_BYTES_PER_PAGE) : 5L * 1024 * 1024;
             maxTotalBytes = maxTotalBytes > 0 ? maxTotalBytes : 512L * 1024 * 1024;
             timeBudget = timeBudget == null || timeBudget.isZero() || timeBudget.isNegative()
                     ? Duration.ofMinutes(10)
@@ -110,6 +110,12 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
                     ? Duration.ofSeconds(15)
                     : requestTimeout;
         }
+
+        /**
+         * The largest per-page cap honoured: a page is buffered in memory up to it.
+         * Matches {@code IngestionSource.IngestionSettings.MAX_BYTES_PER_PAGE_CEILING}.
+         */
+        public static final long MAX_BYTES_PER_PAGE = 50L * 1024 * 1024;
 
         public static Limits defaults() {
             return new Limits(200, 600, 5L * 1024 * 1024, 512L * 1024 * 1024,
