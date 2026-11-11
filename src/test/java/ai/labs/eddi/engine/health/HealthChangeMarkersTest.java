@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.HealthMarker;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -105,7 +106,8 @@ class HealthChangeMarkersTest {
         IHealthTurnStore turns = mock(IHealthTurnStore.class);
         IHealthDailyStore daily = mock(IHealthDailyStore.class);
         doThrow(new HealthStoreException("down", null)).when(turns).deleteOlderThan(any());
-        new HealthTurnRetention(turns, daily, store, HealthSettings.defaults(), Clock.fixed(NOW, ZoneOffset.UTC)).sweep();
+        new HealthTurnRetention(turns, null, daily, store, HealthSettings.defaults(), new HealthMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(NOW, ZoneOffset.UTC)).sweep();
         verify(daily).deleteOlderThan(LocalDate.of(2026, 11, 10).minusDays(730));
         verify(store).deleteOlderThan(LocalDate.of(2026, 11, 10).minusDays(730).atStartOfDay(ZoneOffset.UTC).toInstant());
         verify(store, never()).append(any());

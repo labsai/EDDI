@@ -46,6 +46,6 @@ class MongoHealthTurnStoreIT extends MongoTestBase implements HealthTurnStoreCon
         List<String> names = getDatabase().getCollection(COLLECTION).listIndexes().into(new ArrayList<>()).stream()
                 .map(index -> index.getString("name")).toList();
         assertTrue(names.containsAll(List.of("idx_health_turns_agent_day", "idx_health_turns_conversation", "idx_health_turns_user",
-                "idx_health_turns_day", "idx_health_turns_discarded_at")), names.toString());
+                "idx_health_turns_day", "idx_health_turns_discarded_at", "idx_health_turns_updated")), names.toString());
     }
 }

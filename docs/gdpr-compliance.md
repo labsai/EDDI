@@ -193,7 +193,17 @@ principal, not a user: erasing or exporting it is refused with 400.
     `agentHealthTurns` participant: every row whose user is the erased user (group member
     conversations are owned by the discussion's user, so they are included). A row holds ids,
     counts, failure classes and action names of one turn, no text. Rows also go when their
-    conversation is deleted, and expire after `eddi.health.facts-retention` (90 days). The export
+    conversation is deleted, and expire after `eddi.health.facts-retention` (90 days). Rows still
+    queued on a node's health worker do not land after the erasure: step 0 fences the user on every
+    node (`agentHealthErasureFence`), and a row written while the fence went up — or for a
+    conversation that no longer exists — is deleted right after the write
+    ([details](agent-health.md#gdpr)). If a node did not confirm the erasure's cluster stop, the
+    conversation check cannot answer, or the clean-up delete fails, the row stays — with a WARN —
+    until the next daily orphan sweep, which deletes the rows of conversations that no longer exist
+    (the erasure deletes the user's conversations). That sweep only looks at rows written within
+    `eddi.health.orphan-sweep-window` (48 hours) and keeps a row whenever the conversation store
+    cannot answer, so a failure that outlasts the window leaves the row until
+    `eddi.health.facts-retention` removes it. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 

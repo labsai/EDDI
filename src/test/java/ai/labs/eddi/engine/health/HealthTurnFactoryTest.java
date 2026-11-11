@@ -220,6 +220,18 @@ class HealthTurnFactoryTest {
         }
 
         @Test
+        @DisplayName("a pause a cancel converted after it was stored is not recorded as paused")
+        void cancelledPauseIsNotPaused() {
+            ConversationMemory memory = memory("u");
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setCancelled(true);
+
+            HealthTurn turn = HealthTurnFactory.capture(memory, null, ErrorKind.TURN_INTERRUPTED, null, NOW, false).turn();
+
+            assertFalse(turn.paused());
+        }
+
+        @Test
         @DisplayName("a clean turn has no error kind, no failures and no fallback")
         void clean() {
             HealthTurn turn = turn(memory("u"));

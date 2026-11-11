@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
 import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -29,8 +30,11 @@ import java.util.function.Consumer;
  * writes converge:
  * <ul>
  * <li><b>first recorded wins for {@code day} and {@code timestamp}</b> — a turn
- * paused on one day and resumed on the next stays on the day it started, so a
- * day already rolled up is not changed behind its back;</li>
+ * paused on one day and resumed on the next stays on the day it started. Only
+ * those two are kept: the rest of the row (cost, tokens, failures,
+ * {@code paused}, …) is replaced by the resumed turn's values, so a day already
+ * rolled up <em>does</em> change on a resume, and its rollup must be recomputed
+ * (H2b marks that day dirty);</li>
  * <li><b>newest capture wins</b> — a write whose {@code updatedAt} is older
  * than the stored row's is ignored, so a stale paused row delayed in one node's
  * queue cannot overwrite the finished row another node wrote;</li>
@@ -120,6 +124,16 @@ public interface IHealthTurnStore {
 
     /** Deletes a conversation's rows and markers (the conversation was deleted). */
     long deleteByConversationId(String conversationId);
+
+    /**
+     * Streams to {@code consumer} the distinct conversation ids of the rows whose
+     * {@code updatedAt} is at or after {@code since}, and of the discard markers
+     * written since then — at most {@code limit} ids, in no particular order. What
+     * the orphan sweep ({@code HealthTurnRetention}) checks against the
+     * conversation store: a write that landed after its conversation was deleted is
+     * recent by construction.
+     */
+    void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer);
 
     /**
      * Deletes the rows of every day before {@code day}, and the discard markers
