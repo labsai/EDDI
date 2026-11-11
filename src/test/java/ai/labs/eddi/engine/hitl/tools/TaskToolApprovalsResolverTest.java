@@ -37,6 +37,49 @@ class TaskToolApprovalsResolverTest {
         return cfg;
     }
 
+    // ── deciders, amendments, pause id: a task narrows, never widens ─────
+
+    @Test
+    void taskCannotWidenWhoMayDecideOrHowInStrictMode() {
+        var agent = agentGate();
+        agent.setDeciders(ToolApprovalsConfig.Deciders.ROLE_ONLY);
+        agent.setAllowArgumentAmendments(false);
+        agent.setRequirePauseId(true);
+        var task = new ToolApprovalsConfig();
+        task.setDeciders(ToolApprovalsConfig.Deciders.OWNER_OR_ROLE);
+        task.setAllowArgumentAmendments(true);
+        task.setRequirePauseId(false);
+
+        var merged = TaskToolApprovalsResolver.resolve(agent, task, Mode.STRICT);
+
+        assertEquals(ToolApprovalsConfig.Deciders.ROLE_ONLY, merged.getDeciders());
+        assertEquals(Boolean.FALSE, merged.getAllowArgumentAmendments());
+        assertEquals(Boolean.TRUE, merged.getRequirePauseId());
+    }
+
+    @Test
+    void taskMayNarrowWhoMayDecideAndHow() {
+        var task = new ToolApprovalsConfig();
+        task.setDeciders(ToolApprovalsConfig.Deciders.ROLE_ONLY);
+        task.setAllowArgumentAmendments(false);
+        task.setRequirePauseId(true);
+
+        var merged = TaskToolApprovalsResolver.resolve(agentGate(), task, Mode.STRICT);
+
+        assertTrue(ToolApprovalsConfig.roleOnly(merged));
+        assertFalse(ToolApprovalsConfig.amendmentsAllowed(merged));
+        assertTrue(ToolApprovalsConfig.pauseIdRequired(merged));
+    }
+
+    @Test
+    void unsetDecisionFieldsKeepTodaysDefaults() {
+        var merged = TaskToolApprovalsResolver.resolve(agentGate(), new ToolApprovalsConfig(), Mode.STRICT);
+
+        assertFalse(ToolApprovalsConfig.roleOnly(merged));
+        assertTrue(ToolApprovalsConfig.amendmentsAllowed(merged));
+        assertFalse(ToolApprovalsConfig.pauseIdRequired(merged));
+    }
+
     // ── inheritance and replace mode ─────────────────────────────────────
 
     @Test

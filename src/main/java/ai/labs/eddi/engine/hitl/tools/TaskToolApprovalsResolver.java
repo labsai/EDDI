@@ -141,6 +141,16 @@ public final class TaskToolApprovalsResolver {
         merged.setPendingMessage(firstNonBlank(taskLevel.getPendingMessage(), agent.getPendingMessage()));
         merged.setInGroupTurns(firstNonBlank(taskLevel.getInGroupTurns(), agent.getInGroupTurns()));
         merged.setRules(mergeRules(agent.getRules(), taskLevel.getRules(), merged.getTimeoutPolicy()));
+        // Who may decide, and how: a task may narrow either side, never widen it.
+        merged.setDeciders(ToolApprovalsConfig.roleOnly(agent) || ToolApprovalsConfig.roleOnly(taskLevel)
+                ? ToolApprovalsConfig.Deciders.ROLE_ONLY
+                : firstNonNull(taskLevel.getDeciders(), agent.getDeciders()));
+        merged.setAllowArgumentAmendments(ToolApprovalsConfig.amendmentsAllowed(agent) && ToolApprovalsConfig.amendmentsAllowed(taskLevel)
+                ? firstNonNull(taskLevel.getAllowArgumentAmendments(), agent.getAllowArgumentAmendments())
+                : Boolean.FALSE);
+        merged.setRequirePauseId(ToolApprovalsConfig.pauseIdRequired(agent) || ToolApprovalsConfig.pauseIdRequired(taskLevel)
+                ? Boolean.TRUE
+                : firstNonNull(taskLevel.getRequirePauseId(), agent.getRequirePauseId()));
         // Earned-autonomy suspensions are an agent-level runtime overlay; a task only
         // strengthens.
         merged.setSuspendedPatterns(agent.getSuspendedPatterns());
@@ -247,6 +257,10 @@ public final class TaskToolApprovalsResolver {
 
     private static String firstNonBlank(String preferred, String fallback) {
         return preferred != null && !preferred.isBlank() ? preferred : fallback;
+    }
+
+    private static <T> T firstNonNull(T preferred, T fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
 }

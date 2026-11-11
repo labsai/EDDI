@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.hitl.HitlPauseIdPolicy;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
@@ -348,6 +349,32 @@ class ConversationHitlService {
     }
 
     /**
+     * A person's decision on a tool-call pause that requires a {@code pauseId}
+     * named none — see {@link HitlPauseIdPolicy}. An
+     * {@link IllegalArgumentException}, so REST and MCP answer 400 /
+     * {@code BAD_REQUEST}; the pause is restored before it is thrown.
+     */
+    static final class PauseIdRequiredException extends IllegalArgumentException {
+        PauseIdRequiredException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Whether the current pause requires its decisions to name it: a tool-call
+     * pause, with {@code requirePauseId} on its effective tool-approval config or
+     * deployment-wide.
+     */
+    static boolean pauseIdRequired(ConversationMemorySnapshot snapshot) {
+        if (!ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(snapshot.getHitlPauseType())) {
+            return false;
+        }
+        PendingToolCallBatch batch = snapshot.getHitlPendingToolCalls();
+        return HitlPauseIdPolicy.requiredDeploymentWide()
+                || (batch != null && ToolApprovalsConfig.pauseIdRequired(batch.getEffectiveToolApprovals()));
+    }
+
+    /**
      * Refuse a decision that names a pause other than the one that started at
      * {@code currentPausedAt} — see {@code HitlDecision#pauseId}.
      */
@@ -537,6 +564,14 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw pauseMismatch(conversationId);
             }
+            // requirePauseId (agent toolApprovals or eddi.hitl.require-pause-id): a
+            // person's decision on a tool-call pause must name it, or it would land on
+            // whatever request is pending now. Checked on the snapshot the resume runs
+            // on; the pause is put back untouched, as for a mismatch.
+            if (HitlPauseIdPolicy.refuses(decision, pauseIdRequired(snapshot))) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new PauseIdRequiredException(HitlPauseIdPolicy.message());
+            }
             // GDPR Art. 18 — the same admission rule as start and say. A resume runs the
             // rest of the turn (tools, a model call, a rejection-note revision) for the
             // conversation's OWNER, so an owner whose processing an administrator has
@@ -561,7 +596,8 @@ class ConversationHitlService {
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
             prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
-        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException e) {
+        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
+                | PauseIdRequiredException e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -1354,6 +1390,13 @@ class ConversationHitlService {
                     throw new IllegalArgumentException(
                             "call '" + callId + "' was truncated at pause time and cannot be amended; "
                                     + "approve or reject it as-is");
+                }
+                // toolApprovals.allowArgumentAmendments=false: the decider may approve what
+                // was shown or reject it, never substitute arguments of their own.
+                if (!ToolApprovalsConfig.amendmentsAllowed(batch != null ? batch.getEffectiveToolApprovals() : null)) {
+                    throw new IllegalArgumentException(
+                            "toolDecisions['" + callId + "'].amendedArguments is not allowed for this agent "
+                                    + "(toolApprovals.allowArgumentAmendments is false); approve or reject the call as shown");
                 }
                 if (amendedArguments.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > PendingToolCallBatch.AMENDED_ARGS_MAX_BYTES) {
                     throw new IllegalArgumentException(
