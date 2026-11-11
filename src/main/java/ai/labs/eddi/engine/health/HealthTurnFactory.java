@@ -172,6 +172,7 @@ public final class HealthTurnFactory {
         boolean agentOutput = false;
         boolean question = false;
         List<String> actions = List.of();
+        String selfReported = null;
         List<String> discarded = List.of();
         String executionId = null;
         String origin = HealthOrigins.classify(userId, step);
@@ -206,6 +207,7 @@ public final class HealthTurnFactory {
             agentOutput = !trimmed.isEmpty();
             question = trimmed.endsWith("?") || trimmed.endsWith(FULL_WIDTH_QUESTION_MARK);
             actions = actions(value(step, MemoryKeys.ACTIONS.key()));
+            selfReported = selfReported(value(step, MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME));
         }
         if (executionId == null) {
             // A step not stamped yet: a turn the watchdog abandoned before its end. Its
@@ -217,7 +219,7 @@ public final class HealthTurnFactory {
         HealthTurn turn = new HealthTurn(id, stepIndex, executionId, agentId, version, previousVersion, userId, origin,
                 LocalDate.ofInstant(timestamp, ZoneOffset.UTC), timestamp, timestamp, cost, discardedCost, inputTokens, outputTokens,
                 totalTokens, durationMs == null || durationMs < 0 ? null : durationMs, kind == null ? null : kind.name(), paused, failures,
-                fallback, tools[0], tools[1], tools[2], guardrails, userInput, agentOutput, question, actions, false);
+                fallback, tools[0], tools[1], tools[2], guardrails, userInput, agentOutput, question, actions, false, selfReported);
         return new Capture(turn, discarded, settled);
     }
 
@@ -323,6 +325,14 @@ public final class HealthTurnFactory {
             }
         }
         return total;
+    }
+
+    /**
+     * The outcome {@code report_conversation_outcome} stored, when it is one the
+     * tool may claim; anything else is ignored.
+     */
+    static String selfReported(Object value) {
+        return value instanceof String outcome && HealthOutcomes.SELF_REPORTABLE.contains(outcome) ? outcome : null;
     }
 
     private static List<String> actions(Object value) {

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health.postgres;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
@@ -33,6 +34,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -105,6 +107,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 actions TEXT[],
                 discarded BOOLEAN NOT NULL DEFAULT FALSE,
                 discarded_at_ms BIGINT,
+                self_reported_outcome VARCHAR(32),
                 PRIMARY KEY (conversation_id, execution_id)
             )
             """;
@@ -119,13 +122,16 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             "CREATE INDEX IF NOT EXISTS idx_health_turns_user ON health_turns (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_day ON health_turns (day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
-            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)",
+            // Added in H3; a table created by H2a lacks it.
+            "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)"};
 
     /** The columns a row write binds, in bind order. */
     static final List<String> WRITTEN = List.of("conversation_id", "execution_id", "step_index", "agent_id", "agent_version",
             "previous_agent_version", "user_id", "origin", "day", "recorded_at_ms", "updated_at_ms", "cost_usd", "discarded_cost_usd",
             "input_tokens", "output_tokens", "total_tokens", "duration_ms", "error_kind", "paused", "failures", "fallback_served", "tool_calls",
-            "tool_failures", "tool_refusals", "guardrail_trips", "user_input", "agent_output", "last_output_question", "actions", "discarded");
+            "tool_failures", "tool_refusals", "guardrail_trips", "user_input", "agent_output", "last_output_question", "actions", "discarded",
+            "self_reported_outcome");
 
     /** Columns a replace does not overwrite with the written value. */
     private static final Set<String> NOT_REPLACED = Set.of("conversation_id", "execution_id", "day", "recorded_at_ms", "discarded");
@@ -153,6 +159,11 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
 
     static final String BY_CONVERSATION = SELECT
             + "WHERE conversation_id = ? AND recorded_at_ms IS NOT NULL ORDER BY step_index, recorded_at_ms LIMIT ?";
+    static final String BY_CONVERSATION_FROM_STEP = SELECT
+            + "WHERE conversation_id = ? AND step_index >= ? AND recorded_at_ms IS NOT NULL ORDER BY step_index DESC, recorded_at_ms DESC LIMIT ?";
+    static final String CONVERSATIONS_UPDATED_BETWEEN = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
+            + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
+            + "ORDER BY last, conversation_id LIMIT ?";
     static final String BY_AGENT_DAYS = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ? ORDER BY day, recorded_at_ms LIMIT ?";
     static final String BY_AGENT_DAY = SELECT + "WHERE agent_id = ? AND day = ?";
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
@@ -239,7 +250,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         s.setBoolean(i++, turn.agentOutput());
         s.setBoolean(i++, turn.lastOutputWasQuestion());
         s.setArray(i++, connection.createArrayOf("text", turn.actions().toArray(new String[0])));
-        s.setBoolean(i, turn.discarded());
+        s.setBoolean(i++, turn.discarded());
+        s.setString(i, turn.selfReportedOutcome());
     }
 
     private static Long millis(Instant instant) {
@@ -307,6 +319,38 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             s.setString(1, conversationId);
             s.setInt(2, Math.max(1, limit));
         });
+    }
+
+    @Override
+    public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
+        List<HealthTurn> newest = query(BY_CONVERSATION_FROM_STEP, "Could not read the health turns of a conversation", s -> {
+            s.setString(1, conversationId);
+            s.setInt(2, fromStep);
+            s.setInt(3, Math.max(1, limit));
+        });
+        List<HealthTurn> ordered = new ArrayList<>(newest);
+        Collections.reverse(ordered);
+        return ordered;
+    }
+
+    @Override
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(CONVERSATIONS_UPDATED_BETWEEN)) {
+            statement.setLong(1, since.toEpochMilli());
+            statement.setLong(2, until.toEpochMilli());
+            statement.setInt(3, Math.max(1, limit));
+            List<ConversationActivity> found = new ArrayList<>();
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    found.add(new ConversationActivity(r.getString(1), Instant.ofEpochMilli(r.getLong(2))));
+                }
+            }
+            return found;
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     @Override
@@ -693,7 +737,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 longValue(r, "input_tokens"), longValue(r, "output_tokens"), longValue(r, "total_tokens"), longValue(r, "duration_ms"),
                 r.getString("error_kind"), r.getBoolean("paused"), failuresOf(r.getString("failures")), r.getBoolean("fallback_served"),
                 r.getInt("tool_calls"), r.getInt("tool_failures"), r.getInt("tool_refusals"), r.getInt("guardrail_trips"), r.getBoolean("user_input"),
-                r.getBoolean("agent_output"), r.getBoolean("last_output_question"), actions, r.getBoolean("discarded"));
+                r.getBoolean("agent_output"), r.getBoolean("last_output_question"), actions, r.getBoolean("discarded"),
+                r.getString("self_reported_outcome"));
     }
 
     private static Integer integer(ResultSet r, String column) throws SQLException {

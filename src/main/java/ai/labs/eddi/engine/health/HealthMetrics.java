@@ -46,7 +46,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code eddi.health.rollup.lag.seconds} — gauges read from the shared
  * dirty-day queue when scraped (cached for {@link #BACKLOG_CACHE}), so every
  * node reports the same cluster-wide backlog: agent days still waiting, and the
- * age in seconds of the oldest of them.</li>
+ * age in seconds of the oldest of them;</li>
+ * <li>{@code eddi.health.outcomes.sessions} — session outcome rows the outcome
+ * evaluation wrote (each re-evaluation counts again);</li>
+ * <li>{@code eddi.health.outcomes.failures} — conversations whose evaluation
+ * failed (retried with their next change or due time).</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -78,6 +82,8 @@ public class HealthMetrics {
     static final String ROLLUP_FAILURES = "eddi.health.rollup.failures";
     static final String ROLLUP_PENDING = "eddi.health.rollup.pending";
     static final String ROLLUP_LAG = "eddi.health.rollup.lag.seconds";
+    static final String OUTCOME_SESSIONS = "eddi.health.outcomes.sessions";
+    static final String OUTCOME_FAILURES = "eddi.health.outcomes.failures";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -85,6 +91,8 @@ public class HealthMetrics {
     private final Counter rollupDays;
     private final Counter rollupRows;
     private final Counter rollupFailures;
+    private final Counter outcomeSessions;
+    private final Counter outcomeFailures;
     /** How long one read of the backlog serves the gauges. */
     static final Duration BACKLOG_CACHE = Duration.ofSeconds(10);
 
@@ -108,6 +116,10 @@ public class HealthMetrics {
         this.rollupDays = Counter.builder(ROLLUP_DAYS).description("Agent days the health rollup recomputed").register(registry);
         this.rollupRows = Counter.builder(ROLLUP_ROWS).description("Daily health rows the rollup wrote").register(registry);
         this.rollupFailures = Counter.builder(ROLLUP_FAILURES).description("Agent days whose health rollup failed").register(registry);
+        this.outcomeSessions = Counter.builder(OUTCOME_SESSIONS).description("Session outcome rows the health outcome evaluation wrote")
+                .register(registry);
+        this.outcomeFailures = Counter.builder(OUTCOME_FAILURES).description("Conversations whose health outcome evaluation failed")
+                .register(registry);
     }
 
     /**
@@ -150,6 +162,11 @@ public class HealthMetrics {
         rollupRows.increment(rows);
         rollupFailures.increment(failures);
         rollupDuration.record(took);
+    }
+
+    void outcomesEvaluated(long sessions, long failures) {
+        outcomeSessions.increment(sessions);
+        outcomeFailures.increment(failures);
     }
 
     void registerQueueDepth(ThreadPoolExecutor executor) {

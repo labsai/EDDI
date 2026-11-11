@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health.mongo;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
@@ -17,6 +18,7 @@ import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
@@ -37,6 +39,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -117,6 +120,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     static final String FIELD_ACTIONS = "actions";
     static final String FIELD_DISCARDED = "discarded";
     static final String FIELD_DISCARDED_AT = "discardedAt";
+    static final String FIELD_SELF_REPORTED = "selfReportedOutcome";
 
     private final MongoCollection<Document> turns;
 
@@ -436,6 +440,37 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
+    public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
+        // Newest first with the limit, then oldest first: a session longer than the
+        // limit keeps its latest turns.
+        List<HealthTurn> newest = find(and(eq(FIELD_CONVERSATION, conversationId), gte(FIELD_STEP, fromStep), ne(FIELD_TIMESTAMP, null)),
+                Sorts.descending(FIELD_STEP, FIELD_TIMESTAMP), limit, "Could not read the health turns of a conversation");
+        List<HealthTurn> ordered = new ArrayList<>(newest);
+        Collections.reverse(ordered);
+        return ordered;
+    }
+
+    @Override
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
+        List<Bson> pipeline = List.of(
+                Aggregates.match(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until)), ne(FIELD_CONVERSATION, null),
+                        ne(FIELD_TIMESTAMP, null))),
+                Aggregates.group("$" + FIELD_CONVERSATION, Accumulators.max("last", "$" + FIELD_UPDATED)),
+                Aggregates.sort(Sorts.ascending("last", "_id")), Aggregates.limit(Math.max(1, limit)));
+        List<ConversationActivity> found = new ArrayList<>();
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document d = cursor.next();
+                Date last = d.getDate("last");
+                found.add(new ConversationActivity(String.valueOf(d.get("_id")), last == null ? since : last.toInstant()));
+            }
+            return found;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
+    }
+
+    @Override
     public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
         List<Bson> pipeline = List.of(
                 Aggregates.match(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until)), ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
@@ -601,6 +636,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         d.put(FIELD_QUESTION, turn.lastOutputWasQuestion());
         d.put(FIELD_ACTIONS, turn.actions());
         d.put(FIELD_DISCARDED, turn.discarded());
+        d.put(FIELD_SELF_REPORTED, turn.selfReportedOutcome());
         return d;
     }
 
@@ -631,7 +667,8 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 longValue(d.get(FIELD_OUTPUT_TOKENS)), longValue(d.get(FIELD_TOTAL_TOKENS)), longValue(d.get(FIELD_DURATION)),
                 d.getString(FIELD_ERROR_KIND), flag(d.get(FIELD_PAUSED)), failures, flag(d.get(FIELD_FALLBACK)), intValue(d.get(FIELD_TOOL_CALLS)),
                 intValue(d.get(FIELD_TOOL_FAILURES)), intValue(d.get(FIELD_TOOL_REFUSALS)), intValue(d.get(FIELD_GUARDRAIL_TRIPS)),
-                flag(d.get(FIELD_USER_INPUT)), flag(d.get(FIELD_AGENT_OUTPUT)), flag(d.get(FIELD_QUESTION)), actions, flag(d.get(FIELD_DISCARDED)));
+                flag(d.get(FIELD_USER_INPUT)), flag(d.get(FIELD_AGENT_OUTPUT)), flag(d.get(FIELD_QUESTION)), actions, flag(d.get(FIELD_DISCARDED)),
+                d.getString(FIELD_SELF_REPORTED));
     }
 
     private static Instant instant(Date date) {

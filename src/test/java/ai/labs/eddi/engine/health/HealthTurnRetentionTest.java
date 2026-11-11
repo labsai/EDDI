@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -420,6 +421,16 @@ class HealthTurnRetentionTest {
 
         @Override
         public List<HealthTurn> findByConversation(String conversationId, int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
             throw new UnsupportedOperationException();
         }
 

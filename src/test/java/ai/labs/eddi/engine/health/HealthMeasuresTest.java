@@ -169,7 +169,7 @@ class HealthMeasuresTest {
     }
 
     @Test
-    @DisplayName("effectiveness: null values with the outcomes hint, coverage null, resolution with its four-part breakdown")
+    @DisplayName("effectiveness without outcome data: null values with the hint, coverage null, resolution with its four-part breakdown")
     void effectiveness() {
         Map<String, Object> sections = HealthMeasures.sections(data(null, HealthUsage.EMPTY, RatingStats.EMPTY), null, false);
         assertEquals(HealthDefaults.SECTIONS, List.copyOf(sections.keySet()));
@@ -177,7 +177,7 @@ class HealthMeasuresTest {
         assertNull(e.coverage());
         for (Measure m : e.measures()) {
             assertNull(m.value(), m.id());
-            assertEquals(HealthMeasures.HINT_NEEDS_OUTCOMES, m.hint());
+            assertEquals(HealthMeasures.HINT_OUTCOMES_UNAVAILABLE, m.hint());
         }
         Measure resolution = e.measures().stream().filter(m -> m.id().equals("resolutionRate")).findFirst().orElseThrow();
         assertEquals(List.of("confirmed", "selfReported", "agentClosed", "silence"),

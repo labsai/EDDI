@@ -120,12 +120,19 @@ than sampling conversations:
   session, sessions and users, ratings (restricted unless you may read them). Each measure
   has `value`, `n`, `baseline`, `delta`, `significant` and a `band`; GREY means too little
   data. Report the measures that are RED or changed significantly, with their `n`.
-  Effectiveness is null until conversation outcomes exist — say so, do not guess.
+  Effectiveness is judged per session: the resolution rate always splits into confirmed,
+  self-reported, agent-closed and silence parts — when most of it is silence, say it is an
+  assumption, not a result. Below the coverage minimum the rates are null with a hint.
 - `compare_agent_versions_health` — after a promotion: the new version since its first
   turn against the old one's last days; `deltas` say `better` and `significant`.
 - `list_agent_health` — every agent you may view, the ones needing attention first, and
   the platform incidents of the period: if the agent's failures fall on such a day, the provider is the
   likely cause, not the agent.
+- `suggest_outcome_mappings` — the actions that end most sessions and are not mapped in
+  `healthConfig.outcomes`, with a suggested outcome; propose a mapping, never apply it unasked.
+- `list_agent_health_sessions` — the sessions behind a rate (filter by `outcomes` and
+  `evidence`); needs EDIT on the agent and conversation review on the version, else the
+  error says `FORBIDDEN` or `REVIEW_DISABLED`.
 
 `read_docs("agent-health")` has every measure's definition.
 

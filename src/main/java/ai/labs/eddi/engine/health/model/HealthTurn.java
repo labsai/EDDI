@@ -88,17 +88,42 @@ import java.util.List;
  *            the turn's actions, capped
  * @param discarded
  *            an undo removed this execution and a later turn replaced it
+ * @param selfReportedOutcome
+ *            the outcome the agent's model claimed with
+ *            {@code report_conversation_outcome} on this turn, or {@code null}
  */
 public record HealthTurn(String conversationId, int stepIndex, String executionId, String agentId, Integer agentVersion,
         Integer previousAgentVersion, String userId, String origin, LocalDate day, Instant timestamp, Instant updatedAt, Double costUsd,
         Double discardedCostUsd,
         Long inputTokens, Long outputTokens, Long totalTokens, Long durationMs, String errorKind, boolean paused, List<HealthFailure> failures,
         boolean fallbackServed, int toolCalls, int toolFailures, int toolRefusals, int guardrailTrips, boolean userInput, boolean agentOutput,
-        boolean lastOutputWasQuestion, List<String> actions, boolean discarded) {
+        boolean lastOutputWasQuestion, List<String> actions, boolean discarded, String selfReportedOutcome) {
 
     public HealthTurn {
         failures = failures == null ? List.of() : List.copyOf(failures);
         actions = actions == null ? List.of() : List.copyOf(actions);
+    }
+
+    /** A row without a self-reported outcome. */
+    public HealthTurn(String conversationId, int stepIndex, String executionId, String agentId, Integer agentVersion, Integer previousAgentVersion,
+            String userId, String origin, LocalDate day, Instant timestamp, Instant updatedAt, Double costUsd, Double discardedCostUsd,
+            Long inputTokens, Long outputTokens, Long totalTokens, Long durationMs, String errorKind, boolean paused, List<HealthFailure> failures,
+            boolean fallbackServed, int toolCalls, int toolFailures, int toolRefusals, int guardrailTrips, boolean userInput, boolean agentOutput,
+            boolean lastOutputWasQuestion, List<String> actions, boolean discarded) {
+        this(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp, updatedAt, costUsd,
+                discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed, toolCalls,
+                toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, discarded, null);
+    }
+
+    /**
+     * When the execution ended, as far as the row knows: its start plus its
+     * duration.
+     */
+    public Instant endedAt() {
+        if (timestamp == null) {
+            return null;
+        }
+        return durationMs == null || durationMs <= 0 ? timestamp : timestamp.plusMillis(durationMs);
     }
 
     /**
@@ -121,6 +146,7 @@ public record HealthTurn(String conversationId, int stepIndex, String executionI
     public HealthTurn asDiscarded() {
         return new HealthTurn(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp,
                 updatedAt, costUsd, discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed,
-                toolCalls, toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, true);
+                toolCalls, toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, true,
+                selfReportedOutcome);
     }
 }

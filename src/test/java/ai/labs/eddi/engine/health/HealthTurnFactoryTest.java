@@ -86,6 +86,20 @@ class HealthTurnFactoryTest {
     }
 
     @Test
+    @DisplayName("H3: the self-reported outcome is carried when it is one the tool may claim, ignored otherwise")
+    void selfReportedOutcome() {
+        ConversationMemory memory = memory("user-1");
+        memory.startNextStep();
+        assertNull(turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, "ESCALATED");
+        assertEquals("ESCALATED", turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, "ASSUMED_RESOLVED");
+        assertNull(turn(memory).selfReportedOutcome());
+        put(memory.getCurrentStep(), MemoryKeys.HEALTH_SELF_REPORTED_OUTCOME, 42);
+        assertNull(turn(memory).selfReportedOutcome());
+    }
+
+    @Test
     @DisplayName("a step stored before Agent Health gets the stable legacy id; the memory's version stands in")
     void legacyStep() {
         ConversationMemory memory = memory("u");

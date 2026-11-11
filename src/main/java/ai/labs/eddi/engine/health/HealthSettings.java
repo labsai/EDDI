@@ -30,6 +30,12 @@ public class HealthSettings {
     static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(60);
     /** Default {@code eddi.health.daily-retention}. */
     static final Duration DEFAULT_DAILY_RETENTION = Duration.ofDays(730);
+    /** Default {@code eddi.health.session-window}. */
+    static final Duration DEFAULT_SESSION_WINDOW = Duration.ofHours(24);
+    /** Default {@code eddi.health.email-session-window}. */
+    static final Duration DEFAULT_EMAIL_SESSION_WINDOW = Duration.ofHours(72);
+    /** Default {@code eddi.health.min-outcome-coverage}. */
+    static final double DEFAULT_MIN_OUTCOME_COVERAGE = 0.5;
 
     private final boolean enabled;
     private final int queueCapacity;
@@ -40,6 +46,9 @@ public class HealthSettings {
     private final Duration dailyRetention;
     private final Duration apdexT;
     private final Duration cacheTtl;
+    private Duration sessionWindow = DEFAULT_SESSION_WINDOW;
+    private Duration emailSessionWindow = DEFAULT_EMAIL_SESSION_WINDOW;
+    private double minOutcomeCoverage = DEFAULT_MIN_OUTCOME_COVERAGE;
 
     @Inject
     public HealthSettings(@ConfigProperty(name = "eddi.health.enabled", defaultValue = "true") boolean enabled,
@@ -60,6 +69,21 @@ public class HealthSettings {
         this.dailyRetention = positiveOr(dailyRetention, DEFAULT_DAILY_RETENTION);
         this.apdexT = positiveOr(apdexT, Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS));
         this.cacheTtl = cacheTtl == null || cacheTtl.isNegative() ? DEFAULT_CACHE_TTL : cacheTtl;
+    }
+
+    /**
+     * The outcome settings (H3), set by CDI after construction so the constructors
+     * the tests use stay as they are.
+     */
+    @Inject
+    void outcomeSettings(@ConfigProperty(name = "eddi.health.session-window", defaultValue = "24h") Duration sessionWindow,
+                         @ConfigProperty(name = "eddi.health.email-session-window", defaultValue = "72h") Duration emailSessionWindow,
+                         @ConfigProperty(name = "eddi.health.min-outcome-coverage", defaultValue = "0.5") double minOutcomeCoverage) {
+        this.sessionWindow = positiveOr(sessionWindow, DEFAULT_SESSION_WINDOW);
+        this.emailSessionWindow = positiveOr(emailSessionWindow, DEFAULT_EMAIL_SESSION_WINDOW);
+        this.minOutcomeCoverage = Double.isFinite(minOutcomeCoverage) && minOutcomeCoverage >= 0 && minOutcomeCoverage <= 1
+                ? minOutcomeCoverage
+                : DEFAULT_MIN_OUTCOME_COVERAGE;
     }
 
     /** Collection settings; everything else at its default — for tests. */
@@ -156,5 +180,31 @@ public class HealthSettings {
      */
     public Duration cacheTtl() {
         return cacheTtl;
+    }
+
+    /**
+     * How long a conversation may stay quiet before its session closes, for every
+     * origin but e-mail ({@code eddi.health.session-window}, 24 h). An agent may
+     * override it per origin ({@code healthConfig.inactivityWindowHours}).
+     */
+    public Duration sessionWindow() {
+        return sessionWindow;
+    }
+
+    /**
+     * The same for e-mail conversations ({@code eddi.health.email-session-window},
+     * 72 h): a reply to a mail takes longer than one in a chat.
+     */
+    public Duration emailSessionWindow() {
+        return emailSessionWindow;
+    }
+
+    /**
+     * The outcome coverage below which the effectiveness rates are withheld
+     * ({@code eddi.health.min-outcome-coverage}, 0.5): with most sessions ending
+     * without any outcome evidence, a rate would describe the few that have one.
+     */
+    public double minOutcomeCoverage() {
+        return minOutcomeCoverage;
     }
 }

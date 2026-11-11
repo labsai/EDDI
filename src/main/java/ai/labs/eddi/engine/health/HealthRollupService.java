@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -27,6 +28,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 /**
  * One pass of the {@value HealthSchedules#SCHEDULE_NAME} system job.
  * <ol>
+ * <li><b>Outcomes</b> (H3): the session outcome evaluation
+ * ({@link HealthOutcomeEvaluator}) runs first, within {@link #OUTCOME_BUDGET}
+ * of the pass — under the same schedule claim, so one node judges sessions at a
+ * time without a job of its own. Outcomes are read from their own rows by the
+ * views, so they mark no day dirty.</li>
  * <li><b>Self-heal</b>: re-marks dirty the (agent, day) pairs of turn rows
  * written since the last pass (a durable watermark in the dirty store, minus a
  * {@link #SELF_HEAL_GRACE} so a row whose own mark is still on its way is
@@ -71,12 +77,32 @@ public class HealthRollupService {
     /** The most (agent, day) pairs one self-heal pass re-marks. */
     static final int SELF_HEAL_MAX = 10_000;
 
-    /** What one pass did; {@link #isEmpty()} when nothing at all. */
-    public record Result(int days, int rows, int skipped, int failed, long pending) {
+    /** How much of a pass the outcome evaluation may take. */
+    static final Duration OUTCOME_BUDGET = Duration.ofSeconds(45);
+
+    /**
+     * What one pass did; {@link #isEmpty()} when nothing at all.
+     *
+     * @param sessions
+     *            session outcome rows the outcome evaluation wrote
+     */
+    public record Result(int days, int rows, int skipped, int failed, long pending, int sessions) {
+
+        public Result(int days, int rows, int skipped, int failed, long pending) {
+            this(days, rows, skipped, failed, pending, 0);
+        }
+
         public boolean isEmpty() {
-            return days == 0 && skipped == 0 && failed == 0;
+            return days == 0 && skipped == 0 && failed == 0 && sessions == 0;
         }
     }
+
+    /**
+     * The outcome evaluation, run at the start of every pass. Field-injected and
+     * null-checked: tests build this class by hand.
+     */
+    @Inject
+    Instance<HealthOutcomeEvaluator> outcomeEvaluator;
 
     private final IHealthTurnStore turnStore;
     private final IHealthDailyStore dailyStore;
@@ -104,7 +130,11 @@ public class HealthRollupService {
 
     public Result run() {
         Instant started = clock.instant();
-        selfHeal(started);
+        int sessions = 0;
+        if (outcomeEvaluator != null && outcomeEvaluator.isResolvable()) {
+            sessions = outcomeEvaluator.get().run(started.plus(OUTCOME_BUDGET)).sessions();
+        }
+        selfHeal(clock.instant());
         Instant deadline = started.plus(TIME_BUDGET);
         LocalDate oldestRollable = LocalDate.ofInstant(started, ZoneOffset.UTC).minusDays(settings.factsRetentionDays());
         int days = 0;
@@ -154,7 +184,7 @@ public class HealthRollupService {
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not count dirty Agent Health days: %s", e.getMessage());
         }
-        return new Result(days, rows, skipped, failed, pending);
+        return new Result(days, rows, skipped, failed, pending, sessions);
     }
 
     /**

@@ -8,11 +8,13 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.engine.agenttests.IAgentTestRunStore;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
+import ai.labs.eddi.engine.health.HealthMeasures.OutcomeStats;
 import ai.labs.eddi.engine.health.HealthMeasures.PeriodData;
 import ai.labs.eddi.engine.health.HealthMeasures.RatingStats;
 import ai.labs.eddi.engine.health.HealthMeasures.Totals;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
 import ai.labs.eddi.engine.health.model.HealthMarker;
+import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -73,7 +75,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * not add up across days. A period (or baseline) older than the turn-row
  * retention has none;</li>
  * <li>ratings — the rating store's summary, only for callers who may read
- * ratings.</li>
+ * ratings;</li>
+ * <li>sessions, effectiveness and cost per resolved session — the session
+ * outcome rows, counted in the database ({@link IHealthOutcomeStore#counts}) by
+ * the day each session ended. Like the turn rows they are kept for the turn-row
+ * retention.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -98,6 +104,8 @@ public class HealthReportService {
     private final HealthSettings settings;
     private final Clock clock;
     private final HealthQueryCache cache;
+    /** The session outcomes; {@code null} when built by hand without them. */
+    private IHealthOutcomeStore outcomeStore;
 
     /** How far before a window the returning-user look-back reaches, at most. */
     static final int RETURNING_LOOKBACK_DAYS = 30;
@@ -105,8 +113,15 @@ public class HealthReportService {
     @Inject
     public HealthReportService(IHealthTurnStore turnStore, IHealthDailyStore dailyStore, IHealthDirtyDayStore dirtyStore,
             IHealthMarkerStore markerStore, IConversationRatingStore ratingStore, IAgentTestRunStore testRunStore,
-            IDeploymentStore deploymentStore, HealthSettings settings) {
+            IDeploymentStore deploymentStore, HealthSettings settings, IHealthOutcomeStore outcomeStore) {
         this(turnStore, dailyStore, dirtyStore, markerStore, ratingStore, testRunStore, deploymentStore, settings, Clock.systemUTC());
+        this.outcomeStore = outcomeStore;
+    }
+
+    /** With the session outcomes — for tests. */
+    HealthReportService withOutcomes(IHealthOutcomeStore outcomeStore) {
+        this.outcomeStore = outcomeStore;
+        return this;
     }
 
     HealthReportService(IHealthTurnStore turnStore, IHealthDailyStore dailyStore, IHealthDirtyDayStore dirtyStore, IHealthMarkerStore markerStore,
@@ -184,6 +199,17 @@ public class HealthReportService {
     }
 
     /**
+     * The origins a request counts: those asked for, else the default of the
+     * agent's preset over the window — for the session views.
+     */
+    public List<String> effectiveOrigins(String agentId, Window window, List<String> requested) {
+        if (requested != null) {
+            return requested;
+        }
+        return HealthPeriods.defaultOrigins(preset(daily(agentId, window.from(), window.to())));
+    }
+
+    /**
      * {@code support} when the agent has interactive traffic in the rows — or no
      * traffic at all — else {@code task}: an agent driven only by schedules,
      * webhooks, A2A or groups (plan §4.6).
@@ -212,7 +238,32 @@ public class HealthReportService {
         Totals totals = Totals.of(rows.stream().filter(selected).filter(r -> window.contains(r.day())).toList());
         HealthUsage usage = usage(agentId, window, version, origins);
         RatingStats ratings = qualityAllowed ? ratings(agentId, window, version, origins) : null;
-        return new PeriodData(totals, usage, ratings, exposureDays(window));
+        return new PeriodData(totals, usage, ratings, exposureDays(window), outcomes(agentId, window, version, origins));
+    }
+
+    /**
+     * The sessions that ended in a window, or null when they cannot be counted —
+     * the window reaches past the retention, the agent has no outcome store, or it
+     * could not be read.
+     */
+    OutcomeStats outcomes(String agentId, Window window, Integer version, List<String> origins) {
+        List<HealthOutcomeCount> counts = outcomeCounts(new HealthUsageQuery(agentId, window.from(), window.to(), version, origins), false, "none");
+        return counts == null ? null : OutcomeStats.of(counts, settings.minOutcomeCoverage());
+    }
+
+    /** Outcome counts, cached; null when unavailable. */
+    private List<HealthOutcomeCount> outcomeCounts(HealthUsageQuery query, boolean perDay, String groupBy) {
+        if (outcomeStore == null || query.from().isBefore(oldestTurnDay())) {
+            return null;
+        }
+        try {
+            return cache.get(List.of("outcomes", query, perDay, groupBy == null ? "none" : groupBy),
+                    () -> outcomeStore.counts(query, perDay, groupBy));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not count the session outcomes of agent %s for Agent Health: %s", sanitize(query.agentId()),
+                    sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     /** An agent's daily rows, cached for {@code eddi.health.cache-ttl}. */
@@ -342,8 +393,9 @@ public class HealthReportService {
     /**
      * {@code GET /agents/{agentId}/health/series}: one point per day for each
      * measure (and group). A day without data is a point with {@code value: null}
-     * and {@code n: 0}. Rating measures exist per day only ungrouped; measures that
-     * need outcomes, and returning users, have no daily points yet.
+     * and {@code n: 0}. Rating measures exist per day only ungrouped; outcome
+     * measures count the sessions that ended on the day; returning users have no
+     * daily points.
      */
     public HealthSeries series(Scope scope, List<String> measures, String groupBy, boolean qualityAllowed) {
         Window window = scope.window();
@@ -369,6 +421,19 @@ public class HealthReportService {
         if (rowsByGroup.isEmpty()) {
             rowsByGroup.put(null, new TreeMap<>());
         }
+        Map<String, Map<LocalDate, List<HealthOutcomeCount>>> outcomesByGroup = new HashMap<>();
+        boolean outcomesAvailable = false;
+        if (measures.stream().anyMatch(HealthReportService::usesOutcomes)) {
+            List<HealthOutcomeCount> counts = outcomeCounts(
+                    new HealthUsageQuery(scope.agentId(), window.from(), window.to(), scope.version(), origins), true, groupBy);
+            if (counts != null) {
+                outcomesAvailable = true;
+                for (HealthOutcomeCount c : counts) {
+                    outcomesByGroup.computeIfAbsent(c.group(), k -> new HashMap<>()).computeIfAbsent(c.day(), k -> new ArrayList<>()).add(c);
+                    rowsByGroup.computeIfAbsent(c.group(), k -> new TreeMap<>());
+                }
+            }
+        }
         boolean grouped = groupBy != null && !"none".equals(groupBy);
         Map<LocalDate, RatingStats> ratingsByDay = !grouped && qualityAllowed && measures.stream().anyMatch(HealthReportService::usesRatings)
                 ? dailyRatings(scope.agentId(), window, scope.version(), origins)
@@ -381,6 +446,7 @@ public class HealthReportService {
             boolean restricted = HealthDefaults.QUALITY.equals(HealthDefaults.of(measure).section()) && !qualityAllowed;
             for (Map.Entry<String, Map<LocalDate, List<HealthTurnAggregate>>> group : rowsByGroup.entrySet()) {
                 Map<LocalDate, HealthUsagePoint> usage = usageByGroup.getOrDefault(group.getKey(), Map.of());
+                Map<LocalDate, List<HealthOutcomeCount>> outcomeDays = outcomesByGroup.getOrDefault(group.getKey(), Map.of());
                 List<SeriesPoint> points = new ArrayList<>(window.days());
                 for (LocalDate day = window.from(); !day.isAfter(window.to()); day = day.plusDays(1)) {
                     if (restricted) {
@@ -393,8 +459,10 @@ public class HealthReportService {
                             ? null
                             : u == null ? HealthUsage.EMPTY : new HealthUsage(u.sessions(), u.engagedSessions(), u.turns(), u.distinctUsers(), 0);
                     RatingStats ratings = grouped ? null : ratingsByDay.getOrDefault(day, qualityAllowed ? RatingStats.EMPTY : null);
-                    Measure m = HealthMeasures.pointOf(measure, new PeriodData(Totals.of(dayRows), dayUsage, ratings));
-                    points.add(point(measure, day, m, dayRows, u));
+                    List<HealthOutcomeCount> dayOutcomes = outcomeDays.getOrDefault(day, List.of());
+                    OutcomeStats outcomes = outcomesAvailable ? OutcomeStats.of(dayOutcomes, settings.minOutcomeCoverage()) : null;
+                    Measure m = HealthMeasures.pointOf(measure, new PeriodData(Totals.of(dayRows), dayUsage, ratings, 1.0, outcomes));
+                    points.add(point(measure, day, m, dayRows, u, dayOutcomes));
                 }
                 series.add(new Series(measure, grouped ? group.getKey() : null, unit, points));
             }
@@ -407,8 +475,9 @@ public class HealthReportService {
      * null, n: 0} — counts included, so "no traffic" never reads as a measured 0 —
      * and returning users have no daily value.
      */
-    private static SeriesPoint point(String measure, LocalDate day, Measure m, List<HealthTurnAggregate> rows, HealthUsagePoint usage) {
-        boolean empty = rows.isEmpty() && (usage == null || usage.sessions() == 0);
+    private static SeriesPoint point(String measure, LocalDate day, Measure m, List<HealthTurnAggregate> rows, HealthUsagePoint usage,
+                                     List<HealthOutcomeCount> outcomes) {
+        boolean empty = rows.isEmpty() && (usage == null || usage.sessions() == 0) && (outcomes == null || outcomes.isEmpty());
         if (m == null || "returningUserShare".equals(measure) || empty && !usesRatings(measure)) {
             return new SeriesPoint(day.toString(), null, 0);
         }
@@ -427,6 +496,12 @@ public class HealthReportService {
 
     private static boolean usesUsage(String measure) {
         return Set.of("sessions", "engagedSessions", "distinctUsers", "turnsPerSession", "costPerSession", "ratingResponseRate").contains(measure);
+    }
+
+    /** Measures read (in part) from the session outcome rows. */
+    static boolean usesOutcomes(String measure) {
+        return Set.of("resolutionRate", "escalationRate", "abandonmentRate", "deflectionRate", "outcomeCoverage", "costPerResolvedSession",
+                "sessions", "engagedSessions", "turnsPerSession", "costPerSession", "ratingResponseRate").contains(measure);
     }
 
     private static boolean usesRatings(String measure) {
@@ -614,8 +689,10 @@ public class HealthReportService {
             }
         }
         if (!missing.isEmpty()) {
-            Map<String, HealthPortfolioSessions> read = turnStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(),
-                    HealthOrigins.INTERACTIVE, all);
+            // Real sessions once outcomes exist; the turn rows' conversations without them.
+            Map<String, HealthPortfolioSessions> read = outcomeStore != null
+                    ? outcomeStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(), HealthOrigins.INTERACTIVE, all)
+                    : turnStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(), HealthOrigins.INTERACTIVE, all);
             for (String agentId : missing) {
                 HealthPortfolioSessions agentSessions = read.getOrDefault(agentId, HealthPortfolioSessions.NONE);
                 cache.put(List.of("portfolioSessions", agentId, window), agentSessions);

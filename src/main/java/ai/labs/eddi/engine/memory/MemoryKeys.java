@@ -477,4 +477,16 @@ public final class MemoryKeys {
      * @since 6.7.0
      */
     public static final String HEALTH_LLM_FAILURES = "health:llm_failures";
+
+    /**
+     * The outcome the agent's model claimed for its session on this step
+     * ({@code String}: {@code RESOLVED}, {@code ESCALATED}, {@code DEFLECTED} or
+     * {@code FAILED}) — written by the {@code report_conversation_outcome} tool,
+     * the last call of the turn winning; read by Agent Health into the turn row,
+     * where the session's last claim counts as weak, {@code self_reported}
+     * evidence. Holds no text. Internal: not in the simple conversation snapshot.
+     *
+     * @since 6.7.0
+     */
+    public static final String HEALTH_SELF_REPORTED_OUTCOME = "health:self_reported_outcome";
 }

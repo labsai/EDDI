@@ -274,3 +274,45 @@ What the H2b backend does where this contract leaves room, and its answers to §
   numbers change between two pages can move, so a page may repeat or skip one.
 - **Markers**: at most 200, the newest (≤ 150 of the agent's, ≤ 50 deployment-wide); deployment-wide markers are coalesced
   per kind and hour and shown only to agents of their global-variable tenant.
+
+## 13. Backend notes (H3)
+
+What the H3 backend does where this contract leaves room. Nothing above changed shape; the points marked
+**deviation** are additions or precisions the UI should know about.
+
+- **§11.1 Resolution breakdown — confirmed.** The four entries are each part's share of `n` (closed, engaged sessions of
+  judged origins), so they add up to `value` (less any resolution on evidence of a later phase, none today); each entry's
+  `n` is that part's session count. All four keys are always present. When the rate is withheld (coverage below
+  `eddi.health.min-outcome-coverage`, default 50 %), `value` is `null` on the measure **and** on every part, `n` stays,
+  and `hint` names the coverage and the minimum. `escalationRate`, `abandonmentRate` and `deflectionRate` are withheld the
+  same way; `outcomeCoverage` is always shown and never `significant`.
+- **§11.4 Evidence filters — confirmed.** `outcome=` and `evidence=` take the values of §6 and are AND-ed with each other
+  (OR within one parameter). Self-reported resolutions are stored as `RESOLVED` with evidence `self_reported` (an outcome the
+  model claimed); assumed ones as `ASSUMED_RESOLVED` with `agent_closed` or `silence`. `external_event`,
+  `conversation_id_event` and `judged` are accepted and match nothing until H5/H6.
+- **Deviation — `sessionNo` is the step index the session starts at**, not an ordinal: `0` for a conversation's first
+  session, the index of its first turn for a later one (`3`, `17`, …). It stays put when older turns leave the retention
+  or an undo changes an earlier session.
+- **Deviation — `provisional`.** `true` while the session is inside its inactivity window. Such a row carries the outcome
+  known so far: `OPEN` without a signal, or the mapped / self-reported outcome (which a later turn in the window can
+  still change). Agent-closed sessions are final at once. Only rows with `provisional: false` enter the rates.
+- **Deviation — `outcome: null`** (and `evidence: null`) for sessions of origins that are not judged (`schedule`,
+  `webhook`, `a2a`, `group-member`, `delegated`, `agent-test`). They appear in the drill-down only when such an origin is
+  asked for.
+- **Drill-down permissions.** `403 {"error": "forbidden", "reason": …, "message": …}`. `FORBIDDEN`: the caller does not
+  maintain the agent (`EDIT`, the conversation-review reader rule). `REVIEW_DISABLED`: review is off on `version`, or —
+  without `version` — on the agent's current version. Without `version` the page holds only sessions of versions that have
+  review enabled (of the 100 newest). Rows never carry a user id. `limit` defaults to 50; `nextCursor` is an offset, like
+  the portfolio's (a page may repeat or skip a session evaluated between two pages).
+- **Outcome suggestions.** `items` sorted by `sessionsEndingWith` (descending), at most 20, reserved actions and actions
+  mapped in the **current** version left out; `suggested` is `null` when the name matches no heuristic. VIEW suffices
+  (they carry action names and counts only).
+- **Adoption `sessions` / `engagedSessions`** now count sessions that **ended** in the period (open ones included) from the
+  outcome rows; `turnsPerSession`, `costPerSession` and `ratingResponseRate` divide by them, and the portfolio's `sessions` /
+  `sessionsDelta` too. A period older than the turn-row retention has none (`hint`).
+- **`costPerResolvedSession`** = the period's spend (selected origins) ÷ resolved sessions; informational until budgets.
+- **Thresholds.** `resolutionRate` green ≥ 0.7, red ≤ 0.4 (critical); `outcomeCoverage` green ≥ 0.8, red ≤ 0.5. Escalation,
+  abandonment and deflection have none until health profiles (H4).
+- **Series** of the effectiveness measures are per **session end day**; a day without closed sessions is `value: null, n: 0`.
+- Not done in H3: the "mostly assumed from silence" **reason** (H4 status rules; the breakdown carries what it needs), and
+  `healthConfig` interactive-origin overrides (plan §4.5) — which origins are judged is fixed for now.

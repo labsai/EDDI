@@ -913,6 +913,8 @@ eddi_health_rollup_rows_total       # Daily rows the rollup wrote
 eddi_health_rollup_failures_total   # Agent days whose rollup failed (retried next pass)
 eddi_health_rollup_pending          # Gauge: agent days waiting for the rollup (read from the shared queue, cached 10 s)
 eddi_health_rollup_lag_seconds      # Gauge: age of the oldest waiting agent day (same)
+eddi_health_outcomes_sessions_total # Session outcome rows the outcome evaluation wrote (each re-evaluation counts again)
+eddi_health_outcomes_failures_total # Conversations whose outcome evaluation failed (retried with their next change or due time)
 ```
 
 No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:

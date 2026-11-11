@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -83,6 +84,17 @@ public class HealthTurnRetention {
     @Inject
     Instance<HealthDirtyDays> dirtyDays;
 
+    /**
+     * The session outcomes, which share the turn rows' retention and orphan sweep;
+     * null when built by hand.
+     */
+    @Inject
+    Instance<IHealthOutcomeStore> outcomeStore;
+
+    private IHealthOutcomeStore outcomes() {
+        return outcomeStore != null && outcomeStore.isResolvable() ? outcomeStore.get() : null;
+    }
+
     @Inject
     public HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, IHealthDailyStore dailyStore,
             IHealthMarkerStore markerStore, HealthSettings settings, HealthMetrics metrics) {
@@ -121,6 +133,17 @@ public class HealthTurnRetention {
             }
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Failed to delete expired Agent Health turn rows; the next daily sweep retries");
+        }
+        IHealthOutcomeStore sessions = outcomes();
+        if (sessions != null) {
+            try {
+                long deleted = sessions.deleteOlderThan(cutoff);
+                if (deleted > 0) {
+                    LOGGER.infof("Deleted %d Agent Health session outcome(s) that ended before %s", deleted, cutoff);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health session outcomes; the next daily sweep retries");
+            }
         }
         LocalDate dailyCutoff = dailyCutoff();
         if (dailyStore != null) {
@@ -161,9 +184,18 @@ public class HealthTurnRetention {
         Instant since = clock.instant().minus(settings.orphanSweepWindow());
         int max = settings.orphanSweepMax();
         List<String> candidates = new ArrayList<>();
+        IHealthOutcomeStore sessions = outcomes();
         try {
             // One more than the cap, to tell "exactly the cap" from "more than it".
-            store.forEachConversationUpdatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), candidates::add);
+            int limit = (int) Math.min(Integer.MAX_VALUE, max + 1L);
+            Set<String> unique = new LinkedHashSet<>();
+            store.forEachConversationUpdatedSince(since, limit, unique::add);
+            if (sessions != null) {
+                // An evaluation that read a conversation's rows before its delete can
+                // write its sessions after it.
+                sessions.forEachConversationEvaluatedSince(since, limit, unique::add);
+            }
+            candidates.addAll(unique);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the conversations of recent Agent Health turn rows; the next daily sweep retries: %s",
                     sanitize(e.getMessage()));
@@ -200,6 +232,9 @@ public class HealthTurnRetention {
                 try {
                     Map<String, Set<LocalDate>> days = store.agentDaysOfConversation(conversationId);
                     removed += store.deleteByConversationId(conversationId);
+                    if (sessions != null) {
+                        removed += sessions.deleteByConversationId(conversationId);
+                    }
                     if (dirtyDays != null && dirtyDays.isResolvable()) {
                         dirtyDays.get().noteAll(days);
                     }

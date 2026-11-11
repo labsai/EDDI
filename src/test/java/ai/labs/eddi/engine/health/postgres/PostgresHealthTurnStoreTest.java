@@ -53,7 +53,7 @@ class PostgresHealthTurnStoreTest {
     @DisplayName("the upsert binds every column once, replaces on conflict, keeps the first day, guards on updated_at, discard sticky")
     void upsertShape() {
         String sql = PostgresHealthTurnStore.UPSERT;
-        assertEquals(30, PostgresHealthTurnStore.WRITTEN.size());
+        assertEquals(31, PostgresHealthTurnStore.WRITTEN.size(), "H3 added self_reported_outcome");
         assertEquals(PostgresHealthTurnStore.WRITTEN.size(), placeholders(sql));
         assertTrue(sql.contains("ON CONFLICT (conversation_id, execution_id) DO UPDATE SET"));
         assertTrue(sql.contains("discarded = health_turns.discarded OR EXCLUDED.discarded"));

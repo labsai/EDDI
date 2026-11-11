@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -71,6 +72,23 @@ public interface IHealthTurnStore {
 
     /** A conversation's rows, oldest step first, at most {@code limit}. */
     List<HealthTurn> findByConversation(String conversationId, int limit);
+
+    /**
+     * A conversation's rows from step {@code fromStep} on (discarded ones
+     * included), oldest step first — at most {@code limit}, the newest ones when
+     * there are more. What the outcome evaluation reads for the sessions it
+     * (re)judges.
+     */
+    List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit);
+
+    /**
+     * The conversations with rows written in [{@code since}, {@code until}), each
+     * with the newest {@code updatedAt} of those rows, ordered by it (oldest
+     * first), at most {@code limit} — the outcome evaluation's incremental feed. A
+     * caller that gets {@code limit} entries continues from the last entry's
+     * {@code lastUpdatedAt} (inclusive): the order makes that a gapless page.
+     */
+    List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit);
 
     /**
      * An agent's rows of the UTC days {@code from} to {@code to} (both inclusive),
