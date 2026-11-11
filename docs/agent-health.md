@@ -213,8 +213,10 @@ They are recomputed, never incremented:
    fails to write only costs a recompute), and again, at once, after the write:
    a rollup that ran in between recomputed the day without the row, and the
    second mark is another durable attempt if the first could not reach the
-   store. Only when all four writes (two before, two after) fail does the mark
-   wait in memory, as a deletion mark does. Then it drains the
+   store. The mark is lost only if the node stops at a bad moment, in one of two
+   ways: a rollup clears the pre-mark just before the write and the node stops
+   just after it, before the second mark; or all four writes (two before, two
+   after) fail and the mark is still waiting in memory, as a deletion mark does. Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked

@@ -183,9 +183,13 @@ presets, status and reasons.
   A node stopping between the two can no longer lose the mark; a mark whose row then fails to write only costs a
   recompute. After the write, every day of the row is marked at once again, pre-marked ones included: a rollup that
   ran between the pre-mark and the write recomputed the day without the row and cleared its mark, and the second mark
-  gives it a new token. It is also a second durable attempt when the pre-mark could not reach the store. The remaining
-  limit is the one deletion marks have, now after four failed writes: the dirty store refuses both marks, twice each,
-  and the node stops before the next flush. The row is still written then rather than dropped. A row whose day is
+  gives it a new token. It is also a second durable attempt when the pre-mark could not reach the store. Two windows remain
+  in which the mark can be lost, both ending in the node stopping. The first: a rollup clears the pre-mark between
+  the pre-mark and the write, and the node stops between the write and the re-mark. That is a rollup pass and a stop
+  inside the same few milliseconds of one late row. The second is the limit deletion marks have, now after four failed
+  writes: the dirty store refuses both marks, twice each, and the node stops before the next flush. Closing the first
+  would need the rollup to leave a mark alone while its row is still being written: a lease on the entry, a cost on
+  every pass, for a window this small. The row is still written then rather than dropped. A row whose day is
   never rolled up stays in the turn store, so the agent-day's next write repairs it; a dropped row could not be
   recovered. Tests: `lateWriteMarksBeforeTheWrite` (pre-mark, write, re-mark in that order) and
   `lateWriteMarkSurvivesARollupAndAFailedPreMark` (a real `HealthDirtyDays` whose store refuses the pre-mark: the
