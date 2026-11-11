@@ -529,7 +529,7 @@ class HealthTurnRetentionTest {
         }
 
         @Override
-        public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
+        public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
             throw new UnsupportedOperationException();
         }
 

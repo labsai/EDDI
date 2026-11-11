@@ -130,10 +130,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     /**
      * Added in H3; a table created before lacks it. Checked in the catalog first:
      * even with {@code IF NOT EXISTS} an {@code ALTER TABLE} takes an ACCESS
-     * EXCLUSIVE lock, on every node start.
+     * EXCLUSIVE lock, on every node start. The table checked is the one the search
+     * path resolves {@code health_turns} to — the one the statements use — not a
+     * namesake in another schema.
      */
-    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM information_schema.columns WHERE table_name = 'health_turns' "
-            + "AND column_name = 'self_reported_outcome'";
+    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'self_reported_outcome' AND NOT attisdropped";
     static final String ADD_SELF_REPORTED_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)";
 
     /** The columns a row write binds, in bind order. */
@@ -179,6 +181,10 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     static final String CONVERSATIONS_UPDATED_BETWEEN = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
             + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
             + "ORDER BY last, conversation_id LIMIT ?";
+    /** As above, after the pair (since, conversation id) in its order. */
+    static final String CONVERSATIONS_UPDATED_AFTER = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
+            + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
+            + "HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?) ORDER BY last, conversation_id LIMIT ?";
     static final String BY_AGENT_DAYS = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ? ORDER BY day, recorded_at_ms LIMIT ?";
     static final String BY_AGENT_DAY = SELECT + "WHERE agent_id = ? AND day = ?";
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
@@ -359,13 +365,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection();
-                PreparedStatement statement = connection.prepareStatement(CONVERSATIONS_UPDATED_BETWEEN)) {
-            statement.setLong(1, since.toEpochMilli());
-            statement.setLong(2, until.toEpochMilli());
-            statement.setInt(3, Math.max(1, limit));
+                PreparedStatement statement = connection
+                        .prepareStatement(afterConversationId == null ? CONVERSATIONS_UPDATED_BETWEEN : CONVERSATIONS_UPDATED_AFTER)) {
+            int i = 1;
+            statement.setLong(i++, since.toEpochMilli());
+            statement.setLong(i++, until.toEpochMilli());
+            if (afterConversationId != null) {
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setString(i++, afterConversationId);
+            }
+            statement.setInt(i, Math.max(1, limit));
             List<ConversationActivity> found = new ArrayList<>();
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {

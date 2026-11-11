@@ -53,6 +53,7 @@ import java.util.function.Consumer;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
+import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
@@ -468,12 +469,17 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
-        List<Bson> pipeline = List.of(
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
+        List<Bson> pipeline = new ArrayList<>(List.of(
                 Aggregates.match(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until)), ne(FIELD_CONVERSATION, null),
                         ne(FIELD_TIMESTAMP, null))),
-                Aggregates.group("$" + FIELD_CONVERSATION, Accumulators.max("last", "$" + FIELD_UPDATED)),
-                Aggregates.sort(Sorts.ascending("last", "_id")), Aggregates.limit(Math.max(1, limit)));
+                Aggregates.group("$" + FIELD_CONVERSATION, Accumulators.max("last", "$" + FIELD_UPDATED))));
+        if (afterConversationId != null) {
+            // After the pair (since, afterConversationId) in the sort order below.
+            pipeline.add(Aggregates.match(or(gt("last", date(since)), and(eq("last", date(since)), gt("_id", afterConversationId)))));
+        }
+        pipeline.add(Aggregates.sort(Sorts.ascending("last", "_id")));
+        pipeline.add(Aggregates.limit(Math.max(1, limit)));
         List<ConversationActivity> found = new ArrayList<>();
         try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {

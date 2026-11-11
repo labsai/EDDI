@@ -273,12 +273,30 @@ public interface HealthTurnStoreContract {
         store().upsert(row("late", 0, "l0", T0.plusSeconds(100), 0.1, false));
         store().markDiscarded(row("m", 1, "m1", T0.plusSeconds(5), 0.1, false), List.of("ghost"));
 
-        var page = store().conversationsUpdatedBetween(T0, T0.plusSeconds(60), 10);
+        var page = store().conversationsUpdatedBetween(T0, null, T0.plusSeconds(60), 10);
         assertEquals(List.of("b", "c", "a"), page.stream().map(a -> a.conversationId()).toList(), "markers have no rows to judge");
         assertEquals(T0.plusSeconds(30), page.get(2).lastUpdatedAt());
-        assertEquals(List.of("b", "c"), store().conversationsUpdatedBetween(T0, T0.plusSeconds(60), 2).stream().map(a -> a.conversationId())
+        assertEquals(List.of("b", "c"), store().conversationsUpdatedBetween(T0, null, T0.plusSeconds(60), 2).stream().map(a -> a.conversationId())
                 .toList());
-        assertEquals(List.of("c", "a"), store().conversationsUpdatedBetween(T0.plusSeconds(20), T0.plusSeconds(60), 10).stream()
+        assertEquals(List.of("c", "a"), store().conversationsUpdatedBetween(T0.plusSeconds(20), null, T0.plusSeconds(60), 10).stream()
                 .map(a -> a.conversationId()).toList(), "the since bound is inclusive");
+    }
+
+    @Test
+    @DisplayName("H3: a full page of conversations sharing one newest write continues after the (time, conversation) pair — no repeat, no gap")
+    default void conversationsUpdatedBetweenSameInstant() {
+        for (String c : List.of("d", "a", "c", "b", "e")) {
+            store().upsert(row(c, 0, c + "0", T0.plusSeconds(10), 0.1, false));
+        }
+        store().upsert(row("f", 0, "f0", T0.plusSeconds(20), 0.1, false));
+        Instant until = T0.plusSeconds(60);
+
+        var first = store().conversationsUpdatedBetween(T0, null, until, 2);
+        assertEquals(List.of("a", "b"), first.stream().map(a -> a.conversationId()).toList());
+        var second = store().conversationsUpdatedBetween(first.get(1).lastUpdatedAt(), "b", until, 2);
+        assertEquals(List.of("c", "d"), second.stream().map(a -> a.conversationId()).toList(), "after b at the same instant");
+        var third = store().conversationsUpdatedBetween(second.get(1).lastUpdatedAt(), "d", until, 2);
+        assertEquals(List.of("e", "f"), third.stream().map(a -> a.conversationId()).toList(), "then the later instant");
+        assertEquals(List.of(), store().conversationsUpdatedBetween(T0.plusSeconds(20), "f", until, 2));
     }
 }

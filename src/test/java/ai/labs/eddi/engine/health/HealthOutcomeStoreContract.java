@@ -76,7 +76,7 @@ public interface HealthOutcomeStoreContract {
     }
 
     @Test
-    @DisplayName("findDue returns sessions due at or before now, earliest first; markDue makes a conversation due without postponing")
+    @DisplayName("findDue returns sessions due at or before now, earliest first; markDue makes the named sessions due at the mark")
     default void dueSessions() {
         store().upsert(List.of(session("c1", 0, "agent", "u", T0, "api", true, "OPEN", null, true, T0.plusSeconds(60)),
                 session("c2", 0, "agent", "u", T0, "api", true, "OPEN", null, true, T0.plusSeconds(30)),
@@ -87,7 +87,7 @@ public interface HealthOutcomeStoreContract {
 
         assertEquals(1, store().markDue("c4", null, T0.plusSeconds(10)));
         assertEquals(1, store().markDue("c3", List.of(0), T0.plusSeconds(10)), "an earlier due time wins");
-        assertEquals(0, store().markDue("c2", null, T0.plusSeconds(50)), "a later one does not postpone");
+        assertEquals(1, store().markDue("c2", null, T0.plusSeconds(50)), "an already-due session is due at the mark: still due");
         assertEquals(0, store().markDue("c1", List.of(5), T0.plusSeconds(1)), "only the named sessions");
         assertEquals(0, store().markDue("c1", List.of(), T0.plusSeconds(1)));
         List<String> due = store().findDue(T0.plusSeconds(120), 10).stream().map(HealthOutcome::conversationId).toList();
@@ -114,6 +114,21 @@ public interface HealthOutcomeStoreContract {
         store().upsert(List.of(later));
         assertEquals(null, store().findByConversation("c1").get(0).dueAt(), "evaluated after the mark: cleared");
         assertTrue(store().findDue(T0.plus(Duration.ofDays(9)), 10).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a rating mark on a session already overdue when its evaluation started survives that evaluation's upsert")
+    default void markOnOverdueSessionSurvivesUpsert() {
+        HealthOutcome overdue = session("c1", 0, "agent", "u", T0, "api", true, "OPEN", null, true, T0.plusSeconds(10));
+        store().upsert(List.of(overdue));
+        // The evaluation of the overdue session starts at evaluatedAt; a rating
+        // arrives while it runs.
+        Instant evaluatedAt = T0.plusSeconds(100);
+        assertEquals(1, store().markDue("c1", List.of(0), evaluatedAt.plusSeconds(5)));
+        HealthOutcome closed = new HealthOutcome("c1", 0, "agent", 2, "u", "api", true, T0, T0, 4, 0.25, 1, "ASSUMED_RESOLVED", "silence", false,
+                overdue.day(), null, 0, List.of(), evaluatedAt);
+        store().upsert(List.of(closed));
+        assertEquals(evaluatedAt.plusSeconds(5), store().findByConversation("c1").get(0).dueAt(), "judged again with the new rating");
     }
 
     @Test

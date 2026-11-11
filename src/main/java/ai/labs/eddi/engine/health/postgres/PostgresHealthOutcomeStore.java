@@ -103,7 +103,7 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
 
     static final String BY_CONVERSATION = SELECT + "WHERE conversation_id = ? ORDER BY session_no";
     static final String DUE = SELECT + "WHERE due_at_ms IS NOT NULL AND due_at_ms <= ? ORDER BY due_at_ms LIMIT ?";
-    static final String MARK_DUE = "UPDATE health_outcomes SET due_at_ms = ? WHERE conversation_id = ? AND (due_at_ms IS NULL OR due_at_ms > ?)";
+    static final String MARK_DUE = "UPDATE health_outcomes SET due_at_ms = ? WHERE conversation_id = ?";
     static final String MARK_DUE_SESSIONS = MARK_DUE + " AND session_no = ANY(?)";
     static final String BY_USER = SELECT + "WHERE user_id = ? ORDER BY ended_at_ms DESC LIMIT ?";
     static final String EVALUATED_SINCE = "SELECT DISTINCT conversation_id FROM health_outcomes WHERE evaluated_at_ms >= ? LIMIT ?";
@@ -249,9 +249,8 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
         return update(sessionNos == null ? MARK_DUE : MARK_DUE_SESSIONS, "Could not mark health outcomes due", (c, s) -> {
             s.setLong(1, at.toEpochMilli());
             s.setString(2, conversationId);
-            s.setLong(3, at.toEpochMilli());
             if (sessionNos != null) {
-                s.setArray(4, c.createArrayOf("integer", new LinkedHashSet<>(sessionNos).toArray(new Integer[0])));
+                s.setArray(3, c.createArrayOf("integer", new LinkedHashSet<>(sessionNos).toArray(new Integer[0])));
             }
         });
     }

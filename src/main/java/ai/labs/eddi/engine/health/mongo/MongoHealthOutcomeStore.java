@@ -45,13 +45,11 @@ import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
-import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.ne;
-import static com.mongodb.client.model.Filters.or;
 
 /**
  * MongoDB implementation of {@link IHealthOutcomeStore}: collection
@@ -190,7 +188,9 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         }
         try {
             Date when = Date.from(at);
-            List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId), or(eq(FIELD_DUE, null), gt(FIELD_DUE, when))));
+            // Every session named, even one due earlier: still due, and the mark now
+            // postdates an evaluation that is running, so its upsert keeps it.
+            List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId)));
             if (sessionNos != null) {
                 filters.add(in(FIELD_SESSION, sessionNos));
             }

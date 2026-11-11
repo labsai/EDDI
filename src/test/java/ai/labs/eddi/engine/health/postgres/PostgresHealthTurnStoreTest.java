@@ -50,6 +50,23 @@ class PostgresHealthTurnStoreTest {
     }
 
     @Test
+    @DisplayName("the self_reported_outcome check looks at the health_turns the search path resolves, not a namesake in another schema")
+    void selfReportedColumnOnResolvedTable() {
+        String sql = PostgresHealthTurnStore.HAS_SELF_REPORTED_COLUMN;
+        assertTrue(sql.contains("attrelid = to_regclass('health_turns')"), sql);
+        assertFalse(sql.contains("information_schema"), sql);
+    }
+
+    @Test
+    @DisplayName("the feed after a (time, conversation) pair binds since twice more and the id, in HAVING, keeping the order")
+    void feedAfterPair() {
+        String sql = PostgresHealthTurnStore.CONVERSATIONS_UPDATED_AFTER;
+        assertEquals(placeholders(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_BETWEEN) + 3, placeholders(sql));
+        assertTrue(sql.contains("HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?)"), sql);
+        assertTrue(sql.endsWith("ORDER BY last, conversation_id LIMIT ?"), sql);
+    }
+
+    @Test
     @DisplayName("the upsert binds every column once, replaces on conflict, keeps the first day, guards on updated_at, discard sticky")
     void upsertShape() {
         String sql = PostgresHealthTurnStore.UPSERT;

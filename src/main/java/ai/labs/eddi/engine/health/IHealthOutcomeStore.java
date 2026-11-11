@@ -63,9 +63,13 @@ public interface IHealthOutcomeStore {
     List<HealthOutcome> findDue(Instant now, int limit);
 
     /**
-     * Makes sessions of a conversation due at {@code at} (a rating arrived, or was
-     * withdrawn, that may change them) — the given sessions, or every one when
-     * {@code sessionNos} is {@code null}. Sessions due earlier stay as they are.
+     * Makes sessions of a conversation due at {@code at}, the time of the mark (a
+     * rating arrived, or was withdrawn, that may change them) — the given sessions,
+     * or every one when {@code sessionNos} is {@code null}. A session already due
+     * before {@code at} is due at {@code at} afterwards: still due, and the mark
+     * now postdates an evaluation that started before it, so that evaluation's
+     * {@link #upsert} keeps it rather than clearing an overdue time older than the
+     * evaluation.
      *
      * @return the sessions marked
      */

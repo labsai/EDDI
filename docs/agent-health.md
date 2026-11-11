@@ -96,7 +96,7 @@ authoritative counters, and a dropped row is a gap in a chart, nothing more.
 | `userInput` | `input:initial` is not blank and the turn is not a [self-continuation](long-jobs.md) | Engagement |
 | `agentOutput` | the step rendered output text | Engagement |
 | `lastOutputWasQuestion` | the output text, trimmed, ends with `?` (or `？`) | A cheap hint for outcome inference (`ABANDONED`). It misses questions without a question mark and cannot tell a rhetorical one |
-| `actions` | the turn's actions, at most 32 | Outcomes mapped from actions |
+| `actions` | the turn's actions, at most 32 — of more, the last 32, where the ending and mapped actions are | Outcomes mapped from actions |
 | `selfReportedOutcome` | `health:self_reported_outcome`, written by [`report_conversation_outcome`](#the-self-report-tool) | The model's own claim — weak evidence |
 | `discarded` | an undo removed this execution | See above |
 
@@ -376,23 +376,33 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    them — open sessions whose window has closed, and sessions a rating made due:
    a saved reply rating marks the session of its step, a saved conversation
    rating the session it was given in (the last one started before it), a
-   withdrawn rating its session (a withdrawn conversation rating every session
-   of the conversation). The rating request never waits for this: the mark is
-   handed to a worker thread. A mark that arrives while its session is being
-   evaluated survives that evaluation's write. Each due session is judged over
+   withdrawn rating its session (a withdrawn or changed conversation rating
+   every session of the conversation — a changed one counts at its new time, and
+   the session it was in before is not known). The rating request never waits
+   for this: the mark is handed to a worker thread. A mark that arrives while its
+   session is being evaluated survives that evaluation's write, even when the
+   session was already overdue: a mark always sets the session due at its own
+   time. Each due session is judged over
    its own steps only, up to the next stored session.
 2. **The feed** — conversations with turn rows captured since the watermark
    (`healthrollupstate` / `health_rollup_state`, row `outcomes`) **minus
    `eddi.health.outcome-feed-overlap`** (15 min), up to a minute ago, paged by
-   each conversation's newest capture, oldest first: a pass can stop anywhere and
-   the next resumes without a gap. Rows are ordered by *capture* time, set on the
+   each conversation's newest capture (then its id), oldest first: a pass can
+   stop anywhere and the next resumes without a gap, even where more than a page
+   of conversations share one capture millisecond. Rows are ordered by *capture* time, set on the
    turn's node before the row waits on that node's health queue, so a row can
    reach the store after the watermark passed it; the overlap re-reads the last
    minutes every pass and catches it — the price is re-judging those
-   conversations each pass (the evaluation is idempotent). A conversation whose
-   evaluation fails holds the watermark at its capture time, so the following
-   passes retry it, for at most an hour (then a WARN; its next change or due
-   time judges it). The first pass starts at the turn-row retention, so turns
+   conversations each pass (the evaluation is idempotent), at most half of the
+   pass's time and conversations: then the feed goes on from the watermark, so a
+   busy overlap never keeps it from moving on. A conversation whose evaluation
+   fails — any store it needs cannot be read: turn rows, outcomes, the agent
+   version's `healthConfig`, the ratings — holds the watermark at its capture
+   time (never further back than the watermark), so the following passes retry
+   it, for at most an hour from its first failure, however old the turn (then a
+   WARN; its next change or due time judges it). Nothing is written for it in
+   the meantime: a session is never judged under default settings, or as
+   silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns
    recorded before outcomes existed are judged too, up to 5,000 conversations
    per pass; while it catches up, every outcome-based measure (effectiveness,
    sessions, engaged sessions, turns and cost per session, rating response, cost

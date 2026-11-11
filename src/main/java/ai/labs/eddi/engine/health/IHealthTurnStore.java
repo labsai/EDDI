@@ -85,12 +85,19 @@ public interface IHealthTurnStore {
 
     /**
      * The conversations with rows written in [{@code since}, {@code until}), each
-     * with the newest {@code updatedAt} of those rows, ordered by it (oldest
-     * first), at most {@code limit} — the outcome evaluation's incremental feed. A
-     * caller that gets {@code limit} entries continues from the last entry's
-     * {@code lastUpdatedAt} (inclusive): the order makes that a gapless page.
+     * with the newest {@code updatedAt} of those rows, ordered by it and then by
+     * conversation id (oldest first), at most {@code limit} — the outcome
+     * evaluation's incremental feed. With {@code afterConversationId}, only the
+     * entries after the pair ({@code since}, {@code afterConversationId}) in that
+     * order: a caller that gets {@code limit} entries continues with the last
+     * entry's {@code lastUpdatedAt} and conversation id, a gapless page even when
+     * more than a page of conversations share one {@code lastUpdatedAt}.
+     *
+     * @param afterConversationId
+     *            the last conversation of the previous page, or {@code null} for
+     *            every entry from {@code since} on
      */
-    List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit);
+    List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit);
 
     /**
      * An agent's rows of the UTC days {@code from} to {@code to} (both inclusive),
