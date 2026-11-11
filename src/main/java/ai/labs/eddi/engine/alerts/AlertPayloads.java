@@ -71,6 +71,13 @@ public final class AlertPayloads {
         if (match.value() != null) {
             out.put("value", match.value());
         }
+        if (match.healthStatus() != null) {
+            out.put("healthStatus", match.healthStatus());
+            out.put("previousHealthStatus", match.previousHealthStatus());
+            if (match.measureId() != null) {
+                out.put("measureId", match.measureId());
+            }
+        }
         if (match.ratingId() != null) {
             out.put("ratingId", match.ratingId());
             out.put("stepIndex", match.stepIndex());

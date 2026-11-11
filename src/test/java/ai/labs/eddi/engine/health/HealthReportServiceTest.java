@@ -102,7 +102,7 @@ class HealthReportServiceTest {
     }
 
     @Test
-    @DisplayName("the report: interactive default origins, both periods counted, quality read only when permitted, no status yet")
+    @DisplayName("the report: interactive default origins, both periods counted, quality read only when permitted, a status")
     void report() {
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 2, "api", 50), row(TODAY, 2, "schedule", 500)));
 
@@ -110,7 +110,7 @@ class HealthReportServiceTest {
 
         assertEquals("support", report.preset());
         assertEquals(HealthOrigins.INTERACTIVE, report.origins());
-        assertNull(report.status());
+        assertEquals(HealthDefaults.STATUS_HEALTHY, report.status(), "50 clean interactive turns: nothing to flag");
         assertTrue(report.reasons().isEmpty());
         assertEquals(TODAY.toString(), report.dataThrough());
         assertEquals(TODAY.minusDays(59).toString(), report.baseline().from());

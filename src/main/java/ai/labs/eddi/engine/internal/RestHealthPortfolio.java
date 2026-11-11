@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IRestHealthPortfolio;
 import ai.labs.eddi.engine.health.HealthAccess;
+import ai.labs.eddi.engine.health.HealthDefaults;
+import ai.labs.eddi.engine.health.HealthDefaults.Preset;
 import ai.labs.eddi.engine.health.HealthPeriods;
 import ai.labs.eddi.engine.health.HealthPortfolioService;
 import ai.labs.eddi.engine.health.HealthReportService;
@@ -76,5 +78,10 @@ public class RestHealthPortfolio implements IRestHealthPortfolio {
             }
         }
         return portfolio.portfolio(access.viewableAgents(), window, order, wanted, size, offset);
+    }
+
+    @Override
+    public List<Preset> listPresets() {
+        return List.copyOf(HealthDefaults.PRESETS.values());
     }
 }

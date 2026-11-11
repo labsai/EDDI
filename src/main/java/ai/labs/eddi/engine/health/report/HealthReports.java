@@ -65,11 +65,55 @@ public final class HealthReports {
     public record Check(String id, String label, String state, String at, boolean stale, Integer version) {
     }
 
+    /**
+     * Why an agent has its status (H4).
+     *
+     * @param severity
+     *            {@code RED} (a red band), {@code AMBER} (an amber band or a
+     *            significant change for the worse) or {@code INFO} (worth knowing,
+     *            no effect on the status — "mostly assumed from silence", "not
+     *            enough data")
+     * @param text
+     *            English, short, with the value and its change; shown as is
+     * @param markerId
+     *            the change marker that likely explains it, or {@code null}
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record Reason(String measureId, String severity, String text, String markerId) {
+    }
+
     /** {@code GET /agents/{agentId}/health}. */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record AgentHealth(String agentId, String agentName, Period period, DateRange baseline, Integer version, List<String> origins,
-            String status, List<Object> reasons, String preset, String generatedAt, String dataThrough, Map<String, Object> sections,
+            String status, List<Reason> reasons, String preset, String generatedAt, String dataThrough, Map<String, Object> sections,
             List<Check> checks) {
+    }
+
+    /**
+     * The brand an owner report is shown under (white-labelling): what the shells
+     * already show publicly, nothing more.
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ReportBrand(String productName, String tagline, boolean poweredBy, String logoUrl, String primaryColor) {
+    }
+
+    /**
+     * {@code GET /health/reports/{token}} — the §1 shape limited to the link's
+     * sections, without drill-down, plus the brand and the link's expiry.
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record SharedHealthReport(String agentName, Period period, DateRange baseline, String status, List<Reason> reasons, String preset,
+            String generatedAt, String dataThrough, Map<String, Object> sections, List<Check> checks, String expiresAt, ReportBrand brand) {
+    }
+
+    /** One owner report link as listed — never its token. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ReportLinkInfo(String id, String expiresAt, List<String> sections, String period, String createdAt, String createdBy) {
+    }
+
+    /** A link just created: the only time its token (in {@code url}) is shown. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record CreatedReportLink(String id, String url, String path, String expiresAt, List<String> sections, String period) {
     }
 
     @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -108,7 +152,7 @@ public final class HealthReports {
      * {@code sessionsDelta} when the baseline does.
      */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record PortfolioItem(String agentId, String agentName, String status, String preset, Object topReason, Long sessions,
+    public record PortfolioItem(String agentId, String agentName, String status, String preset, Reason topReason, Long sessions,
             Double sessionsDelta, List<Measure> keyMeasures, boolean platformIncident, String hint) {
     }
 

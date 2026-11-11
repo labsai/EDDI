@@ -104,6 +104,32 @@ public class HealthRollupService {
     @Inject
     Instance<HealthOutcomeEvaluator> outcomeEvaluator;
 
+    /**
+     * The health profiles — an agent's Apdex threshold T (H4). Field-injected and
+     * null-checked like the evaluator.
+     */
+    @Inject
+    Instance<HealthProfiles> profiles;
+
+    /**
+     * The {@code HEALTH} alert evaluation, run at the end of every pass (H4).
+     * Field-injected and null-checked like the evaluator.
+     */
+    @Inject
+    Instance<HealthAlertEvaluator> alertEvaluator;
+
+    /** The owner report links (H4b), whose expired rows each pass deletes. */
+    @Inject
+    Instance<HealthReportLinks> reportLinks;
+
+    /** The agent's Apdex T: its profile's, else {@code eddi.health.apdex-t}. */
+    long apdexTMs(String agentId) {
+        if (profiles != null && profiles.isResolvable()) {
+            return profiles.get().apdexTMs(agentId);
+        }
+        return settings.apdexTMs();
+    }
+
     private final IHealthTurnStore turnStore;
     private final IHealthDailyStore dailyStore;
     private final IHealthDirtyDayStore dirtyStore;
@@ -178,6 +204,14 @@ public class HealthRollupService {
             }
         }
         metrics.rolledUp(days, rows, failed, Duration.between(started, clock.instant()));
+        if (alertEvaluator != null && alertEvaluator.isResolvable()) {
+            // After the daily rows are fresh: HEALTH alerts read them. Never throws.
+            alertEvaluator.get().evaluate();
+        }
+        if (reportLinks != null && reportLinks.isResolvable()) {
+            // Expired owner report links already answer 404; this drops their rows.
+            reportLinks.get().purgeExpired();
+        }
         long pending = 0;
         try {
             pending = dirtyStore.count();
@@ -243,7 +277,7 @@ public class HealthRollupService {
      * @return how many daily rows the day has now
      */
     public int rollUp(String agentId, LocalDate day) {
-        HealthTurnAggregator aggregator = new HealthTurnAggregator(settings.apdexTMs());
+        HealthTurnAggregator aggregator = new HealthTurnAggregator(apdexTMs(agentId));
         turnStore.forEachByAgentAndDay(agentId, day, aggregator);
         List<HealthTurnAggregate> result = aggregator.result();
         dailyStore.replaceDay(agentId, day, result);

@@ -42,20 +42,29 @@ import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.health.IHealthAlertStateStore;
 import ai.labs.eddi.engine.health.IHealthDailyStore;
 import ai.labs.eddi.engine.health.IHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.IHealthMarkerStore;
 import ai.labs.eddi.engine.health.IHealthOutcomeStore;
+import ai.labs.eddi.engine.health.IHealthProfileStore;
+import ai.labs.eddi.engine.health.IHealthReportLinkStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthAlertStateStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthDailyStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthMarkerStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthOutcomeStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthProfileStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthReportLinkStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthTurnStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthAlertStateStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthDailyStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthMarkerStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthOutcomeStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthProfileStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthReportLinkStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
@@ -486,6 +495,26 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IHealthOutcomeStore healthOutcomeStore(Instance<MongoHealthOutcomeStore> mongo, Instance<PostgresHealthOutcomeStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthProfileStore healthProfileStore(Instance<MongoHealthProfileStore> mongo, Instance<PostgresHealthProfileStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthAlertStateStore healthAlertStateStore(Instance<MongoHealthAlertStateStore> mongo,
+                                                        Instance<PostgresHealthAlertStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthReportLinkStore healthReportLinkStore(Instance<MongoHealthReportLinkStore> mongo,
+                                                        Instance<PostgresHealthReportLinkStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

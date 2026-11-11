@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.HealthDefaults.Definition;
 import ai.labs.eddi.engine.health.HealthDefaults.Direction;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
+import ai.labs.eddi.engine.health.model.HealthProfile.MeasureOverride;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.report.HealthReports.BreakdownEntry;
@@ -278,6 +279,14 @@ public final class HealthMeasures {
      *            {@code restricted} and empty
      */
     public static Map<String, Object> sections(PeriodData current, PeriodData baseline, boolean qualityRestricted) {
+        return sections(current, baseline, qualityRestricted, null);
+    }
+
+    /**
+     * Every section with its measures, banded and flagged critical by the agent's
+     * effective health profile ({@code null}: the measure definitions' defaults).
+     */
+    public static Map<String, Object> sections(PeriodData current, PeriodData baseline, boolean qualityRestricted, EffectiveHealthProfile profile) {
         Map<String, List<Measure>> bySection = new LinkedHashMap<>();
         for (String section : HealthDefaults.SECTIONS) {
             bySection.put(section, new ArrayList<>());
@@ -286,7 +295,7 @@ public final class HealthMeasures {
             if (qualityRestricted && HealthDefaults.QUALITY.equals(definition.section())) {
                 continue;
             }
-            bySection.get(definition.section()).add(measure(definition.id(), current, baseline));
+            bySection.get(definition.section()).add(measure(definition.id(), current, baseline, profile));
         }
         Map<String, Object> sections = new LinkedHashMap<>();
         for (Map.Entry<String, List<Measure>> entry : bySection.entrySet()) {
@@ -310,10 +319,24 @@ public final class HealthMeasures {
 
     /** One measure; {@code baseline} may be null. Unknown ids answer null. */
     public static Measure measure(String id, PeriodData current, PeriodData baseline) {
-        Definition d = HealthDefaults.of(id);
-        if (d == null) {
+        return measure(id, current, baseline, null);
+    }
+
+    /**
+     * One measure under an agent's effective health profile: its thresholds, its
+     * critical flag and its kind (a budget makes a cost measure scored). A measure
+     * an active override ignores keeps its band and says so in its hint. With
+     * {@code profile == null} the definitions' defaults apply.
+     */
+    public static Measure measure(String id, PeriodData current, PeriodData baseline, EffectiveHealthProfile profile) {
+        Definition base = HealthDefaults.of(id);
+        if (base == null) {
             return null;
         }
+        Definition d = profile == null
+                ? base
+                : new Definition(base.id(), base.section(), base.label(), profile.kind(base), profile.critical(base.id()), base.unit(),
+                        base.direction(), base.minSample(), base.sampleNoun(), profile.thresholds(base.id()));
         Stat now = stat(id, current);
         Stat before = baseline == null ? null : stat(id, baseline);
         Double baselineValue = before == null ? null : before.value();
@@ -333,6 +356,11 @@ public final class HealthMeasures {
             } else if (d.thresholds() != null) {
                 band = HealthDefaults.band(now.value(), d.thresholds());
             }
+        }
+        MeasureOverride ignored = profile == null ? null : profile.ignored(d.id());
+        if (ignored != null) {
+            String note = "Ignored in the status until " + ignored.until() + ": " + ignored.reason();
+            hint = hint == null ? note : hint + ". " + note;
         }
         return new Measure(d.id(), label(d, current), d.kind(), d.critical(), d.unit(), now.value(), now.n(), now.interval(), baselineValue, delta,
                 significant, band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);

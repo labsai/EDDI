@@ -30,10 +30,19 @@ import java.util.List;
  *            {@link #MAX_COMMENT_EXCERPT} characters — present only when the
  *            rule set {@code includeValue} and the agent version has
  *            conversation review enabled
+ * @param healthStatus
+ *            HEALTH: the agent's status when the rule fired
+ * @param previousHealthStatus
+ *            HEALTH {@code STATUS_CHANGE}: the status before, {@code null} when
+ *            the rule had not seen the agent yet
+ * @param measureId
+ *            HEALTH {@code CRITICAL_TREND}: the measure that got worse;
+ *            {@code BURN_RATE}: {@code agentFailureRate}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AlertMatch(List<String> matched, ErrorKind errorKind, String ratingId, Integer stepIndex, String scale, Integer score,
-        Double normalizedScore, List<String> tags, String commentExcerpt, String value) {
+        Double normalizedScore, List<String> tags, String commentExcerpt, String value, String healthStatus, String previousHealthStatus,
+        String measureId) {
 
     /** The longest rating comment an alert carries. */
     public static final int MAX_COMMENT_EXCERPT = 280;
@@ -41,6 +50,20 @@ public record AlertMatch(List<String> matched, ErrorKind errorKind, String ratin
     public AlertMatch {
         matched = matched == null ? List.of() : List.copyOf(matched);
         tags = tags == null ? null : List.copyOf(tags);
+    }
+
+    /** A match of any source but HEALTH. */
+    public AlertMatch(List<String> matched, ErrorKind errorKind, String ratingId, Integer stepIndex, String scale, Integer score,
+            Double normalizedScore, List<String> tags, String commentExcerpt, String value) {
+        this(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, commentExcerpt, value, null, null, null);
+    }
+
+    /**
+     * A HEALTH match: what changed, in words built from the measures (never
+     * conversation content), and the status.
+     */
+    public static AlertMatch health(List<String> matched, String status, String previousStatus, String measureId) {
+        return new AlertMatch(matched, null, null, null, null, null, null, null, null, null, status, previousStatus, measureId);
     }
 
     /** A match without an OUTPUT_MATCH value. */
@@ -51,12 +74,14 @@ public record AlertMatch(List<String> matched, ErrorKind errorKind, String ratin
 
     /** This match with the rating comment excerpt blanked (GDPR erasure). */
     public AlertMatch withoutCommentExcerpt() {
-        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, null, value);
+        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, null, value, healthStatus,
+                previousHealthStatus, measureId);
     }
 
     /** This match with the captured output value blanked (GDPR erasure). */
     public AlertMatch withoutValue() {
-        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, commentExcerpt, null);
+        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, commentExcerpt, null, healthStatus,
+                previousHealthStatus, measureId);
     }
 
     public static AlertMatch error(ErrorKind kind) {

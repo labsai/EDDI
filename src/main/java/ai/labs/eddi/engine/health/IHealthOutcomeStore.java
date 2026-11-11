@@ -79,6 +79,14 @@ public interface IHealthOutcomeStore {
      */
     List<HealthOutcomeCount> counts(HealthUsageQuery query, boolean perDay, String groupBy);
 
+    /**
+     * The portfolio's outcome counts in one pass (H4): for each of the agents, the
+     * sessions that ended from {@code from} to {@code to} in the given origins,
+     * counted per (origin, outcome, evidence, engaged, provisional) — each count's
+     * {@code group} is its origin. Agents without sessions are absent.
+     */
+    Map<String, List<HealthOutcomeCount>> countsForAgents(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins);
+
     /** One page of the drill-down, newest end first. */
     List<HealthOutcome> sessions(HealthSessionQuery query);
 

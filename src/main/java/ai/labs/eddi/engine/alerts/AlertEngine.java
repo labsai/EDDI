@@ -213,6 +213,27 @@ public class AlertEngine {
      */
     Optional<AlertEvent> fire(AlertRule rule, AlertMatch match, String agentId, Integer agentVersion, String conversationId,
                               String subjectUserId, UnaryOperator<AlertEvent> afterInsert) {
+        return fire(rule, match, agentId, agentVersion, conversationId, subjectUserId, afterInsert, conversationId);
+    }
+
+    /**
+     * Records and, within the throttle, delivers one {@code HEALTH} alert — called
+     * by the Agent Health evaluation after a rollup pass, on its own thread. Goes
+     * through the same dedupe, throttle, digest and outbox as every other alert.
+     *
+     * @param condition
+     *            what fired ({@code status}, {@code burn},
+     *            {@code trend:<measure>}): part of the dedupe key, so two
+     *            conditions of one agent in one window are two alerts, and one
+     *            condition reported twice in a window (two nodes) is one
+     * @return the event as stored, or empty when it was a duplicate
+     */
+    public Optional<AlertEvent> fireHealth(AlertRule rule, AlertMatch match, String agentId, String condition) {
+        return fire(rule, match, agentId, null, null, null, UnaryOperator.identity(), "health:" + condition);
+    }
+
+    private Optional<AlertEvent> fire(AlertRule rule, AlertMatch match, String agentId, Integer agentVersion, String conversationId,
+                                      String subjectUserId, UnaryOperator<AlertEvent> afterInsert, String dedupeSubject) {
         Instant now = clock.instant();
         AlertRule.Throttle throttle = rule.effectiveThrottle();
         Duration window = Duration.ofMinutes(Math.max(1, throttle.windowMinutes()));
@@ -224,7 +245,7 @@ public class AlertEngine {
         }
         AlertEvent event = new AlertEvent(null, rule.id(), rule.name(), rule.source(), AlertEvent.Kind.ALERT, agentId, agentVersion,
                 conversationId, now, AlertMatchers.summary(rule, match, agentId, agentVersion), match, deliveries, AlertEvent.State.PENDING,
-                deliveries.isEmpty() ? null : now.plus(settings.claimLease()), dedupeKey(rule.id(), agentId, conversationId, windowStart), 0,
+                deliveries.isEmpty() ? null : now.plus(settings.claimLease()), dedupeKey(rule.id(), agentId, dedupeSubject, windowStart), 0,
                 null, null, null, null, 0, subjectUserId, null);
 
         Optional<AlertEvent> inserted = eventStore.insert(event);
