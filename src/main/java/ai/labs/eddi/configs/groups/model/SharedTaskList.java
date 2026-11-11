@@ -876,14 +876,33 @@ public class SharedTaskList {
          * Not run: the approval was made by the system (a timeout's AUTO_APPROVE), not
          * by a person, or the discussion was cancelled first.
          */
-        SKIPPED
+        SKIPPED,
+        /**
+         * Not sent: the discussion ended (completed, failed, rejected, cancelled —
+         * crash recovery included — or closed) while the action was still owed, so no
+         * leg is left to send it. Never sent afterwards: an approval whose run was
+         * interrupted is not acted on later behind the approver's back.
+         */
+        NOT_SENT;
+
+        /**
+         * Whether a fresh human approval of the same task — one that went back through
+         * retry or rework and was approved again — owes a new attempt: true only when
+         * this record produced no accepted publish (it failed, was skipped, or was
+         * never sent). SUCCEEDED is never sent twice, and OUTCOME_UNKNOWN is never
+         * resent because the target may have acted.
+         */
+        public boolean allowsNewAttempt() {
+            return this == FAILED || this == SKIPPED || this == NOT_SENT;
+        }
     }
 
     /**
      * The approved-result action of one task ({@code phase.onApproved}), persisted
-     * with the discussion. At most one per task, and a record that has left
-     * {@link ApprovedActionStatus#PENDING} is never sent again — that is the
-     * at-most-once guarantee.
+     * with the discussion. At most one live record per task, and a record that has
+     * left {@link ApprovedActionStatus#PENDING} is never sent again — that is the
+     * at-most-once guarantee. A later human approval of the same task replaces a
+     * record only when its status {@link ApprovedActionStatus#allowsNewAttempt()}.
      *
      * @param status
      *            where it stands
@@ -950,16 +969,59 @@ public class SharedTaskList {
     }
 
     /**
-     * Records the action a task owes, unless it already has one — an approval is
-     * never turned into a second action.
+     * Records the action a task owes. A task without a record gets this one. A task
+     * whose previous record ended without an accepted publish (FAILED, SKIPPED,
+     * NOT_SENT — {@link ApprovedActionStatus#allowsNewAttempt()}) gets it as a new
+     * attempt: the caller records only tasks that went AWAITING_APPROVAL →
+     * COMPLETED in the current decision, and a task whose action already settled
+     * can be awaiting approval again only after a retry or rework reset. Every
+     * other record is kept: PENDING or RUNNING (still owed, or in flight),
+     * SUCCEEDED (never sent twice), OUTCOME_UNKNOWN (never resent).
      *
-     * @return whether the record was added
+     * @return whether the record was added, or replaced an earlier attempt
      */
     public synchronized boolean recordApprovedAction(String taskId, ApprovedActionRecord record) {
         if (taskId == null || record == null) {
             return false;
         }
-        return approvedActions.putIfAbsent(taskId, record) == null;
+        ApprovedActionRecord previous = approvedActions.get(taskId);
+        if (previous != null && (previous.status() == null || !previous.status().allowsNewAttempt())) {
+            return false;
+        }
+        approvedActions.put(taskId, record);
+        return true;
+    }
+
+    /**
+     * Settles the actions an ended discussion still owes: PENDING becomes
+     * {@link ApprovedActionStatus#NOT_SENT} with {@code reason}, and RUNNING (a
+     * claim whose run never recorded its outcome) becomes
+     * {@link ApprovedActionStatus#OUTCOME_UNKNOWN}. Nothing is sent, so at most
+     * once holds across a crash. The discussion store calls this on every read and
+     * write of a document in a terminal state, which covers every way a discussion
+     * ends — crash recovery and a cancel stored by another pod included — on
+     * MongoDB and PostgreSQL alike.
+     *
+     * @return the ids of the tasks whose records were settled
+     */
+    public synchronized List<String> settleOwedApprovedActions(String reason, Instant now) {
+        List<String> settled = new ArrayList<>();
+        for (var entry : approvedActions.entrySet()) {
+            ApprovedActionRecord record = entry.getValue();
+            if (record == null) {
+                continue;
+            }
+            if (record.status() == ApprovedActionStatus.PENDING) {
+                entry.setValue(record.finished(ApprovedActionStatus.NOT_SENT, now, null, null, reason));
+                settled.add(entry.getKey());
+            } else if (record.status() == ApprovedActionStatus.RUNNING) {
+                entry.setValue(record.finished(ApprovedActionStatus.OUTCOME_UNKNOWN, now, null, null,
+                        "The discussion ended while this call was in flight and its outcome was never recorded — "
+                                + "check the target; it is not sent again"));
+                settled.add(entry.getKey());
+            }
+        }
+        return settled;
     }
 
     /** Replaces the action record of a task that already has one. */

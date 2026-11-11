@@ -77,6 +77,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             }
             GroupConversation conversation = resource.getData();
             conversation.setId(id);
+            settleOwedApprovedActionsIfEnded(conversation);
             return conversation;
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read group conversation: " + e.getMessage(), e);
@@ -85,6 +86,7 @@ public class GroupConversationStore implements IGroupConversationStore {
 
     @Override
     public void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException {
+        settleOwedApprovedActionsIfEnded(conversation);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(conversation.getId(), SINGLE_VERSION, conversation);
             // A replace that matches an existing row only. Every document is written at
@@ -182,6 +184,7 @@ public class GroupConversationStore implements IGroupConversationStore {
     @Override
     public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
+        settleOwedApprovedActionsIfEnded(gc);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             storage.storeIfFieldEquals(resource, "state", expectedState.name());
@@ -203,6 +206,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             updateIfState(gc, expectedState);
             return;
         }
+        settleOwedApprovedActionsIfEnded(gc);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             try {
@@ -220,6 +224,34 @@ public class GroupConversationStore implements IGroupConversationStore {
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * An ended discussion owes no approved-result action any more: no leg is left
+     * to send it. Settles each still-owed record (PENDING → NOT_SENT, an orphaned
+     * RUNNING claim → OUTCOME_UNKNOWN) on every read and write of a document in a
+     * terminal state — one place for every way a discussion ends, crash recovery
+     * and a cancel stored by another pod included, on both databases. Never sends:
+     * a crash must not turn into a publish nobody watched.
+     */
+    static void settleOwedApprovedActionsIfEnded(GroupConversation gc) {
+        if (gc == null || gc.getTaskList() == null || gc.getTaskList().getApprovedActions().isEmpty() || !isEnded(gc.getState())) {
+            return;
+        }
+        List<String> settled = gc.getTaskList().settleOwedApprovedActions(
+                "Not sent: the discussion ended (" + gc.getState() + ") before the action ran — post it by hand if it is still "
+                        + "wanted",
+                Instant.now());
+        if (!settled.isEmpty()) {
+            LOGGER.infof("Group conversation %s ended (%s) owing %d approved-result action(s); settled them without sending",
+                    gc.getId(), gc.getState(), settled.size());
+        }
+    }
+
+    private static boolean isEnded(GroupConversation.GroupConversationState state) {
+        return state == GroupConversation.GroupConversationState.COMPLETED || state == GroupConversation.GroupConversationState.FAILED
+                || state == GroupConversation.GroupConversationState.REJECTED || state == GroupConversation.GroupConversationState.CANCELLED
+                || state == GroupConversation.GroupConversationState.CLOSED;
     }
 
     private static Map<String, String> pauseBinding(GroupConversation.GroupConversationState expectedState,

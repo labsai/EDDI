@@ -53,11 +53,19 @@ group whose `hitlConfig.granularity` is `TASK`:
 | Approved by a timeout's `AUTO_APPROVE` (`decidedBy: system:…`) | Recorded as `SKIPPED` — the point is *human*-approved text |
 | Approved, then the discussion was cancelled before the action ran | `SKIPPED` |
 | Rejected at phase level (`verdict: REJECTED`, the whole discussion ends) | Nothing |
+| Approved, then the discussion ended before the action ran (completed, failed, cancelled — crash recovery included) | `NOT_SENT` — never sent afterwards |
+| Approved **again** by a person after a retry or rework reset, and its earlier action ended `FAILED`, `SKIPPED` or `NOT_SENT` | Runs again — a new attempt with the newly approved result and the same idempotency key |
+| Approved again after a reset, and its earlier action ended `SUCCEEDED` | Nothing — a publish is never sent twice; the record of what was sent is kept |
+| Approved again after a reset, and its earlier action ended `OUTCOME_UNKNOWN` | Nothing — the target may have acted; check it |
 
-A task gets **at most one** action per discussion. The action runs on the
-resumed leg *before* the phase loop re-enters the EXECUTE phase, so a task that
-depends on the published one never starts before the publish has settled (or,
-under `FAIL_TASK`, failed it).
+A task has **at most one live action** at a time, and an action whose call
+went out and succeeded, or whose outcome is unknown, is never sent again. A
+task is awaiting approval a second time only after a reset — `onTaskRejection:
+RETRY`, or VERIFY sending it back for rework (`maxReworks`) — so "approve the
+task again" means: send it back, let the member redo it, and approve the new
+result. The action runs on the resumed leg *before* the phase loop re-enters
+the EXECUTE phase, so a task that depends on the published one never starts
+before the publish has settled (or, under `FAIL_TASK`, failed it).
 
 ## The call
 
@@ -70,7 +78,7 @@ only as **template data** — never as template source:
 | `{task.id}`, `{task.subject}`, `{task.description}` | The task |
 | `{task.approvedBy}`, `{task.edited}` | Who approved it, and whether they edited it |
 | `{group.id}`, `{group.conversationId}` | The group configuration and the discussion |
-| `{action.idempotencyKey}` | Stable per discussion and task (32 hex chars) — send it to a target that deduplicates |
+| `{action.idempotencyKey}` | 32 hex chars, stable per task — send it to a target that deduplicates. A standing team's backlog task is keyed by the backlog task, so it keeps its key across every discussion that works it; any other task is keyed by discussion and task (see [Standing teams](#standing-teams-cadence-writeback)) |
 
 The call's path, query, headers and body are its author's templates, rendered
 by the restricted runtime engine. A result that contains `{...}`, `{#eval}` or
@@ -118,7 +126,9 @@ states `runAs: group:<groupId>`.
    the discussion's task list in the same write as the approval — the
    compare-and-set on state *and* `pauseId` that every group approval uses. A
    retried, duplicated or concurrent approval of the same pause loses that write
-   (`409`) and records nothing, and a task never gets a second record.
+   (`409`) and records nothing. A task gets a new record only from a later
+   human approval after a reset, and only when its earlier action ended
+   without an accepted publish (`FAILED`, `SKIPPED`, `NOT_SENT`).
 2. **Claimed before it is sent.** The resumed leg marks the record `RUNNING` and
    persists that *before* the request goes out. A record found `RUNNING` belongs
    to a run that died mid-call (pod crash, failover): it becomes
@@ -134,8 +144,16 @@ states `runAs: group:<groupId>`.
    outcome; an audit entry carries it only when the audit ledger is enabled and
    its submission succeeds; the stored record shows it only if the follow-up
    write succeeds. When that write fails too — and a cancelled discussion
-   always refuses it, since it requires `IN_PROGRESS` — the stored record stays
-   `PENDING` unless a later write of the discussion carries the outcome.
+   always refuses it, since it requires `IN_PROGRESS` — the stored discussion
+   is already ended, and rule 3 settles the record.
+3. **Settled when the discussion ends.** Whenever a discussion is in a terminal
+   state (`COMPLETED`, `FAILED`, `REJECTED`, `CANCELLED`, `CLOSED`), the
+   discussion store settles every record it still owes — on each read and each
+   write of the document, MongoDB and PostgreSQL alike: `PENDING` becomes
+   `NOT_SENT` (summary: the state it ended in, and "post it by hand if it is
+   still wanted"), and an orphaned `RUNNING` claim becomes `OUTCOME_UNKNOWN`.
+   Nothing is sent after the fact: an approval whose run a crash interrupted is
+   not acted on later, behind the approver's back.
 
 So the guarantee is **at most once**: exactly once whenever the run survives,
 and effectively once across a crash for a target that deduplicates on
@@ -143,13 +161,13 @@ and effectively once across a crash for a target that deduplicates on
 (`postResponse.retryApiCallInstruction`) still apply and can repeat a request
 the target already processed — leave them off for a non-idempotent publish.
 
-A discussion whose pod dies after the approval but before the claim stays
-`IN_PROGRESS` with the record `PENDING`; groups have no automatic recovery of a
-running discussion today, so it is not sent until a later leg of that
-discussion runs. The same goes for a record left `RUNNING` by a crash: it reads
-`RUNNING` until a later leg turns it into `OUTCOME_UNKNOWN`. A discussion
-cancelled while no leg is running keeps a `PENDING` record. In all three cases
-the status does not say whether the target received the request — check the
+A discussion whose pod dies after the approval but before the claim keeps
+the record `PENDING` while it stays `IN_PROGRESS`, and sends it only if a later
+leg of that discussion runs. Once the discussion ends — crash recovery cancels
+it, someone cancels it, or a cadence reclaims it — the record reads
+`NOT_SENT`, and was not sent. A record left `RUNNING` by a crash reads
+`OUTCOME_UNKNOWN` as soon as a later leg finds it or the discussion ends; that
+status does not say whether the target received the request — check the
 target.
 
 ## What is recorded
@@ -177,7 +195,8 @@ PostgreSQL alike; documents written before the feature simply have none):
 ```
 
 `status` is one of `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`,
-`OUTCOME_UNKNOWN`, `SKIPPED`. `responseUrl` is the response's `html_url` (else
+`OUTCOME_UNKNOWN`, `SKIPPED`, `NOT_SENT`. A new attempt (see above) replaces
+the record of the earlier one. `responseUrl` is the response's `html_url` (else
 `url`) when it is a JSON object carrying one; `summary` is short and redacted.
 
 - **Audit ledger:** when the ledger is enabled, one entry per settled action,
@@ -186,7 +205,12 @@ PostgreSQL alike; documents written before the feature simply have none):
   on the task). With the ledger disabled no entry is written, and a submission
   that fails is logged as a warning and leaves none.
 - **Metrics:** `eddi_group_approved_action_total{outcome=succeeded|failed|outcome_unknown|skipped}`,
-  incremented for every settled action whether or not the ledger is enabled.
+  incremented for every action a leg settles, whether or not the ledger is
+  enabled.
+- A record the store settles because the discussion ended (`NOT_SENT`, or
+  `OUTCOME_UNKNOWN` for an orphaned claim) has no audit entry and no metric
+  increment — no leg is running to emit them. It is logged at INFO and shows on
+  the discussion document.
 
 ## Cost and quotas
 
@@ -200,6 +224,18 @@ A cadence run reads the discussion's task statuses when it writes back to the
 backlog. Under `FAIL_TASK` a publish that failed leaves its task `FAILED`, so
 the run does not count it as done; under `KEEP_COMPLETED` it stays `COMPLETED`
 and only the action record shows the failure.
+
+A task that is not done goes back to the backlog and is worked again in a
+**new** discussion, with a new action record there. At most once is a
+per-discussion guarantee, so a publish that ended `FAILED` or
+`OUTCOME_UNKNOWN` in one discussion can reach the target again from the next.
+What stays the same is the key: a task pulled from the backlog is keyed by the
+standing team and the **backlog task** (found the way writeback matches it —
+by subject, among the tasks the workspace's running discussion pulled), so
+every discussion that works it offers the same `{action.idempotencyKey}`, and
+a target that deduplicates on it publishes once. A task that is not a backlog
+task — or whose workspace cannot be read at approval time — is keyed by
+discussion and task, and a later discussion gets a different key.
 
 ## Example — a content team that posts approved GitHub comments
 

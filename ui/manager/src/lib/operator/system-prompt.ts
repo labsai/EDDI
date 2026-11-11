@@ -1635,21 +1635,22 @@ your tool schemas do not cover it, not as a routine first step:
   approves (or approves with an edit) the group makes that one call with the
   approved result as {task.result} (data, never template), at most once:
   recorded with the approval, claimed (RUNNING) before it is sent, never
-  resent; a crash mid-call leaves it RUNNING until a later leg of that
-  discussion marks it OUTCOME_UNKNOWN, and a discussion cancelled while no leg
-  runs keeps it PENDING, so neither status proves whether the target got the
-  request: tell the admin to check the target. A claim that cannot be written
-  sends nothing and is settled FAILED, or SKIPPED when the discussion was
-  cancelled; the metric always counts that, an audit entry shows it only
-  when the audit ledger is enabled and its submission succeeded, and the
-  stored record reads it only if the follow-up write succeeds — if that write fails
-  too (a cancelled discussion always refuses it), the record stays PENDING
-  unless a later write of the discussion carries it. Calls with
+  resent; a crash mid-call leaves it RUNNING until a later leg or the end of
+  the discussion marks it OUTCOME_UNKNOWN, which does not prove whether the
+  target got the request: tell the admin to check the target. An action still
+  owed (PENDING) when the discussion ends — completed, failed, cancelled,
+  crash recovery included — reads NOT_SENT and was not sent (no audit entry,
+  no metric for it). A claim that cannot be written sends nothing and is
+  settled FAILED, or SKIPPED when the discussion was cancelled. A person
+  approving the task again after a RETRY or VERIFY-rework reset owes a new
+  attempt only when the earlier one ended FAILED, SKIPPED or NOT_SENT; a
+  SUCCEEDED or OUTCOME_UNKNOWN action is never sent again. Calls with
   preRequest.propertyInstructions are refused. At most once covers the
   claim, not the call's own retries: postResponse.retryApiCallInstruction on
   the referenced call can repeat the request, so for a non-idempotent publish
   advise turning those retries off or deduplicating on the target with
-  {action.idempotencyKey}. Rejected and RETRY-reset tasks get no action record
+  {action.idempotencyKey} (stable per task; a standing team's backlog task
+  keeps it across discussions). Rejected and RETRY-reset tasks get no action record
   at all (nothing to look for); a system:* approval (AUTO_APPROVE timeout) or a
   discussion cancelled first gets a record with status SKIPPED. The outcome
   is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,

@@ -8,12 +8,14 @@ import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedAction;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionRecord;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionStatus;
@@ -58,16 +60,19 @@ import java.util.function.BooleanSupplier;
  * approval: it adds a {@code PENDING} record per approved task to the
  * discussion's task list, and the approval's own compare-and-set (state
  * <em>and</em> pauseId) persists it. A retried or concurrent approval of the
- * same pause loses that CAS, so an approval yields at most one record, and a
- * task never gets a second one. {@link #runOwed} runs on the resumed leg,
- * before the phase loop re-enters the EXECUTE phase (so a dependent never
- * starts before the action of what it depends on has settled): each owed record
- * is claimed as {@code RUNNING} and that claim is persisted <em>before</em> the
- * request is sent. A record found {@code RUNNING} belongs to a run that died
- * mid-call; it becomes {@code OUTCOME_UNKNOWN} and is never sent again. The
- * guarantee is therefore <b>at most once</b> — exactly once whenever the run
- * survives, and for a target that deduplicates on
- * {@code {action.idempotencyKey}}, effectively once even when it does not.
+ * same pause loses that CAS, so an approval yields at most one record. A task
+ * gets a new record only when a person approves it again after a retry or
+ * rework reset and its previous action ended without an accepted publish
+ * (FAILED, SKIPPED, NOT_SENT); a SUCCEEDED or OUTCOME_UNKNOWN action is never
+ * sent again. {@link #runOwed} runs on the resumed leg, before the phase loop
+ * re-enters the EXECUTE phase (so a dependent never starts before the action of
+ * what it depends on has settled): each owed record is claimed as
+ * {@code RUNNING} and that claim is persisted <em>before</em> the request is
+ * sent. A record found {@code RUNNING} belongs to a run that died mid-call; it
+ * becomes {@code OUTCOME_UNKNOWN} and is never sent again. The guarantee is
+ * therefore <b>at most once</b> — exactly once whenever the run survives, and
+ * for a target that deduplicates on {@code {action.idempotencyKey}},
+ * effectively once even when it does not.
  * <p>
  * <b>Data, not template.</b> The approved result reaches the call only as the
  * template variable {@code {task.result}}; the call's path, headers and body
@@ -103,15 +108,28 @@ public class GroupApprovedResultActions {
     private final ApprovedResultActionValidation validation;
     private final AuditLedgerService auditLedgerService;
     private final MeterRegistry meterRegistry;
+    /**
+     * The standing team's workspace — where a cadence discussion's backlog task
+     * identity lives. {@code null} (tests): every key falls back to the
+     * per-discussion one.
+     */
+    private final IGroupWorkspaceStore workspaceStore;
+
+    public GroupApprovedResultActions(IApiCallsStore apiCallsStore, IApiCallExecutor apiCallExecutor,
+            ApprovedResultActionValidation validation, AuditLedgerService auditLedgerService, MeterRegistry meterRegistry) {
+        this(apiCallsStore, apiCallExecutor, validation, auditLedgerService, meterRegistry, null);
+    }
 
     @Inject
     public GroupApprovedResultActions(IApiCallsStore apiCallsStore, IApiCallExecutor apiCallExecutor,
-            ApprovedResultActionValidation validation, AuditLedgerService auditLedgerService, MeterRegistry meterRegistry) {
+            ApprovedResultActionValidation validation, AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
+            IGroupWorkspaceStore workspaceStore) {
         this.apiCallsStore = apiCallsStore;
         this.apiCallExecutor = apiCallExecutor;
         this.validation = validation;
         this.auditLedgerService = auditLedgerService;
         this.meterRegistry = meterRegistry;
+        this.workspaceStore = workspaceStore;
     }
 
     /**
@@ -128,7 +146,8 @@ public class GroupApprovedResultActions {
      * @param approvedBy
      *            who decided — a {@code system:} principal (a timeout's
      *            AUTO_APPROVE) is recorded, and the action is then skipped
-     * @return how many records were added
+     * @return how many records were added (a new attempt that replaces an earlier
+     *         FAILED, SKIPPED or NOT_SENT one counts)
      */
     public int recordApprovals(GroupConversation gc, DiscussionPhase phase, int phaseIndex, Collection<String> candidateTaskIds,
                                String approvedBy) {
@@ -147,14 +166,37 @@ public class GroupApprovedResultActions {
                 continue; // rejected, reset for retry, or still waiting: owes nothing
             }
             boolean edited = taskList.getReviewerEdits().containsKey(taskId);
+            ApprovedActionRecord previous = taskList.getApprovedActions().get(taskId);
             var record = new ApprovedActionRecord(ApprovedActionStatus.PENDING, phase.name(), phaseIndex, target,
                     phase.onApproved().onFailure(), approvedBy != null ? approvedBy : "unknown", edited,
-                    idempotencyKey(gc.getId(), taskId), now, null, null, null, null, null);
+                    idempotencyKeyFor(gc, task), now, null, null, null, null, null);
             if (taskList.recordApprovedAction(taskId, record)) {
                 added++;
+                if (previous != null) {
+                    LOGGER.infof("Task %s in group conversation %s was approved again after its action ended %s — a new attempt is owed",
+                            LogSanitizer.sanitize(taskId), LogSanitizer.sanitize(gc.getId()), previous.status());
+                }
+            } else if (previous != null) {
+                // SUCCEEDED is never sent twice; OUTCOME_UNKNOWN is never resent (the
+                // target may have acted). The kept record says what happened.
+                LOGGER.infof("Task %s in group conversation %s was approved again, but its action already ended %s — not sent again",
+                        LogSanitizer.sanitize(taskId), LogSanitizer.sanitize(gc.getId()), previous.status());
             }
         }
         return added;
+    }
+
+    /**
+     * Whether an approval was made by a person rather than by the system (a
+     * timeout's AUTO_APPROVE decides as {@code system:<reason>}).
+     * <p>
+     * Merge note: the sibling PR #1374 (feat/cadence-approved-counts-as-done)
+     * introduces {@code TaskApproval.byPerson()} for the same decision. Whichever
+     * of the two merges second must replace this helper with that one, so that
+     * "approved by a person" has a single definition.
+     */
+    private static boolean approvedByPerson(String approvedBy) {
+        return approvedBy == null || !approvedBy.startsWith("system:");
     }
 
     /**
@@ -181,7 +223,7 @@ public class GroupApprovedResultActions {
                             "The run that sent this call stopped before recording its outcome — check the target; it is not sent again"),
                             0L);
                 } else if (record.status() == ApprovedActionStatus.PENDING) {
-                    if (record.approvedBy() != null && record.approvedBy().startsWith("system:")) {
+                    if (!approvedByPerson(record.approvedBy())) {
                         settle(gc, store, taskId, record.finished(ApprovedActionStatus.SKIPPED, Instant.now(), null, null,
                                 "Approved by " + record.approvedBy() + ", not by a person — an approved-result action only runs on a human approval"),
                                 0L);
@@ -201,7 +243,8 @@ public class GroupApprovedResultActions {
                                 wasCancelled
                                         ? "The discussion was cancelled before the action ran"
                                         : "Not sent: the claim could not be written (the discussion changed state or the store was "
-                                                + "unavailable) — post it by hand or approve the task again"),
+                                                + "unavailable) — post it by hand, or send the task back (retry or rework) and "
+                                                + "approve it again: that approval sends it"),
                                 0L);
                     }
                 }
@@ -407,11 +450,58 @@ public class GroupApprovedResultActions {
     }
 
     /**
+     * The idempotency key of a task's action. A cadence discussion's task that was
+     * pulled from the standing team's backlog is keyed by the backlog task — stable
+     * across every discussion that works it, so a task that returns to the backlog
+     * (its publish FAILED or OUTCOME_UNKNOWN) and is approved again in a later
+     * discussion offers the target the same key. Every other task is keyed by
+     * discussion and task id. The backlog task is found the way cadence writeback
+     * matches it: among the backlog ids the workspace's running discussion (this
+     * one) pulled, by subject. A workspace that cannot be read falls back to the
+     * per-discussion key.
+     */
+    String idempotencyKeyFor(GroupConversation gc, TaskItem task) {
+        String backlogTaskId = backlogTaskId(gc, task);
+        return backlogTaskId != null ? backlogIdempotencyKey(gc.getGroupId(), backlogTaskId) : idempotencyKey(gc.getId(), task.id());
+    }
+
+    private String backlogTaskId(GroupConversation gc, TaskItem task) {
+        if (workspaceStore == null || gc.getGroupId() == null || gc.getId() == null || task.subject() == null) {
+            return null;
+        }
+        try {
+            GroupWorkspace workspace = workspaceStore.find(gc.getGroupId());
+            if (workspace == null || !gc.getId().equals(workspace.getRunningDiscussionId())) {
+                return null;
+            }
+            for (String pulledId : workspace.getPulledTaskIds()) {
+                TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
+                if (backlogTask != null && task.subject().equals(backlogTask.subject())) {
+                    return backlogTask.id();
+                }
+            }
+            return null;
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            LOGGER.debugf("Could not read the workspace of group %s for an idempotency key: %s", LogSanitizer.sanitize(gc.getGroupId()),
+                    e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Stable per discussion and task, so a retry of the same publish can be
      * deduplicated.
      */
     static String idempotencyKey(String conversationId, String taskId) {
         return sha256(conversationId + "/" + taskId).substring(0, 32);
+    }
+
+    /**
+     * Stable per standing team and backlog task, across every discussion that works
+     * the task.
+     */
+    static String backlogIdempotencyKey(String groupId, String backlogTaskId) {
+        return sha256("backlog/" + groupId + "/" + backlogTaskId).substring(0, 32);
     }
 
     private static String sha256(String text) {
