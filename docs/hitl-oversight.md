@@ -164,7 +164,9 @@ POST /hitl/autonomy/{agentId}/apply?category=tool:http.post:*
 { "recommendationId": "…", "expectedAgentVersion": 7 }
 ```
 
-Administrators, or `EDIT` on the agent. Apply re-checks the evidence **now** (409 `EVIDENCE_CHANGED`), requires the
+Administrators, or an `eddi-editor` holding `EDIT` on the agent (with workspaces off, every editor). `eddi-approver`
+alone is refused with 403 `NOT_PERMITTED` whether or not workspaces are enforced: apply, dismiss and lift take a gate
+away, which is not an approver's to decide. Apply re-checks the evidence **now** (409 `EVIDENCE_CHANGED`), requires the
 agent to still be at `expectedAgentVersion` (409 `AGENT_CHANGED`), validates the result, and writes a **new agent
 version** through the agent store — it does **not** deploy it; deploying is the usual separate step. It writes an
 `autonomy.promotion` ledger entry and resets the category's evidence. `POST …/dismiss {recommendationId, note}` dismisses
@@ -184,20 +186,22 @@ A suspension:
 - resets the evidence and starts the cooldown;
 - opens a `REVERT` recommendation ("make permanent"): applying it writes the gate back into configuration and clears
   the suspension;
-- **never expires**. `POST …/lift {note}` (administrators or `EDIT`) lifts it and writes `autonomy.suspension.lifted`.
+- **never expires**. `POST …/lift {note}` (administrators, or editors with `EDIT`; never approvers) lifts it and writes `autonomy.suspension.lifted`.
 
 Each node caches an agent's suspensions for `eddi.hitl.autonomy.suspension-cache-ttl` (default 15 s) and drops its own
 cache on a write, so a suspension reaches every pod within that time, plus the turn in progress. If the store cannot be
 read, the last known list is used, otherwise no extra gate (logged as an error) — a database blip must not pause every
 exempt call of a deployment. During a rolling upgrade, pods without this feature ignore suspensions.
 
-A resumed tool loop in `eddi.hitl.tool.task-approvals.mode=replace` with a task-level `toolApprovals` does not see a
-suspension until the next turn.
+A resumed tool loop sees the same suspensions as the live one, whatever `eddi.hitl.tool.task-approvals.mode` says:
+both put the overlay on the gate after combining the agent- and task-level configs, so a task-level `toolApprovals`
+under `mode=replace` cannot drop it after an approval.
 
 ## REST API
 
 All under the `HITL Oversight` OpenAPI tag; roles `eddi-admin`, `eddi-editor`, `eddi-approver`. Administrators and
 approvers see every agent; anyone else must pass an `agentId` they hold `EDIT` on (400 `AGENT_ID_REQUIRED`, 403).
+Apply, dismiss and lift are narrower: `eddi-admin` or `eddi-editor` only.
 
 | Method | Path | Notes |
 | --- | --- | --- |
