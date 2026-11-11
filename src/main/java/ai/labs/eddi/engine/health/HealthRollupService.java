@@ -34,12 +34,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * time without a job of its own. Outcomes are read from their own rows by the
  * views, so they mark no day dirty.</li>
  * <li><b>Self-heal</b>: re-marks dirty the (agent, day) pairs of turn rows
- * written since the last pass (a durable watermark in the dirty store, minus a
- * {@link #SELF_HEAL_GRACE} so a row whose own mark is still on its way is
- * covered next time). A mark lost on a node — killed before its debounced flush
- * — therefore never leaves a day stale; the re-mark of a day already dirty only
- * gives its entry a new token. At most {@link #SELF_HEAL_MAX} pairs per pass,
- * with a WARN when there were more.</li>
+ * written, or discarded by an undo, since the last pass (a durable watermark in
+ * the dirty store, minus a {@link #SELF_HEAL_GRACE} so a row whose own mark is
+ * still on its way is covered next time). A mark lost on a node — killed before
+ * its debounced flush — therefore never leaves a day stale; the re-mark of a
+ * day already dirty only gives its entry a new token. At most
+ * {@link #SELF_HEAL_MAX} pairs per pass, with a WARN when there were more.</li>
  * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
  * each streams the agent-day's turn rows through a
  * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}

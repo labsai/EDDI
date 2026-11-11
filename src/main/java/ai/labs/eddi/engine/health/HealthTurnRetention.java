@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import io.quarkus.scheduler.Scheduled;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -183,34 +185,48 @@ public class HealthTurnRetention {
         }
         Instant since = clock.instant().minus(settings.orphanSweepWindow());
         int max = settings.orphanSweepMax();
+        // Conversation -> the agents of its recent rows, so an orphan whose days cannot
+        // be read at delete time can still have its agents' days re-rolled.
+        Map<String, Set<String>> agentsOf = new LinkedHashMap<>();
         List<String> candidates = new ArrayList<>();
         boolean overflowed = false;
         IHealthOutcomeStore sessions = outcomes();
         try {
             // One more than the cap, to tell "exactly the cap" from "more than it".
-            // With session outcomes the cap is shared fairly: each source may fill half
-            // of it, and the turn rows the rest (one more than its share, to tell
-            // "exactly the cap" from "more than it").
+            // With session outcomes the cap is shared fairly: evaluated conversations
+            // first fill up to half of it, the turn rows the rest, and evaluated ones
+            // fill whatever the turn rows leave unused. The turn limit counts
+            // (conversation, agent) pairs; nearly always one per conversation.
             Set<String> unique = new LinkedHashSet<>();
+            List<String> evaluated = new ArrayList<>();
+            int share = Math.max(1, max / 2);
             if (sessions != null) {
                 // An evaluation that read a conversation's rows before its delete can
                 // write its sessions after it.
-                int share = Math.max(1, max / 2);
-                List<String> evaluated = new ArrayList<>();
-                sessions.forEachConversationEvaluatedSince(since, share + 1, evaluated::add);
-                overflowed = evaluated.size() > share;
+                sessions.forEachConversationEvaluatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), evaluated::add);
                 unique.addAll(evaluated.subList(0, Math.min(evaluated.size(), share)));
             }
             int turnLimit = (int) Math.min(Integer.MAX_VALUE, max - unique.size() + 1L);
-            List<String> written = new ArrayList<>();
-            store.forEachConversationUpdatedSince(since, turnLimit, written::add);
-            overflowed |= written.size() >= turnLimit;
-            for (String conversationId : written) {
+            int[] pairs = {0};
+            store.forEachConversationAgentUpdatedSince(since, turnLimit, (conversationId, agentId) -> {
+                pairs[0]++;
+                Set<String> agents = agentsOf.computeIfAbsent(conversationId, k -> new LinkedHashSet<>());
+                if (agentId != null) {
+                    agents.add(agentId);
+                }
+            });
+            overflowed = pairs[0] >= turnLimit;
+            for (String conversationId : agentsOf.keySet()) {
                 if (unique.size() > max) {
                     break;
                 }
                 unique.add(conversationId);
             }
+            // Capacity the turn rows left unused goes to the remaining evaluated ones.
+            for (int i = Math.min(evaluated.size(), share); i < evaluated.size() && unique.size() <= max; i++) {
+                unique.add(evaluated.get(i));
+            }
+            overflowed |= evaluated.size() > max;
             candidates.addAll(unique);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the conversations of recent Agent Health turn rows; the next daily sweep retries: %s",
@@ -226,7 +242,7 @@ public class HealthTurnRetention {
         IConversationMemoryStore conversationStore = conversations.get();
         long removed = 0;
         int unanswered = 0;
-        int failedDeletes = 0;
+        int[] counts = new int[2];
         for (int from = 0; from < candidates.size(); from += BATCH) {
             List<String> batch = candidates.subList(from, Math.min(candidates.size(), from + BATCH));
             Map<String, ConversationListingSummary> existing;
@@ -245,26 +261,29 @@ public class HealthTurnRetention {
                 if (existing.containsKey(conversationId)) {
                     continue;
                 }
-                Map<String, Set<LocalDate>> days = daysOf(conversationId);
-                try {
-                    removed += store.deleteByConversationId(conversationId);
-                    if (sessions != null) {
-                        // Session outcomes are not rolled up into daily rows: deleting
-                        // them marks no day.
-                        removed += sessions.deleteByConversationId(conversationId);
-                    }
-                } catch (RuntimeException e) {
-                    failedDeletes++;
-                    continue;
+                if (agentsOf.containsKey(conversationId)) {
+                    removed += deleteOrphanTurns(conversationId, agentsOf.get(conversationId), counts);
                 }
-                if (dirtyDays != null && dirtyDays.isResolvable()) {
-                    dirtyDays.get().markDeleted(days);
+                if (sessions != null) {
+                    // Session outcomes are not rolled up into daily rows: deleting them
+                    // marks no day, and a failure here cannot skip the turn rows' marks.
+                    try {
+                        removed += sessions.deleteByConversationId(conversationId);
+                    } catch (RuntimeException e) {
+                        counts[FAILED_DELETES]++;
+                    }
                 }
             }
         }
         metrics.dropped(HealthMetrics.REASON_ORPHANED, removed);
         if (removed > 0) {
             LOGGER.infof("Removed %d Agent Health row(s) (turns and sessions) of conversations that no longer exist", removed);
+        }
+        int noAgent = counts[NO_AGENT];
+        int failedDeletes = counts[FAILED_DELETES];
+        if (noAgent > 0) {
+            LOGGER.warnf("The Agent Health orphan sweep left %d orphaned conversation(s) whose rows name no agent: their daily rows could "
+                    + "not be re-rolled, so they are kept for the next sweep", noAgent);
         }
         if (unanswered > 0 || failedDeletes > 0) {
             LOGGER.warnf("The Agent Health orphan sweep could not check %d conversation(s) and could not clean up %d; the next daily sweep "
@@ -274,16 +293,33 @@ public class HealthTurnRetention {
         return removed;
     }
 
+    private static final int NO_AGENT = 0;
+    private static final int FAILED_DELETES = 1;
+
     /**
-     * The (agent, day)s of a conversation's rows; best effort, never in the way of
-     * the delete.
+     * Deletes an orphan's turn rows and marks their days for re-roll at once. Rows
+     * that name no agent are kept: if their days cannot be read at delete time
+     * nothing could be re-rolled, so they wait for the next sweep (or the
+     * retention).
+     *
+     * @return the rows removed
      */
-    private Map<String, Set<LocalDate>> daysOf(String conversationId) {
-        try {
-            return store.agentDaysOfConversation(conversationId);
-        } catch (RuntimeException e) {
-            return Map.of();
+    private long deleteOrphanTurns(String conversationId, Set<String> agents, int[] counts) {
+        if (agents.isEmpty()) {
+            counts[NO_AGENT]++;
+            return 0L;
         }
+        HealthDeletedRows deleted;
+        try {
+            deleted = store.deleteConversationReturningDays(conversationId);
+        } catch (RuntimeException e) {
+            counts[FAILED_DELETES]++;
+            return 0L;
+        }
+        if (dirtyDays != null && dirtyDays.isResolvable()) {
+            dirtyDays.get().markDeletedRows(conversationId, agents, deleted);
+        }
+        return deleted == null ? 0L : deleted.deleted();
     }
 
     /**

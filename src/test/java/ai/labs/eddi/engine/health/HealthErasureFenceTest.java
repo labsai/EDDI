@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,10 +15,19 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DisplayName("HealthErasureFence — holds back a user's health rows while their erasure runs")
 class HealthErasureFenceTest {
@@ -92,5 +104,53 @@ class HealthErasureFenceTest {
         assertEquals(0, fence.stopInFlightWorkByHash(""));
         assertFalse(fence.covers(""));
         assertEquals("agentHealthErasureFence", fence.erasureStepName());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Instance<IConversationMemoryStore> instance(IConversationMemoryStore store) {
+        Instance<IConversationMemoryStore> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(store);
+        return instance;
+    }
+
+    @Test
+    @DisplayName("a local stop notes the agents of the user's conversations, in batches, for as long as the fence lasts")
+    void notesAgents() throws Exception {
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        List<String> ids = IntStream.range(0, 600).mapToObj(i -> "c" + i).toList();
+        when(conversations.getConversationIdsByUserId("user-1")).thenReturn(ids);
+        when(conversations.loadListingSummaries(any())).thenAnswer(inv -> {
+            Map<String, ConversationListingSummary> found = new HashMap<>();
+            for (Object id : (Collection<?>) inv.getArgument(0)) {
+                String agent = id.equals("c599") ? "a2" : id.equals("c1") ? null : "a1";
+                found.put(id.toString(), new ConversationListingSummary(id.toString(), "user-1", null, null, agent, 1, 1));
+            }
+            return found;
+        });
+        HealthErasureFence fence = new HealthErasureFence(clock);
+        fence.conversations = instance(conversations);
+
+        fence.stopInFlightWork("user-1");
+        assertEquals(Set.of("a1", "a2"), fence.agentsOf("user-1"));
+        assertEquals(Set.of(), fence.agentsOf("user-2"));
+        assertEquals(Set.of(), fence.agentsOf(null));
+
+        clockNow = NOW.plus(HealthErasureFence.FENCE_TTL);
+        fence.stopInFlightWork("user-3");
+        assertEquals(Set.of(), fence.agentsOf("user-1"), "swept with its fence");
+    }
+
+    @Test
+    @DisplayName("a conversation store that cannot answer notes nothing and never fails the stop")
+    void agentReadIsBestEffort() throws Exception {
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        when(conversations.getConversationIdsByUserId("user-1")).thenThrow(new IllegalStateException("down"));
+        HealthErasureFence fence = new HealthErasureFence(clock);
+        fence.conversations = instance(conversations);
+
+        assertEquals(0, fence.stopInFlightWork("user-1"));
+        assertTrue(fence.covers("user-1"));
+        assertEquals(Set.of(), fence.agentsOf("user-1"));
     }
 }

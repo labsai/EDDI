@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.health.HealthTurnFactory.Capture;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -20,7 +21,6 @@ import org.jboss.logging.Logger;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -255,16 +255,10 @@ public class HealthTurnRecorder {
     private void removeIfDeletedMeanwhile(HealthTurn turn) {
         try {
             if (erased(turn) || conversationGone(turn.conversationId())) {
-                IHealthTurnStore turns = store.get();
-                Map<String, Set<LocalDate>> days = Map.of();
-                try {
-                    days = turns.agentDaysOfConversation(turn.conversationId());
-                } catch (RuntimeException e) {
-                    // Best effort: the delete must not depend on it.
-                }
-                turns.deleteByConversationId(turn.conversationId());
+                HealthDeletedRows deleted = store.get().deleteConversationReturningDays(turn.conversationId());
                 if (dirtyDays != null) {
-                    dirtyDays.markDeleted(days);
+                    // Unknown days fall back to the agent's whole retained range.
+                    dirtyDays.markDeletedRows(turn.conversationId(), turn.agentId() == null ? List.of() : List.of(turn.agentId()), deleted);
                 }
                 metrics.dropped(HealthMetrics.REASON_ERASED);
             }
