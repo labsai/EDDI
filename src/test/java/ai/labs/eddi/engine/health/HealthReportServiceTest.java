@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.engine.agenttests.IAgentTestRunStore;
@@ -208,7 +209,7 @@ class HealthReportServiceTest {
         when(markers.findGlobal(eq(List.of("default", "t.team.1")), any(), any(), anyInt())).thenReturn(
                 List.of(new HealthMarker("g-x", null, TODAY.minusDays(2).atStartOfDay(ZoneOffset.UTC).toInstant(),
                         HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, "t.team.1")));
-        when(daily.firstDayByVersion("agent")).thenReturn(Map.of(7, TODAY.minusDays(40), 8, TODAY));
+        when(daily.firstDayByVersion(eq("agent"), any())).thenReturn(Map.of(7, TODAY.minusDays(40), 8, TODAY));
 
         HealthSeries series = service.series(new Scope("agent", window, null, null, List.of("default", "t.team.1")),
                 List.of("agentFailureRate", "sessions"), "version", true);
@@ -224,6 +225,21 @@ class HealthReportServiceTest {
     }
 
     @Test
+    @DisplayName("portfolio traffic: a 90-day window is counted but its baseline is not; a window past the retention is not counted")
+    void portfolioSessionsRetention() {
+        when(turns.portfolioSessions(any(), any(), any(), any(), any(), any())).thenReturn(Map.of("a", new HealthPortfolioSessions(5, 6, 0, 0)));
+        HealthPortfolioSessions ninety = service.portfolioSessions(List.of("a"), last(90)).get("a");
+        assertEquals(5L, ninety.interactiveNow());
+        assertNull(ninety.interactiveBefore());
+        // Read without baseline days.
+        verify(turns).portfolioSessions(any(), eq(TODAY.minusDays(89)), eq(TODAY.minusDays(89)), eq(TODAY), any(), any());
+
+        HealthPortfolioSessions old = service.portfolioSessions(List.of("b"), new Window(TODAY.minusDays(120), TODAY.minusDays(100))).get("b");
+        assertNull(old.interactiveNow());
+        assertNull(old.allBefore());
+    }
+
+    @Test
     @DisplayName("series without rating permission answer null rating points")
     void seriesRestricted() {
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 1, "api", 40)));
@@ -235,7 +251,7 @@ class HealthReportServiceTest {
     @Test
     @DisplayName("compare: the newer version since its first turn, the older over its last days before; a version without turns is empty")
     void compare() {
-        when(daily.firstDayByVersion("agent")).thenReturn(Map.of(7, TODAY.minusDays(60), 8, TODAY.minusDays(5)));
+        when(daily.firstDayByVersion(eq("agent"), any())).thenReturn(Map.of(7, TODAY.minusDays(60), 8, TODAY.minusDays(5)));
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY.minusDays(10), 7, "api", 100), row(TODAY, 8, "api", 100)));
 
         HealthCompare compare = service.compare("agent", 7, 8, 14, null, false);
@@ -246,7 +262,10 @@ class HealthReportServiceTest {
         assertEquals(TODAY.minusDays(19).toString(), compare.from().window().from());
         assertTrue(compare.deltas().stream().anyMatch(d -> d.measureId().equals("agentFailureRate")));
 
-        when(daily.firstDayByVersion("agent")).thenReturn(Map.of());
+        verify(daily).firstDayByVersion("agent", HealthReportService.firstTurnOrigins(null));
+        assertFalse(HealthReportService.firstTurnOrigins(null).contains(HealthOrigins.AGENT_TEST), "test runs are no first turn");
+        assertEquals(List.of("api", "agent-test"), HealthReportService.firstTurnOrigins(List.of("api", "agent-test")));
+        when(daily.firstDayByVersion(eq("agent"), any())).thenReturn(Map.of());
         HealthCompare unknown = service.compare("agent", 3, 4, 14, null, false);
         assertEquals(TODAY.toString(), unknown.to().window().from());
     }

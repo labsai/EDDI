@@ -86,6 +86,24 @@ class HealthChangeMarkersTest {
     }
 
     @Test
+    @DisplayName("the coalesced id has a fixed length whatever the tenant id, and stays the same within one hour")
+    void coalescedIdLength() {
+        String tenant = "t." + "x".repeat(200);
+        markers.globalVariableChanged(tenant);
+        markers.globalVariableChanged(tenant);
+        markers.globalVariableChanged("default");
+        ArgumentCaptor<HealthMarker> marker = ArgumentCaptor.forClass(HealthMarker.class);
+        verify(store, times(3)).append(marker.capture());
+        String id = marker.getAllValues().get(0).id();
+        assertEquals(42, id.length());
+        assertTrue(id.startsWith("g-"));
+        assertEquals(id, marker.getAllValues().get(1).id());
+        assertFalse(id.equals(marker.getAllValues().get(2).id()), "another tenant is another marker");
+        assertFalse(id.equals(HealthChangeMarkers.coalescedId(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, tenant,
+                Instant.parse("2026-11-10T13:00:00Z"))), "another hour is another marker");
+    }
+
+    @Test
     @DisplayName("a failing store never fails the change being recorded")
     void neverThrows() {
         doThrow(new HealthStoreException("down", null)).when(store).append(any());

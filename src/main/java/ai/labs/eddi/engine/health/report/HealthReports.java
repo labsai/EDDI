@@ -102,9 +102,14 @@ public final class HealthReports {
     public record HealthCompare(String agentId, CompareSide from, CompareSide to, List<CompareDelta> deltas) {
     }
 
+    /**
+     * One portfolio row. {@code sessions} is {@code null} when the period reaches
+     * past the turn-row retention (then {@code hint} says so), and
+     * {@code sessionsDelta} when the baseline does.
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record PortfolioItem(String agentId, String agentName, String status, String preset, Object topReason, long sessions,
-            Double sessionsDelta, List<Measure> keyMeasures, boolean platformIncident) {
+    public record PortfolioItem(String agentId, String agentName, String status, String preset, Object topReason, Long sessions,
+            Double sessionsDelta, List<Measure> keyMeasures, boolean platformIncident, String hint) {
     }
 
     /** Days on which platform failures of one class hit several agents at once. */

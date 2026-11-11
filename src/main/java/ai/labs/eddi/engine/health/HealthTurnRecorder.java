@@ -256,10 +256,15 @@ public class HealthTurnRecorder {
         try {
             if (erased(turn) || conversationGone(turn.conversationId())) {
                 IHealthTurnStore turns = store.get();
-                Map<String, Set<LocalDate>> days = turns.agentDaysOfConversation(turn.conversationId());
+                Map<String, Set<LocalDate>> days = Map.of();
+                try {
+                    days = turns.agentDaysOfConversation(turn.conversationId());
+                } catch (RuntimeException e) {
+                    // Best effort: the delete must not depend on it.
+                }
                 turns.deleteByConversationId(turn.conversationId());
                 if (dirtyDays != null) {
-                    dirtyDays.noteAll(days);
+                    dirtyDays.markDeleted(days);
                 }
                 metrics.dropped(HealthMetrics.REASON_ERASED);
             }

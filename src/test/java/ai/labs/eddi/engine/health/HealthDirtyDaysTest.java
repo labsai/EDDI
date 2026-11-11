@@ -121,11 +121,21 @@ class HealthDirtyDaysTest {
     }
 
     @Test
-    @DisplayName("noteAll notes every agent's days")
-    void noteAll() {
-        dirty.noteAll(Map.of("a", Set.of(TODAY), "b", Set.of(TODAY, TODAY.minusDays(1))));
-        assertEquals(3, dirty.pendingCount());
-        dirty.noteAll(null);
+    @DisplayName("deletion marks go to the store at once, not to the debounced queue")
+    void markDeletedWritesThrough() {
+        dirty.markDeleted(Map.of("a", Set.of(TODAY), "b", Set.of(TODAY, TODAY.minusDays(1))));
+        verify(store).mark("a", Set.of(TODAY));
+        verify(store).mark("b", Set.of(TODAY, TODAY.minusDays(1)));
+        assertEquals(0, dirty.pendingCount());
+        dirty.markDeleted(null);
+    }
+
+    @Test
+    @DisplayName("a deletion mark the store refuses is kept for the next flush")
+    void markDeletedFallsBackToTheQueue() {
+        doThrow(new HealthStoreException("down", null)).when(store).mark(any(), any());
+        dirty.markDeleted(Map.of("a", Set.of(TODAY, TODAY.minusDays(1))));
+        assertEquals(2, dirty.pendingCount());
     }
 
     @Test

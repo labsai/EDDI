@@ -86,7 +86,7 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
         }
         long deleted = store.deleteByUserId(userId);
         if (dirtyDays != null && dirtyDays.isResolvable()) {
-            dirtyDays.get().noteAll(days);
+            dirtyDays.get().markDeleted(days);
         }
         return deleted;
     }

@@ -47,10 +47,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * <b>Shutdown and crashes.</b> The recorder flushes after its worker drained
  * (CDI destroys beans in no defined order, so this bean's own pre-destroy flush
- * may run first). Pairs noted on a node that is killed before its next flush —
- * at most a few seconds of them — are recovered by the rollup's self-heal pass,
- * which re-marks the days of turn rows written since its last pass
- * ({@code HealthRollupService}).
+ * may run first). Pairs of <em>written</em> rows noted on a node that is killed
+ * before its next flush — at most a few seconds of them — are recovered by the
+ * rollup's self-heal pass, which re-marks the days of turn rows written since
+ * its last pass ({@code HealthRollupService}). The self-heal cannot see a
+ * <em>deleted</em> row, which is why deletions are marked at once
+ * ({@link #markDeleted}).
  */
 @ApplicationScoped
 public class HealthDirtyDays {
@@ -92,14 +94,31 @@ public class HealthDirtyDays {
     }
 
     /**
-     * Notes the (agent, day) pairs of rows about to be deleted — or just deleted —
-     * by an erasure, a conversation delete or the orphan sweep: their daily rows
-     * must be recomputed without them.
+     * Marks the (agent, day) pairs of rows just deleted — by an erasure, a
+     * conversation delete, the orphan sweep or the recorder's post-write cleanup —
+     * dirty <b>at once</b>, in the store, so their daily rows are recomputed
+     * without them. Not debounced: deletions are rare, and unlike a written row a
+     * deleted one leaves nothing the rollup's self-heal could find again, so a mark
+     * held in memory and lost with the node would leave the deleted counts in the
+     * daily rows until their retention. Only when the write fails are the pairs
+     * noted for the next flush.
      */
-    public void noteAll(Map<String, Set<LocalDate>> agentDays) {
-        if (agentDays != null) {
-            agentDays.forEach(this::note);
+    public void markDeleted(Map<String, Set<LocalDate>> agentDays) {
+        if (agentDays == null) {
+            return;
         }
+        agentDays.forEach((agentId, days) -> {
+            if (agentId == null || days == null || days.isEmpty()) {
+                return;
+            }
+            try {
+                store.get().mark(agentId, days);
+            } catch (RuntimeException e) {
+                note(agentId, days);
+                LOGGER.debugf("Could not mark the days of deleted Agent Health rows dirty at once (kept for the next flush): %s",
+                        e.getMessage());
+            }
+        });
     }
 
     /**

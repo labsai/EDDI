@@ -245,17 +245,20 @@ public class HealthTurnRetention {
                 if (existing.containsKey(conversationId)) {
                     continue;
                 }
+                Map<String, Set<LocalDate>> days = daysOf(conversationId);
                 try {
-                    Map<String, Set<LocalDate>> days = store.agentDaysOfConversation(conversationId);
                     removed += store.deleteByConversationId(conversationId);
                     if (sessions != null) {
+                        // Session outcomes are not rolled up into daily rows: deleting
+                        // them marks no day.
                         removed += sessions.deleteByConversationId(conversationId);
-                    }
-                    if (dirtyDays != null && dirtyDays.isResolvable()) {
-                        dirtyDays.get().noteAll(days);
                     }
                 } catch (RuntimeException e) {
                     failedDeletes++;
+                    continue;
+                }
+                if (dirtyDays != null && dirtyDays.isResolvable()) {
+                    dirtyDays.get().markDeleted(days);
                 }
             }
         }
@@ -269,6 +272,18 @@ public class HealthTurnRetention {
                     + "eddi.health.facts-retention", unanswered, failedDeletes);
         }
         return removed;
+    }
+
+    /**
+     * The (agent, day)s of a conversation's rows; best effort, never in the way of
+     * the delete.
+     */
+    private Map<String, Set<LocalDate>> daysOf(String conversationId) {
+        try {
+            return store.agentDaysOfConversation(conversationId);
+        } catch (RuntimeException e) {
+            return Map.of();
+        }
     }
 
     /**

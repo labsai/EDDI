@@ -258,6 +258,11 @@ What the H2b backend does where this contract leaves room, and its answers to §
 - **Series** accept every measure id of §1; an unknown id is `400`. Measures without daily values yet (the
   effectiveness ones, `costPerResolvedSession`, `returningUserShare`) and rating measures the caller may not read
   answer all-null points rather than an error. Rating measures have points only with `groupBy=none`.
+- **Portfolio `sessions` can be `null`** (and the item then carries a `hint`, a field §4 does not show): when the period
+  reaches past the turn-row retention, sessions cannot be counted; `sessionsDelta` is `null` when the baseline does (the
+  90-day portfolio: its window is counted, its baseline is not). Cost and the other key measures still come from the daily
+  rows; `costPerSession` then says why it has no value. `sort=traffic` orders by sessions, or by the daily rows' turns when
+  sessions cannot be counted.
 - **Portfolio:** `status` is `null` for every agent until H4, so a `status=` filter returns no items (the values are
   still validated). `keyMeasures` are `agentFailureRate`, `apdex`, `costPerSession`. `platformIncidents[].from/to` are
   days (`YYYY-MM-DD`), because incidents are detected per day. `nextCursor` is an opaque string.

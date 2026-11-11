@@ -10,9 +10,13 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -77,8 +81,23 @@ public class HealthChangeMarkers {
     private void appendCoalesced(String kind, String tenantId, String label) {
         String tenant = tenantId == null || tenantId.isBlank() ? HealthMarker.DEFAULT_TENANT : tenantId;
         Instant hour = clock.instant().truncatedTo(ChronoUnit.HOURS);
-        String id = "g-" + kind + "-" + tenant + "-" + hour.getEpochSecond();
-        append(new HealthMarker(id, null, hour, kind, label, null, tenant));
+        append(new HealthMarker(coalescedId(kind, tenant, hour), null, hour, kind, label, null, tenant));
+    }
+
+    /**
+     * The id of a coalesced marker: {@code g-} and 40 hex characters of the SHA-256
+     * of kind, tenant and hour — the same for every change of one kind in one
+     * tenant and hour (that is the coalescing), and 42 characters whatever the
+     * tenant id's length, so it always fits the stores' id column.
+     */
+    static String coalescedId(String kind, String tenant, Instant hour) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((kind + "\n" + tenant + "\n" + hour.getEpochSecond()).getBytes(StandardCharsets.UTF_8));
+            return "g-" + HexFormat.of().formatHex(digest).substring(0, 40);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
     }
 
     private static String newId() {

@@ -66,7 +66,7 @@ public class PostgresHealthDailyStore implements IHealthDailyStore {
     static final String BY_AGENT = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ?";
     static final String BY_AGENTS = SELECT + "WHERE agent_id = ANY(?) AND day >= ? AND day <= ?";
     static final String FIRST_DAYS = "SELECT agent_version, MIN(day) FROM health_daily WHERE agent_id = ? AND agent_version <> -1 "
-            + "GROUP BY agent_version";
+            + "AND origin = ANY(?) GROUP BY agent_version";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -195,11 +195,15 @@ public class PostgresHealthDailyStore implements IHealthDailyStore {
     }
 
     @Override
-    public Map<Integer, LocalDate> firstDayByVersion(String agentId) {
+    public Map<Integer, LocalDate> firstDayByVersion(String agentId, Collection<String> origins) {
+        if (origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection();
                 PreparedStatement statement = connection.prepareStatement(FIRST_DAYS)) {
             statement.setString(1, agentId);
+            statement.setArray(2, connection.createArrayOf("text", origins.toArray(new String[0])));
             Map<Integer, LocalDate> first = new TreeMap<>();
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {

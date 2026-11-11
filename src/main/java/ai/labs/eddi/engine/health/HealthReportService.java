@@ -498,7 +498,8 @@ public class HealthReportService {
                 series.add(new Series(measure, grouped ? group.getKey() : null, unit, points));
             }
         }
-        return new HealthSeries(scope.agentId(), period(window), series, markers(scope.agentId(), window, scope.markerTenants()));
+        return new HealthSeries(scope.agentId(), period(window), series,
+                markers(scope.agentId(), window, scope.markerTenants(), firstTurnOrigins(scope.origins())));
     }
 
     /**
@@ -579,7 +580,7 @@ public class HealthReportService {
      * agent's deployments; returned oldest first, at most {@link #MAX_MARKERS} (the
      * newest).
      */
-    List<Marker> markers(String agentId, Window window, List<String> tenants) {
+    List<Marker> markers(String agentId, Window window, List<String> tenants, List<String> firstTurnOrigins) {
         List<HealthMarker> found = new ArrayList<>();
         Instant from = window.from().atStartOfDay(ZoneOffset.UTC).toInstant();
         Instant to = window.to().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
@@ -590,7 +591,7 @@ public class HealthReportService {
             LOGGER.debugf("Could not read Agent Health markers: %s", e.getMessage());
         }
         try {
-            firstDays(agentId).forEach((version, day) -> {
+            firstDays(agentId, firstTurnOrigins).forEach((version, day) -> {
                 if (window.contains(day)) {
                     found.add(new HealthMarker("vft-" + version, agentId, day.atStartOfDay(ZoneOffset.UTC).toInstant(),
                             HealthMarker.KIND_VERSION_FIRST_TURN, "First turn on v" + version, version));
@@ -609,8 +610,17 @@ public class HealthReportService {
         return markers;
     }
 
-    private Map<Integer, LocalDate> firstDays(String agentId) {
-        return cache.get(List.of("firstDays", agentId), () -> dailyStore.firstDayByVersion(agentId));
+    private Map<Integer, LocalDate> firstDays(String agentId, List<String> origins) {
+        return cache.get(List.of("firstDays", agentId, origins), () -> dailyStore.firstDayByVersion(agentId, origins));
+    }
+
+    /**
+     * The origins a version's first turn is looked for in: the ones asked for, else
+     * every origin but {@code agent-test} — a golden-suite run before a version
+     * went live is not its first turn.
+     */
+    static List<String> firstTurnOrigins(List<String> requested) {
+        return requested != null ? requested : HealthPeriods.defaultOrigins(HealthDefaults.PRESET_TASK);
     }
 
     // ------------------------------------------------------------------ compare
@@ -628,7 +638,7 @@ public class HealthReportService {
         int newer = Math.max(fromVersion, toVersion);
         int older = Math.min(fromVersion, toVersion);
         LocalDate today = today();
-        Map<Integer, LocalDate> firstDays = firstDays(agentId);
+        Map<Integer, LocalDate> firstDays = firstDays(agentId, firstTurnOrigins(requestedOrigins));
         LocalDate newerStart = firstDays.get(newer);
         Window newerWindow;
         Window olderWindow;
@@ -700,14 +710,22 @@ public class HealthReportService {
 
     /**
      * For the portfolio: every agent's traffic of the window and its baseline in
-     * one pass over the turn rows, cached per agent the same way. Empty when the
-     * baseline reaches past the turn retention.
+     * one pass over the turn rows, cached per agent the same way. A window that
+     * reaches past the turn-row retention cannot be counted: the window's counts
+     * are then {@link HealthPortfolioSessions#UNCOUNTED}, and a baseline that does
+     * (the 90-day portfolio's) leaves only the baseline's counts {@code null}.
      */
     Map<String, HealthPortfolioSessions> portfolioSessions(List<String> agentIds, Window window) {
         Window baseline = window.baseline();
-        if (baseline.from().isBefore(oldestTurnDay())) {
-            return Map.of();
+        LocalDate oldest = oldestTurnDay();
+        if (window.from().isBefore(oldest)) {
+            Map<String, HealthPortfolioSessions> none = new LinkedHashMap<>();
+            agentIds.forEach(id -> none.put(id, HealthPortfolioSessions.UNCOUNTED));
+            return none;
         }
+        boolean baselineCountable = !baseline.from().isBefore(oldest);
+        // Without a countable baseline, read the window alone (no baseline days).
+        LocalDate readFrom = baselineCountable ? baseline.from() : window.from();
         List<String> all = HealthPeriods.defaultOrigins(HealthDefaults.PRESET_TASK);
         Map<String, HealthPortfolioSessions> sessions = new LinkedHashMap<>();
         List<String> missing = new ArrayList<>();
@@ -721,11 +739,13 @@ public class HealthReportService {
         }
         if (!missing.isEmpty()) {
             // Real sessions once outcomes exist; the turn rows' conversations without them.
+            // Either way only the countable days are read (readFrom).
             Map<String, HealthPortfolioSessions> read = outcomeStore != null
-                    ? outcomeStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(), HealthOrigins.INTERACTIVE, all)
-                    : turnStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(), HealthOrigins.INTERACTIVE, all);
+                    ? outcomeStore.portfolioSessions(missing, readFrom, window.from(), window.to(), HealthOrigins.INTERACTIVE, all)
+                    : turnStore.portfolioSessions(missing, readFrom, window.from(), window.to(), HealthOrigins.INTERACTIVE, all);
             for (String agentId : missing) {
-                HealthPortfolioSessions agentSessions = read.getOrDefault(agentId, HealthPortfolioSessions.NONE);
+                HealthPortfolioSessions counted = read.getOrDefault(agentId, HealthPortfolioSessions.NONE);
+                HealthPortfolioSessions agentSessions = baselineCountable ? counted : counted.withoutBaseline();
                 cache.put(List.of("portfolioSessions", agentId, window), agentSessions);
                 sessions.put(agentId, agentSessions);
             }

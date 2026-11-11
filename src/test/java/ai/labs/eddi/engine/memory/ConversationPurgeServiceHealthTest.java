@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import java.util.Set;
+import java.util.Map;
+import java.time.LocalDate;
+import ai.labs.eddi.engine.health.HealthDirtyDays;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
@@ -43,6 +47,33 @@ class ConversationPurgeServiceHealthTest {
 
         verify(healthStore).deleteByConversationId("conv");
         verify(memoryStore).deleteConversationMemorySnapshot("conv");
+    }
+
+    @Test
+    @DisplayName("a failing day lookup does not skip the delete; the days found are marked dirty at once")
+    @SuppressWarnings("unchecked")
+    void dayLookupIsBestEffort() {
+        IHealthTurnStore healthStore = mock(IHealthTurnStore.class);
+        when(healthStore.agentDaysOfConversation("conv")).thenThrow(new HealthStoreException("down", null));
+        ConversationPurgeService service = service(mock(IConversationMemoryStore.class), healthStore);
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        Instance<HealthDirtyDays> dirtyInstance = mock(Instance.class);
+        when(dirtyInstance.isResolvable()).thenReturn(true);
+        when(dirtyInstance.get()).thenReturn(dirty);
+        service.healthDirtyDays = dirtyInstance;
+
+        service.deleteHealthTurns("conv");
+        verify(healthStore).deleteByConversationId("conv");
+        verify(dirty).markDeleted(Map.of());
+
+        Map<String, Set<LocalDate>> days = Map.of("agent", Set.of(LocalDate.of(2026, 11, 10)));
+        IHealthTurnStore working = mock(IHealthTurnStore.class);
+        when(working.agentDaysOfConversation("conv2")).thenReturn(days);
+        ConversationPurgeService second = service(mock(IConversationMemoryStore.class), working);
+        second.healthDirtyDays = dirtyInstance;
+        second.deleteHealthTurns("conv2");
+        verify(working).deleteByConversationId("conv2");
+        verify(dirty).markDeleted(days);
     }
 
     @Test

@@ -118,10 +118,14 @@ public class MongoHealthDailyStore implements IHealthDailyStore {
     }
 
     @Override
-    public Map<Integer, LocalDate> firstDayByVersion(String agentId) {
+    public Map<Integer, LocalDate> firstDayByVersion(String agentId, Collection<String> origins) {
+        if (origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
         try {
             Map<Integer, LocalDate> first = new TreeMap<>();
-            List<Document> pipeline = List.of(new Document("$match", and(eq(FIELD_AGENT, agentId), ne(FIELD_VERSION, null))),
+            List<Document> pipeline = List.of(
+                    new Document("$match", and(eq(FIELD_AGENT, agentId), ne(FIELD_VERSION, null), in(FIELD_ORIGIN, origins))),
                     new Document("$group", new Document("_id", "$" + FIELD_VERSION).append("first", new Document("$min", "$" + FIELD_DAY))));
             for (Document d : daily.aggregate(pipeline)) {
                 if (d.get("_id") instanceof Number version && d.getString("first") != null) {
