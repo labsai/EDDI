@@ -920,7 +920,7 @@ No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for 
 `eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
 that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
 or removed because their user was erased or their conversation deleted — `orphaned` counts the rows the daily orphan sweep removed,
-each one a clean-up that had failed on the health worker. A dropped row is a gap in the health views, never a slower or
+left either by a failed clean-up on the health worker or by a conversation delete whose own removal of its health rows failed. A dropped row is a gap in the health views, never a slower or
 failed turn. `eddi_health_rollup_lag_seconds` should stay below a few rollup
 intervals (`eddi.health.rollup-interval`, 5 minutes by default); a lag that keeps
 growing, or a rising `eddi_health_rollup_failures_total`, means the daily rows —

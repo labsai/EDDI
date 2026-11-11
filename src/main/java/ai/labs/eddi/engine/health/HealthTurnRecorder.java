@@ -266,7 +266,8 @@ public class HealthTurnRecorder {
         } catch (RuntimeException e) {
             if (due(lastCleanupWarning)) {
                 LOGGER.warnf("Could not check or remove the Agent Health rows of an erased or deleted conversation (%s); the daily "
-                        + "orphan sweep removes them: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
+                        + "orphan sweep may remove them if it checks and deletes them within its window; otherwise they expire "
+                        + "with eddi.health.facts-retention: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
             }
         }
     }
@@ -278,6 +279,11 @@ public class HealthTurnRecorder {
      */
     private boolean conversationGone(String conversationId) {
         if (conversations == null || !conversations.isResolvable()) {
+            if (due(lastCleanupWarning)) {
+                LOGGER.warnf("No conversation store to check whether conversation %s still exists; if it was deleted meanwhile, "
+                        + "its Agent Health rows are removed by the daily orphan sweep or expire with eddi.health.facts-retention",
+                        sanitize(conversationId));
+            }
             return false;
         }
         StateAndRevision stored = conversations.get().getStateAndRevision(conversationId);
@@ -286,7 +292,7 @@ public class HealthTurnRecorder {
             // silently.
             if (due(lastCleanupWarning)) {
                 LOGGER.warnf("Could not tell whether conversation %s still exists; if it was deleted meanwhile, the daily orphan "
-                        + "sweep removes its Agent Health rows", sanitize(conversationId));
+                        + "sweep may remove its Agent Health rows; otherwise they expire with eddi.health.facts-retention", sanitize(conversationId));
             }
             return false;
         }

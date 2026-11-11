@@ -54,7 +54,7 @@ executionId)`; an execution id belongs to one step — never by increment:
   resumed on the next stays on the day it started, so it is never counted on two
   days. The rest of the row is replaced by the resume — its cost, tokens,
   `paused`, outcome — so a rollup of the day it started has to be recomputed
-  (H2b marks that day dirty). `updatedAt` is when the row was last written;
+  (H2b marks that day dirty). `updatedAt` is when the row was last **captured** (on the turn's thread, before it is queued), not when it reached the store;
 - **the newest capture wins**: a write whose `updatedAt` is older than the stored
   row's is ignored, so a stale paused row delayed in one node's queue cannot
   overwrite the finished row another node wrote (ordering is by the writing
@@ -380,8 +380,8 @@ caller: `read_agent_health`, `list_agent_health` and
 | `eddi.health.enabled` | `true` | Off: no turn is recorded. Retention still runs |
 | `eddi.health.queue-capacity` | `10000` | Rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days. Also the oldest day the rollup recomputes, and how far back sessions and users are counted |
-| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks: the conversations of rows written within it are checked, and the rows of those that no longer exist deleted |
-| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN, and the rest wait for the next day |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each row was **captured** on the turn's thread (its `updatedAt`, set before the row is queued for the health worker): the conversations of those rows are checked, and the rows of those that no longer exist deleted |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. The sweep keeps no cursor, so the excess is **not** guaranteed a later check: what leaves the window unchecked stays until `eddi.health.facts-retention` |
 | `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — how far today's numbers may lag. At least 15 s; read when the schedule is created |
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept |
 | `eddi.health.cache-ttl` | `60s` | How long the views cache what they read from the stores; `0` switches the cache off |
@@ -403,7 +403,7 @@ sweep deletes daily rows and change markers older than
 `eddi.health.daily-retention` (730 days); those hold no personal data.
 
 The same daily job then runs the **orphan sweep**: it reads the distinct
-conversations of the rows (and discard markers) written within
+conversations of the rows (and discard markers) captured within
 `eddi.health.orphan-sweep-window` (48 hours), asks the conversation store which
 of them still exist — one projected read per 500 ids — and deletes the rows of
 those that do not, counted (in rows) as
@@ -411,7 +411,14 @@ those that do not, counted (in rows) as
 exist" deletes: a batch the conversation store cannot answer keeps its rows,
 with a WARN, and the next day asks again. At most
 `eddi.health.orphan-sweep-max` conversations are checked per run (a WARN when
-there were more). Like the retention it runs on every node and is idempotent.
+there were more); the sweep keeps no cursor, so conversations past the cap are
+not guaranteed a check before they leave the window, and their rows then stay
+until retention. The window is measured by **capture** time — `updatedAt` is
+set when the turn's thread captures the row, before it is queued — so a row
+delayed long enough on a queue can be written after its conversation was
+deleted yet already be outside the window; if its post-write clean-up also
+failed, it stays until retention. Like the retention it runs on every node and
+is idempotent.
 It is the durable second chance for the [queued-row race](#gdpr) below.
 
 ## GDPR
@@ -425,7 +432,7 @@ Turn rows are personal data about a user's use of an agent:
   `agentHealthTurns.turns`.
 - **Deleting a conversation** deletes its rows (best effort — a failure is
   logged and the rows expire with the retention).
-- **A row still queued does not come back.** Rows are written on the health
+- **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health
   worker's queue, so a turn finished just before an erasure or a delete can
   reach the store after it. The erasure's first step raises a fence for the user
   on every node (through the cluster stop in cluster mode); while it lasts (15
@@ -433,7 +440,8 @@ Turn rows are personal data about a user's use of an agent:
   every write the worker checks again, and deletes the conversation's rows when
   the user is now fenced or the conversation no longer exists — both the erasure
   and a conversation delete remove the conversation before its rows, so one of
-  the two always sees the other, on whichever node the row was queued. Withheld
+  the two sees the other on whichever node the row was queued — provided its
+  check and delete succeed (the limits follow). Withheld
   and removed rows count as `eddi_health_dropped_total{reason="erased"}`. That
   second check costs one primary-key read of the conversation per recorded
   turn, on the worker. What it cannot cover: a node that did not confirm the
@@ -441,14 +449,15 @@ Turn rows are personal data about a user's use of an agent:
   must be re-run), a conversation store that cannot answer, or a cleanup delete
   that fails. Each logs a WARN, at most once a minute (the stores EDDI ships
   always answer the check; only a store without `getStateAndRevision` cannot).
-  Such a row stays only **until the next daily [orphan sweep](#retention)**,
+  Such a row is **normally** removed by the next daily [orphan sweep](#retention),
   which finds its conversation gone and deletes it — the erasure deletes the
   user's conversations, so this covers a row left behind by an erasure (also
   one a node wrote without having confirmed the cluster stop) as well as by a
-  conversation delete. The sweep's own limits: it looks only at rows written
+  conversation delete. The sweep's own limits: it looks only at rows captured
   within `eddi.health.orphan-sweep-window`, so if it cannot ask the
   conversation store, or cannot delete, for longer than that, the row is left
-  to the retention (each failed run logs a WARN); and a conversation delete
+  to the retention (each failed or skipped run — also one with no conversation
+  store to ask — logs a WARN); and a conversation delete
   whose own delete of older rows failed is not caught by it (that failure is
   logged by the delete, and those rows expire with the retention).
 - **A turn whose snapshot was not stored** — a pause that lost its
