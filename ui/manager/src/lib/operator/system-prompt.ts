@@ -733,9 +733,11 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   caller may not read ratings.
 - Effectiveness is judged per session: a conversation splits after its origin's
   inactivity window (24 h; e-mail 72 h; per origin in the agent's
-  \`healthConfig.inactivityWindowHours\`). A session is OPEN inside its window;
-  when it closes it gets an outcome — RESOLVED, ASSUMED_RESOLVED, ESCALATED,
-  ABANDONED, FAILED, DEFLECTED or ENDED_QUIETLY — with its evidence, highest
+  \`healthConfig.inactivityWindowHours\`). Inside its window a session is OPEN
+  unless a mapped action or a self-report already decided it (\`provisional\`
+  until the window passes) or the agent ended it (final at once); when it closes
+  it gets an outcome — RESOLVED, ASSUMED_RESOLVED, ESCALATED, ABANDONED, FAILED,
+  DEFLECTED or ENDED_QUIETLY — with its evidence, highest
   first: \`agent_action\` (an action mapped in \`healthConfig.outcomes\`),
   \`self_reported\` (the model's own \`report_conversation_outcome\`, opt-in
   with \`healthConfig.selfReportTool\`, weak), \`agent_closed\`
