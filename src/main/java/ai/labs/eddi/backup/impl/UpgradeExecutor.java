@@ -18,6 +18,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -1683,7 +1684,9 @@ public class UpgradeExecutor {
                         + " could not be established from its descriptor, so it was not written");
             }
             int currentVersion = resolved;
-            AgentConfiguration current = agentStore.readAgent(agentId, currentVersion);
+            // Unredacted: this document is written back, and an editor's redacted copy
+            // carries the marker in place of the agent's stored credentials.
+            AgentConfiguration current = RestAgentStore.readUnredacted(agentStore, agentId, currentVersion);
 
             // Replace workflow URIs with updated versions, and take off the ones the
             // source no longer has

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentCascadeRequest.ResourceMapping;
 import ai.labs.eddi.configs.agents.model.AgentCascadeResult;
 import ai.labs.eddi.configs.agents.model.AgentCascadeResult.WorkflowChange;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -82,6 +83,16 @@ public class AgentCascadeService {
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
 
+    /**
+     * The local agent store, for reading the agent this cascade writes back without
+     * the read-redaction: through the loopback client an editor gets plaintext
+     * credentials replaced by the marker, and the write-back is then refused for
+     * carrying it. Same access check. Field-injected; {@code null} in tests built
+     * with {@code new}, which falls back to the loopback read.
+     */
+    @Inject
+    RestAgentStore localAgentStore;
+
     @Inject
     public AgentCascadeService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin) {
         this.restInterfaceFactory = restInterfaceFactory;
@@ -147,7 +158,9 @@ public class AgentCascadeService {
                     "Agent " + agentId + " is at version " + current + ", not " + agentVersion + ". Read the current version and retry.");
         }
 
-        AgentConfiguration agentConfig = agentStore.readAgent(agentId, agentVersion);
+        AgentConfiguration agentConfig = localAgentStore != null
+                ? localAgentStore.readUnredacted(agentId, agentVersion)
+                : agentStore.readAgent(agentId, agentVersion);
         if (agentConfig == null) {
             throw new CascadeException(CascadeException.Kind.NOT_FOUND, "Agent not found: " + agentId + " version " + agentVersion);
         }

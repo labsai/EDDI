@@ -17,8 +17,10 @@ import ai.labs.eddi.configs.groups.model.TeamBudgetConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -120,9 +122,21 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         return restVersionInfo.readDescriptors(filter, index, limit);
     }
 
+    /**
+     * The group as stored for an {@code eddi-admin}, and with every plaintext
+     * credential redacted for anyone else — a literal in
+     * {@code lessonConfig.consolidation.parameters} or a SERVICE judge's
+     * {@code parameters} stored before those were refused at save. The same rule
+     * {@code RestLlmStore.readLlm} applies. The engine reads groups from
+     * {@link IAgentGroupStore}, so a discussion or a consolidation run still gets
+     * the stored value.
+     */
     @Override
     public AgentGroupConfiguration readGroup(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        AgentGroupConfiguration stored = restVersionInfo.read(id, version);
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, AgentGroupConfiguration.class);
     }
 
     /**
@@ -191,6 +205,9 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     }
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential.
+        RedactionMarkerGuard.requireNone(groupConfiguration);
         requireUseOnMembers(groupConfiguration);
         requireTeamBudgetChangeAllowed(id, version, groupConfiguration);
         Response response = restVersionInfo.update(id, version, groupConfiguration);
@@ -200,6 +217,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
+        RedactionMarkerGuard.requireNone(groupConfiguration);
         requireUseOnMembers(groupConfiguration);
         TeamBudgetEditPolicy.check(null, groupConfiguration == null ? null : groupConfiguration.getTeamBudget(), teamBudgetAdminOnlyEdits,
                 resourceAccessGuard);
@@ -221,6 +239,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     public Response duplicateGroup(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         AgentGroupConfiguration config = restVersionInfo.read(id, version);
+        RedactionMarkerGuard.requireNone(config);
         // The copy is the caller's group: VIEW on the source is not USE on the agents
         // it runs, so the copy is held to the same check a create is.
         requireUseOnMembers(config);

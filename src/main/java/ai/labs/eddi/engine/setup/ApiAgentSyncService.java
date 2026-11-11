@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.setup;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -82,6 +83,15 @@ public class ApiAgentSyncService {
     private final AgentSetupService setupService;
     private final ObjectMapper comparison = new ObjectMapper();
 
+    /**
+     * The local agent store, for reading the agent this sync writes back without
+     * the read-redaction (see {@link RestAgentStore#readUnredacted}). Same access
+     * check. Field-injected; {@code null} in tests built with {@code new}, which
+     * falls back to the loopback read.
+     */
+    @Inject
+    RestAgentStore localAgentStore;
+
     @Inject
     public ApiAgentSyncService(IRestInterfaceFactory restInterfaceFactory, AgentSetupService setupService) {
         this.restInterfaceFactory = restInterfaceFactory;
@@ -141,7 +151,9 @@ public class ApiAgentSyncService {
         if (current == null || current < 1) {
             throw new AgentSyncNotFoundException("Agent not found: " + agentId);
         }
-        AgentConfiguration agent = agentStore.readAgent(agentId, current);
+        AgentConfiguration agent = localAgentStore != null
+                ? localAgentStore.readUnredacted(agentId, current)
+                : agentStore.readAgent(agentId, current);
         if (agent == null || agent.getWorkflows() == null) {
             throw new AgentSyncNotFoundException("Agent not found: " + agentId + " version " + current);
         }

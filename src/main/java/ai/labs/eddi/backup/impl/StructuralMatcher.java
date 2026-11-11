@@ -11,6 +11,7 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -247,7 +248,7 @@ public class StructuralMatcher {
         if (contentEquals(withoutStoreOwnedAgentFields(sourceJson), withoutStoreOwnedAgentFields(targetJson))) {
             action = DiffAction.SKIP;
         } else if (targetVersion != null && changedLocally(targetAgentId, targetVersion, targetJson,
-                version -> adoptableAgentJson(agentStore.readAgent(targetAgentId, version), targetConfig))) {
+                version -> adoptableAgentJson(RestAgentStore.readUnredacted(agentStore, targetAgentId, version), targetConfig))) {
             action = DiffAction.CONFLICT;
         } else {
             action = DiffAction.UPDATE;
@@ -650,7 +651,10 @@ public class StructuralMatcher {
                 throw new InternalServerErrorException("Could not establish the current version of target agent "
                         + agentId + ", so there is nothing to compare against.");
             }
-            config = agentStore.readAgent(agentId, version);
+            // Unredacted like the extension reads: the upgrade restores the target's own
+            // credentials from this and writes it back (PreviewRedaction hides them again
+            // in the preview an editor sees).
+            config = RestAgentStore.readUnredacted(agentStore, agentId, version);
         } catch (NotFoundException | ForbiddenException e) {
             // A caller without VIEW on the target is refused (403), not handed a 500
             // that reads like a server fault.

@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.exception.ErrorResponses;
@@ -24,9 +26,9 @@ import java.util.Set;
  * Refuses to store a configuration that carries {@link ConfigSecretRedactor}'s
  * marker.
  * <p>
- * A non-administrator reads LLM, MCP-calls, channel, RAG and httpcalls
- * documents with their plaintext credentials replaced by the marker. An editor
- * who opens such a document in the Manager and saves it unchanged would
+ * A non-administrator reads LLM, MCP-calls, channel, RAG, httpcalls, agent and
+ * group documents with their plaintext credentials replaced by the marker. An
+ * editor who opens such a document in the Manager and saves it unchanged would
  * otherwise replace the administrator's key with the marker — silently, until
  * the next deploy fails at the provider. A loud 400 at save time is the right
  * outcome: the credential has to be re-entered, or replaced by a
@@ -53,7 +55,8 @@ public final class RedactionMarkerGuard {
      * over a sentence that merely mentions the marker.
      */
     private static final Set<Class<?>> REDACTED_DOCUMENT_TYPES = Set.of(LlmConfiguration.class, McpCallsConfiguration.class,
-            ChannelIntegrationConfiguration.class, RagConfiguration.class, ApiCallsConfiguration.class);
+            ChannelIntegrationConfiguration.class, RagConfiguration.class, ApiCallsConfiguration.class, AgentConfiguration.class,
+            AgentGroupConfiguration.class);
 
     /**
      * Whether {@code document} is of a type whose REST reads produce the marker.
