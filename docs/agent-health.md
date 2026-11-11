@@ -203,16 +203,24 @@ They are recomputed, never incremented:
    by an undo, since its last pass. A discard leaves the row's write time
    alone, so the time a row was first discarded is stored with it for this
    (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
-   minute behind the clock, at most 10,000 pairs a pass) — and then drains the
+   minute behind the clock, at most 10,000 pairs a pass; a window holding more
+   is halved until one fits, and the watermark moves only past what was
+   marked. The one exception: a one-second window that still holds more than
+   10,000 pairs has only 10,000 of them marked, with a WARN, and the watermark
+   moves past it anyway, so the rest rely on their own marks). A row that reaches the store more than 30 seconds after its capture
+   time, which this scan may already be past, marks its days in the store
+   **before** it is written, instead of on the five-second flush, so a node
+   stopping between the write and the mark cannot lose it (a mark whose row then
+   fails to write only costs a recompute). Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked
    again meanwhile** (a token per mark). A turn written while its day was being
    recomputed therefore keeps the day dirty for the next pass. A pass stops after
    90 seconds and leaves the rest for the next. A day whose rollup fails moves
-   to the back of the queue, so it cannot block the days behind it, and after
-   five failures in a row it is dropped with a WARN (the next write to it marks
-   it again).
+   to the back of the queue, so it cannot block the days behind it. It is never
+   dropped, because the day may have no later write to mark it again: it is
+   retried every pass, with a WARN once it has failed five times.
 3. A dirty day older than the turn-row retention (`eddi.health.facts-retention`)
    is dropped from the queue without recomputing: its turns are gone, and the
    daily rows it already has are kept.

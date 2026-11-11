@@ -20,6 +20,8 @@ import org.jboss.logging.Logger;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -205,6 +207,7 @@ public class HealthTurnRecorder {
 
     void write(Capture capture) {
         HealthTurn turn = capture.turn();
+        Set<LocalDate> premarked = null;
         if (erased(turn)) {
             // Neither the row nor its discard markers: the user is being erased.
             metrics.dropped(HealthMetrics.REASON_ERASED);
@@ -212,21 +215,28 @@ public class HealthTurnRecorder {
         }
         try {
             IHealthTurnStore turns = store.get();
+            if (dirtyDays != null && turn.agentId() != null && writtenLate(turn)) {
+                // Marked before the row exists: a node stopping between the write and its
+                // mark cannot lose the mark, and a mark whose write then fails only costs a
+                // recompute. The marks after the write are then on the debounced flush.
+                premarked = daysBeforeWrite(turns, turn, capture);
+                dirtyDays.markLateWrite(turn.agentId(), premarked);
+            }
             if (!capture.settled()) {
                 // What the conversation keeps may be the earlier execution, or nothing at
                 // all: never replace a row on the strength of this one.
                 turns.insertIfAbsent(turn);
-                markDirty(turn, turn.day() == null ? Set.of() : Set.of(turn.day()));
+                markDirty(turn, turn.day() == null ? Set.of() : Set.of(turn.day()), premarked);
             } else {
                 turns.upsert(turn);
                 // The stored row keeps the day it was first recorded on: a turn resumed
                 // after midnight changed yesterday's numbers, not today's.
-                markDirty(turn, storedDays(turns, turn.conversationId(), List.of(turn.executionId()), turn.day()));
+                markDirty(turn, storedDays(turns, turn.conversationId(), List.of(turn.executionId()), turn.day()), premarked);
                 // After the new row: the discard is only true once the replacing turn
                 // exists.
                 if (!capture.discardedExecutionIds().isEmpty()) {
                     turns.markDiscarded(turn, capture.discardedExecutionIds());
-                    markDirty(turn, storedDays(turns, turn.conversationId(), capture.discardedExecutionIds(), null));
+                    markDirty(turn, storedDays(turns, turn.conversationId(), capture.discardedExecutionIds(), null), premarked);
                 }
             }
             metrics.recorded();
@@ -314,10 +324,59 @@ public class HealthTurnRecorder {
         return fallback == null ? Set.of() : Set.of(fallback);
     }
 
-    private void markDirty(HealthTurn turn, Set<LocalDate> days) {
-        if (dirtyDays != null && turn.agentId() != null) {
-            dirtyDays.note(turn.agentId(), days);
+    /**
+     * Notes the row's days for the next flush. A late row's days were marked in the
+     * store before it was written ({@code premarked}); a day found only now — its
+     * read before the write failed — is marked at once as well.
+     */
+    private void markDirty(HealthTurn turn, Set<LocalDate> days, Set<LocalDate> premarked) {
+        if (dirtyDays == null || turn.agentId() == null) {
+            return;
         }
+        if (premarked == null) {
+            // Not late: the self-heal still covers this row should the mark be lost.
+            dirtyDays.note(turn.agentId(), days);
+            return;
+        }
+        Set<LocalDate> unmarked = new HashSet<>(days);
+        unmarked.removeAll(premarked);
+        if (!unmarked.isEmpty()) {
+            dirtyDays.markLateWrite(turn.agentId(), unmarked);
+        }
+    }
+
+    /**
+     * The days a late row's write can change, read before it: its capture day, the
+     * day an earlier execution of the same turn is stored on (a resume keeps the
+     * first-recorded day), and the days of the executions it discards.
+     */
+    private static Set<LocalDate> daysBeforeWrite(IHealthTurnStore turns, HealthTurn turn, Capture capture) {
+        Set<LocalDate> days = new HashSet<>();
+        if (turn.day() != null) {
+            days.add(turn.day());
+        }
+        List<String> executions = new ArrayList<>();
+        executions.add(turn.executionId());
+        executions.addAll(capture.discardedExecutionIds());
+        try {
+            Set<LocalDate> stored = turns.daysOf(turn.conversationId(), executions);
+            if (stored != null) {
+                days.addAll(stored);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read the stored days of a late Agent Health turn before its write: %s", e.getMessage());
+        }
+        return days;
+    }
+
+    /**
+     * Whether the row reaches the store late enough that the rollup's self-heal
+     * watermark (one {@link HealthRollupService#SELF_HEAL_GRACE} behind the clock)
+     * may already have passed its capture time — judged at half the grace, to leave
+     * room for clock skew between nodes.
+     */
+    boolean writtenLate(HealthTurn turn) {
+        return turn.updatedAt() != null && turn.updatedAt().isBefore(clock.instant().minus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2)));
     }
 
     private static boolean due(AtomicLong last) {

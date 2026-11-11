@@ -27,11 +27,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -235,6 +237,52 @@ class HealthTurnRecorderTest {
         try {
             marking.record(memory(), null, null, null, false);
             verify(dirty, timeout(5_000)).note("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a late row's days are marked in the store before the row is written, so a stop in between cannot lose the mark")
+    void lateWriteMarksBeforeTheWrite() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate day = LocalDate.of(2026, 11, 10);
+        LocalDate firstDay = LocalDate.of(2026, 11, 9);
+        Instant captured = CLOCK.instant();
+        AtomicReference<Instant> now = new AtomicReference<>(captured);
+        Clock moving = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        // The worker reaches the store two minutes after the capture; an earlier
+        // execution of the turn is stored on the day before.
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
+            @Override
+            void write(HealthTurnFactory.Capture capture) {
+                now.set(captured.plus(Duration.ofMinutes(2)));
+                super.write(capture);
+            }
+        };
+        try {
+            marking.record(memory(), null, null, null, false);
+            verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(day, firstDay));
+            InOrder order = inOrder(dirty, store);
+            order.verify(dirty).markLateWrite(eq("agent-1"), any());
+            order.verify(store).upsert(any());
+            verify(dirty, never()).markLateWrite(eq("agent-1"), eq(Set.of(firstDay)));
         } finally {
             marking.shutdown();
         }
