@@ -185,6 +185,40 @@ class VoteTallyEngineTest {
         assertTrue(VoteTallyEngine.resolveOptions(config, List.of()).isEmpty());
     }
 
+    @Test
+    @DisplayName("a label on its own line takes the next non-blank line as its text")
+    void resolveOptions_labelOnItsOwnLine() {
+        assertEquals(List.of("Adopt PostgreSQL", "Stay on MongoDB"),
+                VoteTallyEngine.synthesisOptions("**Option A:**\n\n  Adopt PostgreSQL\nOption B: Stay on MongoDB"));
+    }
+
+    @Test
+    @DisplayName("adversarial whitespace in a synthesis is parsed in linear time, not by catastrophic backtracking")
+    void resolveOptions_adversarialWhitespace_completesQuickly() {
+        String pad800 = " ".repeat(800);
+        String pad4000 = " ".repeat(4000);
+        String manyLines = ("Option A: x" + pad800 + "y\n").repeat(100);
+        String blankRun = "\n".repeat(20_000) + "Option A: x" + pad4000 + "y";
+        var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,
+                TiePolicy.NO_DECISION);
+
+        long start = System.nanoTime();
+        List<String> short800 = VoteTallyEngine.synthesisOptions("Option A: x" + pad800 + "y");
+        List<String> long4000 = VoteTallyEngine.synthesisOptions("Option A: x" + pad4000 + "y");
+        List<String> repeated = VoteTallyEngine.resolveOptions(config, List.of(new TranscriptEntry("mod", "Mod", manyLines, 0,
+                "S", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null)));
+        VoteTallyEngine.synthesisOptions(blankRun);
+        VoteTallyEngine.synthesisOptions("Option A:" + " ".repeat(99_000));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        // Generous for a loaded CI machine: the former pattern took ~2 s for the
+        // 800-space line alone and did not finish the 4,000-space one in 500 s.
+        assertTrue(elapsedMs < 2_000, "option parsing took " + elapsedMs + " ms");
+        assertEquals(List.of("x" + pad800 + "y"), short800, "a line within the length cap still parses");
+        assertTrue(long4000.isEmpty(), "a line over the length cap is prose, not an option");
+        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, repeated.size(), "options are capped per synthesis");
+    }
+
     // =================================================================
     // tally
     // =================================================================

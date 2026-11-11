@@ -509,4 +509,44 @@ class TaskListParserTest {
         // Should return null for unmatched
         assertNull(TaskListParser.resolveAgent("unknown", membersWithNullName));
     }
+
+    @Test
+    @DisplayName("Markdown assignment with surrounding spaces is trimmed")
+    void markdownAssignment_spacedFormat() {
+        var result = TaskListParser.parse("- Research (assigned to   Analyst  ) — find references", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Research", result.getFirst().subject());
+        assertEquals("Analyst", result.getFirst().assignedTo());
+        assertEquals("find references", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("a separator glued to the next word does not split the title")
+    void markdownSeparatorNeedsWhitespace() {
+        var result = TaskListParser.parse("1. Build well-known parts: then test", MEMBERS);
+
+        assertEquals("Build well-known parts", result.getFirst().subject());
+        assertEquals("then test", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("adversarial planner output parses in linear time, not by polynomial backtracking")
+    void adversarialWhitespace_completesQuickly() {
+        String pad = " ".repeat(5_000);
+        String unclosedAssignment = "1. Task (assigned to" + pad + "x\n";
+        String spacedItem = "- " + "a" + pad + "b\n";
+        String bulk = ("- x" + " ".repeat(200) + "y\n").repeat(400);
+
+        long start = System.nanoTime();
+        var first = TaskListParser.parse(unclosedAssignment, MEMBERS);
+        var second = TaskListParser.parse(spacedItem, MEMBERS);
+        var third = TaskListParser.parse(bulk + " ".repeat(200_000), MEMBERS);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(elapsedMs < 1_000, "parsing took " + elapsedMs + " ms");
+        assertNull(first.getFirst().assignedTo(), "an unclosed assignment is not an assignment");
+        assertEquals("a" + pad + "b", second.getFirst().subject());
+        assertEquals(400, third.size());
+    }
 }
