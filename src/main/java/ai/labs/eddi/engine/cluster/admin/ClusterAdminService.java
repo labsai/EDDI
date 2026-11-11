@@ -49,6 +49,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.JetStreamApiException;
@@ -97,6 +98,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -1167,26 +1169,27 @@ public class ClusterAdminService implements ClusterStartable {
         Long revisionBefore = revisionOf(conversationId);
         CompletableFuture<Boolean> answered = new CompletableFuture<>();
         try {
-            conversationService.say(conversationId, false, true, List.of(), input, false, new ConversationResponseHandler() {
-                @Override
-                public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                    answered.complete(true);
-                }
+            dispatchWithoutCaller(() -> conversationService.say(conversationId, false, true, List.of(), input, false,
+                    new ConversationResponseHandler() {
+                        @Override
+                        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            answered.complete(true);
+                        }
 
-                @Override
-                public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                    // A duplicate of a turn another node already committed under this key is
-                    // answered as skipped: with idempotency on, the settlement finds that
-                    // record and deletes the entry. Without it a skip is not looked into, as
-                    // a revision that moved meanwhile could be anybody's write.
-                    answered.complete(turnIdempotency != null && turnIdempotency.isEnabled());
-                }
+                        @Override
+                        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            // A duplicate of a turn another node already committed under this key is
+                            // answered as skipped: with idempotency on, the settlement finds that
+                            // record and deletes the entry. Without it a skip is not looked into, as
+                            // a revision that moved meanwhile could be anybody's write.
+                            answered.complete(turnIdempotency != null && turnIdempotency.isEnabled());
+                        }
 
-                @Override
-                public void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
-                    answered.complete(false);
-                }
-            });
+                        @Override
+                        public void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
+                            answered.complete(false);
+                        }
+                    }));
         } catch (Exception e) {
             return ReplaySubmission.done(
                     new ItemOutcome(id, "REJECTED", e.getClass().getSimpleName() + ": " + sanitize(String.valueOf(e.getMessage()))));
@@ -1195,6 +1198,53 @@ public class ClusterAdminService implements ClusterStartable {
                 (ran, failure) -> settleReplay(id, conversationId, key, revisionBefore, Boolean.TRUE.equals(ran), releaseClaim),
                 replayCompletions);
         return new ReplaySubmission(new ItemOutcome(id, "REPLAYED", null), true);
+    }
+
+    /** The submission of a replayed turn, run by {@link #dispatchWithoutCaller}. */
+    @FunctionalInterface
+    interface ReplayDispatch {
+        void run() throws Exception;
+    }
+
+    /**
+     * Binds no caller; stateless over {@code CallerIdentityContext}'s static
+     * thread-locals, so a private instance is the same context CDI injects.
+     */
+    private static final CallerIdentityContext NO_CALLER = new CallerIdentityContext(null, null);
+
+    /**
+     * Submits a replayed turn with <b>no caller identity</b>, and waits for the
+     * submission (not the turn) so a refusal is still reported synchronously.
+     * <p>
+     * A dead letter is somebody else's turn — usually a user's — and the replay is
+     * an administrator's request. {@code say} captures the caller from the active
+     * request ({@code captureOrCurrent}), so submitting it on the admin's request
+     * thread ran the user's input with the <em>admin's</em> {@code ${caller:token}}
+     * and caller-supplied connection credentials. Binding null on this thread would
+     * not help: {@code capture()} reads the live request first and wins. So the
+     * submission runs on {@link #replayCompletions} — no request context there, so
+     * nothing to capture — with the binding explicitly null, so no caller left on a
+     * pooled thread leaks in either. Like a scheduled turn, caller-bound calls then
+     * fail closed. Per-user connection grants are unaffected: they resolve against
+     * the conversation's stored owner, never the caller.
+     */
+    void dispatchWithoutCaller(ReplayDispatch dispatch) throws Exception {
+        FutureTask<Void> task = new FutureTask<>(NO_CALLER.withIdentity(null, () -> {
+            dispatch.run();
+            return null;
+        }));
+        replayCompletions.execute(task);
+        try {
+            task.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
     }
 
     /**

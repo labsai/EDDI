@@ -44,6 +44,8 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
@@ -561,6 +563,54 @@ class ClusterAdminServiceTest {
             assertEquals(ClusterAdminService.AUDIT_TRAIL, entry.getValue().conversationId());
             assertEquals("admin-1", entry.getValue().userId());
             assertEquals(List.of("deadletters.replay"), entry.getValue().actions());
+        }
+
+        @Test
+        @DisplayName("a replayed turn runs with no caller identity, never the replaying administrator's")
+        void replayRunsWithoutTheAdministratorsIdentity() throws Exception {
+            when(coordinator.getDeadLetter("u1")).thenReturn(Optional.of(entry("u1", "failed", "n1", turn("a1", "hi"))));
+            CallerIdentityContext context = new CallerIdentityContext(null, null);
+            AtomicReference<CallerIdentity> seen = new AtomicReference<>();
+            AtomicReference<Thread> sayThread = new AtomicReference<>();
+            doAnswer(i -> {
+                seen.set(context.current());
+                sayThread.set(Thread.currentThread());
+                ConversationResponseHandler handler = i.getArgument(6);
+                handler.onComplete(new SimpleConversationMemorySnapshot());
+                return null;
+            }).when(conversationService).say(eq("conv-u1"), any(), any(), any(), any(), anyBoolean(), any());
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            service.replayCompletions = pool;
+            // The admin's request: its caller is on this thread, as captureOrCurrent sees
+            // it.
+            context.bind(new CallerIdentity("admin-token", "admin-1", null, Map.of("crm", "Bearer admin"), true));
+            try {
+                assertEquals("REPLAYED", service.replayOne("u1").outcome());
+            } finally {
+                context.clear();
+                pool.shutdownNow();
+            }
+
+            assertNull(seen.get(), "the user's dead-lettered turn must not run with the admin's token or connection credentials");
+            assertNotSame(Thread.currentThread(), sayThread.get(),
+                    "submitted off the admin's request thread, where capture() would read the live identity first");
+        }
+
+        @Test
+        @DisplayName("a replay refused at submission is still reported synchronously")
+        void replayRefusalIsReportedThroughTheDispatch() throws Exception {
+            when(coordinator.getDeadLetter("x")).thenReturn(Optional.of(entry("x", "failed", "n1", turn("a1", "hi"))));
+            doThrow(new IllegalStateException("conversation ended")).when(conversationService).say(eq("conv-x"), any(), any(), any(), any(),
+                    anyBoolean(), any());
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            service.replayCompletions = pool;
+            try {
+                ItemOutcome outcome = service.replayOne("x");
+                assertEquals("REJECTED", outcome.outcome());
+                assertTrue(outcome.message().startsWith("IllegalStateException"), outcome.message());
+            } finally {
+                pool.shutdownNow();
+            }
         }
 
         @Test
