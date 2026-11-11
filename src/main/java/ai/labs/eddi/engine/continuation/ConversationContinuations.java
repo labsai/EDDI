@@ -150,6 +150,12 @@ public class ConversationContinuations {
     public static final String REASON_OWNER_MISMATCH = "owner_mismatch";
     /** At fire time: this continuation already ran (re-delivered schedule). */
     public static final String REASON_DUPLICATE = "duplicate";
+    /**
+     * At fire time, under enforced workspaces: the conversation's owner may no
+     * longer {@code USE} its agent (the grant or share was withdrawn). The same
+     * re-check every other scheduled fire gets; the chain stops.
+     */
+    public static final String REASON_ACCESS_REVOKED = "access_revoked";
 
     private final IScheduleStore scheduleStore;
     private final MeterRegistry meterRegistry;

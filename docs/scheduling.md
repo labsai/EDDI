@@ -580,7 +580,8 @@ conversation on this deployment, not to the agent's configuration. A create, upd
 body carries either marker (`hitlType: hitl_timeout`, `continuationType: conversation_continuation`)
 is refused with `400` for everyone: a forged one would act on a conversation the caller may not own.
 A continuation fire also checks that the schedule's `userId` owns the conversation, and runs nothing
-otherwise (`owner_mismatch`). A continuation is disabled by an
+otherwise (`owner_mismatch`); under enforced workspaces it re-checks that the owner may still `USE` the
+agent and stops the chain when not (`access_revoked`, see [Long Jobs](long-jobs.md)). A continuation is disabled by an
 undeploy and re-enabled by the next deploy like the agent's own schedules; a failed continuation fire
 is retried with the normal backoff and dead-lettered after `eddi.schedule.max-retries`. A fired
 continuation is disabled like any one-shot, and the engine deletes those used-up rows, fire logs
