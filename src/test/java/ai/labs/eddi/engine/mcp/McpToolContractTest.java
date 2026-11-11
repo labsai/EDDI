@@ -39,7 +39,8 @@ class McpToolContractTest {
             McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class,
             McpGdprTools.class, McpDocTools.class, McpVersionTools.class, McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class};
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpHealthTools.class};
 
     /** Words that promise the caller may leave the argument out. */
     private static final Pattern SAYS_OPTIONAL = Pattern.compile(
@@ -93,10 +94,10 @@ class McpToolContractTest {
     }
 
     @Test
-    @DisplayName("108 tools across the 16 tool classes — the count tools/list publishes")
+    @DisplayName("111 tools across the 17 tool classes — the count tools/list publishes")
     void toolCount() {
-        assertEquals(108, tools().size(), "a tool was added or removed — update this count, McpToolFilter and docs/mcp-server.md");
-        assertEquals(108, McpToolFilter.MCP_TOOLS.size());
+        assertEquals(111, tools().size(), "a tool was added or removed — update this count, McpToolFilter and docs/mcp-server.md");
+        assertEquals(111, McpToolFilter.MCP_TOOLS.size());
     }
 
     @Test
