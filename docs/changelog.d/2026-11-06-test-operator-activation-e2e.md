@@ -7,9 +7,9 @@
 6.7.0 shipped with Platform Operator activation broken: `POST /administration/agents/setup-api` refuses a
 `systemPrompt` over `AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH` (100,000), and the operator prompt had grown to
 ~110,000 characters, so every fresh activation and every upgrade answered `System prompt is too long (109661
-characters, maximum 100000) (HTTP 400)`. The cap fix is its own PR (`fix/operator-setup-and-default-favicon`). This
-entry is the test that would have caught it: every operator test until now ran on MSW, and none ever sent the real
-prompt to the real endpoint.
+characters, maximum 100000) (HTTP 400)`. Every operator test until now ran on MSW, and none ever sent the real
+prompt to the real endpoint. This entry adds the test that would have caught it, and the cap fix it needs to pass
+(the separate cap-fix PR, #1290, was closed unmerged).
 
 ### What changed
 
@@ -42,11 +42,26 @@ prompt to the real endpoint.
 
 - Against the released `labsai/eddi:6.7.0` image and the Manager it bundles: **fails** with
   `Operator activation failed: System prompt is too long (109661 characters, maximum 100000) (HTTP 400)`.
-- Against an image built from the cap-fix branch, with this branch's Manager: **passes** (about 18 s).
+- Against an image built with the cap raised to 250,000, with this branch's Manager: **passes** (about 18 s).
 - Mutation checks against that image, each failing by name: an allow-list entry the spec lacks (`This deployment
   does not expose 1 endpoint(s) …`); `EDDI_SELF_BASE_URL=http://127.0.0.1:9` (the read canary's "could not connect to
   the platform API at http://127.0.0.1:9"); and provisioning without `hitlConfig` (`The approval gate could not be
   verified … hitlConfig is absent`).
+
+### The setup-api prompt cap
+
+- **`AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH` 100,000 → 250,000.** The cap bounds a `systemPrompt` that reaches
+  `setup` / `setup-api`, including one an LLM writes through `create_sub_agent` (storage growth, log noise); it is
+  not a prompt-cost control. The operator prompt the Manager sends is ~110,000 characters for `read_write`, and
+  grows every release; 250,000 gives it room and still bounds an LLM-authored prompt. Raising the cap rather than
+  trimming reviewed safety and tool instructions keeps the prompt unchanged (no revision bump for it); shortening
+  the prompt is still worth doing, since it is sent on every operator turn.
+- **The Manager mirrors the cap** as `SETUP_MAX_SYSTEM_PROMPT_LENGTH` in `ui/manager/src/lib/api/agent-setup.ts`.
+  The new backend `SetupPromptCapMirrorTest` reads that file and fails when the two values differ.
+- **New `ui/manager/src/lib/operator/__tests__/operator-prompt-size.test.ts`** builds the exact prompt
+  `provisionOperator` sends, for both scopes (`read_write` grants every endpoint, so every optional section is in)
+  and the longest brand name the validator allows, and fails above 80% of the cap. The headroom is the point: the
+  guard should fire on a feature branch, a release before the cap would.
 
 ### Fixed on the way
 
@@ -99,6 +114,5 @@ text. Restoring the `{outcome: …}` line fails that check with 5 unrendered pro
 
 - Making `Operator Activation E2E` (or `E2E Gate`) a required status check is a repository-settings decision; only
   `Build & Test` and `CodeQL Analysis` are required today.
-- Until the cap fix merges, this job fails on `main`, by design: `main` still cannot activate the operator.
 - The revision bump (61) collides with any other open PR that bumps the operator revision; whichever merges
   second re-bumps.
