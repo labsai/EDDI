@@ -24,6 +24,20 @@ now also treats a changed `type`, `*provider`, `port` or `useTls` as a destinati
 upgrade that kept the `apiKey` placeholder but changed the provider `type` had the target's key
 restored and sent to the other vendor's default endpoint.
 
+Review follow-up: the URL-like names are suffix rules (`*Url`, `*Uri`, `*Endpoint`, `*Host`,
+`*Hostname`), so Vertex's `apiEndpoint`, `serverUrl` and `smtpHost` count; `storeType`, `*Port` and
+`region` (OpenAI-compatible providers derive the base URL from it) were added; and a request
+`path` counts as absolute when it starts with `http`, as `ApiCallExecutor.buildRequest` reads it,
+not only when it contains `://`. `CredentialDestinationsTest` lists every destination parameter
+of the LLM builders, embedding and vector-store factories, MCP calls, httpcalls and email
+channels.
+
+**Setup-api sync.** `ApiAgentSyncService` read the generated httpcalls and the LLM config through
+the redacting loopback client. With no `apiAuth` in the request, a recorded literal auth header
+came back as the marker, which was then vaulted as the new secret (vault on) or written into the
+headers and refused only after earlier writes (vault off). Such a sync is now refused before
+anything is written; the LLM config it rewrites is read unredacted (`RestLlmStore.readUnredacted`).
+
 **2. Agent and group configs returned literal credentials to editors (medium).**
 `GET /agentstore/agents/{id}` and `GET /groupstore/groups/{id}` (and the MCP `get_agent`,
 `list_agent_resources`, `read_group` tools, which read through them) now redact for non-admins with

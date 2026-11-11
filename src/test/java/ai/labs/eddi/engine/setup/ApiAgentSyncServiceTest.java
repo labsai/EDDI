@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.llm.rest.RestLlmStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.ToolQuotaConfig;
 import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -334,6 +336,45 @@ class ApiAgentSyncServiceTest {
         verify(apiCallsStore).updateApiCalls(eq(ITEMS_ID), eq(1), written.capture());
         written.getValue().getHttpCalls().forEach(call -> assertEquals(reference, call.getRequest().getHeaders().get("Authorization")));
         verifyNoInteractions(secretProvider);
+    }
+
+    @Test
+    @DisplayName("an editor's redacted copy of a literal recorded apiAuth is refused, never vaulted or written as the marker")
+    void redactedRecordedApiAuthIsRefused() throws Exception {
+        // What an editor's loopback read returns for calls whose recorded header is a
+        // literal: the marker in its place.
+        String literal = "Bearer plaintext-credential-0123456789";
+        var v1 = McpApiToolBuilder.parseAndBuild(SPEC_V1, null, null, literal, null);
+        AgentSetupService.markGenerated(v1, literal, null);
+        when(apiCallsStore.readApiCalls(ITEMS_ID, 1))
+                .thenReturn(ConfigSecretRedactor.redact(copy(v1.configsByGroup().get("Items")), ApiCallsConfiguration.class));
+        when(apiCallsStore.readApiCalls(USERS_ID, 1))
+                .thenReturn(ConfigSecretRedactor.redact(copy(v1.configsByGroup().get("Users")), ApiCallsConfiguration.class));
+        when(secretProvider.isAvailable()).thenReturn(true);
+
+        var refused = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.sync(AGENT_ID, request(SPEC_V2, null, null)));
+
+        assertTrue(refused.getMessage().contains("apiAuth"), refused.getMessage());
+        assertFalse(refused.getMessage().contains("plaintext-credential-0123456789"), refused.getMessage());
+        verify(secretProvider, never()).store(any(), any(), any(), any(), any());
+        verifyNothingWritten();
+    }
+
+    @Test
+    @DisplayName("the LLM task sync rewrites is read unredacted, so a literal apiKey survives instead of the marker")
+    void llmIsReadUnredacted() throws Exception {
+        llm.tasks().getFirst().getParameters().put("apiKey", "sk-literal-llm-key-0123456789abcdef");
+        RestLlmStore local = mock(RestLlmStore.class);
+        when(local.readUnredacted(LLM_ID, 1)).thenReturn(llm);
+        // The loopback copy an editor would get.
+        when(llmStore.readLlm(LLM_ID, 1)).thenReturn(ConfigSecretRedactor.redact(llm, LlmConfiguration.class));
+        service.localLlmStore = local;
+
+        service.sync(AGENT_ID, request(SPEC_V2, null, null));
+
+        ArgumentCaptor<LlmConfiguration> written = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(llmStore).updateLlm(eq(LLM_ID), eq(1), written.capture());
+        assertEquals("sk-literal-llm-key-0123456789abcdef", written.getValue().tasks().getFirst().getParameters().get("apiKey"));
     }
 
     @Test

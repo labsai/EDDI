@@ -319,6 +319,16 @@ class ConfigJsonPatcherTest {
     }
 
     @Test
+    @DisplayName("an editor cannot add Vertex's apiEndpoint beside a hidden literal key either")
+    void addingAnApiEndpointBesideAHiddenKeyIsRefused() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        var e = assertThrows(BadRequestException.class, () -> patcher.apply(plaintext,
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/apiEndpoint\",\"value\":\"attacker.example:443\"}]", LlmConfiguration.class,
+                true));
+        assertTrue(String.valueOf(e.getResponse().getEntity()).contains("/tasks/0/parameters/apiEndpoint"));
+    }
+
+    @Test
     @DisplayName("changing the provider type beside a hidden literal apiKey is refused, as is removing a stored baseUrl")
     void changingTheProviderOrDroppingTheEndpointIsRefused() throws Exception {
         var plaintext = mapper.readValue("""

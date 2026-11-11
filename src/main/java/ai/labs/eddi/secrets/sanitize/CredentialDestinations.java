@@ -47,11 +47,12 @@ public final class CredentialDestinations {
      * The first field naming a destination whose value differs between the two
      * objects, or {@code null} when they send to the same place.
      * <p>
-     * A destination field is one named like a URL ({@code targetServerUrl},
-     * {@code baseUrl}, {@code url}, {@code uri}, {@code endpoint}, {@code host},
-     * {@code hostname}), a {@code path} that is an absolute URL on either side, or
-     * one that picks the vendor or the connection ({@code type}, a
-     * {@code provider}, {@code port}, {@code useTls}): a key kept beside a changed
+     * A destination field is one whose name ends like a URL
+     * ({@code targetServerUrl}, {@code baseUrl}, {@code serverUrl}, {@code uri},
+     * {@code apiEndpoint}, {@code smtpHost}, {@code hostname}), a {@code path} that
+     * is an absolute URL on either side, or one that picks the vendor or the
+     * connection ({@code type}, {@code storeType}, a {@code provider}, a
+     * {@code port}, {@code useTls}, {@code region}): a key kept beside a changed
      * provider {@code type} is sent to that provider's default endpoint.
      * <p>
      * The fields of both sides are compared, not only the source's: dropping the
@@ -100,18 +101,33 @@ public final class CredentialDestinations {
      */
     public static boolean isDestinationField(String key, String sourceValue, String targetValue) {
         String normalized = key.toLowerCase(Locale.ROOT);
-        if (normalized.endsWith("url") || normalized.equals("uri") || normalized.equals("endpoint")
-                || normalized.equals("host") || normalized.equals("hostname")) {
+        // Suffixes, not whole names: Vertex reads apiEndpoint, the vector stores
+        // serverUrl, email smtpHost — a whole-name rule let an editor change
+        // apiEndpoint beside a hidden key.
+        if (normalized.endsWith("url") || normalized.endsWith("uri") || normalized.endsWith("endpoint") || normalized.endsWith("host")
+                || normalized.endsWith("hostname")) {
             return true;
         }
         // The vendor and the connection: the same key and host under another
-        // provider type, port or TLS setting is a different server.
-        if (normalized.equals("type") || normalized.endsWith("provider") || normalized.equals("port") || normalized.equals("usetls")) {
+        // provider type, store type, port, TLS setting or region (the
+        // OpenAI-compatible providers derive their base URL from region) is a
+        // different server.
+        if (normalized.equals("type") || normalized.equals("storetype") || normalized.endsWith("provider") || isPortField(key)
+                || normalized.equals("usetls") || normalized.equals("region")) {
             return true;
         }
         // A relative path stays on the host its targetServerUrl names, which is
         // compared on its own; an absolute one is a destination in itself.
         return normalized.equals("path") && (isAbsolute(sourceValue) || isAbsolute(targetValue));
+    }
+
+    /**
+     * {@code port}, or a name whose last word is {@code Port} ({@code smtpPort},
+     * {@code proxy_port}) — but not {@code transport} or {@code report}.
+     */
+    private static boolean isPortField(String key) {
+        return key.equalsIgnoreCase("port") || key.endsWith("Port") || key.toLowerCase(Locale.ROOT).endsWith("_port")
+                || key.toLowerCase(Locale.ROOT).endsWith("-port");
     }
 
     /**
@@ -151,7 +167,14 @@ public final class CredentialDestinations {
         };
     }
 
-    private static boolean isAbsolute(String value) {
-        return value != null && value.contains("://");
+    /**
+     * Whether a value names its own host. At least as wide as the httpcalls
+     * executor ({@code ApiCallExecutor.buildRequest}), which uses a request path
+     * that starts with {@code http} as the whole URL and ignores
+     * {@code targetServerUrl} — so {@code http:/host} and {@code https:host}, which
+     * carry no {@code ://}, count as well. Case-insensitive, to be wider still.
+     */
+    static boolean isAbsolute(String value) {
+        return value != null && (value.contains("://") || value.trim().toLowerCase(Locale.ROOT).startsWith("http"));
     }
 }
