@@ -137,6 +137,8 @@ const HEALTH_READS = [
   "GET /agents/{agentId}/health",
   "GET /agents/{agentId}/health/series",
   "GET /agents/{agentId}/health/compare",
+  "GET /agents/{agentId}/health/sessions",
+  "GET /agents/{agentId}/health/outcome-suggestions",
   "GET /health/agents",
 ] as const;
 
@@ -434,10 +436,15 @@ export const READ_ENDPOINTS: readonly string[] = [
   // content; VIEW on the agent is checked by the backend, and the quality
   // section comes back restricted unless the caller may read ratings.
   //
-  // Deliberately NOT granted: nothing else exists yet. Health profiles, report
-  // links and the sessions drill-down arrive in later phases and are decided
-  // when they do (a profile change re-bands every measure; the drill-down lists
-  // conversations).
+  // The sessions drill-down (EDDI 6.7.0+, H3) is granted: it lists session ids
+  // and outcomes, never content or user ids, and the backend applies the
+  // conversation-review rule (EDIT on the agent and review enabled on the
+  // version) to the operator's caller like to anyone. Outcome suggestions only
+  // read; applying a mapping is an ordinary agent update.
+  //
+  // Deliberately NOT granted: nothing else exists yet. Health profiles and
+  // report links arrive in later phases and are decided when they do (a profile
+  // change re-bands every measure).
   ...HEALTH_READS,
 ] as const;
 
@@ -1013,8 +1020,9 @@ export function grantsOversightReads(endpoints: readonly string[]): boolean {
 
 /**
  * Whether the Agent Health reads are granted — usage, the report, its series,
- * the version compare and the portfolio. The prompt's health section names all
- * five, so it is shown only when every one is held.
+ * the version compare, the session drill-down, the outcome suggestions and the
+ * portfolio. The prompt's health section names all seven, so it is shown only
+ * when every one is held.
  */
 export function grantsHealthReads(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);

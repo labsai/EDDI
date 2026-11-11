@@ -715,7 +715,7 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
 
 /**
  * Agent Health — gated on {@link grantsHealthReads}: every line names one of the
- * five health reads, so the section is absent rather than wrong when they are
+ * seven health reads, so the section is absent rather than wrong when they are
  * not granted. Self-contained on purpose (many changes touch this file).
  */
 const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, over time):
@@ -729,9 +729,37 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   the previous period's \`baseline\`, \`delta\`, \`significant\` (a real change,
   not noise) and a \`band\` (GREEN, AMBER, RED; GREY = too little data or no
   threshold — read the \`hint\`). \`status\` is null and \`reasons\` empty
-  until health profiles exist; effectiveness measures are null until
-  conversation outcomes are recorded; say so instead of guessing. A
-  \`restricted\` quality section means the caller may not read ratings.
+  until health profiles exist. A \`restricted\` quality section means the
+  caller may not read ratings.
+- Effectiveness is judged per session: a conversation splits after its origin's
+  inactivity window (24 h; e-mail 72 h; per origin in the agent's
+  \`healthConfig.inactivityWindowHours\`). A session is OPEN inside its window;
+  when it closes it gets an outcome — RESOLVED, ASSUMED_RESOLVED, ESCALATED,
+  ABANDONED, FAILED, DEFLECTED or ENDED_QUIETLY — with its evidence, highest
+  first: \`agent_action\` (an action mapped in \`healthConfig.outcomes\`),
+  \`self_reported\` (the model's own \`report_conversation_outcome\`, opt-in
+  with \`healthConfig.selfReportTool\`, weak), \`agent_closed\`
+  (CONVERSATION_END / STOP_CONVERSATION after a successful turn),
+  \`structural\` (the last turn failed), \`inferred\` (a question left
+  open = ABANDONED) and \`silence\` (quiet after a successful turn =
+  ASSUMED_RESOLVED, on unless \`assumeResolvedOnSilence: false\`). Rates are
+  over engaged, closed sessions of interactive origins (\`n\`); schedules,
+  webhooks, A2A, groups, delegation and agent tests are counted, never judged.
+- \`resolutionRate.breakdown\` always has four parts — \`confirmed\`,
+  \`selfReported\`, \`agentClosed\`, \`silence\` — each a share of the
+  sessions, adding up to the rate. When most of it is \`silence\` (or
+  \`selfReported\`), say so plainly: those are assumptions, not confirmed
+  resolutions. \`outcomeCoverage\` is the share of closed sessions with an
+  outcome other than ENDED_QUIETLY; below the minimum (50 % by default) the rates
+  are null with a hint — then read
+  \`GET /agents/{agentId}/health/outcome-suggestions\` (actions that often end
+  sessions and are not mapped, with a suggested outcome) and suggest a
+  \`healthConfig.outcomes\` mapping; never apply it unasked.
+- \`GET /agents/{agentId}/health/sessions\` lists single sessions (filters
+  \`outcome\`, \`evidence\`, \`origin\`, \`version\`, \`limit\` ≤ 100,
+  \`cursor\`) — no user ids, no content. It needs EDIT on the agent and
+  conversation review enabled on the version: a 403 with \`reason\`
+  FORBIDDEN or REVIEW_DISABLED says which; explain it, do not retry.
 - Reliability keeps two failure rates apart: \`agentFailureRate\` (failures the
   agent is accountable for: pipeline errors, its own timeout, cost ceiling, bad
   request, context too long, unknown model, auth or quota of its key) and
@@ -756,8 +784,9 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
 - \`GET /health/agents\` lists every agent the caller may view, the ones
   needing attention first, with sessions, \`sessionsDelta\` and key measures.
 - Numbers lag by up to one rollup interval (\`dataThrough\`). Daily rows reach
-  back two years; sessions, users and engagement only as far as the turn rows
-  (90 days). You cannot change thresholds; a health profile is the admin's.`;
+  back two years; sessions, outcomes, users and engagement only as far as the
+  turn rows (90 days). You cannot change thresholds; a health profile is the
+  admin's.`;
 
 /**
  * Alerts — gated on {@link grantsAlertReads}: every line names one of the alert
