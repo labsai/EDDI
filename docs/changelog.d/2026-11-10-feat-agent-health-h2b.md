@@ -167,8 +167,19 @@ presets, status and reasons.
   already past its rows, so a dropped day kept stale counts until `eddi.health.daily-retention`.
 - The self-heal no longer moves its watermark past pairs it did not mark. A window with more than 10,000 (agent, day)
   pairs is halved until one fits (down to one second), and the watermark moves only to the end of that part; the
-  rest is the next pass's.
+  rest is the next pass's. Exception: a one-second window still holding more than 10,000 pairs has only 10,000 marked,
+  with a WARN, and the watermark moves past it; the remaining pairs rely on their own marks.
 - A turn row that reaches the store more than 30 seconds (half the self-heal grace) after its capture time marks its
   day in the dirty store at once (`HealthDirtyDays.markLateWrite`, with the deletion marks' retry and fallback),
   not on the five-second flush. The self-heal finds rows by capture time and may already be past such a row, so a
   mark lost with the node could not be found again.
+
+## 🐛 fix(health): a late row's day is marked before the row is written (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthTurnRecorder.write` marks a late row's days (its capture day, and the stored days of the execution it
+  replaces and the ones it discards, read before the write) in the dirty store before the row is written, not after.
+  A node stopping between the two can no longer lose the mark; a mark whose row then fails to write only costs a
+  recompute. A day found only after the write is still marked at once. The remaining limit is the one deletion marks
+  have: both attempts of the mark's write fail and the node stops before the next flush.

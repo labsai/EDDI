@@ -204,9 +204,13 @@ They are recomputed, never incremented:
    (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
    minute behind the clock, at most 10,000 pairs a pass; a window holding more
    is halved until one fits, and the watermark moves only past what was
-   marked). A row that reaches the store more than 30 seconds after its capture
-   time, which this scan may already be past, marks its day in the store at
-   once instead of on the five-second flush. Then it drains the
+   marked. The one exception: a one-second window that still holds more than
+   10,000 pairs has only 10,000 of them marked, with a WARN, and the watermark
+   moves past it anyway, so the rest rely on their own marks). A row that reaches the store more than 30 seconds after its capture
+   time, which this scan may already be past, marks its days in the store
+   **before** it is written, instead of on the five-second flush, so a node
+   stopping between the write and the mark cannot lose it (a mark whose row then
+   fails to write only costs a recompute). Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked

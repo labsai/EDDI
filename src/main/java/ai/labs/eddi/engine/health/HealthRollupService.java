@@ -36,8 +36,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link #SELF_HEAL_MAX} pairs per pass: a window holding more is halved until
  * one fits, and the watermark moves only to the end of what was marked. A row
  * that reaches the store after the grace has passed its capture time marks its
- * day at once instead ({@link HealthDirtyDays#markLateWrite}), since this scan
- * may already be past it.</li>
+ * days before it is written instead ({@link HealthDirtyDays#markLateWrite}),
+ * since this scan may already be past it.</li>
  * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
  * each streams the agent-day's turn rows through a
  * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}

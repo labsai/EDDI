@@ -243,10 +243,11 @@ class HealthTurnRecorderTest {
     }
 
     @Test
-    @DisplayName("a row written after the self-heal grace passed its capture marks its day at once, not on the debounced flush")
-    void lateWriteMarksAtOnce() {
+    @DisplayName("a late row's days are marked in the store before the row is written, so a stop in between cannot lose the mark")
+    void lateWriteMarksBeforeTheWrite() {
         HealthDirtyDays dirty = mock(HealthDirtyDays.class);
         LocalDate day = LocalDate.of(2026, 11, 10);
+        LocalDate firstDay = LocalDate.of(2026, 11, 9);
         Instant captured = CLOCK.instant();
         AtomicReference<Instant> now = new AtomicReference<>(captured);
         Clock moving = new Clock() {
@@ -265,16 +266,23 @@ class HealthTurnRecorderTest {
                 return now.get();
             }
         };
-        // The worker reaches the store two minutes after the capture.
-        when(store.daysOf(eq("conv-1"), any())).thenAnswer(inv -> {
-            now.set(captured.plus(Duration.ofMinutes(2)));
-            return Set.of(day);
-        });
-        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving);
+        // The worker reaches the store two minutes after the capture; an earlier
+        // execution of the turn is stored on the day before.
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
+            @Override
+            void write(HealthTurnFactory.Capture capture) {
+                now.set(captured.plus(Duration.ofMinutes(2)));
+                super.write(capture);
+            }
+        };
         try {
             marking.record(memory(), null, null, null, false);
-            verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(day));
-            verify(dirty, never()).note(eq("agent-1"), any());
+            verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(day, firstDay));
+            InOrder order = inOrder(dirty, store);
+            order.verify(dirty).markLateWrite(eq("agent-1"), any());
+            order.verify(store).upsert(any());
+            verify(dirty, never()).markLateWrite(eq("agent-1"), eq(Set.of(firstDay)));
         } finally {
             marking.shutdown();
         }
