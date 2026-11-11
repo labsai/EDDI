@@ -27,11 +27,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -235,6 +237,44 @@ class HealthTurnRecorderTest {
         try {
             marking.record(memory(), null, null, null, false);
             verify(dirty, timeout(5_000)).note("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a row written after the self-heal grace passed its capture marks its day at once, not on the debounced flush")
+    void lateWriteMarksAtOnce() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate day = LocalDate.of(2026, 11, 10);
+        Instant captured = CLOCK.instant();
+        AtomicReference<Instant> now = new AtomicReference<>(captured);
+        Clock moving = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        // The worker reaches the store two minutes after the capture.
+        when(store.daysOf(eq("conv-1"), any())).thenAnswer(inv -> {
+            now.set(captured.plus(Duration.ofMinutes(2)));
+            return Set.of(day);
+        });
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving);
+        try {
+            marking.record(memory(), null, null, null, false);
+            verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(day));
+            verify(dirty, never()).note(eq("agent-1"), any());
         } finally {
             marking.shutdown();
         }

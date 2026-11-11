@@ -315,9 +315,25 @@ public class HealthTurnRecorder {
     }
 
     private void markDirty(HealthTurn turn, Set<LocalDate> days) {
-        if (dirtyDays != null && turn.agentId() != null) {
+        if (dirtyDays == null || turn.agentId() == null) {
+            return;
+        }
+        if (writtenLate(turn)) {
+            // The rollup's self-heal may already be past this row's capture time.
+            dirtyDays.markLateWrite(turn.agentId(), days);
+        } else {
             dirtyDays.note(turn.agentId(), days);
         }
+    }
+
+    /**
+     * Whether the row reaches the store late enough that the rollup's self-heal
+     * watermark (one {@link HealthRollupService#SELF_HEAL_GRACE} behind the clock)
+     * may already have passed its capture time — judged at half the grace, to leave
+     * room for clock skew between nodes.
+     */
+    boolean writtenLate(HealthTurn turn) {
+        return turn.updatedAt() != null && turn.updatedAt().isBefore(clock.instant().minus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2)));
     }
 
     private static boolean due(AtomicLong last) {

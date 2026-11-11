@@ -157,3 +157,18 @@ presets, status and reasons.
   `eddi.health.facts-retention`.
 - Docs and the `HealthDirtyDays` comment now name the in-memory retry window as the one remaining limit: both writes
   of a deletion mark fail, then the node stops before the next successful flush.
+
+## 🐛 fix(health): no rollup day is dropped or skipped by the self-heal (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- A day whose rollup keeps failing stays in the dirty queue, retried every pass (a WARN past five failures), instead
+  of being dropped after five. A historical day may have no later write to mark it again, and the self-heal is
+  already past its rows, so a dropped day kept stale counts until `eddi.health.daily-retention`.
+- The self-heal no longer moves its watermark past pairs it did not mark. A window with more than 10,000 (agent, day)
+  pairs is halved until one fits (down to one second), and the watermark moves only to the end of that part; the
+  rest is the next pass's.
+- A turn row that reaches the store more than 30 seconds (half the self-heal grace) after its capture time marks its
+  day in the dirty store at once (`HealthDirtyDays.markLateWrite`, with the deletion marks' retry and fallback),
+  not on the five-second flush. The self-heal finds rows by capture time and may already be past such a row, so a
+  mark lost with the node could not be found again.

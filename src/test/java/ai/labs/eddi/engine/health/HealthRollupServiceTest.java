@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -132,17 +133,18 @@ class HealthRollupServiceTest {
     }
 
     @Test
-    @DisplayName("a day failing again and again is deferred, then dropped after the attempt cap — it never blocks the queue")
-    void poisonDropped() {
+    @DisplayName("a day failing again and again is deferred every pass and never dropped, even past the attempt cap")
+    void poisonKept() {
         HealthDirtyDay poison = new HealthDirtyDay("agent", TODAY, "t1", NOW.minusSeconds(60));
         when(dirty.oldest(anyInt())).thenReturn(List.of(poison));
         doThrow(new HealthStoreException("bad day", null)).when(daily).replaceDay(any(), any(), any());
-        when(dirty.defer(eq(poison), any())).thenReturn(2, HealthRollupService.MAX_ATTEMPTS);
+        when(dirty.defer(eq(poison), any())).thenReturn(2, HealthRollupService.MAX_ATTEMPTS, HealthRollupService.MAX_ATTEMPTS + 1);
 
         service.run();
-        verify(dirty, never()).clear(any());
         service.run();
-        verify(dirty).clear(any());
+        service.run();
+        verify(dirty, never()).clear(any());
+        verify(dirty, times(3)).defer(eq(poison), any());
     }
 
     @Test
@@ -174,6 +176,33 @@ class HealthRollupServiceTest {
         verify(dirty).mark(eq("agent"), eq(new TreeSet<>(Set.of(TODAY, TODAY.minusDays(1)))));
         verify(dirty).mark(eq("other"), eq(new TreeSet<>(Set.of(TODAY))));
         verify(dirty).setSelfHealWatermark(NOW.minus(HealthRollupService.SELF_HEAL_GRACE));
+    }
+
+    @Test
+    @DisplayName("an overfull self-heal window is halved until it fits, and the watermark moves only past what was marked")
+    void selfHealHalvesAnOverfullWindow() {
+        Instant watermark = NOW.minusSeconds(3600);
+        Instant end = NOW.minus(HealthRollupService.SELF_HEAL_GRACE);
+        Instant half = watermark.plus(Duration.between(watermark, end).dividedBy(2));
+        when(dirty.selfHealWatermark()).thenReturn(Optional.of(watermark));
+        when(dirty.oldest(anyInt())).thenReturn(List.of());
+        doAnswer(inv -> {
+            BiConsumer<String, LocalDate> consumer = inv.getArgument(3);
+            boolean full = end.equals(inv.getArgument(1));
+            int pairs = full ? HealthRollupService.SELF_HEAL_MAX + 1 : 2;
+            for (int i = 0; i < pairs; i++) {
+                consumer.accept("agent-" + i, TODAY);
+            }
+            return null;
+        }).when(turns).forEachAgentDayUpdatedSince(eq(watermark), any(), anyInt(), any());
+
+        service.run();
+
+        verify(dirty).mark(eq("agent-0"), any());
+        verify(dirty).mark(eq("agent-1"), any());
+        verify(dirty, never()).mark(eq("agent-2"), any());
+        verify(dirty).setSelfHealWatermark(half);
+        verify(dirty, never()).setSelfHealWatermark(end);
     }
 
     @Test

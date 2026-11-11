@@ -33,7 +33,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * still on its way is covered next time). A mark lost on a node — killed before
  * its debounced flush — therefore never leaves a day stale; the re-mark of a
  * day already dirty only gives its entry a new token. At most
- * {@link #SELF_HEAL_MAX} pairs per pass, with a WARN when there were more.</li>
+ * {@link #SELF_HEAL_MAX} pairs per pass: a window holding more is halved until
+ * one fits, and the watermark moves only to the end of what was marked. A row
+ * that reaches the store after the grace has passed its capture time marks its
+ * day at once instead ({@link HealthDirtyDays#markLateWrite}), since this scan
+ * may already be past it.</li>
  * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
  * each streams the agent-day's turn rows through a
  * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}
@@ -45,8 +49,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * rebuild.</li>
  * <li>A day whose rollup fails is moved to the back of the queue
  * ({@link IHealthDirtyDayStore#defer}) so it cannot block the entries behind
- * it; after {@link #MAX_ATTEMPTS} failed attempts in a row it is dropped with a
- * WARN (the next write to the day marks it again).</li>
+ * it. It is never dropped — the day may have no later write to mark it again —
+ * and past {@link #MAX_ATTEMPTS} failed attempts its WARN says it keeps
+ * failing.</li>
  * </ol>
  * <b>Idempotent</b>: a day recomputed twice from the same rows produces the
  * same rows, so a retried pass, a duplicated schedule or two nodes racing do no
@@ -70,6 +75,11 @@ public class HealthRollupService {
     static final Duration SELF_HEAL_FIRST_WINDOW = Duration.ofDays(1);
     /** The most (agent, day) pairs one self-heal pass re-marks. */
     static final int SELF_HEAL_MAX = 10_000;
+    /**
+     * The narrowest window the self-heal halves an overfull one down to; past it,
+     * it marks what fits and moves on.
+     */
+    static final Duration SELF_HEAL_MIN_WINDOW = Duration.ofSeconds(1);
 
     /** What one pass did; {@link #isEmpty()} when nothing at all. */
     public record Result(int days, int rows, int skipped, int failed, long pending) {
@@ -158,16 +168,18 @@ public class HealthRollupService {
     }
 
     /**
-     * Moves a failed entry to the back of the queue, or drops it after too many
-     * tries.
+     * Moves a failed entry to the back of the queue. It is never dropped: its day
+     * may have no later write to mark it again, and the self-heal is already past
+     * its rows, so a dropped day would keep stale counts until its retention. A
+     * failing day costs one attempt per pass; past {@link #MAX_ATTEMPTS} its WARN
+     * says so.
      */
     private void defer(HealthDirtyDay entry, RuntimeException cause) {
         try {
             int attempts = dirtyStore.defer(entry, clock.instant());
             if (attempts >= MAX_ATTEMPTS) {
-                dirtyStore.clear(new HealthDirtyDay(entry.agentId(), entry.day(), entry.token(), entry.markedAt(), attempts));
-                LOGGER.warnf("Agent Health rollup of agent %s, day %s failed %d times; dropped from the queue (the next write to the day "
-                        + "marks it again): %s", sanitize(entry.agentId()), entry.day(), attempts, sanitize(cause.getMessage()));
+                LOGGER.warnf("Agent Health rollup of agent %s, day %s has failed %d times; it stays queued and is retried every pass: %s",
+                        sanitize(entry.agentId()), entry.day(), attempts, sanitize(cause.getMessage()));
             } else {
                 LOGGER.warnf("Agent Health rollup of agent %s, day %s failed (attempt %d, retried later): %s", sanitize(entry.agentId()),
                         entry.day(), attempts, sanitize(cause.getMessage()));
@@ -180,31 +192,55 @@ public class HealthRollupService {
 
     /**
      * Re-marks the days of the rows written since the last pass; see the class
-     * comment. Never throws: a failure leaves the watermark where it was.
+     * comment. Never throws: a failure leaves the watermark where it was. A window
+     * with more than {@link #SELF_HEAL_MAX} pairs is halved until one fits, and the
+     * watermark only moves to the end of the part fully marked; the rest is the
+     * next pass's.
      */
     void selfHeal(Instant now) {
         try {
-            Instant until = now.minus(SELF_HEAL_GRACE);
-            Instant since = dirtyStore.selfHealWatermark().orElse(until.minus(SELF_HEAL_FIRST_WINDOW));
-            if (!since.isBefore(until)) {
+            Instant end = now.minus(SELF_HEAL_GRACE);
+            Instant since = dirtyStore.selfHealWatermark().orElse(end.minus(SELF_HEAL_FIRST_WINDOW));
+            if (!since.isBefore(end)) {
                 return;
             }
-            Map<String, Set<LocalDate>> pairs = new LinkedHashMap<>();
-            int[] count = {0};
-            turnStore.forEachAgentDayUpdatedSince(since, until, SELF_HEAL_MAX + 1, (agentId, day) -> {
-                if (count[0]++ < SELF_HEAL_MAX) {
-                    pairs.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
-                }
-            });
-            if (count[0] > SELF_HEAL_MAX) {
-                LOGGER.warnf("The Agent Health self-heal pass re-marks only %d agent days written since %s; the others rely on their own "
-                        + "marks", SELF_HEAL_MAX, since);
+            Instant until = end;
+            boolean[] overflow = {false};
+            Map<String, Set<LocalDate>> pairs = scan(since, until, overflow);
+            while (overflow[0] && Duration.between(since, until).compareTo(SELF_HEAL_MIN_WINDOW) > 0) {
+                until = since.plus(Duration.between(since, until).dividedBy(2));
+                pairs = scan(since, until, overflow);
+            }
+            if (overflow[0]) {
+                // Even the narrowest window holds more: mark what fits and move on.
+                LOGGER.warnf("The Agent Health self-heal pass re-marks only %d agent days written in %s .. %s; the others rely on their "
+                        + "own marks", SELF_HEAL_MAX, since, until);
+            } else if (until.isBefore(end)) {
+                LOGGER.infof("The Agent Health self-heal pass re-marked rows written up to %s; the rest, up to %s, is the next pass's", until,
+                        end);
             }
             pairs.forEach(dirtyStore::mark);
             dirtyStore.setSelfHealWatermark(until);
         } catch (RuntimeException e) {
             LOGGER.warnf("The Agent Health self-heal pass failed; the next pass retries from the same watermark: %s", sanitize(e.getMessage()));
         }
+    }
+
+    /**
+     * The (agent, day) pairs of rows written in [{@code since}, {@code until}), at
+     * most {@link #SELF_HEAL_MAX}; {@code overflow[0]} says whether there were
+     * more.
+     */
+    private Map<String, Set<LocalDate>> scan(Instant since, Instant until, boolean[] overflow) {
+        Map<String, Set<LocalDate>> pairs = new LinkedHashMap<>();
+        int[] count = {0};
+        turnStore.forEachAgentDayUpdatedSince(since, until, SELF_HEAL_MAX + 1, (agentId, day) -> {
+            if (count[0]++ < SELF_HEAL_MAX) {
+                pairs.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
+            }
+        });
+        overflow[0] = count[0] > SELF_HEAL_MAX;
+        return pairs;
     }
 
     /**
