@@ -617,9 +617,21 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > and a URL on this deployment's own origin (`eddi.self.base-url`), so an agent
 > may still call EDDI's own `/v1` API. The spec document is fetched by EDDI
 > itself (`OpenApiSpecFetcher`: every redirect hop checked, body capped at 16 MB)
-> rather than by swagger-parser. Residual:
-> `$ref`s inside a fetched spec are resolved by swagger-parser's own resolver,
-> which checks each reference's URL but follows that URL's redirects itself.
+> rather than by swagger-parser — and so is **every document a `$ref` names**,
+> in a downloaded spec or an inline one, absolute or relative, recursively:
+> `OpenApiRefBundler` fetches each through `OpenApiSpecFetcher` (the same policy
+> on every hop, the same 16 MB cap, at most 32 documents and 16 MB together, a
+> reference chain at most 16 deep) and inlines the referenced node before
+> parsing, so swagger-parser is handed internal (`#/…`) references only and
+> never opens a connection. A reference that cannot be fetched under the policy
+> refuses the spec, with the reason. Until this release swagger-parser fetched
+> `$ref`s with its own client, whose deny-list missed `100.64.0.0/10` (Alibaba's
+> `100.100.100.200`), Azure's `168.63.129.16` and OCI's `192.0.0.192`, ignored
+> `eddi.security.ssrf-protection.*`, resolved the host again after checking it,
+> followed same-scheme redirects unchecked and read the body without a limit.
+> A recursive schema across remote documents is cut where it recurses (an empty
+> schema), and a schema `$id` is dropped, since every reference is already
+> resolved.
 
 ### Scheme Allowlist
 
@@ -685,6 +697,7 @@ The checks above resolve the host; the HTTP client then resolves it **again** to
 | httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. With protection off, a redirect hop may connect to a private or loopback peer only when the hop before it connected to that same class (or the host is allow-listed) — the "no step into a more private class" rule, applied to the connected peer as well as the name. | Nothing for the address check |
 | `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
 | LLM providers and embedding models (langchain4j JDK client, `BoundedJdkHttpClient`) | Models are cached for as long as they are used, so the endpoint is validated when the model is built **and** again before every request the cached client sends (OpenAI, OpenAI-compatible presets, Ollama, Anthropic, Gemini, Mistral; OpenAI, Ollama, Gemini and Mistral embeddings; the Chroma vector store). | The same cache-expiry window as any pre-connect check. Providers built on their own SDK transport (Azure, Bedrock, Vertex, Oracle, Hugging Face; the other embedding providers) and the other vector stores are checked at build time only. A MongoDB Atlas store's checks cover the hosts its connection string names and its `proxyHost`; replica-set members the driver discovers from those seeds are not re-checked, so list only seeds you trust |
+| Any path through the forward proxy (`eddi.http.outbound.proxy.*`) | None of the above can help: the proxy resolves the target name itself and connects wherever its own answer points, so EDDI's checks — and the post-connect recheck, which sees only the proxy's address — rest on a lookup the proxy need not share (split-horizon DNS, or a rebinding name answering the two resolvers differently). EDDI logs a `WARN` at startup when a proxy is configured while `eddi.security.ssrf-protection.enabled=true`. | Everything: **the proxy must enforce the egress deny list itself** — loopback, private, CGNAT (`100.64.0.0/10`), link-local, unique-local and the cloud metadata addresses listed above. Proxy routing is unchanged |
 | MCP servers (langchain4j transport on `BoundedJdkHttpClient`, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again by the transport's HTTP client before each request — handshake, `tools/list`, every tool call — is sent. The same client caps each response at `eddi.llm.max-response-bytes`. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
 
 Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.

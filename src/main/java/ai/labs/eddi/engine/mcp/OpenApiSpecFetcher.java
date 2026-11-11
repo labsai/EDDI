@@ -51,8 +51,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@value #MAX_SPEC_BYTES} bytes while it streams, not after buffering.</li>
  * </ul>
  * The content is then handed to the parser as text with the location as its
- * base, so a multi-file spec's relative {@code $ref}s still resolve as before —
- * through swagger-parser's own blocked-URL resolver, which is unchanged.
+ * base, so a multi-file spec's relative {@code $ref}s still resolve beside it.
+ * Every document a {@code $ref} names is fetched through this class as well and
+ * inlined by {@link OpenApiRefBundler} before parsing, so swagger-parser's own
+ * resolver and its HTTP client are never used.
  *
  * @since 6.6.0
  */

@@ -175,6 +175,24 @@ public class OutboundHttp {
                     + "answers, which is what a DNS-rebinding attack relies on. Leave %s unset (30s) or set it above 0.",
                     DNS_CACHE_TTL_PROPERTY, DNS_CACHE_TTL_PROPERTY);
         }
+        if (proxyResolvesTargets(settings, ssrfProtectionEnabled)) {
+            LOGGER.warnf("Outbound requests go through the forward proxy %s:%d (eddi.http.outbound.proxy.*) while "
+                    + "eddi.security.ssrf-protection.enabled=true. EDDI's SSRF checks resolve the target host locally, but the proxy "
+                    + "resolves it again on its own and connects wherever its answer points, so a name that resolves differently "
+                    + "there (split-horizon DNS, rebinding) is not covered. The proxy must enforce the egress deny list itself: "
+                    + "loopback, private (10/8, 172.16/12, 192.168/16), CGNAT (100.64/10), link-local (169.254/16, fe80::/10), "
+                    + "unique-local (fc00::/7) and the cloud metadata addresses (169.254.169.254, fd00:ec2::254, 100.100.100.200, "
+                    + "168.63.129.16, 192.0.0.192).", settings.proxy().host(), settings.proxy().port());
+        }
+    }
+
+    /**
+     * Whether a forward proxy is configured while SSRF protection is on — the
+     * proxy, not EDDI, then makes the DNS lookup that decides where a request
+     * connects, so EDDI's checks rest on an answer the proxy may not share.
+     */
+    static boolean proxyResolvesTargets(OutboundSettings settings, boolean ssrfProtectionEnabled) {
+        return ssrfProtectionEnabled && settings.proxy() != null && settings.proxy().enabled();
     }
 
     OutboundHttp(OutboundSettings settings, OutboundEngine engine, boolean ssrfProtectionEnabled, MeterRegistry meterRegistry) {

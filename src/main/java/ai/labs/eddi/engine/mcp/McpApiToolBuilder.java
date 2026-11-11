@@ -290,13 +290,21 @@ public final class McpApiToolBuilder {
     /**
      * Parse an OpenAPI spec from a JSON/YAML string or URL.
      * <p>
-     * <b>Security:</b> reference resolution ({@code setResolve(true)}) runs with
-     * {@code setSafelyResolveURL(true)}, so any {@code $ref} the parser follows —
-     * whether the input is a URL or inline content that embeds external references
-     * — goes through swagger-parser's blocked-URL resolver
-     * (private/link-local/cloud targets refused) and cannot read local files or use
-     * non-http schemes. On its own that guards the {@code $ref} hops; the spec
-     * location itself is guarded separately below.
+     * <b>Security:</b> swagger-parser never touches the network. Before the parser
+     * sees the document, {@link OpenApiRefBundler} fetches every document an
+     * external {@code $ref} names — an absolute http(s) URL, or in a downloaded
+     * spec a path relative to it, recursively, at most
+     * {@value OpenApiRefBundler#MAX_REMOTE_DOCUMENTS} documents — through the same
+     * {@link OpenApiSpecFetcher} as the spec itself, and inlines the referenced
+     * nodes; a reference it cannot fetch under the deployment's target policy is
+     * refused with the reason. The parser is then handed internal ({@code #/…})
+     * references only. swagger-parser's own resolver used to fetch {@code $ref}s
+     * with a client of its own: a deny-list that missed {@code 100.64.0.0/10}
+     * (Alibaba metadata), Azure's {@code 168.63.129.16} and OCI's
+     * {@code 192.0.0.192} and ignored {@code eddi.security.ssrf-protection.*}, a
+     * second DNS lookup after its check, same-scheme redirects followed unchecked
+     * and an unbounded body. {@code setSafelyResolveURL(true)} stays set as defence
+     * in depth.
      * <p>
      * When the input is a location (not inline content) it must be an
      * {@code http}/{@code https} URL via
@@ -333,9 +341,10 @@ public final class McpApiToolBuilder {
     public static OpenAPI parseSpec(String specInput, OpenApiSpecFetcher specFetcher) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
-        // Route every $ref the parser fetches through the blocked-URL resolver:
-        // without this, resolution fetches http(s) refs and reads filesystem refs
-        // (relative to the process CWD) on the first request, unguarded.
+        // Defence in depth only: OpenApiRefBundler hands the parser internal refs
+        // alone, so its blocked-URL resolver should never be reached. That
+        // resolver's deny-list is not EDDI's (no CGNAT, no Azure or OCI metadata,
+        // no ssrf-protection settings) and its client follows redirects unchecked.
         parseOptions.setSafelyResolveURL(true);
 
         SwaggerParseResult result;
@@ -345,7 +354,10 @@ public final class McpApiToolBuilder {
             // filesystem-relative ref (which setSafelyResolveURL does not guard)
             // cannot read local files. Internal (#/…) and http(s) refs are allowed.
             rejectUnsafeInlineRefs(specInput);
-            result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
+            // Its http(s) refs are fetched by EDDI and inlined: the parser gets
+            // internal references only, so it never opens a connection itself.
+            String bundled = OpenApiRefBundler.bundle(specInput, null, specFetcher);
+            result = new OpenAPIV3Parser().readContents(bundled, null, parseOptions);
         } else {
             // Remote location. Enforce an http(s) scheme so nothing can read local
             // files (file://), classpath/jar resources, or use other non-http
@@ -363,7 +375,10 @@ public final class McpApiToolBuilder {
             // classpath: $ref in it would be read from the local filesystem by the
             // parser's 3.1 resolver. Relative refs stay (they resolve against the URL).
             rejectUnsafeRefs(fetched.content(), true);
-            result = new OpenAPIV3Parser().readContents(fetched.content(), null, parseOptions, fetched.location());
+            // Its external refs - absolute or relative to the fetched URL - are
+            // fetched by EDDI and inlined, so the parser resolves nothing remotely.
+            String bundled = OpenApiRefBundler.bundle(fetched.content(), fetched.location(), specFetcher);
+            result = new OpenAPIV3Parser().readContents(bundled, null, parseOptions, fetched.location());
         }
 
         if (result == null || result.getOpenAPI() == null) {
@@ -469,7 +484,7 @@ public final class McpApiToolBuilder {
      * Mirrors {@code OpenAPIV3Parser.readContents}: {@link DeserializationUtils}
      * first, then the plain JSON/YAML mapper it falls back to.
      */
-    private static JsonNode deserializeLikeParser(String specContent) {
+    static JsonNode deserializeLikeParser(String specContent) {
         try {
             return DeserializationUtils.deserializeIntoTree(specContent, null, new ParseOptions(), new SwaggerParseResult());
         } catch (RuntimeException e) {
@@ -507,7 +522,7 @@ public final class McpApiToolBuilder {
         }
         String lower = ref.toLowerCase(Locale.ROOT);
         if (lower.startsWith("http://") || lower.startsWith("https://")) {
-            return; // URL ref — guarded by setSafelyResolveURL
+            return; // URL ref — fetched and inlined by OpenApiRefBundler
         }
         if (downloaded && !ref.startsWith("\\\\") && !EXPLICIT_SCHEME.matcher(ref).find()) {
             return; // relative to the document's URL
