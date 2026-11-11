@@ -4572,6 +4572,7 @@
       "overrideReason": "Motivo",
       "overrideReasonPlaceholder": "Por que esta medida é ignorada?",
       "removeOverride": "Remover exceção",
+      "removeThreshold": "Remover o limite de {{measure}}",
       "addOverride": "Adicionar exceção",
       "green": "{{measure}}: limite do verde",
       "red": "{{measure}}: limite do vermelho",
@@ -4634,7 +4635,7 @@
       "worse": "pior",
       "vsBaseline": "em relação ao período anterior",
       "significant": "significativo",
-      "notSignificant": "dentro da variação normal",
+      "notSignificant": "não significativo, ou poucos dados",
       "untested": "sem teste de significância"
     },
     "critical": "Medida crítica: define o estado do agente",
@@ -4697,7 +4698,8 @@
       "reviewScope": "Só são listadas as sessões de versões com a revisão de conversas ativada."
     },
     "noTrend": "Poucos dias com dados para uma tendência.",
-    "sparklineLabel": "{{label}} no período, de {{min}} a {{max}}",
+    "seriesError": "Não foi possível carregar as tendências.",
+    "sparklineLabel": "{{label}} no período, entre {{min}} e {{max}}",
     "noReasons": "Nenhuma medida precisa de atenção.",
     "overview": {
       "noStatus": "Estado ainda não disponível",

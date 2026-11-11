@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
+import { portfolioFixture } from "@/test/mocks/health-fixtures";
 import { HealthOverviewPage } from "../health-overview";
 
 describe("HealthOverviewPage", () => {
@@ -78,11 +79,33 @@ describe("HealthOverviewPage", () => {
   });
 
   it("explains a status filter that matches nothing while statuses are not calculated", async () => {
-    server.use(http.get("*/health/agents", () => HttpResponse.json({ items: [], platformIncidents: [], nextCursor: null })));
+    // The backend before H4: every status is null, so any status filter returns no items.
+    server.use(
+      http.get("*/health/agents", ({ request }) => {
+        const filtered = new URL(request.url).searchParams.has("status");
+        const items = filtered ? [] : portfolioFixture().items.map((i) => ({ ...i, status: null }));
+        return HttpResponse.json({ items, platformIncidents: [], nextCursor: null });
+      }),
+    );
     renderWithProviders(<HealthOverviewPage />);
-    expect(await screen.findByTestId("health-overview-empty")).toBeInTheDocument();
+    expect(await screen.findAllByTestId("health-overview-row")).not.toHaveLength(0);
     expect(screen.queryByTestId("health-overview-empty-status")).toBeNull();
     await userEvent.click(screen.getByTestId("health-status-filter-WATCH"));
+    expect(await screen.findByTestId("health-overview-empty")).toBeInTheDocument();
     expect(await screen.findByTestId("health-overview-empty-status")).toBeInTheDocument();
+  });
+
+  it("says only that no agents match when statuses are calculated and none has the chosen one", async () => {
+    server.use(
+      http.get("*/health/agents", ({ request }) => {
+        const filtered = new URL(request.url).searchParams.has("status");
+        return HttpResponse.json({ items: filtered ? [] : portfolioFixture().items, platformIncidents: [], nextCursor: null });
+      }),
+    );
+    renderWithProviders(<HealthOverviewPage />);
+    expect(await screen.findAllByTestId("health-overview-row")).not.toHaveLength(0);
+    await userEvent.click(screen.getByTestId("health-status-filter-WATCH"));
+    expect(await screen.findByTestId("health-overview-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("health-overview-empty-status")).toBeNull();
   });
 });

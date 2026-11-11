@@ -79,6 +79,11 @@ export function HealthOverviewPage() {
   const [sort, setSort] = useState<PortfolioSort>("attention");
   const [status, setStatus] = useState<HealthStatus[]>([]);
   const portfolio = useHealthPortfolio(period, sort, status);
+  // The unfiltered list (the same request as `portfolio` while no status is chosen) is where the
+  // backend says whether statuses are calculated: until H4 every agent's `status` is null.
+  const unfiltered = useHealthPortfolio(period, sort, []);
+  const unfilteredItems = unfiltered.data?.pages.flatMap((p) => p.items) ?? [];
+  const statusesUncalculated = unfilteredItems.length > 0 && unfilteredItems.every((i) => i.status === null);
   /** Adds or removes a status from the filter; none selected shows every agent. */
   const toggleStatus = (s: HealthStatus) => setStatus((cur) => (cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]));
   const select = selectClass;
@@ -155,8 +160,8 @@ export function HealthOverviewPage() {
       {portfolio.data && items.length === 0 && (
         <p className="text-sm text-muted-foreground" data-testid="health-overview-empty">{t("health.overview.empty", "No agents match.")}</p>
       )}
-      {portfolio.data && items.length === 0 && status.length > 0 && (
-        // Until statuses are calculated every agent's status is null, which no status filter matches.
+      {portfolio.data && items.length === 0 && status.length > 0 && statusesUncalculated && (
+        // Every agent's status is null, which no status filter matches; an empty filter result otherwise is just "no agents match".
         <p className="text-xs text-muted-foreground" data-testid="health-overview-empty-status">
           {t("health.overview.emptyStatus", "Agent statuses are not calculated on this deployment yet, so a status filter matches no agent.")}
         </p>

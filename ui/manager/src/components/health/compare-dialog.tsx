@@ -111,6 +111,11 @@ export function CompareDialog({
   const from = chosenFrom !== null && to !== null && chosenFrom < to ? chosenFrom : defaultFrom;
   const compare = useHealthCompare(agentId, open ? from : null, open ? to : null, days);
   const options = versionOptions(latestVersion);
+  // The older side lists the versions just below the newer one (capped like the rest), so the
+  // derived default is always selectable even when the newer one sits at the bottom of the list;
+  // a stale choice further down stays listed rather than leaving the select without its value.
+  const olderOptions = to === null ? [...options] : versionOptions(to - 1);
+  if (from !== null && !olderOptions.includes(from)) olderOptions.push(from);
 
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.compare.title", "Compare versions")} maxWidth="max-w-3xl" testId="health-compare-dialog">
@@ -126,7 +131,7 @@ export function CompareDialog({
               data-testid="health-compare-from"
             >
               {from === null && <option value="">—</option>}
-              {options.filter((v) => to === null || v < to).map((v) => (
+              {olderOptions.map((v) => (
                 <option key={v} value={v}>{`v${v}`}</option>
               ))}
             </select>

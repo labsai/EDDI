@@ -6,6 +6,7 @@ import {
   SESSION_ROWS,
   compareFor,
   healthFor,
+  periodFor,
   portfolioFixture,
   seriesFor,
 } from "./health-fixtures";
@@ -84,6 +85,9 @@ const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "t
   sessions: [60, "count"],
 };
 
+/** The days of the requested `period` (7, 30 or 90; the contract's default is 30). */
+const periodDays = (url: URL): number => ({ "7d": 7, "30d": 30, "90d": 90 })[url.searchParams.get("period") ?? "30d"] ?? 30;
+
 /** Measures the backend answers with all-null points (no daily values yet, or a rating the caller may not read). */
 const ALL_NULL_SERIES = new Set(["costPerResolvedSession", "returningUserShare", "ratingScore"]);
 
@@ -92,10 +96,11 @@ export const healthHandlers = [
   http.get("*/agents/:agentId/health/series", ({ request, params }) => {
     const url = new URL(request.url);
     const measures = url.searchParams.getAll("measure");
-    const days = { "7d": 7, "30d": 30, "90d": 90 }[url.searchParams.get("period") ?? "30d"] ?? 30;
+    const days = periodDays(url);
     return HttpResponse.json({
       agentId: params.agentId,
-      period: { from: "2026-10-12", to: "2026-11-10", days },
+      // The same range the summary reports for this period, one point per day of it.
+      period: periodFor(days).period,
       series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", days, ALL_NULL_SERIES.has(m))),
       markers: MARKERS,
     });
@@ -125,8 +130,11 @@ export const healthHandlers = [
     const evidence = url.searchParams.getAll("evidence");
     const origins = url.searchParams.getAll("origin");
     // Sessions of origins that are not judged carry a null outcome and evidence, and are listed only when that origin is asked for.
+    const version = url.searchParams.get("version");
     const items = SESSION_ROWS.filter((r) => {
-      if (r.outcome === null) return origins.includes(r.origin);
+      if (version !== null && r.agentVersion !== Number(version)) return false;
+      // An outcome or evidence filter matches no row without an outcome: the filters are AND-ed with the origin.
+      if (r.outcome === null) return origins.includes(r.origin) && outcomes.length === 0 && evidence.length === 0;
       return (
         (origins.length === 0 || origins.includes(r.origin)) &&
         (outcomes.length === 0 || outcomes.includes(r.outcome)) &&
@@ -153,21 +161,29 @@ export const healthHandlers = [
   ),
 
   // Last among the agent routes: `/agents/:agentId/health` must not swallow the sub-paths above.
-  http.get("*/agents/:agentId/health", ({ params }) => {
+  http.get("*/agents/:agentId/health", ({ request, params }) => {
     if (params.agentId === HEALTH_AGENTS.denied) {
       return HttpResponse.json({ error: "forbidden", message: "No VIEW permission on this agent." }, { status: 403 });
     }
     if (params.agentId === HEALTH_AGENTS.missing) {
       return HttpResponse.json({ error: "not_found", message: "Agent not found." }, { status: 404 });
     }
-    return HttpResponse.json(healthFor(String(params.agentId)));
+    return HttpResponse.json({ ...healthFor(String(params.agentId)), ...periodFor(periodDays(new URL(request.url))) });
   }),
 
   http.get("*/health/agents", ({ request }) => {
     const url = new URL(request.url);
     const statuses = url.searchParams.getAll("status");
     const all = portfolioFixture();
-    const matching = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
+    const filtered = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
+    // `attention` is the fixture's order; `name` and `traffic` are sorted before paging, as the backend does.
+    const sort = url.searchParams.get("sort") ?? "attention";
+    const matching =
+      sort === "name"
+        ? [...filtered].sort((a, b) => a.agentName.localeCompare(b.agentName))
+        : sort === "traffic"
+          ? [...filtered].sort((a, b) => (b.sessions ?? -1) - (a.sessions ?? -1))
+          : filtered;
     // Pages of three: the cursor is the index of the next item.
     const at = Number(url.searchParams.get("cursor") ?? 0);
     return HttpResponse.json({ ...all, items: matching.slice(at, at + 3), nextCursor: at + 3 < matching.length ? String(at + 3) : null });

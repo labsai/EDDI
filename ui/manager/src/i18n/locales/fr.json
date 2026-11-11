@@ -4572,6 +4572,7 @@
       "overrideReason": "Raison",
       "overrideReasonPlaceholder": "Pourquoi cette mesure est-elle ignorée ?",
       "removeOverride": "Supprimer la dérogation",
+      "removeThreshold": "Supprimer le seuil de {{measure}}",
       "addOverride": "Ajouter une dérogation",
       "green": "{{measure}} : seuil vert",
       "red": "{{measure}} : seuil rouge",
@@ -4634,7 +4635,7 @@
       "worse": "moins bien",
       "vsBaseline": "par rapport à la période précédente",
       "significant": "significatif",
-      "notSignificant": "dans la variation normale",
+      "notSignificant": "non significatif, ou trop peu de données",
       "untested": "non testé pour la significativité"
     },
     "critical": "Mesure critique : elle détermine le statut de l'agent",
@@ -4697,7 +4698,8 @@
       "reviewScope": "Seules les sessions des versions dont la revue des conversations est activée sont listées."
     },
     "noTrend": "Pas assez de jours avec des données pour une tendance.",
-    "sparklineLabel": "{{label}} sur la période, de {{min}} à {{max}}",
+    "seriesError": "Les tendances n'ont pas pu être chargées.",
+    "sparklineLabel": "{{label}} sur la période, entre {{min}} et {{max}}",
     "noReasons": "Aucune mesure ne demande d'attention.",
     "overview": {
       "noStatus": "Statut pas encore disponible",

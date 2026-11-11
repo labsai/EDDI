@@ -1,15 +1,25 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { Link } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { HEALTH_AGENTS } from "@/test/mocks/health-fixtures";
 import { resetHealthMockState } from "@/test/mocks/health-handlers";
 import { AgentHealthPanel } from "../agent-health-panel";
+import { formatShortDate } from "../format";
 import { api } from "../deps";
 
-afterEach(() => resetHealthMockState());
+// The profile, report links and export are offered only while the mock API answers them.
+const mockFlag = window as unknown as Record<string, unknown>;
+beforeEach(() => {
+  mockFlag.__EDDI_MOCK_ACTIVE__ = true;
+});
+afterEach(() => {
+  resetHealthMockState();
+  delete mockFlag.__EDDI_MOCK_ACTIVE__;
+});
 
 function panel(agentId: string, props: { canEdit?: boolean; latestVersion?: number } = {}) {
   return (
@@ -158,6 +168,58 @@ describe("AgentHealthPanel", () => {
     expect(list.querySelectorAll("li").length).toBeGreaterThanOrEqual(3);
   });
 
+  it("describes a sparkline by its range, not as a movement from one value to the other", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    const failure = await measureCard("agentFailureRate");
+    const spark = await within(failure).findByTestId("health-sparkline");
+    expect(spark.getAttribute("aria-label")).toMatch(/between .+ and .+/);
+    expect(spark.getAttribute("aria-label")).not.toMatch(/from .+ to /);
+  });
+
+  it("dates a marker in the list by the UTC day the sparkline places it on", async () => {
+    // Late on 3 Nov in UTC, already 4 Nov east of it and earlier in the day west of it.
+    server.use(
+      http.get("*/agents/:agentId/health/series", ({ request }) => {
+        const measures = new URL(request.url).searchParams.getAll("measure");
+        return HttpResponse.json({
+          agentId: "x",
+          period: { from: "2026-10-12", to: "2026-11-10", days: 30 },
+          series: measures.map((m) => ({ measure: m, group: null, unit: "ratio", points: [] })),
+          markers: [{ id: "late", at: "2026-11-03T23:30:00Z", kind: "NOTE", label: "Late note" }],
+        });
+      }),
+    );
+    const before = process.env.TZ;
+    process.env.TZ = "Asia/Tokyo";
+    try {
+      renderPanel(HEALTH_AGENTS.healthy);
+      const list = await within(await screen.findByTestId("health-section-reliability")).findByTestId("health-marker-list");
+      expect(list).toHaveTextContent(formatShortDate("2026-11-03"));
+      expect(list).not.toHaveTextContent(formatShortDate("2026-11-04"));
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+
+  it("says so, with a retry, when the trends of a section fail to load", async () => {
+    let fail = true;
+    server.use(
+      http.get("*/agents/:agentId/health/series", () =>
+        fail ? HttpResponse.json({ error: "internal", message: "Boom" }, { status: 500 }) : undefined,
+      ),
+    );
+    renderPanel(HEALTH_AGENTS.healthy);
+    const section = await screen.findByTestId("health-section-reliability");
+    expect(await within(section).findByTestId("health-series-error")).toBeInTheDocument();
+    // The figures still render; only the trends are missing.
+    expect(within(await measureCard("agentFailureRate")).getByTestId("health-value")).toHaveTextContent("0.4%");
+    fail = false;
+    await userEvent.click(within(section).getByTestId("health-series-retry"));
+    await waitFor(() => expect(within(section).queryByTestId("health-series-error")).toBeNull());
+    expect(await within(section).findAllByTestId("health-sparkline")).not.toHaveLength(0);
+  });
+
   it("marks a critical measure with an image role, not just a tooltip", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     const failure = await measureCard("agentFailureRate");
@@ -205,6 +267,38 @@ describe("AgentHealthPanel", () => {
     expect(screen.queryByTestId("health-open-reports")).toBeNull();
     expect(screen.getByTestId("health-open-compare")).toBeInTheDocument();
     expect(screen.getByTestId("health-export-json")).toBeInTheDocument();
+  });
+
+  it("offers no profile, report links or export against a backend that has none of them yet", async () => {
+    delete mockFlag.__EDDI_MOCK_ACTIVE__;
+    renderPanel(HEALTH_AGENTS.healthy);
+    await screen.findByTestId("health-status");
+    expect(screen.getByTestId("health-open-compare")).toBeInTheDocument();
+    expect(screen.queryByTestId("health-open-profile")).toBeNull();
+    expect(screen.queryByTestId("health-open-reports")).toBeNull();
+    expect(screen.queryByTestId("health-export-json")).toBeNull();
+    expect(screen.queryByTestId("health-export-csv")).toBeNull();
+  });
+
+  it("opens and scrolls to the collapsed panel when a link adds #health", async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      renderWithProviders(
+        <>
+          <Link to="#health" data-testid="to-health">health</Link>
+          <AgentHealthPanel agentId={HEALTH_AGENTS.healthy} latestVersion={8} canEdit />
+        </>,
+      );
+      expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "false");
+      await userEvent.click(screen.getByTestId("to-health"));
+      expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "true");
+      expect(await screen.findByTestId("health-status")).toBeInTheDocument();
+      expect(scroll).toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("explains a whole-panel 403 and disables compare and export", async () => {
@@ -440,6 +534,62 @@ describe("health profile editor", () => {
     expect(green).toHaveValue("5");
   });
 
+  it("removes a threshold row, keeping the other thresholds and the rest of the profile", async () => {
+    let body: { thresholds: Record<string, unknown>; budgets: Record<string, number> } | null = null;
+    server.use(
+      http.put("*/agents/:agentId/health/profile", async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return HttpResponse.json({ ...body, stored: true });
+      }),
+    );
+    renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    await userEvent.click(screen.getByTestId("health-threshold-remove-agentFailureRate"));
+    expect(screen.queryByTestId("health-threshold-agentFailureRate")).toBeNull();
+    expect(screen.getByTestId("health-threshold-resolutionRate")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("health-profile-save"));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(Object.keys(body!.thresholds)).toEqual(["resolutionRate"]);
+    expect(body!.budgets.costPerResolvedUsd).toBe(0.5);
+  });
+
+  it("keeps save and reset disabled while either one is in flight", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    let deletes = 0;
+    let puts = 0;
+    server.use(
+      http.get("*/agents/:agentId/health/profile", () =>
+        HttpResponse.json({ stored: true, preset: "support", critical: [], thresholds: { resolutionRate: { green: 0.7, red: 0.4 } }, budgets: {}, slo: {}, overrides: [] }),
+      ),
+      http.put("*/agents/:agentId/health/profile", async ({ request }) => {
+        puts += 1;
+        await held;
+        return HttpResponse.json({ ...((await request.json()) as object), stored: true });
+      }),
+      http.delete("*/agents/:agentId/health/profile", () => {
+        deletes += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    // Arm the reset first, then save: the armed reset must not fire while the save runs.
+    await userEvent.click(screen.getByTestId("health-profile-reset"));
+    await userEvent.click(screen.getByTestId("health-profile-save"));
+    await waitFor(() => expect(screen.getByTestId("health-profile-save")).toBeDisabled());
+    expect(screen.getByTestId("health-profile-reset")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("health-profile-reset"));
+    fireEvent.submit(screen.getByTestId("health-profile-form"));
+    expect(deletes).toBe(0);
+    release();
+    await waitFor(() => expect(screen.queryByTestId("health-profile-form")).toBeNull());
+    expect(deletes).toBe(0);
+    expect(puts).toBe(1);
+  });
+
   it("lets an override target a whole section", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
@@ -503,6 +653,27 @@ describe("owner report links", () => {
     expect(screen.queryByTestId("health-report-created")).toBeNull();
   });
 
+  it("takes the created link off the screen once that link is revoked, and only then", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    await screen.findByTestId("health-status");
+    await userEvent.click(screen.getByTestId("health-open-reports"));
+    await userEvent.click(await screen.findByTestId("health-report-create"));
+    expect(await screen.findByTestId("health-report-created")).toBeInTheDocument();
+    const list = await screen.findByTestId("health-report-list");
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(1));
+
+    // A failed revoke leaves the link working, so it stays.
+    server.use(http.delete("*/agents/:agentId/health/reports/:id", () => HttpResponse.json({ error: "X", message: "Could not revoke" }, { status: 500 }), { once: true }));
+    await userEvent.click(within(list).getByRole("button"));
+    await userEvent.click(within(list).getByTestId("health-report-revoke-confirm"));
+    expect(await screen.findByTestId("health-report-revoke-error")).toBeInTheDocument();
+    expect(screen.getByTestId("health-report-created")).toBeInTheDocument();
+
+    await userEvent.click(within(screen.getByTestId("health-report-list")).getByRole("button"));
+    await userEvent.click(within(screen.getByTestId("health-report-list")).getByTestId("health-report-revoke-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("health-report-created")).toBeNull());
+  });
+
   it("says so when the server did not return the link", async () => {
     server.use(
       http.post("*/agents/:agentId/health/reports", () => HttpResponse.json({ id: "x", expiresAt: "2026-12-01T00:00:00Z", sections: ["reliability"] }, { status: 201 })),
@@ -542,6 +713,15 @@ describe("owner report links", () => {
 });
 
 describe("export", () => {
+  it("states visibly, not only in a tooltip, that the export ignores the version and origin filters", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    await screen.findByTestId("health-status");
+    const note = screen.getByTestId("health-export-note");
+    expect(note).toBeVisible();
+    expect(note).toHaveTextContent("not the version or origin filters");
+    expect(screen.getByTestId("health-export-json").closest("[role=group]")).toHaveAttribute("aria-describedby", note.id);
+  });
+
   it("goes through the API client with its auth header, and names the file after the agent and period", async () => {
     const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:health");
     const revokeObjectURL = vi.fn();

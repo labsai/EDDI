@@ -1,4 +1,5 @@
 import type { HealthPreset, HealthProfile, MeasureUnit, ProfileViolation } from "./api";
+import { activeLocale } from "./deps";
 
 export const inputClass =
   "h-8 w-full rounded-lg border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -80,13 +81,26 @@ export function unmatchedViolations(violations: ProfileViolation[], draft: Healt
   return violations.filter((v) => !hasField(v.path, draft));
 }
 
+/** The decimal separator of the app's language ("." for English, "," for German); "." when it cannot be told. */
+export function localeDecimalSeparator(locale: string | undefined = activeLocale()): "." | "," {
+  try {
+    const sep = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === "decimal")?.value;
+    return sep === "," ? "," : ".";
+  } catch {
+    return ".";
+  }
+}
+
 /**
  * Reads a decimal a person typed, in either convention: "0.5", "0,5", "1,234.5"
- * and "1.234,5" all work. Returns `undefined` for an empty field and `NaN` for
- * text that is not a number (a lone "-" or "0." is only ever an intermediate
+ * and "1.234,5" all work. One separator followed by exactly three digits
+ * ("1,000", "1.000") could be either, so it is read in the app language's own
+ * convention: "1,000" is a thousand in English and one in German, "1.000" the
+ * other way round. A leading zero ("0,500") is always a decimal. Returns `undefined` for an empty field and `NaN`
+ * for text that is not a number (a lone "-" or "0." is only ever an intermediate
  * state, which is why the text is kept as typed and parsed afterwards).
  */
-export function parseDecimal(text: string): number | undefined {
+export function parseDecimal(text: string, decimalSeparator: "." | "," = localeDecimalSeparator()): number | undefined {
   const t = text.trim().replace(/\s/g, "");
   if (t === "") return undefined;
   const lastComma = t.lastIndexOf(",");
@@ -95,9 +109,13 @@ export function parseDecimal(text: string): number | undefined {
   if (lastComma >= 0 && lastDot >= 0) {
     // The later separator is the decimal one; the other groups thousands.
     normalized = lastComma > lastDot ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
-  } else if (lastComma >= 0) {
-    // A lone comma is a decimal comma, unless there are several (a group separator).
-    normalized = t.split(",").length > 2 ? t.replace(/,/g, "") : t.replace(",", ".");
+  } else if (lastComma >= 0 || lastDot >= 0) {
+    const sep = lastComma >= 0 ? "," : ".";
+    const parts = t.split(sep);
+    // Several: a group separator ("1,234,567", "1.234.567"), never a decimal one.
+    const grouped = parts.length > 2 || (/^[-+]?[1-9]\d{0,2}$/.test(parts[0]!) && /^\d{3}$/.test(parts[1]!) && sep !== decimalSeparator);
+    if (parts.length > 2 && sep === "." && !/^[-+]?\d{1,3}(\.\d{3})+$/.test(t)) return Number.NaN;
+    normalized = grouped ? parts.join("") : t.replace(",", ".");
   }
   if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(normalized)) return Number.NaN;
   return Number(normalized);

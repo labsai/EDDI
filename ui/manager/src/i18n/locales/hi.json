@@ -4524,6 +4524,7 @@
       "overrideReason": "कारण",
       "overrideReasonPlaceholder": "यह मापदंड क्यों अनदेखा किया जा रहा है?",
       "removeOverride": "अपवाद हटाएँ",
+      "removeThreshold": "{{measure}} की सीमा हटाएँ",
       "addOverride": "अपवाद जोड़ें",
       "green": "{{measure}}: हरी सीमा",
       "red": "{{measure}}: लाल सीमा",
@@ -4585,7 +4586,7 @@
       "worse": "बदतर",
       "vsBaseline": "पिछली अवधि की तुलना में",
       "significant": "उल्लेखनीय",
-      "notSignificant": "सामान्य उतार-चढ़ाव के भीतर",
+      "notSignificant": "सार्थक नहीं, या डेटा बहुत कम",
       "untested": "सार्थकता की जाँच नहीं की गई"
     },
     "critical": "अहम मापदंड: एजेंट की स्थिति तय करता है",
@@ -4648,7 +4649,8 @@
       "reviewScope": "केवल उन संस्करणों के सत्र दिखाए जाते हैं जिनमें बातचीत की समीक्षा चालू है।"
     },
     "noTrend": "रुझान के लिए डेटा वाले पर्याप्त दिन नहीं हैं।",
-    "sparklineLabel": "अवधि में {{label}}, {{min}} से {{max}} तक",
+    "seriesError": "रुझान लोड नहीं हो सके।",
+    "sparklineLabel": "अवधि में {{label}}, {{min}} और {{max}} के बीच",
     "noReasons": "किसी मापदंड पर ध्यान देने की ज़रूरत नहीं।",
     "overview": {
       "noStatus": "स्थिति अभी उपलब्ध नहीं",

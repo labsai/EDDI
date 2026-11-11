@@ -279,6 +279,18 @@ export const healthPaths = {
 
 // ── Calls ─────────────────────────────────────────────────────────
 
+/**
+ * Whether the endpoints of later phases can be called: the profile and presets (H4), the owner
+ * report links (H4b) and the export (H5). The backend does not serve them yet — only the mock API
+ * (MSW) answers them — so the panel offers their controls only while the mocks are active
+ * (`__EDDI_MOCK_ACTIVE__`, set by `main.tsx` when it starts the mock worker). Against a real
+ * backend they would only ever answer 404. Return `true` here when those phases land.
+ */
+export function laterHealthPhasesAvailable(): boolean {
+  return typeof window !== "undefined" && (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ === true;
+}
+
+
 /** GET the agent's health summary (contract section 1) for the period, version and origin filter in `q`. */
 export const getAgentHealth = (agentId: string, q: HealthQuery = {}) => api.get<AgentHealth>(healthPaths.health(agentId, q));
 /**

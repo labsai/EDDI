@@ -35,7 +35,8 @@ export function Sparkline({
     label,
     min: formatMeasureValue(g.min, unit),
     max: formatMeasureValue(g.max, unit),
-    defaultValue: "{{label}} over the period, from {{min}} to {{max}}",
+    // The extremes, not the start and the end: the line need not run from one to the other.
+    defaultValue: "{{label}} over the period, between {{min}} and {{max}}",
   });
   return (
     <svg

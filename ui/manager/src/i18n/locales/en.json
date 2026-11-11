@@ -4565,6 +4565,7 @@
       "overrideReason": "Reason",
       "overrideReasonPlaceholder": "Why is this measure ignored?",
       "removeOverride": "Remove override",
+      "removeThreshold": "Remove the {{measure}} threshold",
       "addOverride": "Add override",
       "green": "{{measure}}: green threshold",
       "red": "{{measure}}: red threshold",
@@ -4626,7 +4627,7 @@
       "worse": "worse",
       "vsBaseline": "vs previous period",
       "significant": "significant",
-      "notSignificant": "within normal variation",
+      "notSignificant": "not significant, or too little data",
       "untested": "not tested for significance"
     },
     "critical": "Critical measure: drives the agent's status",
@@ -4689,7 +4690,8 @@
       "reviewScope": "Only sessions of versions with conversation review enabled are listed."
     },
     "noTrend": "Not enough days with data for a trend.",
-    "sparklineLabel": "{{label}} over the period, from {{min}} to {{max}}",
+    "seriesError": "The trends could not be loaded.",
+    "sparklineLabel": "{{label}} over the period, between {{min}} and {{max}}",
     "noReasons": "No measure needs attention.",
     "overview": {
       "noStatus": "Status not available yet",

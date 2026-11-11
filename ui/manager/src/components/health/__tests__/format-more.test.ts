@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { drillForMeasure, drillForResolution } from "../drill";
 import { formatAge, formatDays, formatDelta, formatShortDate, formatSignedPercent, isUntestable, resolutionSplit } from "../format";
 import { chunkMeasures } from "../use-agent-health";
-import { fromInput, parseDecimal, toInput, unmatchedViolations } from "../profile-utils";
+import { fromInput, localeDecimalSeparator, parseDecimal, toInput, unmatchedViolations } from "../profile-utils";
 
 describe("formatDelta with a translated unit", () => {
   it("uses the given percentage-point label", () => {
@@ -104,6 +104,25 @@ describe("parseDecimal", () => {
     ["0.", 0],
   ])("reads %s as %d", (text, value) => {
     expect(parseDecimal(text)).toBe(value);
+  });
+
+  it.each([
+    ["1,000", ".", 1000],
+    ["1.000", ".", 1],
+    ["1,000", ",", 1],
+    ["1.000", ",", 1000],
+    ["1.234.567", ",", 1234567],
+    ["0,500", ".", 0.5],
+    ["0.500", ",", 0.5],
+    ["1,5", ".", 1.5],
+    ["12,25", ".", 12.25],
+  ] as const)("reads the ambiguous %s by the language's decimal separator %s as %d", (text, sep, value) => {
+    expect(parseDecimal(text, sep)).toBe(value);
+  });
+
+  it("takes the decimal separator from the locale", () => {
+    expect(localeDecimalSeparator("en")).toBe(".");
+    expect(localeDecimalSeparator("de")).toBe(",");
   });
 
   it("tells empty from not-a-number", () => {

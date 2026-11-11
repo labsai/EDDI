@@ -42,6 +42,8 @@ function ProfileForm({
   const presets = useHealthPresets();
   const save = useSaveHealthProfile(agentId);
   const reset = useResetHealthProfile(agentId);
+  /** A save or a reset is in flight: both buttons stay disabled and both handlers refuse a second write. */
+  const busy = save.isPending || reset.isPending;
   const [draft, setDraft] = useState<HealthProfile>(() => normalizeProfile(initial));
   const [violations, setViolations] = useState<ProfileViolation[]>([]);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -60,6 +62,8 @@ function ProfileForm({
 
   /** Saves the draft. Unparseable numbers block the save client-side; otherwise a 400 from the server fills `violations` instead of closing the dialog. */
   const submit = () => {
+    // One write at a time: a second submit, or a save while the reset runs, is ignored.
+    if (busy) return;
     setViolations([]);
     if (hasInvalidNumber(draft)) {
       setBadNumber(true);
@@ -202,8 +206,12 @@ function ProfileForm({
             type="button"
             variant={confirmReset ? "destructive" : "outline"}
             size="sm"
-            disabled={reset.isPending}
-            onClick={() => (confirmReset ? reset.mutate(undefined, { onSuccess: onDone }) : setConfirmReset(true))}
+            disabled={busy}
+            onClick={() => {
+              if (busy) return;
+              if (confirmReset) reset.mutate(undefined, { onSuccess: onDone });
+              else setConfirmReset(true);
+            }}
             data-testid="health-profile-reset"
           >
             {confirmReset ? t("health.profile.confirmReset", "Confirm: back to defaults") : t("health.profile.reset", "Reset to defaults")}
@@ -213,7 +221,7 @@ function ProfileForm({
         )}
         <div className="flex gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onDone}>{t("common.cancel", "Cancel")}</Button>
-          <Button type="submit" size="sm" disabled={save.isPending} data-testid="health-profile-save">{t("common.save", "Save")}</Button>
+          <Button type="submit" size="sm" disabled={busy} data-testid="health-profile-save">{t("common.save", "Save")}</Button>
         </div>
       </div>
     </form>

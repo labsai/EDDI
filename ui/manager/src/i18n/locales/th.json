@@ -4524,6 +4524,7 @@
       "overrideReason": "เหตุผล",
       "overrideReasonPlaceholder": "ทำไมจึงละเว้นตัวชี้วัดนี้",
       "removeOverride": "ลบข้อยกเว้น",
+      "removeThreshold": "ลบเกณฑ์ของ {{measure}}",
       "addOverride": "เพิ่มข้อยกเว้น",
       "green": "{{measure}}: เกณฑ์สีเขียว",
       "red": "{{measure}}: เกณฑ์สีแดง",
@@ -4585,7 +4586,7 @@
       "worse": "แย่ลง",
       "vsBaseline": "เทียบกับช่วงก่อนหน้า",
       "significant": "มีนัยสำคัญ",
-      "notSignificant": "อยู่ในความแปรปรวนปกติ",
+      "notSignificant": "ไม่มีนัยสำคัญ หรือข้อมูลน้อยเกินไป",
       "untested": "ไม่ได้ทดสอบนัยสำคัญ"
     },
     "critical": "ตัวชี้วัดสำคัญ: กำหนดสถานะของเอเจนต์",
@@ -4648,7 +4649,8 @@
       "reviewScope": "แสดงเฉพาะเซสชันของเวอร์ชันที่เปิดใช้การตรวจทานการสนทนา"
     },
     "noTrend": "มีวันที่มีข้อมูลไม่พอสำหรับแนวโน้ม",
-    "sparklineLabel": "{{label}} ตลอดช่วงเวลา จาก {{min}} ถึง {{max}}",
+    "seriesError": "โหลดแนวโน้มไม่ได้",
+    "sparklineLabel": "{{label}} ในช่วงเวลานี้ อยู่ระหว่าง {{min}} ถึง {{max}}",
     "noReasons": "ไม่มีตัวชี้วัดที่ต้องให้ความสนใจ",
     "overview": {
       "noStatus": "ยังไม่มีสถานะ",

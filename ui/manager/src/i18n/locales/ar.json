@@ -4716,6 +4716,7 @@
       "overrideReason": "السبب",
       "overrideReasonPlaceholder": "لماذا يُتجاهل هذا المقياس؟",
       "removeOverride": "إزالة الاستثناء",
+      "removeThreshold": "إزالة حدّ {{measure}}",
       "addOverride": "إضافة استثناء",
       "green": "{{measure}}: حد الأخضر",
       "red": "{{measure}}: حد الأحمر",
@@ -4781,7 +4782,7 @@
       "worse": "أسوأ",
       "vsBaseline": "مقارنة بالفترة السابقة",
       "significant": "ذو دلالة",
-      "notSignificant": "ضمن التباين الطبيعي",
+      "notSignificant": "غير دالّ إحصائيًا، أو البيانات غير كافية",
       "untested": "لم يُختبر للدلالة الإحصائية"
     },
     "critical": "مقياس حرج: يحدد حالة الوكيل",
@@ -4844,7 +4845,8 @@
       "reviewScope": "تُعرض فقط جلسات الإصدارات التي فُعّلت فيها مراجعة المحادثات."
     },
     "noTrend": "لا توجد أيام كافية ذات بيانات لرسم اتجاه.",
-    "sparklineLabel": "{{label}} خلال الفترة، من {{min}} إلى {{max}}",
+    "seriesError": "تعذّر تحميل الاتجاهات.",
+    "sparklineLabel": "{{label}} خلال الفترة، بين {{min}} و{{max}}",
     "noReasons": "لا مقياس يحتاج إلى انتباه.",
     "overview": {
       "noStatus": "الحالة غير متاحة بعد",

@@ -59,7 +59,7 @@ export function NumberField({
   );
 }
 
-/** One editable green/red row per measure in the profile's thresholds, in the measure's own unit (ratios as percentages). Violations show beneath the row they belong to. */
+/** One editable green/red row per measure in the profile's thresholds, in the measure's own unit (ratios as percentages), each with a remove button. Violations show beneath the row they belong to. */
 export function ThresholdRows({
   profile,
   onChange,
@@ -80,6 +80,12 @@ export function ThresholdRows({
     const next = { ...profile.thresholds[id], [side]: v };
     onChange({ ...profile, thresholds: { ...profile.thresholds, [id]: next } });
   };
+  /** Drops a measure's threshold entry (the preset's default applies again); other entries and settings stay. */
+  const remove = (id: string) => {
+    const thresholds = { ...profile.thresholds };
+    delete thresholds[id];
+    onChange({ ...profile, thresholds });
+  };
   if (ids.length === 0) {
     return <p className="text-xs text-muted-foreground">{t("health.profile.noThresholds", "No thresholds: the preset's defaults apply.")}</p>;
   }
@@ -89,7 +95,7 @@ export function ThresholdRows({
         const name = labels[id] ?? id;
         return (
           <div key={id} data-testid={`health-threshold-${id}`}>
-            <div className="grid grid-cols-[1fr_6rem_6rem] items-center gap-2 text-xs">
+            <div className="grid grid-cols-[1fr_6rem_6rem_auto] items-center gap-2 text-xs">
               <span className="truncate font-medium">{name}</span>
               <NumberField
                 label={t("health.profile.green", { measure: name, defaultValue: "{{measure}}: green threshold" })}
@@ -107,6 +113,16 @@ export function ThresholdRows({
                 testId={`health-threshold-${id}-red`}
                 onValue={(v) => set(id, "red", v)}
               />
+              <Button
+                type="button"
+                variant="ghost"
+                size="iconSm"
+                aria-label={t("health.profile.removeThreshold", { measure: name, defaultValue: "Remove the {{measure}} threshold" })}
+                onClick={() => remove(id)}
+                data-testid={`health-threshold-remove-${id}`}
+              >
+                <Trash2 />
+              </Button>
             </div>
             <Violations violations={violations} path={`thresholds.${id}`} />
           </div>

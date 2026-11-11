@@ -39,7 +39,9 @@ function Delta({ measure }: { measure: Measure }) {
           ? t("health.delta.significant", "significant")
           : isUntestable(measure)
             ? t("health.delta.untested", "not tested for significance")
-            : t("health.delta.notSignificant", "within normal variation")}
+            : // Not significant also when either period has too few samples to test (contract §12), so the
+              // wording must not claim the change is ordinary variation.
+              t("health.delta.notSignificant", "not significant, or too little data")}
       </span>
     </p>
   );

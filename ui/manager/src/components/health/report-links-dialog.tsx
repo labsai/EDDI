@@ -18,7 +18,8 @@ function ReportsBody({ agentId, canReadQuality }: { agentId: string; canReadQual
   const revoke = useRevokeReportLink(agentId);
   const [days, setDays] = useState<number>(30);
   const [sections, setSections] = useState<string[]>(() => allowedReportSections(canReadQuality).filter((s) => s !== "quality"));
-  const [created, setCreated] = useState<{ url: string | null } | null>(null);
+  // The link just created, by id: revoking that same link takes its URL off the screen.
+  const [created, setCreated] = useState<{ id: string; url: string | null } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   /** Adds or removes a section from the set the new link will show. */
@@ -46,7 +47,7 @@ function ReportsBody({ agentId, canReadQuality }: { agentId: string; canReadQual
         className="space-y-3 rounded-lg border border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
-          create.mutate({ expiresInDays: days, sections }, { onSuccess: (link) => setCreated({ url: link.url ?? null }) });
+          create.mutate({ expiresInDays: days, sections }, { onSuccess: (link) => setCreated({ id: link.id, url: link.url ?? null }) });
         }}
       >
         <label className="flex items-center gap-2 text-xs">
@@ -127,7 +128,13 @@ function ReportsBody({ agentId, canReadQuality }: { agentId: string; canReadQual
                       variant="destructive"
                       size="sm"
                       disabled={revoke.isPending}
-                      onClick={() => revoke.mutate(l.id, { onSettled: () => setConfirming(null) })}
+                      onClick={() =>
+                        revoke.mutate(l.id, {
+                          // A revoked link's URL no longer works: stop offering it for copying.
+                          onSuccess: (_, id) => setCreated((c) => (c && c.id === id ? null : c)),
+                          onSettled: () => setConfirming(null),
+                        })
+                      }
                       data-testid="health-report-revoke-confirm"
                     >
                       {t("health.reports.revokeYes", "Yes, revoke")}

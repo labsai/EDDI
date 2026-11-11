@@ -74,6 +74,9 @@ function reliability(over: Record<string, Partial<Measure>> = {}): HealthSection
   };
 }
 
+/** The band of `outcomeCoverage` under the H3 thresholds (green ≥ 0.8, red ≤ 0.5). */
+const coverageBand = (coverage: number): Measure["band"] => (coverage >= 0.8 ? "GREEN" : coverage <= 0.5 ? "RED" : "AMBER");
+
 function effectiveness(over: Record<string, Partial<Measure>> = {}, coverage = 0.82): HealthSection {
   return {
     restricted: false,
@@ -91,9 +94,11 @@ function effectiveness(over: Record<string, Partial<Measure>> = {}, coverage = 0
         ],
         ...over.resolutionRate,
       }),
-      measure({ id: "escalationRate", label: "Escalation", unit: "ratio", value: 0.08, n: 1820, thresholds: lower(0.1, 0.25), ...over.escalationRate }),
-      measure({ id: "abandonmentRate", label: "Abandonment", unit: "ratio", value: 0.12, n: 1820, band: "AMBER", thresholds: lower(0.1, 0.25), ...over.abandonmentRate }),
-      measure({ id: "outcomeCoverage", label: "Outcome coverage", unit: "ratio", value: coverage, n: 1820, thresholds: higher(0.5, 0.2), band: coverage >= 0.5 ? "GREEN" : "RED", ...over.outcomeCoverage }),
+      // H3: escalation and abandonment have no thresholds until health profiles (H4), so no band either.
+      measure({ id: "escalationRate", label: "Escalation", unit: "ratio", value: 0.08, n: 1820, band: "GREY", ...over.escalationRate }),
+      measure({ id: "abandonmentRate", label: "Abandonment", unit: "ratio", value: 0.12, n: 1820, band: "GREY", ...over.abandonmentRate }),
+      // H3: green from 0.8, red at or below 0.5, amber between; never significant.
+      measure({ id: "outcomeCoverage", label: "Outcome coverage", unit: "ratio", value: coverage, n: 1820, thresholds: higher(0.8, 0.5), band: coverageBand(coverage), ...over.outcomeCoverage }),
     ],
   };
 }
@@ -276,7 +281,10 @@ export const MARKERS: HealthMarker[] = [
   { id: "m-125", at: "2026-10-28T08:00:00Z", kind: "QUOTA_CHANGE", label: "Quota raised" },
 ];
 
-export function days(count: number, end = "2026-11-10"): string[] {
+/** The last day of every mocked period (the fixtures' "today"). */
+export const MOCK_TODAY = "2026-11-10";
+
+export function days(count: number, end = MOCK_TODAY): string[] {
   const last = Date.parse(`${end}T00:00:00Z`);
   return Array.from({ length: count }, (_, i) => new Date(last - (count - 1 - i) * 86_400_000).toISOString().slice(0, 10));
 }
@@ -291,6 +299,18 @@ export function seriesFor(measureId: string, base: number, unit: Series["unit"],
     return { day, value: Math.max(0, base * (1 + wobble)), n: 100 + i };
   });
   return { measure: measureId, group: null, unit, points };
+}
+
+/**
+ * A period of `count` days ending {@link MOCK_TODAY}, and the baseline of equal length before it,
+ * as the contract computes them for `period=7d|30d|90d`.
+ */
+export function periodFor(count: number): { period: AgentHealth["period"]; baseline: AgentHealth["baseline"] } {
+  const span = days(count * 2);
+  return {
+    period: { from: span[count]!, to: span[span.length - 1]!, days: count },
+    baseline: { from: span[0]!, to: span[count - 1]! },
+  };
 }
 
 // ── Compare, portfolio, sessions ──────────────────────────────────
@@ -360,7 +380,7 @@ export const SESSION_ROWS: HealthSessionRow[] = [
   // `sessionNo` is the step index the session starts at: 0 for a conversation's first session, the index of its first turn for a later one.
   { conversationId: "conv-aa", sessionNo: 0, startedAt: "2026-11-09T10:00:00Z", endedAt: "2026-11-09T10:05:00Z", agentVersion: 8, origin: "api", engaged: true, outcome: "ABANDONED", evidence: "inferred", provisional: false, turns: 6, costUsd: 0.031, failures: 1 },
   { conversationId: "conv-bb", sessionNo: 0, startedAt: "2026-11-09T11:00:00Z", endedAt: "2026-11-09T11:08:00Z", agentVersion: 8, origin: "v1", engaged: true, outcome: "ASSUMED_RESOLVED", evidence: "silence", provisional: false, turns: 4, costUsd: 0.02, failures: 0 },
-  { conversationId: "conv-cc", sessionNo: 17, startedAt: "2026-11-09T12:00:00Z", endedAt: null, agentVersion: 8, origin: "email", engaged: true, outcome: "RESOLVED", evidence: "external_event", provisional: true, turns: 9, costUsd: null, failures: 0 },
+  { conversationId: "conv-cc", sessionNo: 17, startedAt: "2026-11-09T12:00:00Z", endedAt: null, agentVersion: 8, origin: "email", engaged: true, outcome: "RESOLVED", evidence: "self_reported", provisional: true, turns: 9, costUsd: null, failures: 0 },
   { conversationId: "conv-dd", sessionNo: 3, startedAt: "2026-11-09T13:00:00Z", endedAt: "2026-11-09T13:02:00Z", agentVersion: 7, origin: "api", engaged: true, outcome: "ASSUMED_RESOLVED", evidence: "agent_closed", provisional: false, turns: 3, costUsd: 0.011, failures: 0 },
   // An origin that is not judged: no outcome, no evidence. Listed only when that origin is asked for.
   { conversationId: "conv-ee", sessionNo: 0, startedAt: "2026-11-09T14:00:00Z", endedAt: "2026-11-09T14:01:00Z", agentVersion: 8, origin: "schedule", engaged: true, outcome: null, evidence: null, provisional: false, turns: 2, costUsd: 0.004, failures: 0 },

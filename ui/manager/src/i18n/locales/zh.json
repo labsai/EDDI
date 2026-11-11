@@ -4524,6 +4524,7 @@
       "overrideReason": "原因",
       "overrideReasonPlaceholder": "为什么忽略此指标？",
       "removeOverride": "移除例外",
+      "removeThreshold": "移除 {{measure}} 的阈值",
       "addOverride": "添加例外",
       "green": "{{measure}}：绿色阈值",
       "red": "{{measure}}：红色阈值",
@@ -4585,7 +4586,7 @@
       "worse": "更差",
       "vsBaseline": "与上一时间段相比",
       "significant": "显著",
-      "notSignificant": "在正常波动范围内",
+      "notSignificant": "不显著，或数据不足",
       "untested": "未做显著性检验"
     },
     "critical": "关键指标：决定智能体的状态",
@@ -4648,7 +4649,8 @@
       "reviewScope": "仅列出已启用对话审阅的版本的会话。"
     },
     "noTrend": "有数据的天数不足，无法显示趋势。",
-    "sparklineLabel": "{{label}}在该时间段内，从 {{min}} 到 {{max}}",
+    "seriesError": "无法加载趋势。",
+    "sparklineLabel": "{{label}} 在此期间介于 {{min}} 和 {{max}} 之间",
     "noReasons": "没有需要关注的指标。",
     "overview": {
       "noStatus": "状态暂不可用",

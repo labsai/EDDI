@@ -4524,6 +4524,7 @@
       "overrideReason": "이유",
       "overrideReasonPlaceholder": "이 지표를 무시하는 이유는 무엇인가요?",
       "removeOverride": "예외 제거",
+      "removeThreshold": "{{measure}} 임계값 제거",
       "addOverride": "예외 추가",
       "green": "{{measure}}: 초록 임계값",
       "red": "{{measure}}: 빨강 임계값",
@@ -4585,7 +4586,7 @@
       "worse": "악화",
       "vsBaseline": "이전 기간 대비",
       "significant": "유의미",
-      "notSignificant": "정상 변동 범위 내",
+      "notSignificant": "유의하지 않음 또는 데이터 부족",
       "untested": "유의성 검정 안 함"
     },
     "critical": "핵심 지표: 에이전트의 상태를 좌우합니다",
@@ -4648,7 +4649,8 @@
       "reviewScope": "대화 검토가 켜진 버전의 세션만 표시됩니다."
     },
     "noTrend": "추세를 보여 줄 만큼 데이터가 있는 날이 충분하지 않습니다.",
-    "sparklineLabel": "기간 중 {{label}}, {{min}}에서 {{max}}까지",
+    "seriesError": "추세를 불러올 수 없습니다.",
+    "sparklineLabel": "기간 중 {{label}}: {{min}}~{{max}} 범위",
     "noReasons": "주의가 필요한 지표가 없습니다.",
     "overview": {
       "noStatus": "아직 상태를 사용할 수 없습니다",

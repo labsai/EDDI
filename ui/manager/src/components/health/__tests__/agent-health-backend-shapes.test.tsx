@@ -67,6 +67,9 @@ describe("changes that cannot be tested for significance", () => {
     const failures = await measureCard("agentFailureRate");
     // Testable and not significant is the other reading.
     expect(within(failures).getByTestId("health-delta")).toHaveAttribute("data-significance", "variation");
+    // Not significant can also mean too few samples in either period: the text must not claim ordinary variation.
+    expect(within(failures).getByTestId("health-delta")).toHaveTextContent("not significant, or too little data");
+    expect(within(failures).getByTestId("health-delta")).not.toHaveTextContent("normal variation");
     const resolution = await measureCard("resolutionRate");
     expect(within(resolution).getByTestId("health-delta")).toHaveAttribute("data-significance", "significant");
   });
@@ -217,5 +220,20 @@ describe("version compare", () => {
     renderWithProviders(<CompareDialog open onClose={() => {}} agentId="a1" latestVersion={8} />);
     await screen.findByTestId("health-compare-table");
     expect(screen.queryByTestId("health-compare-no-turns")).toBeNull();
+  });
+});
+
+describe("compare version pickers", () => {
+  it("keeps the derived older version selectable when the newer one sits at the bottom of the capped list", async () => {
+    renderWithProviders(<CompareDialog open onClose={() => {}} agentId="a1" latestVersion={30} />);
+    const to = screen.getByTestId("health-compare-to") as HTMLSelectElement;
+    const from = screen.getByTestId("health-compare-from") as HTMLSelectElement;
+    // The newer list is capped at 25 versions: v30 … v6.
+    await userEvent.selectOptions(to, "6");
+    expect(from.value).toBe("5");
+    const older = Array.from(from.options).map((o) => o.value);
+    expect(older[0]).toBe("5");
+    expect(older).toContain("1");
+    expect(older).not.toContain("6");
   });
 });

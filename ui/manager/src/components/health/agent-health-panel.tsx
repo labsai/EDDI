@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight, GitCompareArrows, HeartPulse, LayoutList, Link2, SlidersHorizontal } from "lucide-react";
-import type { HealthQuery, MeasureUnit } from "./api";
+import { laterHealthPhasesAvailable, type HealthQuery, type MeasureUnit } from "./api";
 import { useAgentHealth } from "./use-agent-health";
 import { isApiError, Button, Skeleton, getErrorMessage } from "./deps";
 import { ChecksStrip } from "./checks-strip";
@@ -48,6 +48,8 @@ type Dialog = "compare" | "profile" | "reports" | "suggestions" | null;
  * `canEdit` gates the profile and the report links (the backend enforces it
  * too) and the sessions drill-down, which needs EDIT on top of review being
  * enabled; everything else needs only the VIEW that reaching this page implies.
+ * The profile, report links and export are hidden until their backend phases
+ * land (see `laterHealthPhasesAvailable`).
  */
 export function AgentHealthPanel({
   agentId,
@@ -61,14 +63,19 @@ export function AgentHealthPanel({
   defaultOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  const { hash } = useLocation();
+  const { hash, key: locationKey } = useLocation();
   const sectionRef = useRef<HTMLElement>(null);
   // `#health` (the overview's link) opens the section and brings it into view.
   const linked = hash === "#health";
   const [open, setOpen] = useState(() => linked || readOpen(defaultOpen));
+  // Also when the panel is already mounted and collapsed: navigating to `#health`
+  // (again — each navigation has its own location key) reopens it, which enables the
+  // query, and scrolls to it. Opening by link is not remembered as a preference.
   useEffect(() => {
-    if (linked) sectionRef.current?.scrollIntoView?.({ block: "start" });
-  }, [linked]);
+    if (!linked) return;
+    setOpen(true);
+    sectionRef.current?.scrollIntoView?.({ block: "start" });
+  }, [linked, locationKey]);
   const [filters, setFilters] = useState<HealthFilterState>({ period: "30d", version: null, origins: [] });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [drill, setDrill] = useState<DrillFilter | null>(null);
@@ -102,6 +109,8 @@ export function AgentHealthPanel({
   const forbidden = health.isError && isApiError(health.error) && health.error.status === 403;
   const canReadQuality = data?.sections.quality ? !data.sections.quality.restricted : false;
   const bodyId = useId();
+  // Profile (H4), report links (H4b) and export (H5) have no backend endpoint yet.
+  const laterPhases = laterHealthPhasesAvailable();
 
   return (
     <section ref={sectionRef} id="health" className="rounded-xl border border-border bg-card p-4" data-testid="agent-health-panel">
@@ -123,7 +132,7 @@ export function AgentHealthPanel({
                 <GitCompareArrows aria-hidden="true" />
                 {t("health.compare.open", "Compare versions")}
               </Button>
-              {canEdit && (
+              {canEdit && laterPhases && (
                 <>
                   <Button size="sm" variant="outline" onClick={() => setDialog("profile")} data-testid="health-open-profile">
                     <SlidersHorizontal aria-hidden="true" />
@@ -135,7 +144,7 @@ export function AgentHealthPanel({
                   </Button>
                 </>
               )}
-              <ExportButtons agentId={agentId} period={filters.period} disabled={forbidden} />
+              {laterPhases && <ExportButtons agentId={agentId} period={filters.period} disabled={forbidden} />}
             </div>
           </div>
 
@@ -187,8 +196,8 @@ export function AgentHealthPanel({
       <SessionsDialog open={drill !== null} onClose={() => setDrill(null)} agentId={agentId} query={query} filter={drill} canEdit={canEdit} />
       <OutcomeSuggestionsDialog open={dialog === "suggestions"} onClose={() => setDialog(null)} agentId={agentId} />
       <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} agentId={agentId} latestVersion={latestVersion} />
-      {canEdit && <ProfileDialog open={dialog === "profile"} onClose={() => setDialog(null)} agentId={agentId} info={info} />}
-      {canEdit && <ReportLinksDialog open={dialog === "reports"} onClose={() => setDialog(null)} agentId={agentId} canReadQuality={canReadQuality} />}
+      {canEdit && laterPhases && <ProfileDialog open={dialog === "profile"} onClose={() => setDialog(null)} agentId={agentId} info={info} />}
+      {canEdit && laterPhases && <ReportLinksDialog open={dialog === "reports"} onClose={() => setDialog(null)} agentId={agentId} canReadQuality={canReadQuality} />}
     </section>
   );
 }

@@ -4524,6 +4524,7 @@
       "overrideReason": "Begründung",
       "overrideReasonPlaceholder": "Warum wird dieser Messwert ignoriert?",
       "removeOverride": "Ausnahme entfernen",
+      "removeThreshold": "Schwellenwert für {{measure}} entfernen",
       "addOverride": "Ausnahme hinzufügen",
       "green": "{{measure}}: Schwellenwert für Grün",
       "red": "{{measure}}: Schwellenwert für Rot",
@@ -4585,7 +4586,7 @@
       "worse": "schlechter",
       "vsBaseline": "gegenüber dem Vorzeitraum",
       "significant": "signifikant",
-      "notSignificant": "im normalen Schwankungsbereich",
+      "notSignificant": "nicht signifikant oder zu wenige Daten",
       "untested": "nicht auf Signifikanz geprüft"
     },
     "critical": "Kritischer Messwert: bestimmt den Status des Agents",
@@ -4648,7 +4649,8 @@
       "reviewScope": "Es werden nur Sitzungen von Versionen aufgelistet, bei denen die Konversationsprüfung aktiviert ist."
     },
     "noTrend": "Zu wenige Tage mit Daten für einen Trend.",
-    "sparklineLabel": "{{label}} im Zeitraum, von {{min}} bis {{max}}",
+    "seriesError": "Die Verläufe konnten nicht geladen werden.",
+    "sparklineLabel": "{{label}} im Zeitraum, zwischen {{min}} und {{max}}",
     "noReasons": "Kein Messwert braucht Aufmerksamkeit.",
     "overview": {
       "noStatus": "Status noch nicht verfügbar",

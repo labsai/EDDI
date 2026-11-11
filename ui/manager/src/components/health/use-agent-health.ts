@@ -69,7 +69,8 @@ export function useAgentHealth(agentId: string, query: HealthQuery, enabled = tr
     queryFn: () => getAgentHealth(agentId, normalize(query)),
     enabled,
     staleTime: STALE_MS,
-    placeholderData: keepPreviousData,
+    // No placeholder: another period, version or origin set shows the loading state,
+    // never the previous selection's numbers under the new filters.
     retry: false,
   });
 }
@@ -85,6 +86,10 @@ export interface HealthSeriesResult {
   byMeasure: Map<string, SeriesPoint[]>;
   markers: HealthMarker[];
   isLoading: boolean;
+  /** At least one of the series calls failed; `byMeasure` then holds only the ones that answered. */
+  isError: boolean;
+  /** Retries the failed series calls. */
+  retry: () => void;
 }
 
 /**
@@ -108,7 +113,16 @@ export function useHealthSeries(agentId: string, measures: readonly string[], qu
     for (const s of r.data?.series ?? []) if (!s.group) byMeasure.set(s.measure, s.points);
     for (const m of r.data?.markers ?? []) markers.set(m.id, m);
   }
-  return { byMeasure, markers: [...markers.values()], isLoading: results.some((r) => r.isLoading) };
+  const failed = results.filter((r) => r.isError);
+  return {
+    byMeasure,
+    markers: [...markers.values()],
+    isLoading: results.some((r) => r.isLoading),
+    isError: failed.length > 0,
+    retry: () => {
+      for (const r of failed) void r.refetch();
+    },
+  };
 }
 
 /**

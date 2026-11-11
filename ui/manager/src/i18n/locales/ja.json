@@ -4524,6 +4524,7 @@
       "overrideReason": "理由",
       "overrideReasonPlaceholder": "この指標を無視する理由は？",
       "removeOverride": "例外を削除",
+      "removeThreshold": "{{measure}} のしきい値を削除",
       "addOverride": "例外を追加",
       "green": "{{measure}}: 緑のしきい値",
       "red": "{{measure}}: 赤のしきい値",
@@ -4585,7 +4586,7 @@
       "worse": "悪化",
       "vsBaseline": "前の期間との比較",
       "significant": "有意",
-      "notSignificant": "通常の変動の範囲内",
+      "notSignificant": "有意ではない、またはデータ不足",
       "untested": "有意性は未検定"
     },
     "critical": "重要な指標: エージェントのステータスを左右します",
@@ -4648,7 +4649,8 @@
       "reviewScope": "会話レビューが有効なバージョンのセッションのみ表示されます。"
     },
     "noTrend": "傾向を示すには、データのある日数が足りません。",
-    "sparklineLabel": "期間中の{{label}}（{{min}} から {{max}}）",
+    "seriesError": "推移を読み込めませんでした。",
+    "sparklineLabel": "期間中の{{label}}：{{min}}〜{{max}}の範囲",
     "noReasons": "注意が必要な指標はありません。",
     "overview": {
       "noStatus": "ステータスはまだありません",
