@@ -62,10 +62,9 @@ public record DkimResult(String domain, String selector, String algorithm, Outco
          */
         TESTING,
         /**
-         * Not checked: its {@code d=} can never align with the {@code From} domain, so
-         * no outcome could authenticate the sender, and its key is not looked up — an
-         * attacker's domain must not be able to make EDDI query its DNS, or turn a mail
-         * into a day of retries with a key server that times out.
+         * Not checked: its {@code d=} cannot align with the {@code From} domain and a
+         * signature that can already verifies, so no outcome of this one could change
+         * the verdict; its key is not looked up.
          */
         SKIPPED
     }

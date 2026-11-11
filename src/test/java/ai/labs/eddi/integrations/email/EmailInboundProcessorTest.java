@@ -634,6 +634,23 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("a Gmail-shaped reply (In-Reply-To/References not signed) still continues its sender's conversation")
+        void gmailReplyContinues() throws Exception {
+            // Gmail's h=: no in-reply-to, no references, no content-type.
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("mime-version", "date", "message-id", "subject", "from", "to", "cc", "reply-to"), List.of(),
+                            List.of(), "g1"));
+            var ctx = context(Map.of("correlateThreads", "true"));
+            String root = "<root-gmail@supplier.com>";
+            processor.process(ctx, EmailTestMail.mail().messageId(root).polled(1), Instant.now());
+            handlers.get(0).onComplete(snapshot(ConversationState.READY, 0));
+
+            processor.process(ctx, EmailTestMail.mail().header("In-Reply-To: " + root).header("References: " + root).polled(2), Instant.now());
+
+            assertEquals(List.of("conv-1", "conv-1"), sayConversations);
+        }
+
+        @Test
         @DisplayName("each mail is its own conversation by default")
         void defaultNewConversation() throws Exception {
             String root = "<r@supplier.com>";

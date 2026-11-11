@@ -174,7 +174,7 @@ Targets: a target's `triggers` match the **plus-tag** of the address a mail was 
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
 nothing matching means the default target. `observeMode` targets are refused. A `GROUP` target starts a group
 discussion with the rendered input as its question (no attachments). For an authenticated mail only what its DKIM
-signature covers counts: an unsigned `Subject` routes nothing, and only the signed `To`/`Cc` instances carry a
+signature covers routes: an unsigned `Subject` routes nothing, and only the signed `To`/`Cc` instances carry a
 plus-tag ([Identity](#identity)).
 
 ## What the agent sees
@@ -233,13 +233,23 @@ addresses. Forwarded and mailing-list mail often breaks DKIM and arrives unauthe
 never sees the connecting IP). Details: [security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
 
 **A signature covers only some headers, and anyone holding a signed mail can deliver it again.** So for an
-authenticated mail EDDI reads only the headers its signature covers: an unsigned `Subject`, `In-Reply-To`,
-`References`, `Reply-To` or `Date` counts as absent, and only the signed `To`/`Cc` instances count — the mail then
-goes to the default target, starts a new conversation, and is answered at its `From`. A `Content-Type`,
-`Content-Transfer-Encoding` or `MIME-Version` the signature does not cover makes it unauthenticated
-(`eddi.email.dkim.require-signed-content-headers`), as does a signature older than seven days at delivery
-(`eddi.email.dkim.max-signature-age`). A copy of an already processed signed mail is refused as a duplicate, even
-under a new Message-ID when the Message-ID is unsigned.
+authenticated mail, the headers that choose where it goes count only when its signature covers them: an unsigned
+`Subject` is no subject (no trigger-word routing), an unsigned `Reply-To` is ignored (the reply goes to the `From`),
+and only the signed `To`/`Cc` instances carry a plus-tag. `In-Reply-To` and `References` are used unsigned — Gmail does
+not sign them, and a continuation only ever reaches a conversation of the same authenticated sender. A
+`Content-Type`, `Content-Transfer-Encoding` or `MIME-Version` added above the signed ones makes the mail
+unauthenticated; an unsigned `multipart/*` `Content-Type` (Gmail does not sign it) is accepted only when the signed
+body begins with its boundary, and `eddi.email.dkim.require-signed-content-headers=true` refuses it altogether — the
+hardened setting where every sender signs `Content-Type`, as Microsoft 365 does. A signature older than seven days at
+delivery is not authenticated (`eddi.email.dkim.max-signature-age`), and a copy of an already processed signed mail is
+refused as a duplicate, even under a new Message-ID when the Message-ID is unsigned.
+
+What remains (details in [security.md](security.md#mail-sender-authentication--dkim-and-dmarc)): a single-part mail from
+a signer that does not sign `Content-Type`, whose body begins at its first byte with text the attacker had the sender
+quote, can be re-labelled as a multipart with that text's boundary; the charset of an unsigned single-part type and an
+unsigned transfer encoding can be changed (the signed bytes are re-decoded, nothing is added); and the mailbox's own
+address is not required in the signed `To`/`Cc` — there is no `requireAddressed` setting, because distribution lists,
+aliases and BCC deliver mail that does not name it.
 
 ## Threads
 

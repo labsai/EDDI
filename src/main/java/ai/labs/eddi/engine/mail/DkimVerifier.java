@@ -129,14 +129,14 @@ public class DkimVerifier {
      *            empty), or null
      */
     public record Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure,
-            Map<String, List<String>> headers) {
+            Map<String, List<String>> headers, String firstBodyLine) {
         public Verification {
             results = results == null ? List.of() : List.copyOf(results);
             headers = headers == null ? Map.of() : Map.copyOf(headers);
         }
 
         public Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure) {
-            this(results, signaturesFound, fromFieldCount, messageFailure, Map.of());
+            this(results, signaturesFound, fromFieldCount, messageFailure, Map.of(), null);
         }
 
         /**
@@ -221,14 +221,18 @@ public class DkimVerifier {
     }
 
     /**
-     * Verifies every DKIM signature whose {@code d=} {@code mayAuthenticate}
-     * accepts; the others are {@link Outcome#SKIPPED}, with no DNS lookup.
+     * Verifies the signatures whose {@code d=} {@code alignable} accepts first — so
+     * their keys are fetched before the message's lookup budget can be spent on
+     * others — and the rest only when none of those passed. Once an alignable
+     * signature passes, the remaining non-alignable ones are
+     * {@link Outcome#SKIPPED}: no outcome of theirs could change the verdict.
+     * Results stay in header order.
      *
-     * @param mayAuthenticate
-     *            whether a signing domain could authenticate the sender at all
-     *            (alignment with {@code From}, judged without DNS)
+     * @param alignable
+     *            whether a signing domain could align with {@code From} at all
+     *            (judged without DNS)
      */
-    public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt, Predicate<String> mayAuthenticate) {
+    public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt, Predicate<String> alignable) {
         long at = (evaluatedAt != null ? evaluatedAt : clock.instant()).getEpochSecond();
         if (raw == null || raw.length == 0) {
             return new Verification(List.of(), 0, 0, "the message is empty");
@@ -243,12 +247,64 @@ public class DkimVerifier {
         }
         int fromCount = message.indexes.getOrDefault("from", List.of()).size();
         List<Integer> signatures = message.indexes.getOrDefault("dkim-signature", List.of());
-        List<DkimResult> results = new ArrayList<>();
+        int evaluated = Math.min(signatures.size(), MAX_SIGNATURES);
+        DkimResult[] results = new DkimResult[evaluated];
         Map<Canon, byte[]> bodyHashes = new EnumMap<>(Canon.class);
-        for (int i = 0; i < signatures.size() && i < MAX_SIGNATURES; i++) {
-            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget, at, mayAuthenticate));
+        boolean alignedPassed = false;
+        for (int i = 0; i < evaluated; i++) {
+            String domain = signingDomain(message, signatures.get(i));
+            if (domain != null && alignable.test(domain)) {
+                results[i] = verifyOne(message, signatures.get(i), bodyHashes, budget, at);
+                alignedPassed |= results[i].passed();
+            }
         }
-        return new Verification(results, signatures.size(), fromCount, null, reportedHeaders(message));
+        for (int i = 0; i < evaluated; i++) {
+            if (results[i] != null) {
+                continue;
+            }
+            results[i] = alignedPassed
+                    ? new DkimResult(signingDomain(message, signatures.get(i)), null, null, Outcome.SKIPPED,
+                            "not checked: a signature of a domain aligned with From already verifies")
+                    : verifyOne(message, signatures.get(i), bodyHashes, budget, at);
+        }
+        return new Verification(List.of(results), signatures.size(), fromCount, null, reportedHeaders(message), firstBodyLine(message));
+    }
+
+    /** The validated {@code d=} of a signature field, or null. */
+    private static String signingDomain(ParsedMessage message, int fieldIndex) {
+        String value = message.fields.get(fieldIndex).value();
+        if (value.length() > MAX_SIGNATURE_FIELD_LENGTH) {
+            return null;
+        }
+        TagList tags = TagList.parse(value);
+        return tags == null ? null : validDomain(tags.value("d"));
+    }
+
+    /** Characters of the first body line kept for the caller. */
+    private static final int MAX_FIRST_LINE = 1000;
+
+    /**
+     * The body's first non-blank line, trailing whitespace removed, as ISO-8859-1
+     * text — the bytes the body hash covers — or null when the body is blank.
+     */
+    private static String firstBodyLine(ParsedMessage message) {
+        byte[] b = message.bytes;
+        int pos = message.bodyStart;
+        while (pos < b.length) {
+            int end = pos;
+            while (end < b.length && b[end] != '\r' && b[end] != '\n') {
+                end++;
+            }
+            int contentEnd = end;
+            while (contentEnd > pos && (b[contentEnd - 1] == ' ' || b[contentEnd - 1] == '\t')) {
+                contentEnd--;
+            }
+            if (contentEnd > pos) {
+                return new String(b, pos, Math.min(contentEnd - pos, MAX_FIRST_LINE), StandardCharsets.ISO_8859_1);
+            }
+            pos = end + 1;
+        }
+        return null;
     }
 
     /**
@@ -279,7 +335,7 @@ public class DkimVerifier {
     // ---------------------------------------------------------------------
 
     private DkimResult verifyOne(ParsedMessage message, int fieldIndex, Map<Canon, byte[]> bodyHashes, MailDnsResolver.Budget budget,
-                                 long evaluatedAtSecond, Predicate<String> mayAuthenticate) {
+                                 long evaluatedAtSecond) {
         Field field = message.fields.get(fieldIndex);
         String value = field.value();
         if (value.length() > MAX_SIGNATURE_FIELD_LENGTH) {
@@ -367,10 +423,6 @@ public class DkimVerifier {
         byte[] claimedBodyHash = base64(tags.value("bh"));
         if (claimedBodyHash == null || claimedBodyHash.length != 32) {
             return sig.fail("bh= is not a SHA-256 hash");
-        }
-        if (!mayAuthenticate.test(domain)) {
-            return new DkimResult(domain, selector, algorithmText, Outcome.SKIPPED,
-                    "not checked: the signing domain cannot align with the From domain", signedHeaders, null, null);
         }
 
         // The body first: local, and a tampered message then spends no lookup.

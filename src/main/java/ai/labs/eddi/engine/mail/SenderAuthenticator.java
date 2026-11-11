@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Who sent this mail, as far as DNS and cryptography can say: EDDI's own DKIM
@@ -47,22 +48,20 @@ import java.util.Set;
  * {@code References}, {@code Reply-To}, {@code Content-Type},
  * {@code Content-Transfer-Encoding} or {@code MIME-Version}
  * ({@link MailAnomaly#DUPLICATE_SINGLETON_HEADER}). Two more conditions bind
- * the pass to the mail as it was signed: an unsigned instance of a header that
- * decides how the body is read refuses it
- * ({@code eddi.email.dkim.require-signed-content-headers},
- * {@link #contentHeadersRefusal}), and so does a signature older than
+ * the pass to the mail as it was signed: an unsigned header that decides how
+ * the body is read must not be able to change what is read
+ * ({@link #contentHeadersRefusal},
+ * {@code eddi.email.dkim.require-signed-content-headers} for the strict rule),
+ * and the signature may be no older than
  * {@code eddi.email.dkim.max-signature-age} at delivery (a replay). The pass
- * then carries the {@link SignedHeaders} its signature covers, and
- * {@link InboundMail#signedView()} reads nothing else.</li>
- * <li><b>{@link Verdict#PASS_UNALIGNED}</b>: a signature passes for a domain
- * that aligns with {@code From} under relaxed but not under the strict
- * alignment the domain's DMARC record asks for (or assumed when that record
- * could not be read). A signature by an unrelated domain (a mailing list, a
- * forwarder, a bulk sender signing as itself) is not checked at all.</li>
+ * then carries the {@link SignedHeaders} its signature covers, which
+ * {@link InboundMail#signedView()} applies.</li>
+ * <li><b>{@link Verdict#PASS_UNALIGNED}</b>: a signature passes, but for
+ * another domain (a mailing list, a forwarder, a bulk sender signing as
+ * itself). Signatures that could align are verified first; a temporary failure
+ * of one that never could does not make the result temporary.</li>
  * <li><b>{@link Verdict#FAIL}</b>: signatures exist and none passes, the
- * message cannot be read, or {@code From} is missing or ambiguous — and also
- * when no signature is by a domain that could align with {@code From}: those
- * are {@link DkimResult.Outcome#SKIPPED}, their keys never looked up.</li>
+ * message cannot be read, or {@code From} is missing or ambiguous.</li>
  * <li><b>{@link Verdict#NONE}</b>: no signature, or only signatures under a key
  * in testing mode (RFC 6376 §3.6.1: treat as unsigned).</li>
  * </ul>
@@ -120,19 +119,19 @@ public class SenderAuthenticator {
             @ConfigProperty(name = "eddi.email.dkim.max-delivery-age", defaultValue = "7d") Duration maxDeliveryAge,
             @ConfigProperty(name = "eddi.email.dkim.max-signature-age", defaultValue = "7d") Duration maxSignatureAge,
             @ConfigProperty(name = "eddi.email.dkim.require-signed-content-headers",
-                            defaultValue = "true") boolean requireSignedContentHeaders) {
+                            defaultValue = "false") boolean requireSignedContentHeaders) {
         this(dkim, dmarc, dns, meterRegistry, maxDeliveryAge, maxSignatureAge, requireSignedContentHeaders, Clock.systemUTC());
     }
 
     /** Defaults: 7-day maximum delivery and signature ages, the system clock. */
     public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry) {
-        this(dkim, dmarc, dns, meterRegistry, DEFAULT_MAX_DELIVERY_AGE, DEFAULT_MAX_SIGNATURE_AGE, true, Clock.systemUTC());
+        this(dkim, dmarc, dns, meterRegistry, DEFAULT_MAX_DELIVERY_AGE, DEFAULT_MAX_SIGNATURE_AGE, false, Clock.systemUTC());
     }
 
     /** For tests: any maximum delivery age, any clock; the other defaults. */
     public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry,
             Duration maxDeliveryAge, Clock clock) {
-        this(dkim, dmarc, dns, meterRegistry, maxDeliveryAge, DEFAULT_MAX_SIGNATURE_AGE, true, clock);
+        this(dkim, dmarc, dns, meterRegistry, maxDeliveryAge, DEFAULT_MAX_SIGNATURE_AGE, false, clock);
     }
 
     /**
@@ -143,9 +142,11 @@ public class SenderAuthenticator {
      *            {@code t=} or else the signed {@code Date}; zero disables the
      *            bound
      * @param requireSignedContentHeaders
-     *            whether an aligned pass needs every {@code Content-Type},
-     *            {@code Content-Transfer-Encoding} and {@code MIME-Version}
-     *            instance signed (see {@link #contentHeadersRefusal})
+     *            the strict rule: a multipart mail whose signature does not cover
+     *            {@code Content-Type}, or a single-part one with an unsigned
+     *            non-identity {@code Content-Transfer-Encoding}, is not an aligned
+     *            pass; false (the default) applies the structural check instead
+     *            (see {@link #contentHeadersRefusal})
      */
     public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry,
             Duration maxDeliveryAge, Duration maxSignatureAge, boolean requireSignedContentHeaders, Clock clock) {
@@ -251,14 +252,15 @@ public class SenderAuthenticator {
         if (raw.length != parsed.rawSize()) {
             return fail("the raw bytes are not the message that was parsed", false, List.of());
         }
-        // Alignment first, without DNS: a signature whose d= could never align with
-        // From cannot authenticate anyone, so its key is not looked up (an attacker
-        // must not make EDDI query their DNS, or defer a mail for a day with a key
-        // server that times out). Relaxed is the widest mode; the DMARC record can
-        // only narrow it.
+        // Alignment is judged first, without DNS (relaxed is the widest mode; the
+        // DMARC record can only narrow it). Signatures that could align are verified
+        // first, so the lookup budget goes to them; the others are still verified
+        // (PASS_UNALIGNED stays a verdict) unless an alignable one already passed.
+        // A temporary failure of a signature that can never align cannot make the
+        // mail wait: no later answer of an attacker's DNS could authenticate it.
         String alignableFrom = parsed.from() == null ? null : parsed.from().domain();
-        DkimVerifier.Verification verification = dkim.verify(raw, budget, evaluatedAt,
-                domain -> alignableFrom != null && dmarc.aligned(domain, alignableFrom, DmarcAlignment.Mode.RELAXED));
+        Predicate<String> alignable = domain -> alignableFrom != null && dmarc.aligned(domain, alignableFrom, DmarcAlignment.Mode.RELAXED);
+        DkimVerifier.Verification verification = dkim.verify(raw, budget, evaluatedAt, alignable);
         if (verification.messageFailure() != null) {
             return fail(verification.messageFailure(), false, List.of());
         }
@@ -268,13 +270,9 @@ public class SenderAuthenticator {
         }
         List<DkimResult> checked = results.stream().filter(r -> r.outcome() != Outcome.SKIPPED).toList();
         List<DkimResult> passing = checked.stream().filter(DkimResult::passed).toList();
-        boolean anyTemporary = checked.stream().anyMatch(r -> r.outcome() == Outcome.TEMPERROR);
+        boolean anyTemporary = checked.stream()
+                .anyMatch(r -> r.outcome() == Outcome.TEMPERROR && r.domain() != null && alignable.test(r.domain()));
         if (passing.isEmpty()) {
-            if (checked.isEmpty()) {
-                String ambiguity = ambiguity(parsed, verification.fromFieldCount());
-                return fail(ambiguity != null ? ambiguity : "no signature is by a domain that can align with From (not checked)", false,
-                        results);
-            }
             if (checked.stream().allMatch(r -> r.outcome() == Outcome.TESTING)) {
                 return new MailAuthentication(Verdict.NONE, null, "only signatures under a key in testing mode (t=y)", false, results);
             }
@@ -321,11 +319,9 @@ public class SenderAuthenticator {
      * or null when it does. A fixed sentence, never message text.
      */
     String policyRefusal(DkimResult pass, DkimVerifier.Verification verification, InboundMail parsed, Instant evaluatedAt) {
-        if (requireSignedContentHeaders) {
-            String content = contentHeadersRefusal(pass, verification);
-            if (content != null) {
-                return content;
-            }
+        String content = contentHeadersRefusal(pass, verification, requireSignedContentHeaders);
+        if (content != null) {
+            return content;
         }
         if (!maxSignatureAge.isZero()) {
             // t= when the signer set it, else the Date — but only a signed Date: an
@@ -344,21 +340,38 @@ public class SenderAuthenticator {
     }
 
     /**
-     * Why the body cannot be read as the signer sent it, or null. Every instance of
-     * {@link #CONTENT_HEADERS} must be signed — that is, a header may not occur
-     * more often than {@code h=} lists it — which refuses a header added, prepended
-     * or replaced by whoever holds the signed mail.
+     * Why the body cannot be read as the signer sent it, or null.
      * <p>
-     * A signer that does not list a header at all is judged on what the header
-     * could do: a single unsigned {@code Content-Type} is accepted only when it is
-     * not {@code multipart/*} or {@code message/*} (a single-part body is the
-     * signed bytes whatever the type says; a multipart's boundary would decide
-     * which of them EDDI reads), a single unsigned
-     * {@code Content-Transfer-Encoding} only when it is an identity encoding
-     * ({@code 7bit}, {@code 8bit}, {@code binary}), a single {@code MIME-Version}
-     * always.
+     * <b>Always:</b> no {@link #CONTENT_HEADERS} header may occur more often than
+     * the signature's {@code h=} lists it. That refuses one added or prepended by
+     * whoever holds the signed mail (the mail library reads the topmost
+     * {@code Content-Type}), and, where the signer lists it, one replaced.
+     * <p>
+     * <b>A signer that does not list one at all</b> (Gmail leaves
+     * {@code Content-Type} out of {@code h=}) leaves a single instance replaceable.
+     * What the replacement could do decides:
+     * <ul>
+     * <li>{@code message/*}: refused — it would turn the signed body into an
+     * enclosed message.</li>
+     * <li>{@code multipart/*}, by default: accepted only when the body's first
+     * non-blank line is exactly {@code --<boundary>} of that header (no preamble).
+     * The body is covered by the body hash, so a header swapped for one with a
+     * boundary of the attacker's choosing fails unless the signed body already
+     * begins with their delimiter; a swap that keeps the boundary only re-labels
+     * the signer's own parts. With {@code strict}, refused.</li>
+     * <li>anything else: accepted (the body is the signed bytes, read as that
+     * single part).</li>
+     * <li>{@code Content-Transfer-Encoding}: accepted by default (on a multipart it
+     * makes the parser skip the body; on a single part it can only re-decode the
+     * signed bytes); with {@code strict}, only an identity encoding ({@code 7bit},
+     * {@code 8bit}, {@code binary}).</li>
+     * <li>{@code MIME-Version}: accepted.</li>
+     * </ul>
+     *
+     * @param strict
+     *            {@code eddi.email.dkim.require-signed-content-headers}
      */
-    static String contentHeadersRefusal(DkimResult pass, DkimVerifier.Verification verification) {
+    static String contentHeadersRefusal(DkimResult pass, DkimVerifier.Verification verification, boolean strict) {
         for (String name : CONTENT_HEADERS) {
             int present = verification.headerCount(name);
             int signed = pass.timesSigned(name);
@@ -368,26 +381,44 @@ public class SenderAuthenticator {
             if (signed > 0 || present > 1) {
                 return "an unsigned " + name + " header was added to the signed message";
             }
-            String value = verification.headerValues(name).get(0).strip().toLowerCase(Locale.ROOT);
-            if ("content-type".equals(name) && isContainerType(value)) {
-                return "the signature does not cover content-type, and the message is multipart";
+            String value = verification.headerValues(name).get(0).strip();
+            if ("content-type".equals(name)) {
+                String refusal = unsignedContentTypeRefusal(value, verification.firstBodyLine(), strict);
+                if (refusal != null) {
+                    return refusal;
+                }
             }
-            if ("content-transfer-encoding".equals(name) && !(value.equals("7bit") || value.equals("8bit") || value.equals("binary"))) {
+            String lower = value.toLowerCase(Locale.ROOT);
+            if (strict && "content-transfer-encoding".equals(name) && !(lower.equals("7bit") || lower.equals("8bit") || lower.equals("binary"))) {
                 return "the signature does not cover content-transfer-encoding, and the body is encoded";
             }
         }
         return null;
     }
 
-    private static boolean isContainerType(String contentType) {
-        String base;
+    private static String unsignedContentTypeRefusal(String value, String firstBodyLine, boolean strict) {
+        ContentType type;
         try {
-            base = new ContentType(contentType).getBaseType().toLowerCase(Locale.ROOT);
+            type = new ContentType(value);
         } catch (ParseException e) {
             // The parser reads an unparseable type as text/plain, and so does this.
-            return false;
+            return null;
         }
-        return base.startsWith("multipart/") || base.startsWith("message/");
+        String base = type.getBaseType().toLowerCase(Locale.ROOT);
+        if (base.startsWith("message/")) {
+            return "the signature does not cover content-type, and it makes the body an enclosed message";
+        }
+        if (!base.startsWith("multipart/")) {
+            return null;
+        }
+        if (strict) {
+            return "the signature does not cover content-type, and the message is multipart";
+        }
+        String boundary = type.getParameter("boundary");
+        if (boundary == null || boundary.isEmpty() || firstBodyLine == null || !firstBodyLine.equals("--" + boundary)) {
+            return "the signature does not cover content-type, and the signed body does not begin with its boundary";
+        }
+        return null;
     }
 
     /**

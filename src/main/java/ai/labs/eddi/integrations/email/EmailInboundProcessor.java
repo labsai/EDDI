@@ -325,10 +325,11 @@ public class EmailInboundProcessor {
         if (loop.isPresent()) {
             return refuse(ctx, row, loop.get(), bounce ? EmailMetrics.BOUNCE : EmailMetrics.LOOP, now);
         }
-        // From here on, everything that routes, threads, answers or is shown to the
-        // agent reads only what the aligned signature covers: an unsigned Subject,
-        // To/Cc plus-tag, In-Reply-To, References or Reply-To added to someone's
-        // genuine signed mail falls back to the default (InboundMail#signedView).
+        // From here on, what routes, answers or is shown to the agent comes from the
+        // signed view: an unsigned Subject, To/Cc plus-tag or Reply-To added to
+        // someone's genuine signed mail falls back to the default target and the
+        // authenticated From (InboundMail#signedView). Thread headers are kept: a
+        // continuation is bound to the conversation's own sender anyway.
         parsed = asReceived.signedView();
         if (sender == null) {
             return refuse(ctx, row, "blocked:no_single_sender", EmailMetrics.BLOCKED, now);

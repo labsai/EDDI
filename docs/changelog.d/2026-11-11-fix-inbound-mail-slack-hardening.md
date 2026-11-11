@@ -16,14 +16,17 @@ victim's words; or deliver the signed mail again with an unsigned `Subject`, plu
 - `DkimVerifier` returns each signature's `h=` list (with multiplicity), its `t=` and a digest of `d=`/`b=`
   (`DkimResult`), and the counts and values of the headers that matter (`Verification`).
 - `SenderAuthenticator` grants `ALIGNED_PASS` only when no `Content-Type`, `Content-Transfer-Encoding` or
-  `MIME-Version` occurs more often than `h=` lists it (`eddi.email.dkim.require-signed-content-headers`, default
-  `true`; a signer that omits one passes for a single, non-multipart, identity-encoded body), and when the signature's
-  `t=` — or else the signed `Date` — is no older than `eddi.email.dkim.max-signature-age` (default 7 days, `0`
-  disables) at delivery. The pass carries the headers its signature covers (`SignedHeaders`).
-- `InboundMail.signedView()` drops every header the aligned signature does not wholly cover (`To`/`Cc` keep their
-  signed instances). `EmailInboundProcessor` uses that view for routing (`EmailTargetRouting`), thread continuation
-  and correlation, the agent's `mail` data and the reply recipient (`EmailReplyRecipients` sees no unsigned
-  `Reply-To`) — the safe defaults are the default target, a new conversation, the authenticated `From`. A mail whose
+  `MIME-Version` occurs more often than `h=` lists it, and when the signature's `t=` — or else the signed `Date` — is
+  no older than `eddi.email.dkim.max-signature-age` (default 7 days, `0` disables) at delivery. For a signer that
+  leaves `Content-Type` out of `h=` (Gmail), a single unsigned `multipart/*` type passes only when the signed body's
+  first non-blank line is exactly `--<its boundary>`, and `message/*` never; `eddi.email.dkim.require-signed-content-headers=true`
+  (default `false`) is the hardened rule that refuses unsigned multipart types and non-identity transfer encodings.
+  The pass carries the headers its signature covers (`SignedHeaders`).
+- `InboundMail.signedView()` drops an uncovered `Subject` and `Reply-To` and keeps only the signed `To`/`Cc`
+  instances; `EmailInboundProcessor` uses that view for routing (`EmailTargetRouting`), the agent's `mail` data and
+  the reply recipient (`EmailReplyRecipients` sees no unsigned `Reply-To`). `In-Reply-To`, `References` and `Date` are
+  kept unsigned: Gmail does not sign the thread headers, and a continuation is bound to the conversation's own
+  authenticated sender anyway. A mail whose
   `Message-ID` is unsigned is also deduplicated on its signature: a terminal marker row keyed `<dkim.<digest>@eddi.invalid>`,
   so a copy under a new id is refused as `duplicate:replayed_signature`.
 - `Reply-To`, `Content-Type`, `Content-Transfer-Encoding` and `MIME-Version` joined the singleton headers whose
@@ -44,9 +47,11 @@ names and display names are capped before they are decoded.
 together) — the rest is cut and the mail flagged `html_truncated` — and the HTML quote strip does not copy a tree of
 more than 100,000 elements.
 
-**5 — Attacker DNS cannot defer a mail for a day (low-medium).** Alignment is judged before any key lookup: a
-signature whose `d=` cannot align with `From` even relaxed is `SKIPPED`, its key never fetched (such mail is now
-`FAIL`, not `PASS_UNALIGNED`). Temporary DNS failures are cached for two minutes.
+**5 — Attacker DNS cannot defer a mail for a day (low-medium).** Signatures whose `d=` could align with `From`
+(relaxed, judged without DNS) are verified first; once one passes, the others are `SKIPPED` without a lookup. A
+temporary failure of a signature that can never align no longer makes the verdict temporary, so it cannot defer the
+mail. Non-aligning signatures are otherwise still verified, so `PASS_UNALIGNED` is unchanged. Temporary DNS failures
+are cached for two minutes.
 
 **6 — Slack webhooks are small and verify before parsing (medium).** Both endpoints read the body as a stream, at
 most `eddi.slack.max-body-bytes` (1 MB, 413 above), and `RequestBodyLimitGuard` refuses a larger declared length
@@ -64,6 +69,10 @@ delete. `POST /alerts/rules/test` allows `eddi.alerts.test-max-per-minute` (6) s
 
 - The loop guard and delivery-report handling still read every header of the mail as received: a header that can
   only make EDDI refuse a mail is safe to believe unsigned.
+- The default content-header rule is structural, not strict, so ordinary Gmail HTML mail (multipart/alternative,
+  `Content-Type` not in `h=`) keeps authenticating. Residual: a single-part mail from such a signer whose body begins
+  at byte 0 with attacker-quoted delimiter text can be re-labelled as multipart. `true` closes it where all senders
+  sign `Content-Type`.
 - `requireAddressed` (the integration's own address must appear in a signed `To`/`Cc`) was not added: distribution
   lists, aliases and BCC deliver mail whose `To` does not name the mailbox, and the replay it would narrow is closed by
   the signature age, the signed-header view and the signature-keyed dedup.
@@ -92,5 +101,5 @@ docs: [`security.md`](../security.md#mail-sender-authentication--dkim-and-dmarc)
 [`alerts.md`](../alerts.md), [`configuration-reference.md`](../configuration-reference.md).
 
 ```decision-log
-| 2026-11-11 | An aligned DKIM pass vouches only for headers its signature wholly covers; the email channel reads nothing else | Prepended Content-Type and unsigned Subject/To/Reply-To/References on a replayed signed mail ran as its author | Trusting every header of a signed mail; failing all mail with any unsigned header |
+| 2026-11-11 | An aligned DKIM pass vouches only for headers its signature wholly covers; Subject, Reply-To and To/Cc plus-tags steer only when covered, thread headers are read unsigned | Prepended Content-Type and unsigned Subject/To/Reply-To/References on a replayed signed mail ran as its author | Trusting every header of a signed mail; failing all mail with any unsigned header |
 ```

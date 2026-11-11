@@ -14,11 +14,10 @@ import java.util.Set;
  * else, and anyone holding a signed mail can add, prepend or replace an
  * unsigned header and keep the signature valid. An aligned pass therefore
  * authenticates the {@code From} — and only those other headers whose every
- * instance is signed. {@link InboundMail#signedView()} drops the rest, so an
- * unsigned {@code Subject}, plus-tag in {@code To}, {@code In-Reply-To},
- * {@code References} or {@code Reply-To} added to someone's genuine signed mail
- * cannot steer where it is routed, which conversation it continues, or where
- * the reply goes.
+ * instance is signed. {@link InboundMail#signedView()} drops the uncovered ones
+ * that steer the mail, so an unsigned {@code Subject}, plus-tag in {@code To}
+ * or {@code Reply-To} added to someone's genuine signed mail cannot choose the
+ * target agent or where the reply goes.
  *
  * @param restricted
  *            false when nothing is restricted: the verdict is not an aligned
