@@ -19376,6 +19376,216 @@
           }
         }
       ]
+    },
+    {
+      "id": 447,
+      "type": "row",
+      "title": "GDPR Erasure Guarantee",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "panels": [
+        {
+          "id": 448,
+          "type": "timeseries",
+          "title": "Erasure guarantee: guarded writes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — `recorded` minus `cleared` is the backlog that keeps erasures failing until it is retried; `record_failed` should stay at zero.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 40
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_gdpr_guard_writes_skipped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "skipped {{reason}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (writer) (rate(eddi_gdpr_guard_self_deletions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "self-deleted {{writer}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (outcome) (rate(eddi_gdpr_guard_pending_removals_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "pending {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 449,
+          "type": "timeseries",
+          "title": "Erasure guarantee: drain barrier",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_gdpr_guard_drain_seconds` — how long erasures and permanent conversation deletes waited for this node's async writers to finish the work queued before the tombstones (max and mean). `eddi_gdpr_guard_drain_timeouts_total` by `writer` — barriers not passed within `eddi.gdpr.drain-timeout`; each one failed an erasure or a delete.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 40
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(eddi_gdpr_guard_drain_seconds_max{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "max wait"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_gdpr_guard_drain_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum(rate(eddi_gdpr_guard_drain_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "mean wait"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (writer) (increase(eddi_gdpr_guard_drain_timeouts_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timeouts {{writer}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
     }
   ],
   "preload": false,

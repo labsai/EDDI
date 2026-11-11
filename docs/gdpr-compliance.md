@@ -52,7 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
-> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `erasureTombstone`, `asyncWriteDrain`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -76,6 +76,11 @@ and `failedSteps`.
 principal, not a user: erasing or exporting it is refused with 400.
 
 **What happens:**
+
+Before anything else, the erasure records durable **tombstones** of the user and of
+each of their conversations, and every node drains its asynchronous writers — see
+[The erasure guarantee for asynchronously written data](#the-erasure-guarantee-for-asynchronously-written-data).
+
 0. The user's in-flight work on the node serving the request is **stopped first**:
    running conversation turns are cancelled (they then skip their write-back to
    user memory and their snapshot is discarded) and running group discussions are
@@ -189,6 +194,88 @@ principal, not a user: erasing or exporting it is refused with 400.
     carries the user's counters (tool or pool, window start, count) under `counters` in the
     `toolQuotas` section of `additionalData`, at most 1,000; past that the section says
     `"truncated": true` and the bundle reports `complete: false`
+
+#### The erasure guarantee for asynchronously written data
+
+Some per-user rows are written from a background queue, after the turn or request
+that produced them: alert events (an `OUTPUT_MATCH` value, a rating comment
+excerpt), and any other *async erasure writer* that joins the same mechanism. Such a
+row, queued before an erasure, used to be able to reach the store after the erasure
+had deleted everything — an erasure reported complete, followed seconds later by
+the data it had removed. For these rows the erasure now gives a **guarantee**:
+
+> `complete: true` means no guarded row of the user exists **and none can be written
+> later**. When that cannot be ensured, a step fails — the erasure is never reported
+> complete while a late write is still possible. Every such failure is retryable:
+> re-running the erasure finishes it.
+
+How it holds:
+
+1. **Tombstones first.** Before the first stop or delete, the erasure writes a durable
+   tombstone of the user and one of each of their conversations
+   (`erasuretombstones` / `erasure_tombstones`). The user is recorded as an HMAC of
+   the SHA-256 the cluster stop carries, keyed by a random per-deployment salt the
+   store creates on first use — never the id, and not a plain hash anyone with a
+   list of e-mail addresses could recompute. Conversations are recorded by id. A
+   tombstone is kept for `eddi.gdpr.tombstone-retention` (default `400d`), longer
+   than any guarded data can still arrive (alert events live 90 days). A tombstone
+   that cannot be written fails the step `erasureTombstone`.
+2. **Guarded writes.** A writer asks before writing (`beforeWrite`) and does not store
+   the row — an alert then fires without its value or excerpt — when the row's
+   conversation is tombstoned, or its user is tombstoned and the content was
+   captured before the erasure (up to `eddi.gdpr.tombstone-clock-skew`, default
+   `5m`, after it, to absorb clock differences between nodes; content captured
+   later is new activity of a reused id and is stored). Right after writing it asks
+   again (`afterWrite`): if an erasure started in between, the row removes itself;
+   if that removal fails, a durable **pending removal** is recorded
+   (`erasurependingremovals` / `erasure_pending_removals`) and retried every five
+   minutes. Tombstones that cannot be read count as present (fail closed). There is
+   no cache: a cached "not erased" is exactly what would let a late write through.
+3. **Drain barrier.** After the stop, each node waits until the work its async
+   writers had queued *before the tombstones existed* has finished (at most
+   `eddi.gdpr.drain-timeout`, default `30s`). Work queued later sees the tombstones.
+   On the node running the erasure a writer that does not drain in time fails the
+   step `asyncWriteDrain`; every other node drains while answering the cluster stop
+   (`gdpr-stop`) and confirms it with `drained: true` — a node that does not answer,
+   reports a timeout, or answers without that confirmation (a node of an older
+   release during a rolling upgrade) fails `clusterStop`.
+4. **Delete, then verify.** The writer's participant deletes the user's rows and then
+   checks that none is left and no pending removal of the user remains; otherwise
+   its step fails (`alerts` for alert events). A re-run first retries the pending
+   removals, so it completes once the store accepts the removal.
+
+The same holds for an **explicit, permanent conversation delete**
+(`DELETE /conversationstore/conversations/{id}?deletePermanently=true`, and the
+agent-test runner's cleanup): the conversation is tombstoned, every node drains
+(the `erasure-drain` cluster RPC), the conversation's guarded rows are removed and
+verified — all before anything else of the conversation is deleted. If any of it
+fails, the delete fails with an error naming the cause and **nothing else is
+deleted**, so retrying the same delete finishes it.
+
+**Not covered, by design.** The *retention* sweep of ended conversations
+(`deleteEndedConversationsOnceOlderThanDays`) does not run the barrier: it deletes
+conversations that have been ended and untouched for at least that many days, so no
+work of theirs can still be queued; their alert events age out on
+`eddi.alerts.event-retention`. A soft delete keeps the conversation and is no
+erasure.
+
+**The one residual limit.** The barrier reaches the nodes the cluster's presence
+view lists when the erasure starts. A node that is running but cut off from NATS is
+not among them; if it still has work queued from before the erasure, that work
+reaches the store after the tombstones were written, so its `afterWrite` removes the
+row again (or leaves a pending removal, retried within five minutes and blocking any
+re-run until it is gone) — but that can happen after the erasure has answered. The
+same partition already limits the cluster stop of running turns (see
+[Clustering](clustering.md#residual-limitations)).
+
+**For a new async writer** (an `AsyncErasureWriter` bean), the contract is: queue
+work through a `DrainBarrier` and answer `awaitDrained` from it; call
+`ErasureGuard.beforeWrite(userId, conversationId, capturedAt)` before writing and
+`ErasureGuard.afterWrite(name, rowId, userId, conversationId, capturedAt, remover)`
+right after; implement `removeRow` (idempotent), `eraseConversation` and
+`countForConversation`; and in the writer's `IGdprParticipant.erase`, delete the
+user's rows and then call `ErasureGuard.verifyUserErased(name, userId, remaining)`.
+The writer's `name()` is stored in pending removals and must never change.
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
