@@ -34,7 +34,6 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -122,9 +121,16 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             "CREATE INDEX IF NOT EXISTS idx_health_turns_user ON health_turns (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_day ON health_turns (day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
-            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)",
-            // Added in H3; a table created by H2a lacks it.
-            "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
+
+    /**
+     * Added in H3; a table created before lacks it. Checked in the catalog first:
+     * even with {@code IF NOT EXISTS} an {@code ALTER TABLE} takes an ACCESS
+     * EXCLUSIVE lock, on every node start.
+     */
+    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM information_schema.columns WHERE table_name = 'health_turns' "
+            + "AND column_name = 'self_reported_outcome'";
+    static final String ADD_SELF_REPORTED_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)";
 
     /** The columns a row write binds, in bind order. */
     static final List<String> WRITTEN = List.of("conversation_id", "execution_id", "step_index", "agent_id", "agent_version",
@@ -159,8 +165,9 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
 
     static final String BY_CONVERSATION = SELECT
             + "WHERE conversation_id = ? AND recorded_at_ms IS NOT NULL ORDER BY step_index, recorded_at_ms LIMIT ?";
-    static final String BY_CONVERSATION_FROM_STEP = SELECT
-            + "WHERE conversation_id = ? AND step_index >= ? AND recorded_at_ms IS NOT NULL ORDER BY step_index DESC, recorded_at_ms DESC LIMIT ?";
+    static final String BY_CONVERSATION_STEPS = SELECT
+            + "WHERE conversation_id = ? AND step_index >= ? AND step_index < ? AND recorded_at_ms IS NOT NULL ORDER BY step_index, recorded_at_ms "
+            + "LIMIT ?";
     static final String CONVERSATIONS_UPDATED_BETWEEN = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
             + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
             + "ORDER BY last, conversation_id LIMIT ?";
@@ -190,6 +197,13 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             statement.execute(CREATE_TABLE);
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
+            }
+            boolean hasColumn;
+            try (ResultSet column = statement.executeQuery(HAS_SELF_REPORTED_COLUMN)) {
+                hasColumn = column != null && column.next();
+            }
+            if (!hasColumn) {
+                statement.execute(ADD_SELF_REPORTED_COLUMN);
             }
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -322,15 +336,13 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
-        List<HealthTurn> newest = query(BY_CONVERSATION_FROM_STEP, "Could not read the health turns of a conversation", s -> {
+    public List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit) {
+        return query(BY_CONVERSATION_STEPS, "Could not read the health turns of a conversation", s -> {
             s.setString(1, conversationId);
             s.setInt(2, fromStep);
-            s.setInt(3, Math.max(1, limit));
+            s.setInt(3, toStep == null ? Integer.MAX_VALUE : toStep);
+            s.setInt(4, Math.max(1, limit));
         });
-        List<HealthTurn> ordered = new ArrayList<>(newest);
-        Collections.reverse(ordered);
-        return ordered;
     }
 
     @Override

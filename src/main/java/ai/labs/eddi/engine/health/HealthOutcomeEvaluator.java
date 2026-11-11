@@ -9,8 +9,10 @@ import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
+import ai.labs.eddi.engine.ratings.ConversationRatingWithdrawn;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -26,6 +28,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -36,25 +46,38 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * reads only turn rows and ratings, never conversation memory, and writes
  * {@link IHealthOutcomeStore} rows through {@link HealthSessionEvaluator}.
  * <p>
- * Which conversations, per pass:
+ * Per pass, in this order:
  * <ol>
- * <li><b>the incremental feed</b> — conversations with turn rows written since
- * the stored watermark, up to one minute ago; paged by each conversation's
- * newest write, oldest first, so a pass can stop anywhere and the next resumes
- * without a gap ({@link #GRACE}, so rows still on a node's queue are taken next
- * time). The first pass starts at the turn-row retention, so turns recorded
- * before outcomes existed are judged too, a bounded batch per pass;</li>
  * <li><b>due sessions</b> — sessions whose window has closed since they were
- * judged ({@code dueAt}), and those a new rating made due
- * ({@link #ratingSaved}). A late row is also caught here: a session is read
- * again in full when its window closes.</li>
+ * judged ({@code dueAt}), and those a rating (saved or withdrawn) made due — at
+ * most half of the pass's time, so they are never starved by a backfill;</li>
+ * <li><b>the incremental feed</b> — conversations with turn rows captured since
+ * the stored watermark <em>minus</em> {@code eddi.health.outcome-feed-overlap}
+ * (15 minutes), up to one minute ago; paged by each conversation's newest
+ * capture, oldest first, so a pass can stop anywhere and the next resumes
+ * without a gap. Rows are ordered by their <em>capture</em> time, set on the
+ * turn's node before the row waits on that node's health queue, so a row can
+ * reach the store after the watermark passed its capture time; the overlap
+ * re-reads every conversation of the last minutes each pass (the evaluation is
+ * idempotent) and catches a row that late — the trade-off is that much
+ * re-evaluation. The first pass starts at the turn-row retention, so turns
+ * recorded before outcomes existed are judged too, a bounded batch per
+ * pass.</li>
  * </ol>
- * Per conversation it reads the turn rows from the latest stored session on (or
- * from the earliest due one), so a long conversation is not re-read from its
- * start: earlier sessions are closed and keep their rows. At most
- * {@link #MAX_SESSION_TURNS} rows are read — the newest; a longer session
- * counts its turns and spend from those. Sessions it no longer finds from that
- * step on (an undo removed a session's first turn) are deleted.
+ * A conversation whose evaluation fails holds the watermark at its capture
+ * time, so the next passes retry it — for at most {@link #MAX_RETRY}, then it
+ * is left (a WARN; its next change or due time evaluates it again).
+ * <p>
+ * Per conversation it reads the turn rows of a <em>range of steps</em>, oldest
+ * first: from the latest stored session on (the feed), or one stored session's
+ * own range up to the next stored session (a due session). Earlier sessions are
+ * closed and keep their rows. Sessions are keyed by the step they genuinely
+ * start at; a stored session whose first turns the retention removed keeps its
+ * key. At most {@link #MAX_RANGE_TURNS} rows are read; when a range is longer,
+ * its last (incomplete) session is left as stored. Sessions no longer found in
+ * the range read (an undo removed a session's first turn) are deleted — never
+ * one outside it. When every turn of the range was undone, the previous stored
+ * session is judged again instead.
  * <p>
  * GDPR: nothing is written for a user an erasure is fencing
  * ({@link HealthErasureFence}), and a conversation whose user became fenced
@@ -68,14 +91,16 @@ public class HealthOutcomeEvaluator {
 
     /** Rows younger than this are left for the next pass. */
     static final Duration GRACE = Duration.ofMinutes(1);
+    /** How long a failed conversation holds the feed's watermark back. */
+    static final Duration MAX_RETRY = Duration.ofHours(1);
     /** Conversations read per page of the feed. */
     static final int FEED_PAGE = 500;
     /** Due sessions read per pass. */
     static final int DUE_PAGE = 1_000;
     /** The most conversations one pass evaluates. */
     static final int MAX_CONVERSATIONS = 5_000;
-    /** The most turn rows read for one conversation. */
-    static final int MAX_SESSION_TURNS = 1_000;
+    /** The most turn rows read for one range of a conversation. */
+    static final int MAX_RANGE_TURNS = 10_000;
     /** A rating below this normalised score is negative. */
     static final double NEGATIVE_RATING_BELOW = 0.5;
 
@@ -95,10 +120,27 @@ public class HealthOutcomeEvaluator {
     private final HealthMetrics metrics;
     private final Clock clock;
 
+    /**
+     * Where rating events are handed off: the rating request must never wait for
+     * Agent Health. One thread, a bounded queue; a full queue drops the mark (the
+     * session is judged again with its next change).
+     */
+    private Executor ratingExecutor;
+    private ExecutorService ownedExecutor;
+    /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
+    private int maxRangeTurns = MAX_RANGE_TURNS;
+
     @Inject
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
             IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics) {
         this(turnStore, outcomeStore, configPolicy, ratingStore, fence, settings, metrics, Clock.systemUTC());
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1_000), r -> {
+            Thread thread = new Thread(r, "health-outcome-ratings");
+            thread.setDaemon(true);
+            return thread;
+        }, new ThreadPoolExecutor.DiscardPolicy());
+        this.ownedExecutor = executor;
+        this.ratingExecutor = executor;
     }
 
     HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
@@ -111,43 +153,79 @@ public class HealthOutcomeEvaluator {
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
+        this.ratingExecutor = Runnable::run;
+        metrics.registerOutcomeLag(outcomeStore, clock);
+    }
+
+    /** For tests: where rating events are handed off. */
+    void ratingExecutor(Executor executor) {
+        this.ratingExecutor = executor;
+    }
+
+    /** For tests: the most turn rows read for one range. */
+    void maxRangeTurns(int max) {
+        this.maxRangeTurns = max;
+    }
+
+    @PreDestroy
+    void stop() {
+        if (ownedExecutor != null) {
+            ownedExecutor.shutdownNow();
+        }
     }
 
     /** One pass, stopping at {@code deadline}. Never throws. */
     public Result run(Instant deadline) {
         int[] done = {0, 0, 0};
-        Set<String> seen = new HashSet<>();
+        Instant start = clock.instant();
+        // Due sessions first, within half of the time: windows close and ratings are
+        // re-checked even while a backfill fills the feed.
+        Instant dueDeadline = start.plus(Duration.between(start, deadline).dividedBy(2));
         try {
-            feed(deadline, done, seen);
-        } catch (RuntimeException e) {
-            LOGGER.warnf("The Agent Health outcome feed failed; the next pass resumes from the same watermark: %s", sanitize(e.getMessage()));
-        }
-        try {
-            due(deadline, done, seen);
+            due(dueDeadline, done);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the due Agent Health sessions; the next pass retries: %s", sanitize(e.getMessage()));
+        }
+        try {
+            feed(deadline, done);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("The Agent Health outcome feed failed; the next pass resumes from the same watermark: %s", sanitize(e.getMessage()));
         }
         metrics.outcomesEvaluated(done[1], done[2]);
         return new Result(done[0], done[1], done[2]);
     }
 
-    private void feed(Instant deadline, int[] done, Set<String> seen) {
+    private void feed(Instant deadline, int[] done) {
         Instant now = clock.instant();
         Instant until = now.minus(GRACE);
-        Instant since = outcomeStore.watermark().orElse(now.minus(settings.factsRetention()));
-        while (since.isBefore(until) && clock.instant().isBefore(deadline) && done[0] < MAX_CONVERSATIONS) {
+        Instant oldest = now.minus(settings.factsRetention());
+        Instant watermark = outcomeStore.watermark().orElse(oldest);
+        Instant since = watermark.minus(settings.outcomeFeedOverlap());
+        if (since.isBefore(oldest)) {
+            since = oldest;
+        }
+        Set<String> seen = new HashSet<>();
+        Instant failedAt = null;
+        Instant reached = since;
+        boolean complete = true;
+        boolean read = false;
+        while (since.isBefore(until)) {
+            if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
+                complete = false;
+                break;
+            }
             List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(since, until, FEED_PAGE);
+            read = true;
             Instant next = until;
-            boolean complete = true;
             for (ConversationActivity activity : page) {
                 if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
-                    // Resume at this conversation's newest write next time.
+                    // Resume at this conversation's newest capture next time.
                     next = activity.lastUpdatedAt();
                     complete = false;
                     break;
                 }
-                if (seen.add(activity.conversationId())) {
-                    evaluate(activity.conversationId(), null, done);
+                if (seen.add(activity.conversationId()) && !evaluateSafely(activity.conversationId(), null, done)) {
+                    failedAt = failedAt == null || activity.lastUpdatedAt().isBefore(failedAt) ? activity.lastUpdatedAt() : failedAt;
                 }
             }
             if (complete && page.size() >= FEED_PAGE) {
@@ -155,61 +233,98 @@ public class HealthOutcomeEvaluator {
                 // More than a page shares one millisecond: step past it rather than loop.
                 next = last.isAfter(since) ? last : since.plusMillis(1);
             }
-            outcomeStore.setWatermark(next);
+            reached = next;
             since = next;
             if (!complete) {
-                return;
+                break;
             }
         }
+        if (!read) {
+            return;
+        }
+        Instant stored = reached.isAfter(watermark) ? reached : watermark;
+        if (failedAt != null) {
+            if (failedAt.isAfter(until.minus(MAX_RETRY))) {
+                // Retried next pass, from here.
+                stored = failedAt.isBefore(stored) ? failedAt : stored;
+            } else {
+                LOGGER.warnf("Agent Health outcome evaluation kept failing for conversations captured at %s; they are evaluated again with "
+                        + "their next change or due time", failedAt);
+            }
+        }
+        outcomeStore.setWatermark(stored);
     }
 
-    private void due(Instant deadline, int[] done, Set<String> seen) {
+    private void due(Instant deadline, int[] done) {
         if (!clock.instant().isBefore(deadline)) {
             return;
         }
-        Map<String, Integer> earliest = new LinkedHashMap<>();
+        Map<String, Set<Integer>> bySession = new LinkedHashMap<>();
         for (HealthOutcome due : outcomeStore.findDue(clock.instant(), DUE_PAGE)) {
-            earliest.merge(due.conversationId(), due.sessionNo(), Math::min);
+            bySession.computeIfAbsent(due.conversationId(), k -> new TreeSet<>()).add(due.sessionNo());
         }
-        for (Map.Entry<String, Integer> entry : earliest.entrySet()) {
-            if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
-                return;
+        for (Map.Entry<String, Set<Integer>> entry : bySession.entrySet()) {
+            for (Integer sessionNo : entry.getValue()) {
+                if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
+                    return;
+                }
+                evaluateSafely(entry.getKey(), sessionNo, done);
             }
-            evaluate(entry.getKey(), entry.getValue(), done);
-            seen.add(entry.getKey());
         }
     }
 
     /**
-     * Evaluates one conversation from {@code fromSession} on ({@code null}: from
-     * its latest stored session). Never throws.
+     * Evaluates one conversation from {@code fromSession} ({@code null}: from its
+     * latest stored session on). Never throws.
+     *
+     * @return whether it succeeded
      */
-    void evaluate(String conversationId, Integer fromSession, int[] done) {
+    boolean evaluateSafely(String conversationId, Integer fromSession, int[] done) {
         try {
             int written = evaluate(conversationId, fromSession);
             done[0]++;
             done[1] += written;
+            return true;
         } catch (RuntimeException e) {
             done[2]++;
             LOGGER.debugf("Could not evaluate the sessions of conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            return false;
         }
     }
 
-    /** @return the session rows written */
+    /**
+     * Judges one range of a conversation: one stored session's own steps (up to the
+     * next stored session) when {@code fromSession} names it, else every step from
+     * the latest stored session on.
+     *
+     * @return the session rows written
+     */
     int evaluate(String conversationId, Integer fromSession) {
-        List<HealthOutcome> stored = outcomeStore.findByConversation(conversationId);
-        int from = fromSession != null ? fromSession : stored.isEmpty() ? 0 : stored.get(stored.size() - 1).sessionNo();
-        List<HealthTurn> rows = turnStore.findByConversationFromStep(conversationId, from, MAX_SESSION_TURNS);
-        List<HealthTurn> live = rows.stream().filter(t -> t.recorded() && !t.discarded()).toList();
-        Set<Integer> stale = new HashSet<>();
-        for (HealthOutcome o : stored) {
-            if (o.sessionNo() >= from) {
-                stale.add(o.sessionNo());
-            }
+        Instant evaluatedAt = clock.instant();
+        TreeMap<Integer, HealthOutcome> stored = new TreeMap<>();
+        for (HealthOutcome o : outcomeStore.findByConversation(conversationId)) {
+            stored.put(o.sessionNo(), o);
         }
+        int from = fromSession != null ? fromSession : stored.isEmpty() ? 0 : stored.lastKey();
+        Integer to = fromSession != null ? stored.higherKey(fromSession) : null;
+        List<HealthTurn> rows = turnStore.findByConversationSteps(conversationId, from, to, maxRangeTurns + 1);
+        // Every turn of the range undone: judge the previous session again, which may
+        // now be the last one (an undo back into it).
+        while (HealthSessionEvaluator.turnsOf(rows).isEmpty() && stored.lowerKey(from) != null) {
+            outcomeStore.deleteSessions(conversationId, stored.subMap(from, true, to == null ? Integer.MAX_VALUE : to, false).keySet());
+            from = stored.lowerKey(from);
+            rows = turnStore.findByConversationSteps(conversationId, from, to, maxRangeTurns + 1);
+        }
+        boolean truncated = rows.size() > maxRangeTurns;
+        if (truncated) {
+            rows = rows.subList(0, maxRangeTurns);
+        }
+        Set<Integer> inRange = new HashSet<>(stored.subMap(from, true, to == null ? Integer.MAX_VALUE : to, false).keySet());
+        List<HealthTurn> live = HealthSessionEvaluator.turnsOf(rows);
         if (live.isEmpty()) {
-            // Every turn from there on was undone or is gone: so are its sessions.
-            outcomeStore.deleteSessions(conversationId, stale);
+            // Nothing left of the conversation from here (an undo, an erasure, the
+            // retention): neither are its sessions.
+            outcomeStore.deleteSessions(conversationId, inRange);
             return 0;
         }
         HealthTurn newest = live.get(live.size() - 1);
@@ -217,24 +332,35 @@ public class HealthOutcomeEvaluator {
         if (fence.covers(userId)) {
             return 0;
         }
-        String origin = origin(stored, from, live);
-        Resolved current = configPolicy.of(newest.agentId(), newest.agentVersion());
-        Duration window = configPolicy.windowOf(origin, current);
+        String origin = origin(stored.values(), from, live);
+        String agentId = newest.agentId();
+        Map<Integer, Resolved> configs = new HashMap<>();
         Integer knownFirstOutput = null;
-        for (HealthOutcome o : stored) {
-            if (o.sessionNo() < from && o.firstOutputStep() != null && (knownFirstOutput == null || o.firstOutputStep() < knownFirstOutput)) {
+        for (HealthOutcome o : stored.headMap(from, false).values()) {
+            if (o.firstOutputStep() != null && (knownFirstOutput == null || o.firstOutputStep() < knownFirstOutput)) {
                 knownFirstOutput = o.firstOutputStep();
             }
         }
-        // Read only all MAX_SESSION_TURNS when there were more: the first session then
-        // keeps its stored key although its first turns were not read.
-        Integer firstSessionNo = rows.size() >= MAX_SESSION_TURNS && !stale.isEmpty() ? Integer.valueOf(from) : null;
-        Map<Integer, Resolved> configs = new HashMap<>();
-        String agentId = newest.agentId();
-        List<HealthOutcome> sessions = HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live, origin, window,
-                version -> configs.computeIfAbsent(version == null ? -1 : version, v -> configPolicy.of(agentId, version)), knownFirstOutput,
-                firstSessionNo, new LazyRatings(conversationId), clock.instant()));
+        // A stored session whose first rows the retention removed (no row at all at
+        // its first step, not even an undone one) keeps its key.
+        int firstRead = rows.isEmpty() ? from : rows.get(0).stepIndex();
+        Integer firstSessionNo = stored.containsKey(from) && firstRead > from ? Integer.valueOf(from) : null;
+        List<HealthOutcome> sessions = new ArrayList<>(HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live,
+                origin, version -> configPolicy.windowOf(origin, configOf(configs, agentId, version)), version -> configOf(configs, agentId, version),
+                knownFirstOutput, firstSessionNo, new LazyRatings(conversationId), evaluatedAt)));
+        int deleteBefore = to == null ? Integer.MAX_VALUE : to;
+        if (truncated && !sessions.isEmpty()) {
+            // The last session read may go on past the rows read: leave it as stored.
+            HealthOutcome partial = sessions.remove(sessions.size() - 1);
+            deleteBefore = partial.sessionNo();
+        }
         outcomeStore.upsert(sessions);
+        Set<Integer> stale = new HashSet<>();
+        for (Integer sessionNo : inRange) {
+            if (sessionNo < deleteBefore) {
+                stale.add(sessionNo);
+            }
+        }
         for (HealthOutcome s : sessions) {
             stale.remove(s.sessionNo());
         }
@@ -247,12 +373,17 @@ public class HealthOutcomeEvaluator {
         return sessions.size();
     }
 
+    private Resolved configOf(Map<Integer, Resolved> configs, String agentId, Integer version) {
+        return configs.computeIfAbsent(version == null ? -1 : version, v -> configPolicy.of(agentId, version));
+    }
+
     /**
      * The conversation's origin: its first turn row that is not {@code api} — the
      * stored one when an earlier session already found it, since the rows read now
-     * may start later.
+     * may start later. Sessions stored before a later non-{@code api} row appeared
+     * keep the origin they were judged with.
      */
-    static String origin(List<HealthOutcome> stored, int from, List<HealthTurn> live) {
+    static String origin(Iterable<HealthOutcome> stored, int from, List<HealthTurn> live) {
         for (HealthOutcome o : stored) {
             if (o.sessionNo() <= from && o.origin() != null && !HealthOrigins.API.equals(o.origin())) {
                 return o.origin();
@@ -268,21 +399,63 @@ public class HealthOutcomeEvaluator {
 
     void onRatingSaved(@Observes ConversationRatingSaved saved) {
         if (saved != null && saved.rating() != null) {
-            ratingSaved(saved.rating().conversationId());
+            handOff(() -> ratingChanged(saved.rating().conversationId(), saved.rating().stepIndex(), ratingTime(saved.rating())));
         }
     }
 
+    void onRatingWithdrawn(@Observes ConversationRatingWithdrawn withdrawn) {
+        if (withdrawn != null) {
+            // A withdrawn conversation rating has no time left to place it by.
+            handOff(() -> ratingChanged(withdrawn.conversationId(), withdrawn.stepIndex(), null));
+        }
+    }
+
+    private void handOff(Runnable task) {
+        try {
+            ratingExecutor.execute(task);
+        } catch (RejectedExecutionException e) {
+            LOGGER.debugf("Agent Health rating hand-off rejected: %s", e.getMessage());
+        }
+    }
+
+    private static Instant ratingTime(ConversationRating rating) {
+        return rating.updatedAt() != null ? rating.updatedAt() : rating.createdAt();
+    }
+
     /**
-     * A rating was saved: the conversation's sessions are evaluated again at the
-     * next pass, since a negative rating turns a silence into
-     * {@code ENDED_QUIETLY}. Never throws.
+     * A rating was saved or withdrawn: the session(s) it can change are judged
+     * again at the next pass — a reply rating's session (by step), a conversation
+     * rating's session (the last one started at or before its time; all of them
+     * when withdrawn). Never throws.
      */
-    public void ratingSaved(String conversationId) {
+    void ratingChanged(String conversationId, int stepIndex, Instant at) {
         if (conversationId == null || conversationId.isBlank()) {
             return;
         }
         try {
-            outcomeStore.markDue(conversationId, clock.instant());
+            Instant now = clock.instant();
+            List<HealthOutcome> sessions = outcomeStore.findByConversation(conversationId);
+            Integer target = null;
+            if (stepIndex == ConversationRating.CONVERSATION_STEP_INDEX) {
+                if (at == null) {
+                    outcomeStore.markDue(conversationId, null, now);
+                    return;
+                }
+                for (HealthOutcome s : sessions) {
+                    if (target == null || s.startedAt() == null || !s.startedAt().isAfter(at)) {
+                        target = s.sessionNo();
+                    }
+                }
+            } else {
+                for (HealthOutcome s : sessions) {
+                    if (s.sessionNo() <= stepIndex) {
+                        target = s.sessionNo();
+                    }
+                }
+            }
+            if (target != null) {
+                outcomeStore.markDue(conversationId, List.of(target), now);
+            }
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not mark the sessions of conversation %s for another look: %s", sanitize(conversationId),
                     sanitize(e.getMessage()));
@@ -317,7 +490,7 @@ public class HealthOutcomeEvaluator {
                     continue;
                 }
                 if (r.isConversationRating()) {
-                    Instant at = r.updatedAt() != null ? r.updatedAt() : r.createdAt();
+                    Instant at = ratingTime(r);
                     if (at != null && !at.isBefore(from) && at.isBefore(until)) {
                         return true;
                     }

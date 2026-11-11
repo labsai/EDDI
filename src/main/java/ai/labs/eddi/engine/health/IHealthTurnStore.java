@@ -74,12 +74,13 @@ public interface IHealthTurnStore {
     List<HealthTurn> findByConversation(String conversationId, int limit);
 
     /**
-     * A conversation's rows from step {@code fromStep} on (discarded ones
-     * included), oldest step first — at most {@code limit}, the newest ones when
-     * there are more. What the outcome evaluation reads for the sessions it
-     * (re)judges.
+     * A conversation's rows of the steps {@code fromStep} (inclusive) to
+     * {@code toStep} (exclusive; {@code null} for no end), discarded ones included,
+     * oldest step first, at most {@code limit} — the first ones when there are
+     * more. What the outcome evaluation reads for the sessions it (re)judges; a
+     * caller that gets {@code limit} rows knows the range was cut.
      */
-    List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit);
+    List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit);
 
     /**
      * The conversations with rows written in [{@code since}, {@code until}), each

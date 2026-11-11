@@ -19560,7 +19560,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_health_rollup_lag_seconds` — age of the oldest agent day waiting for the `health-rollup` job, and `eddi_health_rollup_pending` — how many wait, both as the node's last pass left them. The lag should stay below a few `eddi.health.rollup-interval` (5 minutes by default); while it grows, the health views fall behind the turns.",
+          "description": "`eddi_health_rollup_lag_seconds` — age of the oldest agent day waiting for the `health-rollup` job, and `eddi_health_rollup_pending` — how many wait, both as the node's last pass left them. The lag should stay below a few `eddi.health.rollup-interval` (5 minutes by default); while it grows, the health views fall behind the turns. `eddi_health_outcomes_lag_seconds` — how far the session-outcome evaluation's watermark is behind the clock (high during the backfill after an upgrade, then about a minute).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -19589,6 +19589,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "pending days"
+            },
+            {
+              "refId": "C",
+              "expr": "max(eddi_health_outcomes_lag_seconds{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "outcome lag (s)"
             }
           ],
           "fieldConfig": {

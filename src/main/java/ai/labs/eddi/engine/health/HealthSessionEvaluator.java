@@ -14,8 +14,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 
 /**
@@ -23,12 +24,18 @@ import java.util.function.Function;
  * a pure function of the rows, the agent's {@code healthConfig} and the clock,
  * so every rule has a unit test (plan §4.4).
  * <p>
- * <b>Sessions.</b> A conversation splits wherever a turn starts more than its
- * origin's inactivity window after the previous turn ended. A session is still
- * <em>open</em> until that window has passed since its last turn; a turn that
- * arrives later starts a new session, so a closed session is never reopened by
- * new traffic — only a change to its own rows (a HITL resume, an undo) or a
- * rating makes it be evaluated again.
+ * <b>Sessions.</b> A conversation splits wherever a turn starts more than the
+ * inactivity window (of its origin, under the {@code healthConfig} of the
+ * version the earlier session ran on) after the previous turn ended. A turn's
+ * time is taken from its row: it started {@code durationMs} before its first
+ * capture ({@code timestamp}) and was last active at the later of that and its
+ * last capture ({@code updatedAt}) — so a HITL resume, which keeps the first
+ * {@code timestamp}, keeps its session open for a full window after the resume,
+ * and a session that had closed while paused reopens to {@code OPEN}. A session
+ * is <em>open</em> until its window has passed since its last activity; a turn
+ * that arrives later starts a new session. Of several rows of one step (an
+ * unsettled, insert-only capture next to the settled one), the settled row is
+ * the turn.
  * <p>
  * <b>Outcome</b>, highest precedence first:
  * <ol>
@@ -82,15 +89,17 @@ public final class HealthSessionEvaluator {
     }
 
     /**
-     * What the evaluation of one conversation needs.
+     * What the evaluation of one conversation (or one range of it) needs.
      *
      * @param turns
-     *            the conversation's rows from the first session to judge on, any
-     *            order; discarded rows and discard markers are skipped
+     *            the rows to judge, any order; discarded rows and discard markers
+     *            are skipped, and of several rows of one step the settled one wins
      * @param origin
      *            the conversation's origin
-     * @param window
-     *            its inactivity window
+     * @param windowOf
+     *            the inactivity window under the {@code healthConfig} of an agent
+     *            version — a session is split and closed by the window of the
+     *            version it ran on
      * @param configOf
      *            the resolved {@code healthConfig} of an agent version
      * @param knownFirstOutputStep
@@ -98,11 +107,12 @@ public final class HealthSessionEvaluator {
      *            or {@code null}
      * @param firstSessionNo
      *            the key of the first session, or {@code null} for the step index
-     *            of its first turn (a caller that could not read every turn of an
-     *            ongoing session passes the session's stored key)
+     *            of its first turn (a caller whose first rows were removed by the
+     *            retention passes the session's stored key, so it is never
+     *            re-keyed)
      */
-    public record Input(String conversationId, List<HealthTurn> turns, String origin, Duration window, Function<Integer, Resolved> configOf,
-            Integer knownFirstOutputStep, Integer firstSessionNo, Ratings ratings, Instant now) {
+    public record Input(String conversationId, List<HealthTurn> turns, String origin, Function<Integer, Duration> windowOf,
+            Function<Integer, Resolved> configOf, Integer knownFirstOutputStep, Integer firstSessionNo, Ratings ratings, Instant now) {
     }
 
     private HealthSessionEvaluator() {
@@ -113,18 +123,35 @@ public final class HealthSessionEvaluator {
         return HealthOrigins.INTERACTIVE.contains(origin);
     }
 
+    /**
+     * The rows that are turns: recorded, not discarded, one per step — the settled
+     * row when an unsettled (insert-only) capture of the same step exists, else the
+     * newest — ordered by step.
+     */
+    static List<HealthTurn> turnsOf(List<HealthTurn> rows) {
+        Map<Integer, HealthTurn> byStep = new TreeMap<>();
+        for (HealthTurn t : rows) {
+            if (t == null || !t.recorded() || t.discarded()) {
+                continue;
+            }
+            byStep.merge(t.stepIndex(), t, HealthSessionEvaluator::preferred);
+        }
+        return new ArrayList<>(byStep.values());
+    }
+
+    private static HealthTurn preferred(HealthTurn a, HealthTurn b) {
+        if (a.possiblyUnsettled() != b.possiblyUnsettled()) {
+            return a.possiblyUnsettled() ? b : a;
+        }
+        return b.activeUntil().isAfter(a.activeUntil()) ? b : a;
+    }
+
     /** The conversation's sessions, oldest first. */
     public static List<HealthOutcome> evaluate(Input in) {
-        List<HealthTurn> live = new ArrayList<>();
-        for (HealthTurn t : in.turns()) {
-            if (t != null && t.recorded() && !t.discarded()) {
-                live.add(t);
-            }
-        }
+        List<HealthTurn> live = turnsOf(in.turns());
         if (live.isEmpty()) {
             return List.of();
         }
-        live.sort(Comparator.comparingInt(HealthTurn::stepIndex).thenComparing(HealthTurn::timestamp));
         Integer firstOutput = in.knownFirstOutputStep();
         for (HealthTurn t : live) {
             if (t.agentOutput() && (firstOutput == null || t.stepIndex() < firstOutput)) {
@@ -134,14 +161,18 @@ public final class HealthSessionEvaluator {
         List<List<HealthTurn>> sessions = new ArrayList<>();
         List<HealthTurn> current = new ArrayList<>();
         Instant previousEnd = null;
+        Integer previousVersion = null;
         for (HealthTurn t : live) {
-            if (previousEnd != null && Duration.between(previousEnd, t.timestamp()).compareTo(in.window()) > 0) {
+            // The window of the session that would end here — of the version it ran on.
+            if (previousEnd != null && Duration.between(previousEnd, t.startedAt()).compareTo(in.windowOf().apply(previousVersion)) > 0) {
                 sessions.add(current);
                 current = new ArrayList<>();
+                previousEnd = null;
             }
             current.add(t);
-            Instant end = t.endedAt();
+            Instant end = t.activeUntil();
             previousEnd = previousEnd == null || end.isAfter(previousEnd) ? end : previousEnd;
+            previousVersion = t.agentVersion();
         }
         sessions.add(current);
         List<HealthOutcome> out = new ArrayList<>(sessions.size());
@@ -154,33 +185,32 @@ public final class HealthSessionEvaluator {
     }
 
     private static HealthOutcome session(Input in, List<HealthTurn> rows, int sessionNo, Integer firstOutput) {
-        HealthTurn first = rows.get(0);
         HealthTurn last = rows.get(rows.size() - 1);
-        Instant endedAt = first.endedAt();
+        Instant startedAt = null;
+        Instant endedAt = null;
         double cost = 0;
         int failures = 0;
         boolean engaged = false;
         for (HealthTurn t : rows) {
-            if (t.endedAt().isAfter(endedAt)) {
-                endedAt = t.endedAt();
-            }
+            startedAt = startedAt == null || t.startedAt().isBefore(startedAt) ? t.startedAt() : startedAt;
+            endedAt = endedAt == null || t.activeUntil().isAfter(endedAt) ? t.activeUntil() : endedAt;
             cost += positive(t.costUsd()) + positive(t.discardedCostUsd());
-            if (t.failed()) {
+            if (t.failed() && !t.interrupted()) {
                 failures++;
             }
             if (t.userInput() && firstOutput != null && t.stepIndex() > firstOutput) {
                 engaged = true;
             }
         }
-        Instant closesAt = endedAt.plus(in.window());
+        Instant closesAt = endedAt.plus(in.windowOf().apply(last.agentVersion()));
         boolean closed = !in.now().isBefore(closesAt);
         Decision decision = evaluated(in.origin())
-                ? decide(rows, last, closed, in.configOf().apply(last.agentVersion()), in.ratings(), sessionNo, first.timestamp(), closesAt)
+                ? decide(rows, last, closed, in.configOf().apply(last.agentVersion()), in.ratings(), sessionNo, startedAt, closesAt)
                 : new Decision(null, null, !closed);
         Instant dueAt = decision.provisional() ? closesAt : null;
         List<String> lastActions = last.actions().size() > MAX_LAST_ACTIONS ? last.actions().subList(0, MAX_LAST_ACTIONS) : last.actions();
-        return new HealthOutcome(in.conversationId(), sessionNo, last.agentId(), last.agentVersion(), last.userId(), in.origin(), engaged,
-                first.timestamp(), endedAt, rows.size(), cost, failures, decision.outcome(), decision.evidence(), decision.provisional(),
+        return new HealthOutcome(in.conversationId(), sessionNo, last.agentId(), last.agentVersion(), last.userId(), in.origin(), engaged, startedAt,
+                endedAt, rows.size(), cost, failures, decision.outcome(), decision.evidence(), decision.provisional(),
                 LocalDate.ofInstant(endedAt, ZoneOffset.UTC), dueAt, firstOutput, lastActions, in.now());
     }
 
@@ -224,12 +254,14 @@ public final class HealthSessionEvaluator {
         if (!closed) {
             return new Decision(HealthOutcomes.OPEN, null, true);
         }
-        if (last.failed()) {
+        // A cancelled turn (TURN_INTERRUPTED) is the person's or the platform's stop,
+        // not the agent failing: it is judged like a quiet ending below.
+        if (last.failed() && !last.interrupted()) {
             return new Decision(HealthOutcomes.FAILED, HealthOutcomes.EVIDENCE_STRUCTURAL, false);
         }
         // 3. Inferred, after the window.
-        if (last.paused()) {
-            // Waiting on an approver is not the person's silence.
+        if (last.paused() || last.interrupted()) {
+            // Waiting on an approver, or stopped mid-turn, is not the person's silence.
             return new Decision(HealthOutcomes.ENDED_QUIETLY, HealthOutcomes.EVIDENCE_INFERRED, false);
         }
         if (last.lastOutputWasQuestion()) {

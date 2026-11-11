@@ -248,7 +248,35 @@ public class HealthReportService {
      */
     OutcomeStats outcomes(String agentId, Window window, Integer version, List<String> origins) {
         List<HealthOutcomeCount> counts = outcomeCounts(new HealthUsageQuery(agentId, window.from(), window.to(), version, origins), false, "none");
-        return counts == null ? null : OutcomeStats.of(counts, settings.minOutcomeCoverage());
+        return counts == null ? null : OutcomeStats.of(counts, settings.minOutcomeCoverage()).withPending(outcomesPendingHint(window));
+    }
+
+    /**
+     * The hint the outcome-based measures carry while the outcome evaluation has
+     * not reached the window's end — after an upgrade it backfills the turn-row
+     * retention a batch per pass — or {@code null} when it has (within an hour and
+     * two rollup intervals, which a held-back failure or a pass in progress can
+     * take).
+     */
+    public String outcomesPendingHint(Window window) {
+        if (outcomeStore == null) {
+            return null;
+        }
+        Instant watermark;
+        try {
+            watermark = cache.get(List.of("outcomeWatermark"), () -> outcomeStore.watermark().orElse(Instant.EPOCH));
+        } catch (RuntimeException e) {
+            return null;
+        }
+        Instant now = clock.instant();
+        Instant end = window.to().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant needed = (end.isBefore(now) ? end : now).minus(Duration.ofHours(1)).minus(settings.rollupInterval().multipliedBy(2));
+        if (!watermark.isBefore(needed)) {
+            return null;
+        }
+        return Instant.EPOCH.equals(watermark)
+                ? "Outcomes are still being evaluated"
+                : "Outcomes are still being evaluated (through " + LocalDate.ofInstant(watermark, ZoneOffset.UTC) + ")";
     }
 
     /** Outcome counts, cached; null when unavailable. */
@@ -434,6 +462,7 @@ public class HealthReportService {
                 }
             }
         }
+        String pendingHint = outcomesAvailable ? outcomesPendingHint(window) : null;
         boolean grouped = groupBy != null && !"none".equals(groupBy);
         Map<LocalDate, RatingStats> ratingsByDay = !grouped && qualityAllowed && measures.stream().anyMatch(HealthReportService::usesRatings)
                 ? dailyRatings(scope.agentId(), window, scope.version(), origins)
@@ -460,7 +489,9 @@ public class HealthReportService {
                             : u == null ? HealthUsage.EMPTY : new HealthUsage(u.sessions(), u.engagedSessions(), u.turns(), u.distinctUsers(), 0);
                     RatingStats ratings = grouped ? null : ratingsByDay.getOrDefault(day, qualityAllowed ? RatingStats.EMPTY : null);
                     List<HealthOutcomeCount> dayOutcomes = outcomeDays.getOrDefault(day, List.of());
-                    OutcomeStats outcomes = outcomesAvailable ? OutcomeStats.of(dayOutcomes, settings.minOutcomeCoverage()) : null;
+                    OutcomeStats outcomes = outcomesAvailable
+                            ? OutcomeStats.of(dayOutcomes, settings.minOutcomeCoverage()).withPending(pendingHint)
+                            : null;
                     Measure m = HealthMeasures.pointOf(measure, new PeriodData(Totals.of(dayRows), dayUsage, ratings, 1.0, outcomes));
                     points.add(point(measure, day, m, dayRows, u, dayOutcomes));
                 }

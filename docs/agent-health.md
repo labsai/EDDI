@@ -233,7 +233,12 @@ and ratings, never conversation memory, and writes one row per session.
 ### Sessions
 
 A conversation splits into sessions wherever a turn starts more than its
-origin's **inactivity window** after the previous turn ended:
+origin's **inactivity window** after the previous turn ended. A turn's times come
+from its row: it started `durationMs` before its first capture (`timestamp`,
+taken when the turn ends) and was last active at the later of that and its last
+capture (`updatedAt`). A HITL resume keeps the first `timestamp`, so it counts
+from the resume: the session stays open a full window after it, and a session
+that had already closed while it waited for the approver reopens to `OPEN`.
 
 | Origin | Window |
 | --- | --- |
@@ -242,11 +247,15 @@ origin's **inactivity window** after the previous turn ended:
 
 An agent can override the window per origin in
 [`healthConfig.inactivityWindowHours`](agent-config-authoring.md#healthconfig--how-agent-health-judges-conversations)
-(1–720 hours); the window of the conversation's current version applies. A
-conversation's origin is its first turn row that is not `api` (see
-[origins](#origins)). `sessionNo` is the **step index the session starts at** —
-`0` for the first session, the index of its first turn for a later one — so a
-session keeps its key when older turns leave the retention.
+(1–720 hours); each session is split and closed by the window of the version it
+ran on. A conversation's origin is its first turn row that is not `api` (see
+[origins](#origins)); sessions judged before a later non-`api` row appeared keep
+the origin they were judged with. `sessionNo` is the **step index the session
+starts at** — `0` for the first session, the index of its first turn for a
+later one. A session whose first turns the retention removed keeps its stored
+key; one whose first turn an undo removed is re-keyed by its new first turn. Of
+two rows of one step — an unsettled, insert-only capture (a cancelled or
+deadline-stopped turn) next to the settled one — the settled row is the turn.
 
 A session is **open** while its window lasts: a turn inside it continues the
 session. Once the window has passed it is **closed**, and a turn that arrives
@@ -274,8 +283,8 @@ signal wins:
 | 1 | The last action of the session mapped in [`healthConfig.outcomes`](agent-config-authoring.md#healthconfig--how-agent-health-judges-conversations) | as mapped (`RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED`, `ABANDONED`) | `agent_action` | at once, `provisional` until the window passes |
 | 2 | The session's last [`report_conversation_outcome`](#the-self-report-tool) claim | as claimed | `self_reported` | at once, `provisional` |
 | 3 | `CONVERSATION_END` or `STOP_CONVERSATION` on a last turn that did not fail | `ASSUMED_RESOLVED` | `agent_closed` | at once, final — the conversation is over |
-| 4 | The last turn failed and nothing followed | `FAILED` | `structural` | after the window |
-| 5 | The last turn is still waiting on a HITL approver | `ENDED_QUIETLY` | `inferred` | after the window |
+| 4 | The last turn failed and nothing followed — a cancelled turn (`TURN_INTERRUPTED`) is not a failure | `FAILED` | `structural` | after the window |
+| 5 | The last turn is still waiting on a HITL approver, or was cancelled | `ENDED_QUIETLY` | `inferred` | after the window |
 | 6 | The last output asked a question | `ABANDONED` | `inferred` | after the window |
 | 7 | A negative rating (a conversation rating given during the session, or a thumbs-down on one of its replies; normalised score below 0.5) | `ENDED_QUIETLY` | `inferred` | after the window |
 | 8 | Quiet after a successful last turn | `ASSUMED_RESOLVED` | `silence` (default), or `ENDED_QUIETLY` with `assumeResolvedOnSilence: false` | after the window |
@@ -334,21 +343,41 @@ must be judged again (`dueAt`), and the action names of the session's last turn
 
 Per pass (at most 45 s of it, then the daily-row drain runs):
 
-1. **The feed** — conversations with turn rows written since a watermark
-   (`healthrollupstate` / `health_rollup_state`, row `outcomes`), up to a minute
-   ago, paged by each conversation's newest write, oldest first: a pass can stop
-   anywhere and the next resumes without a gap. The first pass starts at the
-   turn-row retention, so turns recorded before outcomes existed are judged too,
-   up to 5,000 conversations per pass.
-2. **Due sessions** — open sessions whose window has closed, and sessions a new
-   rating made due. A late row (one that reached the store after its window was
-   judged) is read here, when the session is judged again in full.
+1. **Due sessions first**, within half of that time, so a backfill never starves
+   them — open sessions whose window has closed, and sessions a rating made due:
+   a saved reply rating marks the session of its step, a saved conversation
+   rating the session it was given in (the last one started before it), a
+   withdrawn rating its session (a withdrawn conversation rating every session
+   of the conversation). The rating request never waits for this: the mark is
+   handed to a worker thread. A mark that arrives while its session is being
+   evaluated survives that evaluation's write. Each due session is judged over
+   its own steps only, up to the next stored session.
+2. **The feed** — conversations with turn rows captured since the watermark
+   (`healthrollupstate` / `health_rollup_state`, row `outcomes`) **minus
+   `eddi.health.outcome-feed-overlap`** (15 min), up to a minute ago, paged by
+   each conversation's newest capture, oldest first: a pass can stop anywhere and
+   the next resumes without a gap. Rows are ordered by *capture* time, set on the
+   turn's node before the row waits on that node's health queue, so a row can
+   reach the store after the watermark passed it; the overlap re-reads the last
+   minutes every pass and catches it — the price is re-judging those
+   conversations each pass (the evaluation is idempotent). A conversation whose
+   evaluation fails holds the watermark at its capture time, so the following
+   passes retry it, for at most an hour (then a WARN; its next change or due
+   time judges it). The first pass starts at the turn-row retention, so turns
+   recorded before outcomes existed are judged too, up to 5,000 conversations
+   per pass; while it catches up, every outcome-based measure (effectiveness,
+   sessions, engaged sessions, turns and cost per session, rating response, cost
+   per resolved session) carries the hint "Outcomes are still being evaluated
+   (through <day>)", and the portfolio's `sessionsDelta` is `null`.
+   `eddi_health_outcomes_lag_seconds` shows how far behind it is.
 
-A conversation is read from its latest stored session on (from the earliest due
-one when sessions are due), at most the newest 1,000 turn rows: a longer session
-counts its turns and spend from those. Sessions no longer found from that step
-on (an undo removed a session's first turn) are deleted. Idempotent: judging the
-same rows again writes the same rows.
+A conversation is read as a range of steps, oldest first, from its latest stored
+session on, at most 10,000 turn rows: when a range is longer, its last session —
+the one the rows read cut — is left as stored. Sessions are keyed by the step they
+genuinely start at. Sessions no longer found in the range read (an undo removed a
+session's first turn) are deleted, never one outside it; when every turn of the
+range was undone, the previous session is judged again (an undo back into it).
+Idempotent: judging the same rows again writes the same rows.
 
 ## Change markers
 
@@ -420,7 +449,7 @@ daily granularity, because that is what the rollup keeps.
 | Every endpoint | Roles `eddi-admin`, `eddi-editor`, `eddi-viewer`, and **`VIEW` on the agent** — the rule of `GET /agents/{agentId}/usage`. `403` without it, `404` for an unknown agent |
 | Quality section (ratings) | The [ratings rule](conversation-ratings.md#analyzing-and-triaging-the-people-running-the-agent) exactly: `eddi-admin` or `eddi-editor` (never `eddi-viewer`), and `EDIT` on the agent unless the caller sees every agent. Anyone else gets `{"restricted": true, "measures": []}`, and rating series points are `null` |
 | Portfolio | Only agents the caller may `VIEW`; platform incidents are computed over those agents only |
-| Session drill-down | The [conversation-review rule](workspaces.md): the caller **maintains** the agent (`EDIT`), else `403 {"reason": "FORBIDDEN"}`, and conversation review is enabled on the version asked for — without `version`, on the agent's current version — else `403 {"reason": "REVIEW_DISABLED"}`. Without `version` the page lists only sessions of versions that have review enabled (of the 100 newest), so a session that ran while review was off never appears |
+| Session drill-down | The [conversation-review rule](workspaces.md): the caller **maintains** the agent (`EDIT`), else `403 {"reason": "FORBIDDEN"}`, and conversation review is enabled on the version asked for — without `version`, on the agent's current version — else `403 {"reason": "REVIEW_DISABLED"}`. Without `version` the page lists only sessions of versions that have review enabled (of the 100 newest). The version checked is the one of the session's **last** turn: a session that moved from a version without review to one with it is listed. The rows carry ids, counts and outcomes, no content; reading the conversation itself goes through the conversation endpoints, which apply the review rule to the conversation's own version |
 | Outcome suggestions | `VIEW`, like the report |
 
 No view but the drill-down carries a conversation id, and none carries
@@ -531,6 +560,7 @@ the review rule applies to the MCP caller exactly as over REST) and
 | `eddi.health.apdex-t` | `4s` | Apdex threshold T (satisfied ≤ T, tolerating ≤ 4T); applies to days rolled up after a change |
 | `eddi.health.session-window` | `24h` | The inactivity window after which a session closes, for every origin but e-mail; `healthConfig.inactivityWindowHours` overrides it per agent and origin |
 | `eddi.health.email-session-window` | `72h` | The same for e-mail conversations |
+| `eddi.health.outcome-feed-overlap` | `15m` | How far behind its watermark the outcome evaluation re-reads conversations every pass, so a turn row that reached the store late is still judged (see [the evaluation](#the-evaluation)) |
 | `eddi.health.min-outcome-coverage` | `0.5` | The outcome coverage below which the effectiveness rates are withheld (`value: null` with a hint) |
 
 ## Retention
@@ -645,7 +675,8 @@ eddi_health_rollup_failures_total    # Agent days whose rollup failed (retried)
 eddi_health_rollup_pending           # Gauge: agent days waiting (the shared queue, cached 10 s)
 eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent day
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
-eddi_health_outcomes_failures_total  # Conversations whose outcome evaluation failed (retried with their next change)
+eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
+eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
 ```
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`

@@ -118,6 +118,13 @@ class HealthOutcomeViewsTest {
             assertEquals("DEFLECTED", HealthOutcomeViews.suggest("request_not_supported"));
             assertEquals("DEFLECTED", HealthOutcomeViews.suggest("outofscope"));
             assertNull(HealthOutcomeViews.suggest("greet"));
+            assertNull(HealthOutcomeViews.suggest("not_done"), "negated");
+            assertNull(HealthOutcomeViews.suggest("unconfirmed"), "a different word");
+            assertNull(HealthOutcomeViews.suggest("humanize_reply"));
+            assertNull(HealthOutcomeViews.suggest("abandonedCart"));
+            assertEquals("RESOLVED", HealthOutcomeViews.suggest("orderConfirmed"), "camelCase is split");
+            assertEquals("ESCALATED", HealthOutcomeViews.suggest("hand-off-to-agent"));
+            assertEquals("DEFLECTED", HealthOutcomeViews.suggest("OUT_OF_SCOPE"));
         }
     }
 

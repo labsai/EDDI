@@ -50,6 +50,7 @@ class HealthSessionEvaluatorTest {
         Integer version = 1;
         String origin = "api";
         double cost = 0.01;
+        Instant updatedAt;
 
         Turn(int step, Instant at) {
             this.step = step;
@@ -73,6 +74,17 @@ class HealthSessionEvaluatorTest {
 
         Turn failed() {
             errorKind = "TURN_ERROR";
+            return this;
+        }
+
+        Turn kind(String kind) {
+            errorKind = kind;
+            return this;
+        }
+
+        /** Captured again later — a HITL resume keeps the first timestamp. */
+        Turn updated(Instant at) {
+            updatedAt = at;
             return this;
         }
 
@@ -108,7 +120,9 @@ class HealthSessionEvaluatorTest {
 
         HealthTurn row() {
             return new HealthTurn("c1", step, "e" + step + (discarded ? "x" : ""), "agent", version, null, "user", origin,
-                    LocalDate.ofInstant(at, ZoneOffset.UTC), at, at, cost, null, 1L, 1L, 2L, 1_000L, errorKind, paused, List.of(), false, 0, 0, 0, 0,
+                    LocalDate.ofInstant(at, ZoneOffset.UTC), at, updatedAt == null ? at : updatedAt, cost, null, 1L, 1L, 2L, 1_000L, errorKind,
+                    paused,
+                    List.of(), false, 0, 0, 0, 0,
                     input, output, question, actions, discarded, selfReported);
         }
     }
@@ -128,8 +142,8 @@ class HealthSessionEvaluatorTest {
 
     static List<HealthOutcome> evaluate(List<Turn> turns, String origin, Duration window, Function<Integer, Resolved> configOf, Integer knownFirst,
                                         Ratings ratings, Instant now) {
-        return HealthSessionEvaluator.evaluate(new Input("c1", turns.stream().map(Turn::row).toList(), origin, window, configOf, knownFirst, null,
-                ratings, now));
+        return HealthSessionEvaluator.evaluate(new Input("c1", turns.stream().map(Turn::row).toList(), origin, v -> window, configOf, knownFirst,
+                null, ratings, now));
     }
 
     static HealthOutcome only(List<HealthOutcome> sessions) {
@@ -155,8 +169,8 @@ class HealthSessionEvaluatorTest {
             assertEquals(List.of(0, 3), sessions.stream().map(HealthOutcome::sessionNo).toList());
             assertEquals(3, sessions.get(0).turns());
             assertEquals(1, sessions.get(1).turns());
-            assertEquals(T0, sessions.get(0).startedAt());
-            assertEquals(T0.plus(Duration.ofHours(23)).plusSeconds(1), sessions.get(0).endedAt(), "the last turn's start plus its duration");
+            assertEquals(T0.plus(Duration.ofHours(23)), sessions.get(0).endedAt(), "the last turn's capture: the timestamp is taken when it ends");
+            assertEquals(T0.minusSeconds(1), sessions.get(0).startedAt(), "the first turn's capture less its duration");
             assertEquals(LocalDate.of(2026, 11, 2), sessions.get(0).day(), "the day the session ended");
         }
 
@@ -480,6 +494,91 @@ class HealthSessionEvaluatorTest {
             List<Turn> turns = greetingAndOneExchange();
             turns.get(1).actions("a", "b");
             assertEquals(List.of("a", "b"), judge(turns, Resolved.DEFAULTS).lastActions());
+        }
+    }
+
+    @Nested
+    @DisplayName("review fixes: resumes, unsettled rows, per-version windows, stable keys")
+    class ReviewFixes {
+
+        @Test
+        @DisplayName("M1: a HITL resume keeps the first timestamp; the session is open for a full window after the resume")
+        void resumeReopens() {
+            List<Turn> paused = greetingAndOneExchange();
+            paused.get(1).paused();
+            HealthOutcome closedWhilePaused = only(evaluate(paused, "api", DAY, Resolved.DEFAULTS, T0.plus(Duration.ofHours(25))));
+            assertEquals(HealthOutcomes.ENDED_QUIETLY, closedWhilePaused.outcome());
+
+            // The approver resumes 30 h later: same row, same timestamp, a new updatedAt.
+            Instant resumed = T0.plus(Duration.ofHours(30));
+            List<Turn> after = greetingAndOneExchange();
+            after.get(1).updated(resumed);
+            HealthOutcome reopened = only(evaluate(after, "api", DAY, Resolved.DEFAULTS, resumed.plusSeconds(60)));
+            assertEquals(HealthOutcomes.OPEN, reopened.outcome(), "reopened, not silence at once");
+            assertTrue(reopened.provisional());
+            assertEquals(resumed, reopened.endedAt());
+            assertEquals(resumed.plus(DAY), reopened.dueAt());
+            assertEquals(HealthOutcomes.ASSUMED_RESOLVED,
+                    only(evaluate(after, "api", DAY, Resolved.DEFAULTS, resumed.plus(DAY).plusSeconds(1))).outcome());
+        }
+
+        @Test
+        @DisplayName("M1: a resume inside the window moves the close to a window after the resume")
+        void resumeInsideWindow() {
+            Instant resumed = T0.plus(Duration.ofHours(20));
+            List<Turn> turns = greetingAndOneExchange();
+            turns.get(1).updated(resumed);
+            HealthOutcome s = only(evaluate(turns, "api", DAY, Resolved.DEFAULTS, T0.plus(Duration.ofHours(30))));
+            assertEquals(HealthOutcomes.OPEN, s.outcome(), "would have closed at T0+24h by the first capture");
+            assertEquals(resumed.plus(DAY), s.dueAt());
+        }
+
+        @Test
+        @DisplayName("m5: of two rows of one step the settled one is the turn; a cancelled duplicate inflates nothing")
+        void duplicateUnsettledRow() {
+            List<Turn> turns = greetingAndOneExchange();
+            Turn cancelled = turn(1, T0.plusSeconds(90)).kind("TURN_INTERRUPTED");
+            turns.add(cancelled);
+            HealthOutcome s = only(evaluate(turns, "api", DAY, Resolved.DEFAULTS, T0.plus(Duration.ofDays(3))));
+            assertEquals(2, s.turns());
+            assertEquals(0, s.failures());
+            assertEquals(HealthOutcomes.ASSUMED_RESOLVED, s.outcome());
+        }
+
+        @Test
+        @DisplayName("m5: a last turn the person cancelled is no structural FAILED")
+        void cancelledLastTurn() {
+            List<Turn> turns = greetingAndOneExchange();
+            turns.get(1).kind("TURN_INTERRUPTED");
+            HealthOutcome s = only(evaluate(turns, "api", DAY, Resolved.DEFAULTS, T0.plus(Duration.ofDays(3))));
+            assertEquals(HealthOutcomes.ENDED_QUIETLY, s.outcome());
+            assertEquals(0, s.failures());
+            List<Turn> deadline = greetingAndOneExchange();
+            deadline.get(1).kind("TURN_DEADLINE");
+            assertEquals(HealthOutcomes.FAILED, only(evaluate(deadline, "api", DAY, Resolved.DEFAULTS, T0.plus(Duration.ofDays(3)))).outcome(),
+                    "the agent's own deadline is its failure");
+        }
+
+        @Test
+        @DisplayName("m2: a session is split and closed by the window of the version it ran on")
+        void windowPerVersion() {
+            List<Turn> turns = new ArrayList<>(List.of(turn(0, T0).noInput().version(1), turn(1, T0.plusSeconds(60)).version(1),
+                    turn(2, T0.plus(Duration.ofHours(3))).version(2), turn(3, T0.plus(Duration.ofHours(5))).version(2)));
+            Function<Integer, Duration> windows = v -> v == 1 ? Duration.ofHours(1) : DAY;
+            List<HealthOutcome> sessions = HealthSessionEvaluator.evaluate(new Input("c1", turns.stream().map(Turn::row).toList(), "api", windows,
+                    v -> Resolved.DEFAULTS, null, null, Ratings.NONE, T0.plus(Duration.ofHours(6))));
+            assertEquals(List.of(0, 2), sessions.stream().map(HealthOutcome::sessionNo).toList(), "v1's 1 h window split it; v2's 24 h did not");
+            assertEquals(HealthOutcomes.ASSUMED_RESOLVED, sessions.get(0).outcome(), "v1's window has passed");
+            assertEquals(HealthOutcomes.OPEN, sessions.get(1).outcome(), "v2's has not");
+        }
+
+        @Test
+        @DisplayName("m2: a stored key passed by the caller is kept for the first session")
+        void keepsKey() {
+            List<Turn> turns = List.of(turn(5, T0), turn(6, T0.plusSeconds(60)));
+            HealthOutcome s = only(HealthSessionEvaluator.evaluate(new Input("c1", turns.stream().map(Turn::row).toList(), "api", v -> DAY,
+                    v -> Resolved.DEFAULTS, 0, 3, Ratings.NONE, T0)));
+            assertEquals(3, s.sessionNo());
         }
     }
 }

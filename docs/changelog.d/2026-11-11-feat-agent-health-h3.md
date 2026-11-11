@@ -51,7 +51,33 @@ the backend's answers in its new §13.
 - **Metrics**: `eddi.health.outcomes.sessions`, `eddi.health.outcomes.failures` (on the rollup panel of the Full
   dashboard).
 - **Platform Operator**: the two GET endpoints allow-listed, the health prompt teaches sessions, evidence, coverage, the
-  four-part split and the silence caveat; operator revision 62; the OpenAPI snapshot gains both operations.
+  four-part split and the silence caveat; operator revision 63; the OpenAPI snapshot gains both operations.
+
+### Review fixes (same day)
+
+An independent review of the evaluator job found real defects; all fixed on the branch:
+
+- **HITL resumes** (M1): a turn's start is its capture (`timestamp`, taken when the turn ends) less its duration, its
+  end the later of that and its last capture (`updatedAt`). A resume, which keeps the first `timestamp`, now keeps its
+  session open a full window after the resume, and a session closed while paused reopens to `OPEN`.
+- **Late rows** (M2): the feed re-reads `eddi.health.outcome-feed-overlap` (15m) behind its watermark every pass —
+  rows are ordered by capture time, set before they wait on a node's queue — and a failed evaluation holds the
+  watermark at its capture for up to an hour, so it is retried.
+- **Ranges and keys** (M3): a conversation is read as a forward range of steps (`findByConversationSteps`), at most
+  10,000 rows, never the newest N; a due session is judged over its own steps only; sessions are keyed by their genuine
+  first step (a stored key kept when the retention removed the first rows), and only sessions inside the range read
+  can be deleted. A rating marks only the session it can change.
+- **Throughput** (M4): due sessions run first, within half of the pass; a lag gauge
+  `eddi.health.outcomes.lag.seconds` (shared state, cached); while the evaluation is behind the period, outcome
+  measures carry "Outcomes are still being evaluated (through …)" and the portfolio's `sessionsDelta` is null.
+- Undo back into an earlier session re-judges it (m1); each session uses its own version's window, mapping and
+  silence setting (m2); a due mark that arrives during an evaluation survives its write, and a withdrawn rating
+  (new `ConversationRatingWithdrawn` event) marks its session (m3); rating marks are handed to a worker thread (m4);
+  of two rows of one step the settled one is the turn, and a cancelled (`TURN_INTERRUPTED`) last turn is no `FAILED`
+  (m5); the Postgres column is added only when the catalog lacks it (m6); the orphan sweep splits its cap between
+  turn and outcome rows (m7); the drill-down's version rule is documented (m8). Nits: start/end times, `dueAt`
+  stored absent (sparse index), `costPerResolvedSession` withheld with the rates, word-based suggestion heuristics,
+  the operator prompt on provisional outcomes.
 
 ### Design decisions
 

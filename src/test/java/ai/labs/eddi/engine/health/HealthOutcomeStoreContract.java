@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -84,13 +85,35 @@ public interface HealthOutcomeStoreContract {
         assertEquals(List.of("c2", "c1"), store().findDue(T0.plusSeconds(120), 10).stream().map(HealthOutcome::conversationId).toList());
         assertEquals(List.of("c2"), store().findDue(T0.plusSeconds(120), 1).stream().map(HealthOutcome::conversationId).toList());
 
-        assertEquals(1, store().markDue("c4", T0.plusSeconds(10)));
-        assertEquals(1, store().markDue("c3", T0.plusSeconds(10)), "an earlier due time wins");
-        assertEquals(0, store().markDue("c2", T0.plusSeconds(50)), "a later one does not postpone");
+        assertEquals(1, store().markDue("c4", null, T0.plusSeconds(10)));
+        assertEquals(1, store().markDue("c3", List.of(0), T0.plusSeconds(10)), "an earlier due time wins");
+        assertEquals(0, store().markDue("c2", null, T0.plusSeconds(50)), "a later one does not postpone");
+        assertEquals(0, store().markDue("c1", List.of(5), T0.plusSeconds(1)), "only the named sessions");
+        assertEquals(0, store().markDue("c1", List.of(), T0.plusSeconds(1)));
         List<String> due = store().findDue(T0.plusSeconds(120), 10).stream().map(HealthOutcome::conversationId).toList();
         assertEquals(4, due.size(), due.toString());
         assertEquals(Set.of("c3", "c4"), Set.copyOf(due.subList(0, 2)), "both due at T0+10s");
         assertEquals(List.of("c2", "c1"), due.subList(2, 4));
+    }
+
+    @Test
+    @DisplayName("a due mark newer than the evaluation that writes the row survives it, as the earlier time; an older one does not")
+    default void markSurvivesUpsert() {
+        Instant evaluatedAt = T0.plusSeconds(100);
+        HealthOutcome open = session("c1", 0, "agent", "u", T0, "api", true, "OPEN", null, true, T0.plusSeconds(86_400));
+        store().upsert(List.of(open));
+        // A rating arrives while the next evaluation runs (it started at evaluatedAt).
+        store().markDue("c1", null, evaluatedAt.plusSeconds(5));
+        HealthOutcome closed = new HealthOutcome("c1", 0, "agent", 2, "u", "api", true, T0, T0, 4, 0.25, 1, "ASSUMED_RESOLVED", "silence", false,
+                open.day(), null, 0, List.of(), evaluatedAt);
+        store().upsert(List.of(closed));
+        assertEquals(evaluatedAt.plusSeconds(5), store().findByConversation("c1").get(0).dueAt(), "the mark is kept");
+
+        HealthOutcome later = new HealthOutcome("c1", 0, "agent", 2, "u", "api", true, T0, T0, 4, 0.25, 1, "ASSUMED_RESOLVED", "silence", false,
+                open.day(), null, 0, List.of(), evaluatedAt.plusSeconds(60));
+        store().upsert(List.of(later));
+        assertEquals(null, store().findByConversation("c1").get(0).dueAt(), "evaluated after the mark: cleared");
+        assertTrue(store().findDue(T0.plus(Duration.ofDays(9)), 10).isEmpty());
     }
 
     @Test

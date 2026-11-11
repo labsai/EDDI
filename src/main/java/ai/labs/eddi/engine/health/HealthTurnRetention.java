@@ -184,16 +184,32 @@ public class HealthTurnRetention {
         Instant since = clock.instant().minus(settings.orphanSweepWindow());
         int max = settings.orphanSweepMax();
         List<String> candidates = new ArrayList<>();
+        boolean overflowed = false;
         IHealthOutcomeStore sessions = outcomes();
         try {
             // One more than the cap, to tell "exactly the cap" from "more than it".
-            int limit = (int) Math.min(Integer.MAX_VALUE, max + 1L);
+            // With session outcomes the cap is shared fairly: each source may fill half
+            // of it, and the turn rows the rest (one more than its share, to tell
+            // "exactly the cap" from "more than it").
             Set<String> unique = new LinkedHashSet<>();
-            store.forEachConversationUpdatedSince(since, limit, unique::add);
             if (sessions != null) {
                 // An evaluation that read a conversation's rows before its delete can
                 // write its sessions after it.
-                sessions.forEachConversationEvaluatedSince(since, limit, unique::add);
+                int share = Math.max(1, max / 2);
+                List<String> evaluated = new ArrayList<>();
+                sessions.forEachConversationEvaluatedSince(since, share + 1, evaluated::add);
+                overflowed = evaluated.size() > share;
+                unique.addAll(evaluated.subList(0, Math.min(evaluated.size(), share)));
+            }
+            int turnLimit = (int) Math.min(Integer.MAX_VALUE, max - unique.size() + 1L);
+            List<String> written = new ArrayList<>();
+            store.forEachConversationUpdatedSince(since, turnLimit, written::add);
+            overflowed |= written.size() >= turnLimit;
+            for (String conversationId : written) {
+                if (unique.size() > max) {
+                    break;
+                }
+                unique.add(conversationId);
             }
             candidates.addAll(unique);
         } catch (RuntimeException e) {
@@ -201,10 +217,10 @@ public class HealthTurnRetention {
                     sanitize(e.getMessage()));
             return 0L;
         }
-        if (candidates.size() > max) {
+        if (candidates.size() > max || overflowed) {
             LOGGER.warnf("The Agent Health orphan sweep checks %d conversations, not every conversation written since %s; the rest wait for "
                     + "the next daily sweep (raise eddi.health.orphan-sweep-max)", max, since);
-            candidates = candidates.subList(0, max);
+            candidates = candidates.subList(0, Math.min(candidates.size(), max));
         }
 
         IConversationMemoryStore conversationStore = conversations.get();
@@ -245,7 +261,7 @@ public class HealthTurnRetention {
         }
         metrics.dropped(HealthMetrics.REASON_ORPHANED, removed);
         if (removed > 0) {
-            LOGGER.infof("Removed %d Agent Health turn row(s) of conversations that no longer exist", removed);
+            LOGGER.infof("Removed %d Agent Health row(s) (turns and sessions) of conversations that no longer exist", removed);
         }
         if (unanswered > 0 || failedDeletes > 0) {
             LOGGER.warnf("The Agent Health orphan sweep could not check %d conversation(s) and could not clean up %d; the next daily sweep "

@@ -49,8 +49,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * age in seconds of the oldest of them;</li>
  * <li>{@code eddi.health.outcomes.sessions} — session outcome rows the outcome
  * evaluation wrote (each re-evaluation counts again);</li>
- * <li>{@code eddi.health.outcomes.failures} — conversations whose evaluation
- * failed (retried with their next change or due time).</li>
+ * <li>{@code eddi.health.outcomes.failures} — conversation evaluations that
+ * failed (the feed retries them for up to an hour, then with their next change
+ * or due time);</li>
+ * <li>{@code eddi.health.outcomes.lag.seconds} — how far the outcome feed's
+ * watermark is behind the clock (a gauge over the shared state, like the
+ * backlog gauges).</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -84,6 +88,7 @@ public class HealthMetrics {
     static final String ROLLUP_LAG = "eddi.health.rollup.lag.seconds";
     static final String OUTCOME_SESSIONS = "eddi.health.outcomes.sessions";
     static final String OUTCOME_FAILURES = "eddi.health.outcomes.failures";
+    static final String OUTCOME_LAG = "eddi.health.outcomes.lag.seconds";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -97,6 +102,7 @@ public class HealthMetrics {
     static final Duration BACKLOG_CACHE = Duration.ofSeconds(10);
 
     private final AtomicReference<Backlog> backlog = new AtomicReference<>();
+    private final AtomicReference<Backlog> outcomeLag = new AtomicReference<>();
 
     /** One read of the dirty-day queue. */
     private record Backlog(Instant readAt, double pending, double lagSeconds) {
@@ -162,6 +168,33 @@ public class HealthMetrics {
         rollupRows.increment(rows);
         rollupFailures.increment(failures);
         rollupDuration.record(took);
+    }
+
+    /**
+     * Registers {@code eddi.health.outcomes.lag.seconds}: how far the outcome
+     * feed's watermark is behind the clock, read from the shared state when scraped
+     * (cached for {@link #BACKLOG_CACHE}), so every node reports the same value.
+     * NaN while the evaluation has never run or the store cannot be read.
+     */
+    void registerOutcomeLag(IHealthOutcomeStore store, Clock clock) {
+        Gauge.builder(OUTCOME_LAG, () -> outcomeLag(store, clock)).description("How far the Agent Health outcome evaluation is behind")
+                .register(registry);
+    }
+
+    private double outcomeLag(IHealthOutcomeStore store, Clock clock) {
+        Instant now = clock.instant();
+        Backlog last = outcomeLag.get();
+        if (last != null && last.readAt().plus(BACKLOG_CACHE).isAfter(now)) {
+            return last.lagSeconds();
+        }
+        double lag;
+        try {
+            lag = store.watermark().map(w -> (double) Math.max(0, Duration.between(w, now).toSeconds())).orElse(Double.NaN);
+        } catch (RuntimeException e) {
+            lag = Double.NaN;
+        }
+        outcomeLag.set(new Backlog(now, 0, lag));
+        return lag;
     }
 
     void outcomesEvaluated(long sessions, long failures) {

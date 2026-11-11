@@ -18,9 +18,10 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.UpdateOneModel;
+import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import com.mongodb.client.model.WriteModel;
 import io.quarkus.arc.DefaultBean;
@@ -32,6 +33,7 @@ import org.bson.conversions.Bson;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -125,14 +127,36 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         try {
             List<WriteModel<Document>> writes = new ArrayList<>(rows.size());
             for (HealthOutcome row : rows) {
-                Document d = toDocument(row);
-                d.put("_id", id(row.conversationId(), row.sessionNo()));
-                writes.add(new ReplaceOneModel<>(eq("_id", d.get("_id")), d, new ReplaceOptions().upsert(true)));
+                writes.add(new UpdateOneModel<>(eq("_id", id(row.conversationId(), row.sessionNo())), replacePipeline(row),
+                        new UpdateOptions().upsert(true)));
             }
             outcomes.bulkWrite(writes);
         } catch (MongoException e) {
             throw new HealthStoreException("Could not store health outcomes", e);
         }
+    }
+
+    /**
+     * Every value {@code $set} as a literal (an action named {@code "$x"} stays a
+     * string), and {@code dueAt} kept when a mark newer than this evaluation is
+     * stored — removed, not nulled, when there is none (the index is sparse).
+     */
+    static List<Bson> replacePipeline(HealthOutcome row) {
+        Document set = new Document();
+        toDocument(row).forEach((field, value) -> {
+            if (!FIELD_DUE.equals(field)) {
+                set.put(field, new Document("$literal", value));
+            }
+        });
+        Date evaluated = date(row.evaluatedAt() == null ? Instant.EPOCH : row.evaluatedAt());
+        Object fresh = row.dueAt() == null ? "$$REMOVE" : date(row.dueAt());
+        Object kept = row.dueAt() == null ? "$" + FIELD_DUE : new Document("$min", List.of("$" + FIELD_DUE, date(row.dueAt())));
+        Document markedSince = new Document("$and", List.of(
+                new Document("$ne", Arrays.asList(new Document("$ifNull", Arrays.asList("$" + FIELD_DUE, null)), null)),
+                new Document("$gte", List.of("$" + FIELD_DUE, evaluated)),
+                new Document("$lte", List.of("$" + FIELD_DUE, new Date(evaluated.getTime() + MARK_WINDOW_MS)))));
+        set.put(FIELD_DUE, new Document("$cond", Arrays.asList(markedSince, kept, fresh)));
+        return List.of(new Document("$set", set));
     }
 
     @Override
@@ -160,11 +184,17 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
-    public long markDue(String conversationId, Instant at) {
+    public long markDue(String conversationId, Collection<Integer> sessionNos, Instant at) {
+        if (sessionNos != null && sessionNos.isEmpty()) {
+            return 0L;
+        }
         try {
             Date when = Date.from(at);
-            return outcomes.updateMany(and(eq(FIELD_CONVERSATION, conversationId), or(eq(FIELD_DUE, null), gt(FIELD_DUE, when))),
-                    Updates.set(FIELD_DUE, when)).getModifiedCount();
+            List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId), or(eq(FIELD_DUE, null), gt(FIELD_DUE, when))));
+            if (sessionNos != null) {
+                filters.add(in(FIELD_SESSION, sessionNos));
+            }
+            return outcomes.updateMany(and(filters), Updates.set(FIELD_DUE, when)).getModifiedCount();
         } catch (MongoException e) {
             throw new HealthStoreException("Could not mark health outcomes due", e);
         }
@@ -406,7 +436,9 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         d.put(FIELD_EVIDENCE, o.evidence());
         d.put(FIELD_PROVISIONAL, o.provisional());
         d.put(FIELD_DAY, o.day() == null ? null : o.day().toString());
-        d.put(FIELD_DUE, date(o.dueAt()));
+        if (o.dueAt() != null) {
+            d.put(FIELD_DUE, date(o.dueAt()));
+        }
         d.put(FIELD_FIRST_OUTPUT, o.firstOutputStep());
         d.put(FIELD_LAST_ACTIONS, o.lastActions());
         d.put(FIELD_EVALUATED, date(o.evaluatedAt()));

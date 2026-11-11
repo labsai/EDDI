@@ -291,21 +291,30 @@ What the H3 backend does where this contract leaves room. Nothing above changed 
   model claimed); assumed ones as `ASSUMED_RESOLVED` with `agent_closed` or `silence`. `external_event`,
   `conversation_id_event` and `judged` are accepted and match nothing until H5/H6.
 - **Deviation — `sessionNo` is the step index the session starts at**, not an ordinal: `0` for a conversation's first
-  session, the index of its first turn for a later one (`3`, `17`, …). It stays put when older turns leave the retention
-  or an undo changes an earlier session.
+  session, the index of its first turn for a later one (`3`, `17`, …). A stored session keeps its key when the retention
+  removes its first turns; an undo of a session's first turn re-keys it by its new first turn.
 - **Deviation — `provisional`.** `true` while the session is inside its inactivity window. Such a row carries the outcome
   known so far: `OPEN` without a signal, or the mapped / self-reported outcome (which a later turn in the window can
   still change). Agent-closed sessions are final at once. Only rows with `provisional: false` enter the rates.
 - **Deviation — `outcome: null`** (and `evidence: null`) for sessions of origins that are not judged (`schedule`,
   `webhook`, `a2a`, `group-member`, `delegated`, `agent-test`). They appear in the drill-down only when such an origin is
   asked for.
+- **`startedAt` / `endedAt`** come from the turn rows: a turn started `durationMs` before its first capture and was last
+  active at its last capture (`updatedAt`), so a HITL resume counts from when it was resumed and reopens a closed session
+  to `OPEN`. `costPerResolvedSession` is withheld (`null` + hint) with the rates when coverage is too low.
+- **While the outcome evaluation catches up** (after an upgrade it backfills the turn-row retention), every outcome-based
+  measure keeps its value and carries the `hint` "Outcomes are still being evaluated (through YYYY-MM-DD)", and the
+  portfolio's `sessionsDelta` is `null` (the item has no `hint` field; the report's measures say it).
 - **Drill-down permissions.** `403 {"error": "forbidden", "reason": …, "message": …}`. `FORBIDDEN`: the caller does not
   maintain the agent (`EDIT`, the conversation-review reader rule). `REVIEW_DISABLED`: review is off on `version`, or —
   without `version` — on the agent's current version. Without `version` the page holds only sessions of versions that have
-  review enabled (of the 100 newest). Rows never carry a user id. `limit` defaults to 50; `nextCursor` is an offset, like
+  review enabled (of the 100 newest). The version checked is the one of the session's last turn (documented; reading a
+  conversation itself applies the review rule to its own version). Rows never carry a user id. `limit` defaults to 50; `nextCursor` is an offset, like
   the portfolio's (a page may repeat or skip a session evaluated between two pages).
 - **Outcome suggestions.** `items` sorted by `sessionsEndingWith` (descending), at most 20, reserved actions and actions
-  mapped in the **current** version left out; `suggested` is `null` when the name matches no heuristic. VIEW suffices
+  mapped in the **current** version left out; `suggested` is `null` when the name matches no heuristic. The heuristics
+  match whole words of the action name (split at `_`, `-`, `.` and camelCase), not substrings, and a word after
+  `not`/`no`/`never` does not count — `not_done`, `unconfirmed` and `humanize` suggest nothing. VIEW suffices
   (they carry action names and counts only).
 - **Adoption `sessions` / `engagedSessions`** now count sessions that **ended** in the period (open ones included) from the
   outcome rows; `turnsPerSession`, `costPerSession` and `ratingResponseRate` divide by them, and the portfolio's `sessions` /

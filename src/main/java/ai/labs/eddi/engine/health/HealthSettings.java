@@ -34,6 +34,8 @@ public class HealthSettings {
     static final Duration DEFAULT_SESSION_WINDOW = Duration.ofHours(24);
     /** Default {@code eddi.health.email-session-window}. */
     static final Duration DEFAULT_EMAIL_SESSION_WINDOW = Duration.ofHours(72);
+    /** Default {@code eddi.health.outcome-feed-overlap}. */
+    static final Duration DEFAULT_OUTCOME_FEED_OVERLAP = Duration.ofMinutes(15);
     /** Default {@code eddi.health.min-outcome-coverage}. */
     static final double DEFAULT_MIN_OUTCOME_COVERAGE = 0.5;
 
@@ -49,6 +51,7 @@ public class HealthSettings {
     private Duration sessionWindow = DEFAULT_SESSION_WINDOW;
     private Duration emailSessionWindow = DEFAULT_EMAIL_SESSION_WINDOW;
     private double minOutcomeCoverage = DEFAULT_MIN_OUTCOME_COVERAGE;
+    private Duration outcomeFeedOverlap = DEFAULT_OUTCOME_FEED_OVERLAP;
 
     @Inject
     public HealthSettings(@ConfigProperty(name = "eddi.health.enabled", defaultValue = "true") boolean enabled,
@@ -84,6 +87,24 @@ public class HealthSettings {
         this.minOutcomeCoverage = Double.isFinite(minOutcomeCoverage) && minOutcomeCoverage >= 0 && minOutcomeCoverage <= 1
                 ? minOutcomeCoverage
                 : DEFAULT_MIN_OUTCOME_COVERAGE;
+    }
+
+    /** The outcome feed's overlap (H3 review), injected like the settings above. */
+    @Inject
+    void outcomeFeedOverlap(@ConfigProperty(name = "eddi.health.outcome-feed-overlap", defaultValue = "15m") Duration overlap) {
+        this.outcomeFeedOverlap = overlap == null || overlap.isNegative() ? DEFAULT_OUTCOME_FEED_OVERLAP : overlap;
+    }
+
+    /**
+     * How far behind its watermark the outcome evaluation re-reads conversations
+     * every pass ({@code eddi.health.outcome-feed-overlap}, 15 min): a turn row is
+     * ordered by its capture time, set on the turn's node before it waits on that
+     * node's queue, so it can reach the store after the watermark passed it. A row
+     * later than this is judged with its conversation's next change or when its
+     * session is due. Zero re-reads nothing.
+     */
+    public Duration outcomeFeedOverlap() {
+        return outcomeFeedOverlap;
     }
 
     /** Collection settings; everything else at its default — for tests. */

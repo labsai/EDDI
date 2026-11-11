@@ -21,6 +21,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -164,5 +165,28 @@ class HealthMeasuresOutcomeTest {
         EffectivenessSection effectiveness = (EffectivenessSection) sections.get("effectiveness");
         assertEquals(0.85, effectiveness.coverage(), 1e-9);
         assertEquals(5, effectiveness.measures().size());
+    }
+
+    @Test
+    @DisplayName("nit: cost per resolved session is withheld with the rates when coverage is too low")
+    void costPerResolvedWithheld() {
+        List<HealthOutcomeCount> counts = List.of(c("ASSUMED_RESOLVED", "agent_closed", 20), c("ENDED_QUIETLY", "inferred", 80));
+        Measure m = HealthMeasures.pointOf("costPerResolvedSession", period(counts, 0.5, 4.0));
+        assertNull(m.value());
+        assertTrue(m.hint().contains("coverage"), m.hint());
+        assertEquals(0.2, HealthMeasures.pointOf("costPerResolvedSession", period(counts, 0.1, 4.0)).value(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("M4: a pending evaluation's hint rides on every outcome-based measure, values kept")
+    void pendingHint() {
+        Totals totals = new Totals(10, 0, 0, 0, Map.of(), Map.of(), 1.0, 0, 0, 0, 0, 0, List.of(), null);
+        PeriodData data = new PeriodData(totals, null, null, 1.0, OutcomeStats.of(sample(), 0.5).withPending("Outcomes are still being evaluated"));
+        for (String id : List.of("resolutionRate", "sessions", "engagedSessions", "outcomeCoverage")) {
+            Measure m = HealthMeasures.pointOf(id, data);
+            assertNotNull(m.value(), id);
+            assertEquals("Outcomes are still being evaluated", m.hint(), id);
+        }
+        assertNotEquals("Outcomes are still being evaluated", HealthMeasures.pointOf("tokensPerTurn", data).hint(), "not an outcome measure");
     }
 }

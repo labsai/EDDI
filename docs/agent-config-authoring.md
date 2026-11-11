@@ -273,8 +273,10 @@ save with out-of-range values answers 400 naming the field.
 `healthConfig` on the **agent** configuration says how [Agent Health](agent-health.md#conversation-outcomes)
 decides how a session ended. It is **versioned** and travels with the agent in
 export, import and agent sync, like `ratingConfig`; a session is judged by the
-`healthConfig` of the version it **ended** on, so changing it in v9 never
-re-judges sessions that ran on v8. Absent, every default applies.
+`healthConfig` of the version it ran on — its mapping and silence setting those
+of the version of its last turn, its inactivity window that of the version it
+ran on when it was split and closed — so changing it in v9 never re-judges
+sessions that ran on v8. Absent, every default applies.
 
 ```json
 "healthConfig": {

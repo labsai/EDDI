@@ -138,7 +138,16 @@ public final class HealthMeasures {
      */
     public record OutcomeStats(long sessions, long engagedSessions, long turns, long closed, long resolvedConfirmed, long resolvedSelfReported,
             long resolvedAgentClosed, long resolvedSilence, long resolvedOther, long escalated, long abandoned, long deflected, long failed,
-            long endedQuietly, double minCoverage) {
+            long endedQuietly, double minCoverage, String pending) {
+
+        /**
+         * The same counts, with the hint that the evaluation has not reached the end of
+         * the period yet ({@code null}: it has).
+         */
+        public OutcomeStats withPending(String hint) {
+            return new OutcomeStats(sessions, engagedSessions, turns, closed, resolvedConfirmed, resolvedSelfReported, resolvedAgentClosed,
+                    resolvedSilence, resolvedOther, escalated, abandoned, deflected, failed, endedQuietly, minCoverage, hint);
+        }
 
         public static final OutcomeStats EMPTY = of(List.of(), 0.5);
 
@@ -183,7 +192,7 @@ public final class HealthMeasures {
                 }
             }
             return new OutcomeStats(sessions, engaged, turns, closed, confirmed, self, agentClosed, silence, other, escalated, abandoned, deflected,
-                    failed, quiet, minCoverage);
+                    failed, quiet, minCoverage, null);
         }
 
         /** Resolved sessions, confirmed or assumed. */
@@ -450,7 +459,21 @@ public final class HealthMeasures {
         return new Stat((double) count, count, null, new Count(count), null, null);
     }
 
+    /** Measures read, in part or whole, from the session outcome rows. */
+    static final Set<String> OUTCOME_MEASURES = Set.of("resolutionRate", "escalationRate", "abandonmentRate", "deflectionRate", "outcomeCoverage",
+            "costPerResolvedSession", "sessions", "engagedSessions", "turnsPerSession", "costPerSession", "ratingResponseRate");
+
     static Stat stat(String id, PeriodData data) {
+        Stat stat = stat0(id, data);
+        OutcomeStats o = data.outcomes();
+        if (o != null && o.pending() != null && OUTCOME_MEASURES.contains(id)) {
+            // The value stands for what is evaluated so far; say so.
+            return new Stat(stat.value(), stat.n(), stat.interval(), stat.test(), stat.breakdown(), o.pending());
+        }
+        return stat;
+    }
+
+    private static Stat stat0(String id, PeriodData data) {
         Totals t = data.totals();
         HealthUsage u = data.usage();
         RatingStats r = data.ratings();
@@ -474,7 +497,7 @@ public final class HealthMeasures {
             case "outcomeCoverage" -> o == null
                     ? Stat.none(HINT_OUTCOMES_UNAVAILABLE)
                     : o.closed() <= 0 ? Stat.none(HINT_NO_CLOSED_SESSIONS) : untested(proportion(o.covered(), o.closed(), null));
-            case "costPerResolvedSession" -> o == null ? Stat.none(HINT_OUTCOMES_UNAVAILABLE) : ratio(t.costUsd(), o.resolved());
+            case "costPerResolvedSession" -> costPerResolved(t, o);
             case "ratingScore" -> r == null
                     ? Stat.none(HINT_RATINGS_UNAVAILABLE)
                     : ratingScore(r);
@@ -598,6 +621,21 @@ public final class HealthMeasures {
             return new Stat(null, o.closed(), null, new NoTest(), resolutionBreakdown(o, false), low);
         }
         return proportion(o.resolved(), o.closed(), resolutionBreakdown(o, true));
+    }
+
+    /**
+     * The period's spend over its resolved sessions — withheld with the rates when
+     * the coverage is too low to say what "resolved" counts.
+     */
+    private static Stat costPerResolved(Totals t, OutcomeStats o) {
+        if (o == null) {
+            return Stat.none(HINT_OUTCOMES_UNAVAILABLE);
+        }
+        String low = o.closed() > 0 ? coverageHint(o) : null;
+        if (low != null) {
+            return new Stat(null, o.resolved(), null, new NoTest(), null, low);
+        }
+        return ratio(t.costUsd(), o.resolved());
     }
 
     /**

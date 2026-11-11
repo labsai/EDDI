@@ -92,14 +92,19 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
 
     static final String UPSERT = "INSERT INTO health_outcomes (" + String.join(", ", COLUMNS) + ") VALUES ("
             + COLUMNS.stream().map(c -> "?").collect(Collectors.joining(", ")) + ") ON CONFLICT (conversation_id, session_no) DO UPDATE SET "
-            + COLUMNS.stream().filter(c -> !c.equals("conversation_id") && !c.equals("session_no")).map(c -> c + " = EXCLUDED." + c)
-                    .collect(Collectors.joining(", "));
+            + COLUMNS.stream().filter(c -> !c.equals("conversation_id") && !c.equals("session_no") && !c.equals("due_at_ms"))
+                    .map(c -> c + " = EXCLUDED." + c).collect(Collectors.joining(", "))
+            // A mark set at or after this evaluation started is kept, as the earlier time.
+            + ", due_at_ms = CASE WHEN health_outcomes.due_at_ms IS NOT NULL AND health_outcomes.due_at_ms >= EXCLUDED.evaluated_at_ms "
+            + "AND health_outcomes.due_at_ms <= EXCLUDED.evaluated_at_ms + " + MARK_WINDOW_MS + " "
+            + "THEN LEAST(health_outcomes.due_at_ms, COALESCE(EXCLUDED.due_at_ms, health_outcomes.due_at_ms)) ELSE EXCLUDED.due_at_ms END";
 
     private static final String SELECT = "SELECT " + String.join(", ", COLUMNS) + " FROM health_outcomes ";
 
     static final String BY_CONVERSATION = SELECT + "WHERE conversation_id = ? ORDER BY session_no";
     static final String DUE = SELECT + "WHERE due_at_ms IS NOT NULL AND due_at_ms <= ? ORDER BY due_at_ms LIMIT ?";
     static final String MARK_DUE = "UPDATE health_outcomes SET due_at_ms = ? WHERE conversation_id = ? AND (due_at_ms IS NULL OR due_at_ms > ?)";
+    static final String MARK_DUE_SESSIONS = MARK_DUE + " AND session_no = ANY(?)";
     static final String BY_USER = SELECT + "WHERE user_id = ? ORDER BY ended_at_ms DESC LIMIT ?";
     static final String EVALUATED_SINCE = "SELECT DISTINCT conversation_id FROM health_outcomes WHERE evaluated_at_ms >= ? LIMIT ?";
     static final String READ_WATERMARK = "SELECT at_ms FROM health_rollup_state WHERE name = ?";
@@ -237,11 +242,17 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
-    public long markDue(String conversationId, Instant at) {
-        return update(MARK_DUE, "Could not mark health outcomes due", (c, s) -> {
+    public long markDue(String conversationId, Collection<Integer> sessionNos, Instant at) {
+        if (sessionNos != null && sessionNos.isEmpty()) {
+            return 0L;
+        }
+        return update(sessionNos == null ? MARK_DUE : MARK_DUE_SESSIONS, "Could not mark health outcomes due", (c, s) -> {
             s.setLong(1, at.toEpochMilli());
             s.setString(2, conversationId);
             s.setLong(3, at.toEpochMilli());
+            if (sessionNos != null) {
+                s.setArray(4, c.createArrayOf("integer", new LinkedHashSet<>(sessionNos).toArray(new Integer[0])));
+            }
         });
     }
 

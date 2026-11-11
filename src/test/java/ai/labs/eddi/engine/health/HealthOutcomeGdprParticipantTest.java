@@ -14,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -119,5 +120,46 @@ class HealthOutcomeGdprParticipantTest {
         verify(outcomes).deleteByConversationId("gone");
         verify(turns).deleteByConversationId("gone");
         verify(outcomes, never()).deleteByConversationId("live");
+    }
+
+    @Test
+    @DisplayName("m7: the orphan sweep's cap is shared — outcome rows get their half even when turn rows alone would fill it")
+    @SuppressWarnings("unchecked")
+    void fairCap() throws Exception {
+        IHealthTurnStore turns = mock(IHealthTurnStore.class);
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
+        when(conversationInstance.isResolvable()).thenReturn(true);
+        when(conversationInstance.get()).thenReturn(conversations);
+        Instance<IHealthOutcomeStore> outcomeInstance = mock(Instance.class);
+        when(outcomeInstance.isResolvable()).thenReturn(true);
+        when(outcomeInstance.get()).thenReturn(outcomes);
+        doAnswer(inv -> {
+            int limit = inv.getArgument(1);
+            for (int i = 0; i < Math.min(limit, 10); i++) {
+                ((Consumer<String>) inv.getArgument(2)).accept("t" + i);
+            }
+            return null;
+        }).when(turns).forEachConversationUpdatedSince(any(), anyInt(), any());
+        doAnswer(inv -> {
+            int limit = inv.getArgument(1);
+            for (int i = 0; i < Math.min(limit, 10); i++) {
+                ((Consumer<String>) inv.getArgument(2)).accept("o" + i);
+            }
+            return null;
+        }).when(outcomes).forEachConversationEvaluatedSince(any(), anyInt(), any());
+        when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+
+        HealthSettings settings = new HealthSettings(true, 10, Duration.ofDays(90), Duration.ofHours(48), 4);
+        HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, settings, new HealthMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(Instant.parse("2026-11-10T03:00:00Z"), ZoneOffset.UTC));
+        retention.outcomeStore = outcomeInstance;
+        retention.removeOrphans();
+
+        verify(outcomes).deleteByConversationId("o0");
+        verify(outcomes).deleteByConversationId("o1");
+        verify(turns).deleteByConversationId("t0");
+        verify(turns, never()).deleteByConversationId("t5");
     }
 }

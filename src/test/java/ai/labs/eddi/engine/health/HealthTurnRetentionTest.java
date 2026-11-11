@@ -425,7 +425,7 @@ class HealthTurnRetentionTest {
         }
 
         @Override
-        public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
+        public List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit) {
             throw new UnsupportedOperationException();
         }
 

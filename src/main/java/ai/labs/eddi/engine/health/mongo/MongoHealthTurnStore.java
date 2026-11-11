@@ -39,7 +39,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -440,14 +439,12 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public List<HealthTurn> findByConversationFromStep(String conversationId, int fromStep, int limit) {
-        // Newest first with the limit, then oldest first: a session longer than the
-        // limit keeps its latest turns.
-        List<HealthTurn> newest = find(and(eq(FIELD_CONVERSATION, conversationId), gte(FIELD_STEP, fromStep), ne(FIELD_TIMESTAMP, null)),
-                Sorts.descending(FIELD_STEP, FIELD_TIMESTAMP), limit, "Could not read the health turns of a conversation");
-        List<HealthTurn> ordered = new ArrayList<>(newest);
-        Collections.reverse(ordered);
-        return ordered;
+    public List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit) {
+        List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId), gte(FIELD_STEP, fromStep), ne(FIELD_TIMESTAMP, null)));
+        if (toStep != null) {
+            filters.add(lt(FIELD_STEP, toStep));
+        }
+        return find(and(filters), Sorts.ascending(FIELD_STEP, FIELD_TIMESTAMP), limit, "Could not read the health turns of a conversation");
     }
 
     @Override

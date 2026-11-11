@@ -40,10 +40,17 @@ public class HealthOutcomeViews {
     /** The most suggestions returned. */
     static final int MAX_SUGGESTIONS = 20;
 
-    // Name heuristics, checked in this order: a "handoff_done" is a handoff first.
-    private static final Pattern DEFLECTED = Pattern.compile("out_?of_?scope|out-of-scope|not_?supported|unsupported");
-    private static final Pattern ESCALATED = Pattern.compile("handoff|hand_off|human|escalat");
-    private static final Pattern RESOLVED = Pattern.compile("confirm|done|complete|booked");
+    // Name heuristics over whole words (split at _, -, . and camelCase), checked in
+    // this order: a "handoff_done" is a handoff first. A word after "not"/"no"/
+    // "never" does not count ("not_done"), and "unconfirmed" or "humanize" are not
+    // the words matched.
+    private static final Pattern WORD_BREAK = Pattern.compile("[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])");
+    private static final Set<String> NEGATIONS = Set.of("not", "no", "never", "non");
+    private static final List<List<String>> DEFLECTED = List.of(List.of("out", "of", "scope"), List.of("outofscope"), List.of("not", "supported"),
+            List.of("unsupported"), List.of("off", "topic"));
+    private static final Set<String> ESCALATED = Set.of("handoff", "human", "humans", "escalate", "escalated", "escalation", "escalating");
+    private static final List<List<String>> ESCALATED_PHRASES = List.of(List.of("hand", "off"), List.of("hand", "over"));
+    private static final Set<String> RESOLVED = Set.of("confirm", "confirmed", "confirmation", "done", "complete", "completed", "booked");
 
     private final IHealthOutcomeStore outcomeStore;
     private final HealthSettings settings;
@@ -106,16 +113,40 @@ public class HealthOutcomeViews {
 
     /** The outcome an action's name suggests, or {@code null}. */
     static String suggest(String action) {
-        String name = action.toLowerCase(Locale.ROOT);
-        if (DEFLECTED.matcher(name).find()) {
+        List<String> words = new ArrayList<>();
+        for (String word : WORD_BREAK.split(action)) {
+            if (!word.isEmpty()) {
+                words.add(word.toLowerCase(Locale.ROOT));
+            }
+        }
+        if (DEFLECTED.stream().anyMatch(phrase -> contains(words, phrase))) {
             return HealthOutcomes.DEFLECTED;
         }
-        if (ESCALATED.matcher(name).find()) {
+        if (matches(words, ESCALATED) || ESCALATED_PHRASES.stream().anyMatch(phrase -> contains(words, phrase))) {
             return HealthOutcomes.ESCALATED;
         }
-        if (RESOLVED.matcher(name).find()) {
+        if (matches(words, RESOLVED)) {
             return HealthOutcomes.RESOLVED;
         }
         return null;
+    }
+
+    /** A word of {@code vocabulary} not negated by the word before it. */
+    private static boolean matches(List<String> words, Set<String> vocabulary) {
+        for (int i = 0; i < words.size(); i++) {
+            if (vocabulary.contains(words.get(i)) && (i == 0 || !NEGATIONS.contains(words.get(i - 1)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean contains(List<String> words, List<String> phrase) {
+        for (int i = 0; i + phrase.size() <= words.size(); i++) {
+            if (words.subList(i, i + phrase.size()).equals(phrase)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

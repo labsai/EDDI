@@ -237,7 +237,7 @@ public interface HealthTurnStoreContract {
     }
 
     @Test
-    @DisplayName("H3: a self-reported outcome round-trips; rows from a step come oldest first, the newest when capped, markers excluded")
+    @DisplayName("H3: a self-reported outcome round-trips; rows of a step range come oldest first, the first ones when capped, markers excluded")
     default void rowsFromStep() {
         HealthTurn reported = row("c1", 2, "e2", T0.plusSeconds(20), 0.1, false);
         reported = new HealthTurn(reported.conversationId(), reported.stepIndex(), reported.executionId(), reported.agentId(),
@@ -253,12 +253,14 @@ public interface HealthTurnStoreContract {
         store().upsert(row("c1", 3, "e3", T0.plusSeconds(30), 0.1, false));
         store().markDiscarded(row("c1", 4, "e4", T0.plusSeconds(40), 0.1, false), List.of("ghost"));
 
-        List<HealthTurn> fromOne = store().findByConversationFromStep("c1", 1, 10);
+        List<HealthTurn> fromOne = store().findByConversationSteps("c1", 1, null, 10);
         assertEquals(List.of(1, 2, 3), fromOne.stream().map(HealthTurn::stepIndex).toList());
         assertEquals("RESOLVED", fromOne.get(1).selfReportedOutcome());
         assertEquals(null, fromOne.get(0).selfReportedOutcome());
-        assertEquals(List.of(2, 3), store().findByConversationFromStep("c1", 0, 2).stream().map(HealthTurn::stepIndex).toList(),
-                "capped: the newest rows, oldest first");
+        assertEquals(List.of(0, 1), store().findByConversationSteps("c1", 0, null, 2).stream().map(HealthTurn::stepIndex).toList(),
+                "capped: the first rows, oldest first");
+        assertEquals(List.of(1, 2), store().findByConversationSteps("c1", 1, 3, 10).stream().map(HealthTurn::stepIndex).toList(),
+                "the end step is exclusive");
     }
 
     @Test

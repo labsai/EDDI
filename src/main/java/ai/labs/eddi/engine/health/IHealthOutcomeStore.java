@@ -30,7 +30,21 @@ import java.util.function.Consumer;
  */
 public interface IHealthOutcomeStore {
 
-    /** Inserts or replaces each row by its key. */
+    /**
+     * How long after an evaluation's start a stored due time still counts as a mark
+     * made during it (see {@link #upsert}). A window close stored earlier falls
+     * into it only when it is this close anyway — then the session is merely looked
+     * at once more.
+     */
+    long MARK_WINDOW_MS = 10 * 60 * 1000L;
+
+    /**
+     * Inserts or replaces each row by its key — except {@code dueAt}: a stored due
+     * time within {@link #MARK_WINDOW_MS} after the row's {@code evaluatedAt} (a
+     * rating marked the session due while it was being evaluated) is kept, as the
+     * earlier of the two, so the mark is never lost. A row without a due time
+     * stores none.
+     */
     void upsert(Collection<HealthOutcome> outcomes);
 
     /** A conversation's sessions, oldest first. */
@@ -49,12 +63,13 @@ public interface IHealthOutcomeStore {
     List<HealthOutcome> findDue(Instant now, int limit);
 
     /**
-     * Makes a conversation's sessions due at {@code at} (a rating arrived that may
-     * change them). Sessions due earlier stay as they are.
+     * Makes sessions of a conversation due at {@code at} (a rating arrived, or was
+     * withdrawn, that may change them) — the given sessions, or every one when
+     * {@code sessionNos} is {@code null}. Sessions due earlier stay as they are.
      *
      * @return the sessions marked
      */
-    long markDue(String conversationId, Instant at);
+    long markDue(String conversationId, Collection<Integer> sessionNos, Instant at);
 
     /**
      * Sessions of one agent that ended in the query's days, versions and origins,
