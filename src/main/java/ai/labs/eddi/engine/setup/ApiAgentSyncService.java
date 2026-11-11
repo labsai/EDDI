@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
+import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupInternalException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -397,7 +398,10 @@ public class ApiAgentSyncService {
             // because the agent was not updated.
             setupService.rollbackCreatedResources(created, "agent-" + agentId, e);
             LOGGER.warnf("Sync of agent %s failed: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
-            throw new AgentSetupException("Sync failed: " + e.getMessage() + ". Agent " + agentId + " was NOT changed (still version " + current
+            // The cause's text goes to the log under the correlation id, not to the
+            // caller; what the caller needs to act on — the agent is unchanged, and
+            // which orphaned versions exist — stays in the message.
+            throw AgentSetupInternalException.internalFailure("Sync failed. Agent " + agentId + " was NOT changed (still version " + current
                     + ")." + (written.isEmpty() ? "" : " Versions written that nothing references yet: " + String.join(", ", written) + "."), e);
         }
     }

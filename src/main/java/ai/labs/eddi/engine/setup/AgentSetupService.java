@@ -419,7 +419,7 @@ public class AgentSetupService {
             // inside this try declares one, and every vault error is raised at step 0
             // above, outside it. A catch for an unreachable case is not symmetry.
             writer.rollback(createdResources, request.agentName(), e);
-            throw new AgentSetupException("Failed to set up agent: " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Failed to set up agent", e);
         }
     }
 
@@ -785,7 +785,7 @@ public class AgentSetupService {
             throw e;
         } catch (Exception e) {
             writer.rollback(createdResources, request.agentName(), e);
-            throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Failed to create API agent", e);
         }
     }
 
@@ -1721,8 +1721,9 @@ public class AgentSetupService {
             // The provider's detail stays in the server log: it can name internal
             // infrastructure, and the caller needs only what to do next.
             LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
-            throw new AgentSetupException("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
-                    + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
+            throw AgentSetupInternalException
+                    .internalFailure("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
+                            + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
         }
     }
 
@@ -1776,8 +1777,9 @@ public class AgentSetupService {
         } catch (ISecretProvider.SecretProviderException e) {
             // As for the API key: the provider's detail stays in the server log.
             LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
-            throw new AgentSetupException("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
-                    + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
+            throw AgentSetupInternalException
+                    .internalFailure("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
+                            + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
         }
     }
 
@@ -1806,7 +1808,7 @@ public class AgentSetupService {
         } catch (ISecretProvider.SecretNotFoundException e) {
             existing = null;
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not read vault key '" + ref.keyName() + "'", e);
         }
         return useNamedVaultKey(ref, existing, key, agentName, createdResources, hosts);
     }
@@ -1862,8 +1864,7 @@ public class AgentSetupService {
                 // A keyed checksum needs the checksum key, which may have to be read and
                 // unwrapped first. A failure there means "could not compare", not "does
                 // not match" — so it must not fall through to the mismatch message.
-                throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': "
-                        + e.getClass().getSimpleName(), e);
+                throw AgentSetupInternalException.internalFailure("Could not verify the value of vault key '" + ref.keyName() + "'", e);
             }
             if (!matches) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
@@ -1900,7 +1901,7 @@ public class AgentSetupService {
             // depends only on what it holds.
             return reuseConcurrentlyCreatedKey(ref, key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not store the API key under vault key '" + ref.keyName() + "'", e);
         }
     }
 
@@ -1924,13 +1925,13 @@ public class AgentSetupService {
             // over by writing: report it and let the caller retry.
             throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created and removed concurrently. Retry the setup.", e);
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not read vault key '" + ref.keyName() + "'", e);
         }
         boolean sameValue;
         try {
             sameValue = winner.checksum() != null && secretProvider.matchesChecksum(ref.tenantId(), winner.checksum(), expectedPlaintext);
         } catch (RuntimeException e) {
-            throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': " + e.getClass().getSimpleName(), e);
+            throw AgentSetupInternalException.internalFailure("Could not verify the value of vault key '" + ref.keyName() + "'", e);
         }
         if (!sameValue) {
             throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created concurrently by another setup and holds a "
@@ -2767,6 +2768,41 @@ public class AgentSetupService {
     public static class AgentSetupForbiddenException extends AgentSetupException {
         public AgentSetupForbiddenException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Setup failed for a reason that is not the caller's: a store, the vault or the
+     * deployment threw something unexpected. Mapped to 500, not the 400 a plain
+     * {@link AgentSetupException} gets.
+     * <p>
+     * The cause's message is never part of this message. It was written for an
+     * operator, not the caller — a database timeout names the replica it waited
+     * for, a vault provider echoes its backend's error — so
+     * {@link #internalFailure} logs the full cause at ERROR under a correlation id,
+     * and the message carries only a sentence safe to show plus that id. The cause
+     * is still attached, for code that inspects it.
+     */
+    public static class AgentSetupInternalException extends AgentSetupException {
+        private final String correlationId;
+
+        private AgentSetupInternalException(String message, Throwable cause, String correlationId) {
+            super(message, cause);
+            this.correlationId = correlationId;
+        }
+
+        /**
+         * Logs {@code cause} under a fresh correlation id and returns the exception to
+         * throw. {@code safeMessage} must not contain any text taken from the cause.
+         */
+        public static AgentSetupInternalException internalFailure(String safeMessage, Throwable cause) {
+            String correlationId = UUID.randomUUID().toString();
+            LOGGER.errorf(cause, "%s [correlationId=%s]", LogSanitizer.sanitize(safeMessage), correlationId);
+            return new AgentSetupInternalException(safeMessage + " (correlationId: " + correlationId + ")", cause, correlationId);
+        }
+
+        public String correlationId() {
+            return correlationId;
         }
     }
 }

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.rest;
 
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
+import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupInternalException;
 import ai.labs.eddi.engine.setup.ApiAgentSyncService;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +78,35 @@ class RestAgentSetupTest {
         when(agentSetupService.setupAgent(any())).thenThrow(new RuntimeException(INTERNAL_DETAIL));
 
         assertNotEquals(errorOf(rest.setupAgent(null)), errorOf(rest.setupAgent(null)));
+    }
+
+    /**
+     * The service wraps a store or vault failure it caught mid-setup. That used to
+     * be a plain {@link AgentSetupException} carrying the cause's text, answered
+     * 400.
+     */
+    @Test
+    @DisplayName("an internal setup failure the service classified is a 500 with its safe message, never the cause's text")
+    void internalSetupFailureIsA500() throws Exception {
+        var internal = AgentSetupInternalException.internalFailure("Failed to set up agent", new RuntimeException(INTERNAL_DETAIL));
+        when(agentSetupService.setupAgent(any())).thenThrow(internal);
+
+        Response response = rest.setupAgent(null);
+
+        assertOpaqueServerError(response, "Failed to set up agent");
+        assertTrue(errorOf(response).contains(internal.correlationId()), errorOf(response));
+    }
+
+    @Test
+    @DisplayName("createApiAgent and syncApiAgent answer an internal setup failure as a 500 too")
+    void internalFailureIsA500OnEveryEndpoint() throws Exception {
+        when(agentSetupService.createApiAgent(any()))
+                .thenThrow(AgentSetupInternalException.internalFailure("Failed to create API agent", new RuntimeException(INTERNAL_DETAIL)));
+        when(apiAgentSyncService.sync(any(), any()))
+                .thenThrow(AgentSetupInternalException.internalFailure("Sync failed.", new RuntimeException(INTERNAL_DETAIL)));
+
+        assertOpaqueServerError(rest.createApiAgent(null), "Failed to create API agent");
+        assertOpaqueServerError(rest.syncApiAgent("abcdef0123456789abcdef01", null), "Sync failed.");
     }
 
     @Test
