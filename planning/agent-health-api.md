@@ -263,4 +263,14 @@ What the H2b backend does where this contract leaves room, and its answers to §
   days (`YYYY-MM-DD`), because incidents are detected per day. `nextCursor` is an opaque string.
 - **Errors:** a bad parameter is `400` with `{"error": "bad_request", "message": "<names the parameter>"}`; an unknown
   agent is `404` with `{"error": "not_found", ...}`; no VIEW is `403`.
-- **`dataThrough`** is the day before the earliest day of the agent still waiting for the rollup, else today.
+- **`dataThrough`** is the day before the earliest day of the agent that has waited for the rollup longer than one rollup
+  interval, else today.
+- **Count measures** (`sessions`, `engagedSessions`, `distinctUsers`) report a `baseline` scaled to the current period's
+  exposure (a period ending today counts today's elapsed fraction), and `delta`/`significant` use it; the portfolio's
+  `sessionsDelta` likewise. `returningUserShare` is never `significant`.
+- **Apdex** names its threshold in `label` ("Response time (Apdex, T = 4 s)"); no new field. A period mixing T values is
+  `value: null` with a hint.
+- **Portfolio `nextCursor`** is an offset into the order computed for each request (from cached numbers): an agent whose
+  numbers change between two pages can move, so a page may repeat or skip one.
+- **Markers**: at most 200, the newest (≤ 150 of the agent's, ≤ 50 deployment-wide); deployment-wide markers are coalesced
+  per kind and hour and shown only to agents of their global-variable tenant.

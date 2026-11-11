@@ -167,15 +167,26 @@ They are recomputed, never incremented:
    day of the resume, and for an undo the days of the discarded executions. The
    notes are written to the `healthdirty` queue every five seconds, each
    (agent, day) once, so a busy agent does not turn its queue entry into a hot
-   document.
+   document. A node that stops flushes its notes after its health worker
+   drained; a node that is killed loses at most a few seconds of notes, which
+   the self-heal pass (step 2) recovers. An erasure, a conversation delete and
+   the orphan sweep mark the days of the rows they delete, so the daily rows
+   lose those counts at the next pass.
 2. The `health-rollup` system schedule (a heartbeat, every
    `eddi.health.rollup-interval`, default 5 minutes; created at startup, run by
-   one node at a time under the schedule store's claim) drains the queue: for
+   one node at a time under the schedule store's claim) first **self-heals** —
+   it re-marks dirty the (agent, day) pairs of turn rows written since its last
+   pass (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
+   minute behind the clock, at most 10,000 pairs a pass) — and then drains the
+   queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked
    again meanwhile** (a token per mark). A turn written while its day was being
    recomputed therefore keeps the day dirty for the next pass. A pass stops after
-   90 seconds and leaves the rest for the next.
+   90 seconds and leaves the rest for the next. A day whose rollup fails moves
+   to the back of the queue, so it cannot block the days behind it, and after
+   five failures in a row it is dropped with a WARN (the next write to it marks
+   it again).
 3. A dirty day older than the turn-row retention (`eddi.health.facts-retention`)
    is dropped from the queue without recomputing: its turns are gone, and the
    daily rows it already has are kept.
@@ -183,12 +194,23 @@ They are recomputed, never incremented:
 The rollup is idempotent: recomputing a day from the same turn rows writes the
 same rows, so a retried pass or a duplicated schedule does no harm. The
 schedule is server-managed like `alerts-maintenance`: it cannot be created,
-changed or deleted over REST or MCP (`SYSTEM_SCHEDULE`), only fired.
+changed or deleted over REST or MCP (`SYSTEM_SCHEDULE`), only fired, and the
+name `health-rollup` (and the `healthType` metadata key) is reserved — a user
+schedule cannot take it. A changed `eddi.health.rollup-interval` updates the
+schedule at the next start.
 
-`dataThrough` in a report is the last day the rollup has fully processed for the
-agent; **today's numbers may lag by up to one rollup interval**. Daily rows are
-kept `eddi.health.daily-retention` (730 days), hold no personal data (no user or
-conversation id) and are not recomputed when a user's turn rows are erased.
+`dataThrough` in a report is the day before the earliest day of the agent that
+has waited for the rollup longer than one rollup interval, else today: a day
+marked a moment ago is waiting for the next pass, not behind. **Today's numbers
+may lag by up to one rollup interval.** Daily rows are kept
+`eddi.health.daily-retention` (730 days) and hold no personal data (no user or
+conversation id); an erasure removes a user's counts from them at the next pass.
+
+The views cache what they read from the stores for `eddi.health.cache-ttl`
+(60 s; 0 switches it off), keyed by the full query and per agent, never per
+caller — who may see what is decided before the cache is asked. The portfolio
+counts every listed agent's traffic, now and in the baseline, in one pass over
+the turn rows (indexed by `(agentId, day)`).
 A change that alters how stored turns are counted (outcome mappings, later
 phases) marks a whole range dirty through `HealthDirtyDays.markRange`.
 
@@ -206,14 +228,18 @@ at the moment of the change; nothing in it ever fails the change itself:
 | Kind | Written when | Concerns |
 | --- | --- | --- |
 | `DEPLOYMENT` | a deploy reached `READY` and actually deployed (re-deploying a version that was already up records nothing) — "v8 deployed (production)" | the agent |
-| `GLOBAL_VARIABLE_CHANGE` | a global variable was written or deleted | every agent |
-| `SNIPPET_CHANGE` | a prompt snippet was created, updated or deleted | every agent |
+| `GLOBAL_VARIABLE_CHANGE` | a global variable was written or deleted — "Global variables changed" | the agents of the variable's tenant: `default` concerns every agent, a space's tenant the agents of that space |
+| `SNIPPET_CHANGE` | a prompt snippet was created, updated or deleted — "Prompt snippets changed" | every agent (snippets are not tenant-scoped) |
 | `VERSION_FIRST_TURN` | derived, not stored: the first day a version has a daily row ("First turn on v8", at 00:00 UTC of that day) | the agent |
 
 The labels of global-variable and snippet markers do not name the variable or
-snippet: those concern every agent, and a viewer of one agent's health has no
-business reading the deployment's configuration keys. Markers are kept as long
-as the daily rows.
+snippet: those concern many agents, and a viewer of one agent's health has no
+business reading the deployment's configuration keys. They are **coalesced**:
+one marker per kind, tenant and UTC hour, so a script saving a thousand
+variables leaves one marker, not a thousand. A series returns at most 200
+markers, the newest: up to 150 of the agent's own and 50 deployment-wide ones,
+read separately so neither can crowd the other out. Markers are kept as long as
+the daily rows.
 
 ## REST API
 
@@ -275,7 +301,7 @@ intent); health profiles will override them per agent.
 | --- | --- | --- | --- |
 | Reliability | `agentFailureRate` | Failed turns the agent is accountable for ÷ turns (see attribution below) | Scored, **critical**: green ≤ 1 %, red ≥ 5 %, min 30 turns |
 | | `platformFailureRate` | Turns touched by a provider or platform failure — a platform-caused failure, or any failed attempt of class `TRANSIENT`, `RATE_LIMITED` or `TIMEOUT`, **recovered or not** — ÷ turns; `breakdown` lists failed attempts per class | Informational |
-| | `apdex` | (satisfied + tolerating ÷ 2) ÷ timed turns, with satisfied ≤ T and tolerating ≤ 4T (`eddi.health.apdex-t`, 4 s). A paused turn is not a latency sample | Scored: green ≥ 0.85, red ≤ 0.70 |
+| | `apdex` | (satisfied + tolerating ÷ 2) ÷ timed turns, with satisfied ≤ T and tolerating ≤ 4T (`eddi.health.apdex-t`, 4 s). The label names T ("Response time (Apdex, T = 4 s)"). A period whose days were rolled up with different T values is `null` with a hint rather than a mix. A paused turn is not a latency sample | Scored: green ≥ 0.85, red ≤ 0.70 |
 | | `turnDurationP95` | The 95th percentile of turn duration, **approximate**: interpolated inside fixed buckets (100 ms … 5 min) | Informational |
 | | `fallbackRate` | Turns that served the configured fallback ÷ turns | Scored: green ≤ 2 %, red ≥ 10 % |
 | Effectiveness | `resolutionRate` (with the four-part `breakdown`), `escalationRate`, `abandonmentRate`, `deflectionRate`, `outcomeCoverage` | `value: null`, "Available once conversation outcomes are recorded" (H3); the section's `coverage` is `null` | — |
@@ -287,7 +313,7 @@ intent); health profiles will override them per agent.
 | | `costPerResolvedSession` | `null` until outcomes (H3) | — |
 | | `tokensPerTurn` | Tokens ÷ turns | Informational |
 | Adoption | `sessions`, `engagedSessions`, `distinctUsers` | Counted from the turn rows: distinct conversations (a session is a conversation until H3), those engaged (a person's turn after the agent's first output, judged on the period's turns), distinct user ids | Informational |
-| | `returningUserShare` | Users of the period who also had a turn before it, back to the turn-row retention ÷ distinct users. No daily series | Informational |
+| | `returningUserShare` | Users of the period who also had a turn in the 30 days before it (clipped to the turn-row retention) ÷ distinct users. Never called significant: the look-back of a baseline near the retention is shorter. No daily series | Informational |
 | | `turnsPerSession` | Turns ÷ sessions | Informational |
 | Business | — | Empty until outcome events (H5) | — |
 
@@ -318,12 +344,20 @@ both.
   interval, whose variance is known exactly (each turn scores 1, ½ or 0).
 - **`significant`** — a two-sided test at 95 % against the baseline, and only when
   both periods reach the minimum sample: rates by the pooled **two-proportion
-  z-test**; Apdex by Welch's z-test with its exact variance; counts of two equally
-  long periods (sessions, users) by the conditional **Poisson test**
-  `(a − b) / √(a + b)`. A measure with no variance to test — a percentile from
-  buckets, a cost or token average — is never called significant.
+  z-test**; Apdex by Welch's z-test with its exact variance; counts (sessions,
+  engaged sessions, users) by the conditional **Poisson test** at the two
+  periods' exposure — given `n = a + b`, the current count is binomial with
+  `p = e / (1 + e)`, `e` the current period's exposure over the baseline's. A
+  measure with no variance to test — a percentile from buckets, a cost or token
+  average, the returning-user share — is never called significant.
+- **Exposure.** A period that ends today is not over: its exposure is its full
+  days plus the part of today that has passed. A count measure's `baseline` is
+  the previous period's count **scaled to that exposure**, so a window read at
+  09:00 is compared with 37.5 % of a baseline day, not a whole one, and does not
+  show a "significant" drop every morning. Rates are unaffected.
 - **`delta`** is `value − baseline` in the measure's unit (percentage points for
-  rates); the portfolio's `sessionsDelta` is relative (−0.08 = −8 %).
+  rates); the portfolio's `sessionsDelta` is relative to the exposure-scaled
+  baseline (−0.08 = −8 %).
 
 ### Checks
 
@@ -350,6 +384,7 @@ caller: `read_agent_health`, `list_agent_health` and
 | `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN, and the rest wait for the next day |
 | `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` job runs — how far today's numbers may lag. At least 15 s; read when the schedule is created |
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept |
+| `eddi.health.cache-ttl` | `60s` | How long the views cache what they read from the stores; `0` switches the cache off |
 | `eddi.health.apdex-t` | `4s` | Apdex threshold T (satisfied ≤ T, tolerating ≤ 4T); applies to days rolled up after a change |
 
 ## Retention
@@ -441,7 +476,7 @@ eddi_health_rollup_duration_seconds  # Timer: one rollup pass
 eddi_health_rollup_days_total        # Agent days recomputed
 eddi_health_rollup_rows_total        # Daily rows written
 eddi_health_rollup_failures_total    # Agent days whose rollup failed (retried)
-eddi_health_rollup_pending           # Gauge: agent days waiting, as the last pass left them
+eddi_health_rollup_pending           # Gauge: agent days waiting (the shared queue, cached 10 s)
 eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent day
 ```
 
