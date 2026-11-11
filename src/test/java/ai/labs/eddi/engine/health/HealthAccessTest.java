@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -87,6 +88,18 @@ class HealthAccessTest {
         when(guard.seesEverything()).thenReturn(seesEverything);
         when(guard.hasAccess("a1", AccessLevel.EDIT)).thenReturn(edit);
         assertEquals(expected, access.mayReadRatings("a1"));
+    }
+
+    @Test
+    @DisplayName("marker tenants: default, plus the agent's space tenant; default alone when the descriptor cannot be read")
+    void markerTenants() throws Exception {
+        HealthAccess access = access(true, Set.of("eddi-viewer"));
+        DocumentDescriptor inSpace = descriptor("6740aaaaaaaaaaaaaaaaaaa1", "Support");
+        inSpace.setSpaceId("team:eng");
+        when(descriptors.readCurrentDescriptor("a1")).thenReturn(inSpace);
+        assertEquals(List.of("default", SpaceTenants.tenantFor("team:eng")), access.markerTenants("a1"));
+        when(descriptors.readCurrentDescriptor("gone")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        assertEquals(List.of("default"), access.markerTenants("gone"));
     }
 
     @Test

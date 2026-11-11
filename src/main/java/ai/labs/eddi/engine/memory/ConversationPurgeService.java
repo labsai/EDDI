@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.health.HealthDirtyDays;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -20,6 +21,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.time.LocalDate;
+
+import java.util.Map;
+
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -70,6 +77,12 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<IHealthTurnStore> healthTurnStore;
+
+    /**
+     * Marks the days of deleted health rows for a re-roll; null when built by hand.
+     */
+    @Inject
+    Instance<HealthDirtyDays> healthDirtyDays;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -216,7 +229,13 @@ public class ConversationPurgeService {
             return;
         }
         try {
-            healthTurnStore.get().deleteByConversationId(conversationId);
+            IHealthTurnStore turns = healthTurnStore.get();
+            Map<String, Set<LocalDate>> days = turns.agentDaysOfConversation(conversationId);
+            turns.deleteByConversationId(conversationId);
+            if (healthDirtyDays != null && healthDirtyDays.isResolvable()) {
+                // The daily rows of those days are recomputed without the conversation.
+                healthDirtyDays.get().noteAll(days);
+            }
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
                     sanitize(conversationId), sanitize(e.getMessage()));

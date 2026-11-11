@@ -71,7 +71,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response updateSnippet(String id, Integer version, PromptSnippet snippet) {
         Response response = restVersionInfo.update(id, version, snippet);
         snippetService.invalidateCache();
-        markSnippetChange(false);
+        markSnippetChange();
         return response;
     }
 
@@ -79,7 +79,7 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response createSnippet(PromptSnippet snippet) {
         Response response = restVersionInfo.create(snippet);
         snippetService.invalidateCache();
-        markSnippetChange(false);
+        markSnippetChange();
         return response;
     }
 
@@ -87,13 +87,13 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     public Response deleteSnippet(String id, Integer version, Boolean permanent) {
         Response response = restVersionInfo.delete(id, version, permanent);
         snippetService.invalidateCache();
-        markSnippetChange(true);
+        markSnippetChange();
         return response;
     }
 
-    private void markSnippetChange(boolean deleted) {
+    private void markSnippetChange() {
         if (healthMarkers != null && healthMarkers.isResolvable()) {
-            healthMarkers.get().snippetChanged(deleted);
+            healthMarkers.get().snippetChanged();
         }
     }
 

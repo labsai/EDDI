@@ -19,6 +19,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -77,6 +78,10 @@ public class HealthTurnRetention {
     private final HealthSettings settings;
     private final HealthMetrics metrics;
     private final Clock clock;
+
+    /** Marks the days of orphaned rows for a re-roll; null when built by hand. */
+    @Inject
+    Instance<HealthDirtyDays> dirtyDays;
 
     @Inject
     public HealthTurnRetention(IHealthTurnStore store, Instance<IConversationMemoryStore> conversations, IHealthDailyStore dailyStore,
@@ -191,7 +196,11 @@ public class HealthTurnRetention {
                     continue;
                 }
                 try {
+                    Map<String, Set<LocalDate>> days = store.agentDaysOfConversation(conversationId);
                     removed += store.deleteByConversationId(conversationId);
+                    if (dirtyDays != null && dirtyDays.isResolvable()) {
+                        dirtyDays.get().noteAll(days);
+                    }
                 } catch (RuntimeException e) {
                     failedDeletes++;
                 }

@@ -11,6 +11,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -23,8 +25,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <b>Never fails the change it records</b>: a marker is a chart annotation, so
  * a store error is logged at DEBUG and dropped. Labels name what changed, never
  * a value — and for global variables and snippets not even the name: both
- * concern every agent, and a viewer of one agent's health has no business
+ * concern many agents, and a viewer of one agent's health has no business
  * reading the deployment's configuration keys.
+ * <p>
+ * <b>Deployment-wide markers are scoped and coalesced.</b> A global-variable
+ * marker carries the variable's tenant ({@code default}, or a space's tenant)
+ * and is shown only with the agents of that tenant (every agent sees
+ * {@code default}; an agent in a space also sees its space's tenant). Snippets
+ * are not tenant-scoped, so their markers are {@code default}. And their id
+ * names the kind, the tenant and the UTC hour, so a script saving a thousand
+ * variables leaves one marker per hour, not a thousand that crowd the agent's
+ * deployments out of the chart.
  */
 @ApplicationScoped
 public class HealthChangeMarkers {
@@ -53,16 +64,21 @@ public class HealthChangeMarkers {
                 "v" + version + " deployed (" + (environment == null ? "production" : environment) + ")", version));
     }
 
-    /** A global variable was written or deleted. */
-    public void globalVariableChanged(boolean deleted) {
-        append(new HealthMarker(newId(), null, clock.instant(), HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE,
-                deleted ? "A global variable was deleted" : "A global variable was changed", null));
+    /** A global variable of {@code tenantId} was written or deleted. */
+    public void globalVariableChanged(String tenantId) {
+        appendCoalesced(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, tenantId, "Global variables changed");
     }
 
     /** A prompt snippet was created, updated or deleted. */
-    public void snippetChanged(boolean deleted) {
-        append(new HealthMarker(newId(), null, clock.instant(), HealthMarker.KIND_SNIPPET_CHANGE,
-                deleted ? "A prompt snippet was deleted" : "A prompt snippet was saved", null));
+    public void snippetChanged() {
+        appendCoalesced(HealthMarker.KIND_SNIPPET_CHANGE, HealthMarker.DEFAULT_TENANT, "Prompt snippets changed");
+    }
+
+    private void appendCoalesced(String kind, String tenantId, String label) {
+        String tenant = tenantId == null || tenantId.isBlank() ? HealthMarker.DEFAULT_TENANT : tenantId;
+        Instant hour = clock.instant().truncatedTo(ChronoUnit.HOURS);
+        String id = "g-" + kind + "-" + tenant + "-" + hour.getEpochSecond();
+        append(new HealthMarker(id, null, hour, kind, label, null, tenant));
     }
 
     private static String newId() {

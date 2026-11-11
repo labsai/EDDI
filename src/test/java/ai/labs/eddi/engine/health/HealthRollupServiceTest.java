@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.engine.health;
 
+import java.util.function.BiConsumer;
+import java.util.TreeSet;
+import java.util.Set;
+import java.util.Optional;
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
@@ -122,8 +126,72 @@ class HealthRollupServiceTest {
         assertEquals(1, result.failed());
         assertEquals(1, result.pending());
         verify(dirty, never()).clear(any());
+        verify(dirty).defer(eq(entry), any());
         assertEquals(1.0, registry.counter("eddi.health.rollup.failures").count());
         assertEquals(600.0, registry.get("eddi.health.rollup.lag.seconds").gauge().value());
+    }
+
+    @Test
+    @DisplayName("a day failing again and again is deferred, then dropped after the attempt cap — it never blocks the queue")
+    void poisonDropped() {
+        HealthDirtyDay poison = new HealthDirtyDay("agent", TODAY, "t1", NOW.minusSeconds(60));
+        when(dirty.oldest(anyInt())).thenReturn(List.of(poison));
+        doThrow(new HealthStoreException("bad day", null)).when(daily).replaceDay(any(), any(), any());
+        when(dirty.defer(eq(poison), any())).thenReturn(2, HealthRollupService.MAX_ATTEMPTS);
+
+        service.run();
+        verify(dirty, never()).clear(any());
+        service.run();
+        verify(dirty).clear(any());
+    }
+
+    @Test
+    @DisplayName("a failing clear of a day past the retention is contained")
+    void guardedClear() {
+        HealthDirtyDay old = new HealthDirtyDay("agent", TODAY.minusDays(200), "t", NOW);
+        when(dirty.oldest(anyInt())).thenReturn(List.of(old));
+        when(dirty.clear(old)).thenThrow(new HealthStoreException("down", null));
+        HealthRollupService.Result result = service.run();
+        assertEquals(1, result.failed());
+    }
+
+    @Test
+    @DisplayName("self-heal re-marks the days of rows written since the watermark, then moves the watermark")
+    void selfHeal() {
+        Instant watermark = NOW.minusSeconds(3600);
+        when(dirty.selfHealWatermark()).thenReturn(Optional.of(watermark));
+        when(dirty.oldest(anyInt())).thenReturn(List.of());
+        doAnswer(inv -> {
+            BiConsumer<String, LocalDate> consumer = inv.getArgument(3);
+            consumer.accept("agent", TODAY);
+            consumer.accept("agent", TODAY.minusDays(1));
+            consumer.accept("other", TODAY);
+            return null;
+        }).when(turns).forEachAgentDayUpdatedSince(eq(watermark), any(), anyInt(), any());
+
+        service.run();
+
+        verify(dirty).mark(eq("agent"), eq(new TreeSet<>(Set.of(TODAY, TODAY.minusDays(1)))));
+        verify(dirty).mark(eq("other"), eq(new TreeSet<>(Set.of(TODAY))));
+        verify(dirty).setSelfHealWatermark(NOW.minus(HealthRollupService.SELF_HEAL_GRACE));
+    }
+
+    @Test
+    @DisplayName("a failing self-heal leaves the watermark and does not stop the drain")
+    void selfHealFailure() {
+        when(dirty.selfHealWatermark()).thenThrow(new HealthStoreException("down", null));
+        when(dirty.oldest(anyInt())).thenReturn(List.of());
+        service.run();
+        verify(dirty, never()).setSelfHealWatermark(any());
+    }
+
+    @Test
+    @DisplayName("the backlog gauges read the shared queue, cluster-wide")
+    void backlogGauges() {
+        when(dirty.count()).thenReturn(3L);
+        when(dirty.oldest(1)).thenReturn(List.of(new HealthDirtyDay("agent", TODAY, "t", NOW.minusSeconds(90))));
+        assertEquals(3.0, registry.get("eddi.health.rollup.pending").gauge().value());
+        assertEquals(90.0, registry.get("eddi.health.rollup.lag.seconds").gauge().value());
     }
 
     @Test

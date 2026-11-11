@@ -4,6 +4,16 @@
  */
 package ai.labs.eddi.engine.health;
 
+import static org.mockito.Mockito.doAnswer;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.Map;
+import java.util.ArrayList;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -64,6 +74,58 @@ class HealthDirtyDaysTest {
 
         dirty.flush();
         verify(store, times(2)).mark(any(), any());
+    }
+
+    @Test
+    @DisplayName("notes racing flushes lose nothing: every noted day ends up marked")
+    void noLostMarksUnderConcurrency() throws Exception {
+        Set<LocalDate> marked = ConcurrentHashMap.newKeySet();
+        doAnswer(inv -> {
+            Collection<LocalDate> days = inv.getArgument(1);
+            marked.addAll(days);
+            return null;
+        }).when(store).mark(eq("agent"), any());
+        int threads = 8;
+        int perThread = 500;
+        ExecutorService pool = Executors.newFixedThreadPool(threads + 1);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicBoolean writing = new AtomicBoolean(true);
+        List<Future<?>> writers = new ArrayList<>();
+        for (int t = 0; t < threads; t++) {
+            int offset = t * perThread;
+            writers.add(pool.submit(() -> {
+                start.await();
+                for (int i = 0; i < perThread; i++) {
+                    dirty.note("agent", Set.of(TODAY.minusDays(offset + i)));
+                }
+                return null;
+            }));
+        }
+        Future<?> flusher = pool.submit(() -> {
+            start.await();
+            while (writing.get()) {
+                dirty.flush();
+            }
+            return null;
+        });
+        start.countDown();
+        for (Future<?> writer : writers) {
+            writer.get(30, TimeUnit.SECONDS);
+        }
+        writing.set(false);
+        flusher.get(30, TimeUnit.SECONDS);
+        pool.shutdown();
+        dirty.flush();
+        assertEquals(threads * perThread, marked.size());
+        assertEquals(0, dirty.pendingCount());
+    }
+
+    @Test
+    @DisplayName("noteAll notes every agent's days")
+    void noteAll() {
+        dirty.noteAll(Map.of("a", Set.of(TODAY), "b", Set.of(TODAY, TODAY.minusDays(1))));
+        assertEquals(3, dirty.pendingCount());
+        dirty.noteAll(null);
     }
 
     @Test

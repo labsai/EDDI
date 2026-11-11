@@ -89,8 +89,23 @@ public final class HealthStatistics {
      * test.
      */
     public static boolean significantCounts(long a, long b) {
-        long total = a + b;
-        return total > 0 && Math.abs(a - b) / Math.sqrt(total) >= Z;
+        return significantCounts(a, b, 1.0);
+    }
+
+    /**
+     * Whether count {@code a} (over an exposure {@code ratio} times that of
+     * {@code b}) differs from what {@code b} predicts — the conditional (binomial)
+     * test of two Poisson rates: given {@code n = a + b}, {@code a} is binomial
+     * with {@code p = ratio / (1 + ratio)} under no change.
+     */
+    public static boolean significantCounts(long a, long b, double ratio) {
+        long n = a + b;
+        if (n <= 0 || !(ratio > 0) || Double.isInfinite(ratio)) {
+            return false;
+        }
+        double p = ratio / (1 + ratio);
+        double se = Math.sqrt(n * p * (1 - p));
+        return se > 0 && Math.abs(a - n * p) / se >= Z;
     }
 
     /**

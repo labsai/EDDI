@@ -213,6 +213,39 @@ class HealthMeasuresTest {
     }
 
     @Test
+    @DisplayName("a count's baseline is scaled to the current exposure; the morning's partial day is no significant drop")
+    void countExposure() {
+        PeriodData now = new PeriodData(Totals.EMPTY, new HealthUsage(640, 0, 0, 0, 0), null, 6.375);
+        PeriodData before = new PeriodData(Totals.EMPTY, new HealthUsage(700, 0, 0, 0, 0), null, 7.0);
+        Measure sessions = HealthMeasures.measure("sessions", now, before);
+        assertEquals(637.5, sessions.baseline(), 1e-9);
+        assertEquals(2.5, sessions.delta(), 1e-9);
+        assertFalse(sessions.significant());
+    }
+
+    @Test
+    @DisplayName("returningUserShare is never called significant")
+    void returningUntested() {
+        PeriodData now = data(null, new HealthUsage(1000, 0, 0, 1000, 900), null);
+        PeriodData before = data(null, new HealthUsage(1000, 0, 0, 1000, 100), null);
+        assertFalse(HealthMeasures.measure("returningUserShare", now, before).significant());
+    }
+
+    @Test
+    @DisplayName("apdex names its T, and a period mixing T values is GREY with a hint")
+    void apdexThreshold() {
+        Measure m = HealthMeasures.measure("apdex", data(row(100, 0, 0, 0, 0, 0, 100, 80, 10, Map.of()), null, null), null);
+        assertEquals("Response time (Apdex, T = 4 s)", m.label());
+        HealthTurnAggregate other = new HealthTurnAggregate("agent", 1, "api", DAY.minusDays(1), 10, 10, 10, 0, Map.of(), 0, 0, Map.of(), 0, 0, 0,
+                0, 10, 0, 0, 0, 0, 0, 0, 0, 10, List.of(), 2000, 10, 0);
+        Measure mixed = HealthMeasures.measure("apdex",
+                new PeriodData(Totals.of(List.of(row(100, 0, 0, 0, 0, 0, 100, 80, 10, Map.of()), other)), null, null), null);
+        assertNull(mixed.value());
+        assertEquals("GREY", mixed.band());
+        assertEquals(HealthMeasures.HINT_MIXED_APDEX, mixed.hint());
+    }
+
+    @Test
     @DisplayName("unknown measure ids answer null")
     void unknown() {
         assertNull(HealthMeasures.measure("nope", data(null, null, null), null));

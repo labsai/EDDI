@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -254,7 +255,12 @@ public class HealthTurnRecorder {
     private void removeIfDeletedMeanwhile(HealthTurn turn) {
         try {
             if (erased(turn) || conversationGone(turn.conversationId())) {
-                store.get().deleteByConversationId(turn.conversationId());
+                IHealthTurnStore turns = store.get();
+                Map<String, Set<LocalDate>> days = turns.agentDaysOfConversation(turn.conversationId());
+                turns.deleteByConversationId(turn.conversationId());
+                if (dirtyDays != null) {
+                    dirtyDays.noteAll(days);
+                }
                 metrics.dropped(HealthMetrics.REASON_ERASED);
             }
         } catch (RuntimeException e) {
@@ -330,6 +336,16 @@ public class HealthTurnRecorder {
         } catch (InterruptedException e) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
+        }
+        // The worker has drained (or been stopped): write the days its last rows
+        // made dirty now, rather than rely on HealthDirtyDays' own pre-destroy flush,
+        // which CDI may run before this one.
+        if (dirtyDays != null) {
+            try {
+                dirtyDays.flush();
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not flush Agent Health dirty days at shutdown: %s", e.getMessage());
+            }
         }
     }
 }

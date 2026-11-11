@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -37,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
@@ -331,6 +333,42 @@ class HealthTurnRetentionTest {
         }
     }
 
+    @Nested
+    @DisplayName("daily rows and change markers")
+    class DailyAndMarkers {
+
+        private final Clock clock = Clock.fixed(Instant.parse("2026-11-10T12:00:00Z"), ZoneOffset.UTC);
+
+        @Test
+        @DisplayName("deleted before the daily retention: rows by day, markers by the start of that day")
+        void sweeps() {
+            IHealthTurnStore turns = mock(IHealthTurnStore.class);
+            IHealthDailyStore daily = mock(IHealthDailyStore.class);
+            IHealthMarkerStore markers = mock(IHealthMarkerStore.class);
+            HealthTurnRetention retention = new HealthTurnRetention(turns, null, daily, markers, HealthSettings.defaults(),
+                    new HealthMetrics(new SimpleMeterRegistry()), clock);
+            assertEquals(LocalDate.of(2026, 11, 10).minusDays(730), retention.dailyCutoff());
+            retention.deleteExpired();
+            verify(turns).deleteOlderThan(LocalDate.of(2026, 11, 10).minusDays(90));
+            verify(daily).deleteOlderThan(LocalDate.of(2024, 11, 10));
+            verify(markers).deleteOlderThan(Instant.parse("2024-11-10T00:00:00Z"));
+        }
+
+        @Test
+        @DisplayName("each delete is isolated: a failing one does not stop the others")
+        void isolated() {
+            IHealthTurnStore turns = mock(IHealthTurnStore.class);
+            IHealthDailyStore daily = mock(IHealthDailyStore.class);
+            IHealthMarkerStore markers = mock(IHealthMarkerStore.class);
+            when(turns.deleteOlderThan(any())).thenThrow(new HealthStoreException("t", null));
+            when(daily.deleteOlderThan(any())).thenThrow(new HealthStoreException("d", null));
+            HealthTurnRetention retention = new HealthTurnRetention(turns, null, daily, markers, HealthSettings.defaults(),
+                    new HealthMetrics(new SimpleMeterRegistry()), clock);
+            assertDoesNotThrow(retention::deleteExpired);
+            verify(markers).deleteOlderThan(any());
+        }
+    }
+
     /**
      * Just enough of a store for the race: rows by key, an optional hold on the
      * first write, and deletes that can be made to fail.
@@ -444,8 +482,24 @@ class HealthTurnRetentionTest {
         }
 
         @Override
-        public Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins) {
+        public Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom,
+                                                                      LocalDate to, Collection<String> interactive, Collection<String> origins) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit) {
+            return Map.of();
+        }
+
+        @Override
+        public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
+            return Map.of();
         }
     }
 }

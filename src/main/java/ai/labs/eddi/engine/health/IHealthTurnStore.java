@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -15,6 +16,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -111,10 +113,34 @@ public interface IHealthTurnStore {
     List<HealthUsagePoint> dailyUsage(HealthUsageQuery query, String groupBy);
 
     /**
-     * Distinct conversations per agent over the days given — the portfolio's
-     * traffic. Agents without rows are absent.
+     * The portfolio's traffic in one pass: for each agent, the distinct
+     * conversations with a turn in the baseline ({@code baselineFrom} to the day
+     * before {@code windowFrom}) and in the window ({@code windowFrom} to
+     * {@code to}), over the {@code interactive} origins and over all of
+     * {@code origins}. Agents without rows are absent.
      */
-    Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins);
+    Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom, LocalDate to,
+                                                           Collection<String> interactive, Collection<String> origins);
+
+    /**
+     * Streams the distinct (agent, day) pairs of the rows written in
+     * [{@code since}, {@code until}) — at most {@code limit} — to {@code consumer}.
+     * What the rollup's self-heal pass re-marks dirty, so a dirty mark lost on a
+     * node (a hard kill before its flush) never leaves a day stale.
+     */
+    void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer);
+
+    /**
+     * The (agent, day) pairs a user's rows are on, at most {@code limit} pairs —
+     * read before an erasure deletes them, so the daily rows of those days are
+     * recomputed without the user.
+     */
+    Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit);
+
+    /**
+     * The (agent, day) pairs a conversation's rows are on — read before a delete.
+     */
+    Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId);
 
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);

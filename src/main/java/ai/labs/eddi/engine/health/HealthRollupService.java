@@ -16,24 +16,37 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * One pass of the {@value HealthSchedules#SCHEDULE_NAME} system job: drains the
- * dirty-day queue and recomputes each (agent, day) from its turn rows.
+ * One pass of the {@value HealthSchedules#SCHEDULE_NAME} system job.
  * <ol>
- * <li>read the oldest dirty entries (with their tokens);</li>
- * <li>for each: stream the agent-day's turn rows through a
- * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replace}
- * the day's daily rows with the result, then clear the entry <em>only if its
+ * <li><b>Self-heal</b>: re-marks dirty the (agent, day) pairs of turn rows
+ * written since the last pass (a durable watermark in the dirty store, minus a
+ * {@link #SELF_HEAL_GRACE} so a row whose own mark is still on its way is
+ * covered next time). A mark lost on a node — killed before its debounced flush
+ * — therefore never leaves a day stale; the re-mark of a day already dirty only
+ * gives its entry a new token. At most {@link #SELF_HEAL_MAX} pairs per pass,
+ * with a WARN when there were more.</li>
+ * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
+ * each streams the agent-day's turn rows through a
+ * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}
+ * the day's daily rows with the result, then clears the entry <em>only if its
  * token is unchanged</em> — a write that marked it meanwhile keeps it
- * dirty;</li>
- * <li>a day older than the turn-row retention is cleared without recomputing:
+ * dirty.</li>
+ * <li>A day older than the turn-row retention is cleared without recomputing:
  * its turns are gone, and recomputing would wipe a daily row nothing can
  * rebuild.</li>
+ * <li>A day whose rollup fails is moved to the back of the queue
+ * ({@link IHealthDirtyDayStore#defer}) so it cannot block the entries behind
+ * it; after {@link #MAX_ATTEMPTS} failed attempts in a row it is dropped with a
+ * WARN (the next write to the day marks it again).</li>
  * </ol>
  * <b>Idempotent</b>: a day recomputed twice from the same rows produces the
  * same rows, so a retried pass, a duplicated schedule or two nodes racing do no
@@ -49,6 +62,14 @@ public class HealthRollupService {
     static final int BATCH = 200;
     /** How long one pass may run before it leaves the rest for the next. */
     static final Duration TIME_BUDGET = Duration.ofSeconds(90);
+    /** Failed rollups of one entry in a row before it is dropped. */
+    static final int MAX_ATTEMPTS = 5;
+    /** Rows younger than this are left to their own marks (still being flushed). */
+    static final Duration SELF_HEAL_GRACE = Duration.ofMinutes(1);
+    /** How far back the first self-heal pass looks. */
+    static final Duration SELF_HEAL_FIRST_WINDOW = Duration.ofDays(1);
+    /** The most (agent, day) pairs one self-heal pass re-marks. */
+    static final int SELF_HEAL_MAX = 10_000;
 
     /** What one pass did; {@link #isEmpty()} when nothing at all. */
     public record Result(int days, int rows, int skipped, int failed, long pending) {
@@ -78,17 +99,19 @@ public class HealthRollupService {
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
+        metrics.registerBacklog(dirtyStore, clock);
     }
 
     public Result run() {
         Instant started = clock.instant();
+        selfHeal(started);
         Instant deadline = started.plus(TIME_BUDGET);
         LocalDate oldestRollable = LocalDate.ofInstant(started, ZoneOffset.UTC).minusDays(settings.factsRetentionDays());
         int days = 0;
         int rows = 0;
         int skipped = 0;
         int failed = 0;
-        Set<String> failedKeys = new HashSet<>();
+        Set<String> seen = new HashSet<>();
         boolean more = true;
         while (more && clock.instant().isBefore(deadline)) {
             List<HealthDirtyDay> batch = dirtyStore.oldest(BATCH);
@@ -99,45 +122,89 @@ public class HealthRollupService {
                     more = false;
                     break;
                 }
-                String key = entry.agentId() + "|" + entry.day();
-                if (failedKeys.contains(key)) {
-                    continue;
-                }
-                if (entry.day().isBefore(oldestRollable)) {
-                    // Its turn rows are gone; keep the daily rows as they are.
-                    dirtyStore.clear(entry);
-                    skipped++;
-                    progress++;
+                if (!seen.add(entry.agentId() + "|" + entry.day())) {
+                    // Deferred earlier in this pass and back at the head: next pass.
                     continue;
                 }
                 try {
-                    rows += rollUp(entry.agentId(), entry.day());
-                    dirtyStore.clear(entry);
-                    days++;
+                    if (entry.day().isBefore(oldestRollable)) {
+                        // Its turn rows are gone; keep the daily rows as they are.
+                        dirtyStore.clear(entry);
+                        skipped++;
+                    } else {
+                        rows += rollUp(entry.agentId(), entry.day());
+                        dirtyStore.clear(entry);
+                        days++;
+                    }
                     progress++;
                 } catch (RuntimeException e) {
                     failed++;
-                    failedKeys.add(key);
-                    LOGGER.warnf("Agent Health rollup of agent %s, day %s failed (retried next pass): %s", sanitize(entry.agentId()),
-                            entry.day(), sanitize(e.getMessage()));
+                    progress++;
+                    defer(entry, e);
                 }
             }
             if (progress == 0) {
-                // Nothing in the batch could be done (it failed now or earlier in this
-                // pass): do not spin on the same entries.
                 more = false;
             }
         }
-        long pending = dirtyStore.count();
-        long lag = 0;
-        if (pending > 0) {
-            List<HealthDirtyDay> oldest = dirtyStore.oldest(1);
-            if (!oldest.isEmpty() && oldest.get(0).markedAt() != null) {
-                lag = Math.max(0, Duration.between(oldest.get(0).markedAt(), clock.instant()).toSeconds());
-            }
+        metrics.rolledUp(days, rows, failed, Duration.between(started, clock.instant()));
+        long pending = 0;
+        try {
+            pending = dirtyStore.count();
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count dirty Agent Health days: %s", e.getMessage());
         }
-        metrics.rolledUp(days, rows, failed, Duration.between(started, clock.instant()), pending, lag);
         return new Result(days, rows, skipped, failed, pending);
+    }
+
+    /**
+     * Moves a failed entry to the back of the queue, or drops it after too many
+     * tries.
+     */
+    private void defer(HealthDirtyDay entry, RuntimeException cause) {
+        try {
+            int attempts = dirtyStore.defer(entry, clock.instant());
+            if (attempts >= MAX_ATTEMPTS) {
+                dirtyStore.clear(new HealthDirtyDay(entry.agentId(), entry.day(), entry.token(), entry.markedAt(), attempts));
+                LOGGER.warnf("Agent Health rollup of agent %s, day %s failed %d times; dropped from the queue (the next write to the day "
+                        + "marks it again): %s", sanitize(entry.agentId()), entry.day(), attempts, sanitize(cause.getMessage()));
+            } else {
+                LOGGER.warnf("Agent Health rollup of agent %s, day %s failed (attempt %d, retried later): %s", sanitize(entry.agentId()),
+                        entry.day(), attempts, sanitize(cause.getMessage()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Agent Health rollup of agent %s, day %s failed and could not be deferred: %s", sanitize(entry.agentId()),
+                    entry.day(), sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Re-marks the days of the rows written since the last pass; see the class
+     * comment. Never throws: a failure leaves the watermark where it was.
+     */
+    void selfHeal(Instant now) {
+        try {
+            Instant until = now.minus(SELF_HEAL_GRACE);
+            Instant since = dirtyStore.selfHealWatermark().orElse(until.minus(SELF_HEAL_FIRST_WINDOW));
+            if (!since.isBefore(until)) {
+                return;
+            }
+            Map<String, Set<LocalDate>> pairs = new LinkedHashMap<>();
+            int[] count = {0};
+            turnStore.forEachAgentDayUpdatedSince(since, until, SELF_HEAL_MAX + 1, (agentId, day) -> {
+                if (count[0]++ < SELF_HEAL_MAX) {
+                    pairs.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
+                }
+            });
+            if (count[0] > SELF_HEAL_MAX) {
+                LOGGER.warnf("The Agent Health self-heal pass re-marks only %d agent days written since %s; the others rely on their own "
+                        + "marks", SELF_HEAL_MAX, since);
+            }
+            pairs.forEach(dirtyStore::mark);
+            dirtyStore.setSelfHealWatermark(until);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("The Agent Health self-heal pass failed; the next pass retries from the same watermark: %s", sanitize(e.getMessage()));
+        }
     }
 
     /**

@@ -46,30 +46,40 @@ public class HealthRollupSchedule {
         ensure();
     }
 
-    boolean installed() throws Exception {
+    /** The installed rollup schedule, if any. */
+    Optional<ScheduleConfiguration> installed() throws Exception {
         Optional<ScheduleConfiguration> byName = scheduleStore.readScheduleByName(HealthSchedules.SCHEDULE_NAME);
         if (byName.isPresent() && HealthSchedules.isRollup(byName.get().getMetadata())) {
-            return true;
+            return byName;
         }
         for (int offset = 0; offset < SCAN_LIMIT; offset += SCAN_PAGE) {
             List<ScheduleConfiguration> page = scheduleStore.readAllSchedules(SCAN_PAGE, offset, true);
-            if (page.stream().anyMatch(s -> HealthSchedules.isRollup(s.getMetadata()))) {
-                return true;
+            Optional<ScheduleConfiguration> found = page.stream().filter(s -> HealthSchedules.isRollup(s.getMetadata())).findFirst();
+            if (found.isPresent()) {
+                return found;
             }
             if (page.size() < SCAN_PAGE) {
-                return false;
+                return Optional.empty();
             }
         }
-        return false;
+        return Optional.empty();
     }
 
     /** Creates the schedule when missing; never throws. */
     public void ensure() {
         try {
-            if (installed()) {
+            long seconds = settings.rollupInterval().toSeconds();
+            Optional<ScheduleConfiguration> existing = installed();
+            if (existing.isPresent()) {
+                ScheduleConfiguration schedule = existing.get();
+                if (schedule.getHeartbeatIntervalSeconds() == null || schedule.getHeartbeatIntervalSeconds() != seconds) {
+                    // eddi.health.rollup-interval changed since the schedule was created.
+                    schedule.setHeartbeatIntervalSeconds(seconds);
+                    scheduleStore.updateSchedule(schedule.getId(), schedule);
+                    LOGGER.infof("Updated the %s system schedule to every %ds", HealthSchedules.SCHEDULE_NAME, seconds);
+                }
                 return;
             }
-            long seconds = settings.rollupInterval().toSeconds();
             ScheduleConfiguration schedule = new ScheduleConfiguration();
             schedule.setName(HealthSchedules.SCHEDULE_NAME);
             schedule.setTriggerType(ScheduleConfiguration.TriggerType.HEARTBEAT);

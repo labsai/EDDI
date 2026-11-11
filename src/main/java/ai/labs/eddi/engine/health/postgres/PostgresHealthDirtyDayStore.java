@@ -44,16 +44,25 @@ public class PostgresHealthDirtyDayStore implements IHealthDirtyDayStore {
                 day DATE NOT NULL,
                 token VARCHAR(64) NOT NULL,
                 marked_at_ms BIGINT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (agent_id, day)
             )
             """;
     static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_health_dirty_marked ON health_dirty (marked_at_ms)";
+    /** The rollup's own state (the self-heal watermark), apart from the queue. */
+    static final String CREATE_STATE = "CREATE TABLE IF NOT EXISTS health_rollup_state (name VARCHAR(64) PRIMARY KEY, at_ms BIGINT NOT NULL)";
+    static final String WATERMARK = "self-heal";
 
     static final String MARK = "INSERT INTO health_dirty (agent_id, day, token, marked_at_ms) VALUES (?, ?, ?, ?) "
-            + "ON CONFLICT (agent_id, day) DO UPDATE SET token = EXCLUDED.token, marked_at_ms = EXCLUDED.marked_at_ms";
-    static final String OLDEST = "SELECT agent_id, day, token, marked_at_ms FROM health_dirty ORDER BY marked_at_ms LIMIT ?";
+            + "ON CONFLICT (agent_id, day) DO UPDATE SET token = EXCLUDED.token, marked_at_ms = EXCLUDED.marked_at_ms, attempts = 0";
+    static final String OLDEST = "SELECT agent_id, day, token, marked_at_ms, attempts FROM health_dirty ORDER BY marked_at_ms LIMIT ?";
+    static final String DEFER = "UPDATE health_dirty SET marked_at_ms = ?, attempts = attempts + 1 WHERE agent_id = ? AND day = ? AND token = ? "
+            + "RETURNING attempts";
+    static final String READ_WATERMARK = "SELECT at_ms FROM health_rollup_state WHERE name = ?";
+    static final String WRITE_WATERMARK = "INSERT INTO health_rollup_state (name, at_ms) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET at_ms = "
+            + "EXCLUDED.at_ms";
     static final String CLEAR = "DELETE FROM health_dirty WHERE agent_id = ? AND day = ? AND token = ?";
-    static final String EARLIEST = "SELECT MIN(day) FROM health_dirty WHERE agent_id = ?";
+    static final String EARLIEST = "SELECT MIN(day) FROM health_dirty WHERE agent_id = ? AND marked_at_ms < ?";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -70,6 +79,7 @@ public class PostgresHealthDirtyDayStore implements IHealthDirtyDayStore {
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
             statement.execute(CREATE_INDEX);
+            statement.execute(CREATE_STATE);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new HealthStoreException("Could not create the " + TABLE + " schema", e);
@@ -106,7 +116,8 @@ public class PostgresHealthDirtyDayStore implements IHealthDirtyDayStore {
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
                     entries.add(
-                            new HealthDirtyDay(r.getString(1), r.getObject(2, LocalDate.class), r.getString(3), Instant.ofEpochMilli(r.getLong(4))));
+                            new HealthDirtyDay(r.getString(1), r.getObject(2, LocalDate.class), r.getString(3), Instant.ofEpochMilli(r.getLong(4)),
+                                    r.getInt(5)));
                 }
             }
             return entries;
@@ -129,15 +140,59 @@ public class PostgresHealthDirtyDayStore implements IHealthDirtyDayStore {
     }
 
     @Override
-    public Optional<LocalDate> earliestPending(String agentId) {
+    public int defer(HealthDirtyDay entry, Instant now) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(DEFER)) {
+            statement.setLong(1, now.toEpochMilli());
+            statement.setString(2, entry.agentId());
+            statement.setObject(3, entry.day());
+            statement.setString(4, entry.token());
+            try (ResultSet r = statement.executeQuery()) {
+                return r.next() ? r.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not defer a dirty health day", e);
+        }
+    }
+
+    @Override
+    public Optional<LocalDate> earliestPending(String agentId, Instant markedBefore) {
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(EARLIEST)) {
             statement.setString(1, agentId);
+            statement.setLong(2, markedBefore.toEpochMilli());
             try (ResultSet r = statement.executeQuery()) {
                 return r.next() ? Optional.ofNullable(r.getObject(1, LocalDate.class)) : Optional.empty();
             }
         } catch (SQLException e) {
             throw new HealthStoreException("Could not read dirty health days", e);
+        }
+    }
+
+    @Override
+    public Optional<Instant> selfHealWatermark() {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(READ_WATERMARK)) {
+            statement.setString(1, WATERMARK);
+            try (ResultSet r = statement.executeQuery()) {
+                return r.next() ? Optional.of(Instant.ofEpochMilli(r.getLong(1))) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the health rollup watermark", e);
+        }
+    }
+
+    @Override
+    public void setSelfHealWatermark(Instant at) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(WRITE_WATERMARK)) {
+            statement.setString(1, WATERMARK);
+            statement.setLong(2, at.toEpochMilli());
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not store the health rollup watermark", e);
         }
     }
 

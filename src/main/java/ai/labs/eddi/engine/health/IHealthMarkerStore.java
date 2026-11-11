@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.model.HealthMarker;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -18,15 +19,24 @@ import java.util.List;
  */
 public interface IHealthMarkerStore {
 
-    /** Stores a marker. */
+    /**
+     * Stores a marker. A marker whose id is already stored is ignored — that is how
+     * deployment-wide markers coalesce: their id names the kind, the tenant and the
+     * hour.
+     */
     void append(HealthMarker marker);
 
     /**
-     * The markers of the agent and the deployment-wide ones (no agent) between
-     * {@code from} (inclusive) and {@code to} (exclusive), oldest first, at most
-     * {@code limit}.
+     * The agent's own markers between {@code from} (inclusive) and {@code to}
+     * (exclusive), newest first, at most {@code limit}.
      */
-    List<HealthMarker> find(String agentId, Instant from, Instant to, int limit);
+    List<HealthMarker> findForAgent(String agentId, Instant from, Instant to, int limit);
+
+    /**
+     * The deployment-wide markers (no agent) of the given tenants in the same
+     * range, newest first, at most {@code limit}.
+     */
+    List<HealthMarker> findGlobal(Collection<String> tenantIds, Instant from, Instant to, int limit);
 
     /** Deletes the markers before {@code before} (retention). */
     long deleteOlderThan(Instant before);

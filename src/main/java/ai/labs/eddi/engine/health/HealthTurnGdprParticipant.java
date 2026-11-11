@@ -8,11 +8,14 @@ import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Joins GDPR erasure and export for the Agent Health turn rows.
@@ -37,8 +40,9 @@ import java.util.Map;
  * <p>
  * The export carries the user's rows, newest first, under {@code turns}; past
  * {@link #MAX_EXPORTED_TURNS} the section is marked
- * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates (a later phase)
- * hold no personal data and are not part of either.
+ * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates hold no personal
+ * data and are not part of either; the days of the erased rows are marked
+ * dirty, so the rollup recomputes them without the user.
  */
 @ApplicationScoped
 public class HealthTurnGdprParticipant implements IGdprParticipant {
@@ -46,7 +50,18 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
     /** An export carries at most this many rows. */
     static final int MAX_EXPORTED_TURNS = 10_000;
 
+    /** The most (agent, day) pairs of an erased user re-rolled. */
+    static final int MAX_ERASED_DAYS = 10_000;
+
     private final IHealthTurnStore store;
+
+    /**
+     * Marks the days of the erased rows dirty, so the daily rows lose the user's
+     * counts at the next rollup. Field-injected and null-checked: tests build this
+     * class by hand.
+     */
+    @Inject
+    Instance<HealthDirtyDays> dirtyDays;
 
     @Inject
     public HealthTurnGdprParticipant(IHealthTurnStore store) {
@@ -60,7 +75,20 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
 
     @Override
     public long erase(String userId) {
-        return userId == null || userId.isBlank() ? 0L : store.deleteByUserId(userId);
+        if (userId == null || userId.isBlank()) {
+            return 0L;
+        }
+        Map<String, Set<LocalDate>> days = Map.of();
+        try {
+            days = store.agentDaysOfUser(userId, MAX_ERASED_DAYS);
+        } catch (RuntimeException e) {
+            // The erasure itself must not depend on it.
+        }
+        long deleted = store.deleteByUserId(userId);
+        if (dirtyDays != null && dirtyDays.isResolvable()) {
+            dirtyDays.get().noteAll(days);
+        }
+        return deleted;
     }
 
     @Override

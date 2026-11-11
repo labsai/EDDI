@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
 import ai.labs.eddi.engine.health.HealthPortfolioService.AgentRef;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
@@ -40,6 +41,7 @@ class HealthPortfolioServiceTest {
     @BeforeEach
     void setUp() {
         reports = mock(HealthReportService.class);
+        when(reports.exposureDays(any())).thenAnswer(inv -> (double) inv.getArgument(0, Window.class).days());
         service = new HealthPortfolioService(reports);
     }
 
@@ -63,8 +65,8 @@ class HealthPortfolioServiceTest {
         rows.add(row("busy", WINDOW.baseline().from(), 5000, 5, 0, Map.of()));
         rows.add(row("busy", TODAY, 5000, 5, 0, Map.of()));
         when(reports.dailyRows(any(), any(), any())).thenReturn(rows);
-        when(reports.sessionsByAgent(any(), eq(WINDOW), eq(HealthOrigins.INTERACTIVE))).thenReturn(Map.of("worse", 90L, "busy", 400L));
-        when(reports.sessionsByAgent(any(), eq(WINDOW.baseline()), eq(HealthOrigins.INTERACTIVE))).thenReturn(Map.of("worse", 100L, "busy", 400L));
+        when(reports.portfolioSessions(any(), eq(WINDOW))).thenReturn(Map.of("worse", new HealthPortfolioSessions(90, 95, 100, 105), "busy",
+                new HealthPortfolioSessions(400, 400, 400, 400)));
 
         Portfolio p = service.portfolio(List.of(new AgentRef("busy", "Busy"), new AgentRef("worse", "Worse"), new AgentRef("idle", "Idle")), WINDOW,
                 "attention", List.of(), 100, 0);
@@ -99,7 +101,7 @@ class HealthPortfolioServiceTest {
         rows.add(row("b", TODAY, 100, 0, 20, Map.of("TRANSIENT", 5L)));
         rows.add(row("d", TODAY.minusDays(1), 5, 0, 5, Map.of("RATE_LIMITED", 5L)));
         when(reports.dailyRows(any(), any(), any())).thenReturn(rows);
-        when(reports.sessionsByAgent(any(), any(), any())).thenReturn(Map.of());
+        when(reports.portfolioSessions(any(), any())).thenReturn(Map.of());
 
         Portfolio p = service.portfolio(List.of(new AgentRef("a", "A"), new AgentRef("b", "B"), new AgentRef("c", "C"), new AgentRef("d", "D")),
                 WINDOW, "name", List.of(), 100, 0);
@@ -108,6 +110,16 @@ class HealthPortfolioServiceTest {
                 p.platformIncidents());
         assertTrue(p.items().get(0).platformIncident());
         assertFalse(p.items().get(3).platformIncident(), "d had too few turns to count as hit");
+    }
+
+    @Test
+    @DisplayName("sessionsDelta compares with the baseline at the window's exposure")
+    void deltaAtExposure() {
+        when(reports.exposureDays(WINDOW)).thenReturn(3.5);
+        when(reports.dailyRows(any(), any(), any())).thenReturn(List.of(row("a", TODAY, 10, 0, 0, Map.of())));
+        when(reports.portfolioSessions(any(), eq(WINDOW))).thenReturn(Map.of("a", new HealthPortfolioSessions(50, 50, 100, 100)));
+        Portfolio p = service.portfolio(List.of(new AgentRef("a", "A")), WINDOW, "name", List.of(), 100, 0);
+        assertEquals(0.0, p.items().get(0).sessionsDelta(), 1e-12, "50 in half a week against 100 a week is no change");
     }
 
     @Test

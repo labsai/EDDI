@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health.mongo;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Filters.and;
@@ -310,7 +312,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         return new Document("_id", groupId)
                 .append("minOut", new Document("$min", new Document("$cond", Arrays.asList("$" + FIELD_AGENT_OUTPUT, "$" + FIELD_STEP, null))))
                 .append("maxIn", new Document("$max", new Document("$cond", Arrays.asList("$" + FIELD_USER_INPUT, "$" + FIELD_STEP, null))))
-                .append("turns", new Document("$sum", 1)).append("user", new Document("$first", "$" + FIELD_USER));
+                .append("turns", new Document("$sum", 1)).append("users", new Document("$addToSet", "$" + FIELD_USER));
     }
 
     private static Document engagedExpression() {
@@ -377,9 +379,12 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                     new Document("$group",
                             new Document("_id", new Document("d", "$_id.d").append("g", "$_id.g")).append("sessions", new Document("$sum", 1))
                                     .append("engaged", new Document("$sum", engagedExpression()))
-                                    .append("turns", new Document("$sum", "$turns")).append("users", new Document("$addToSet", "$user"))),
+                                    .append("turns", new Document("$sum", "$turns")).append("users", new Document("$push", "$users"))),
                     new Document("$project", new Document("sessions", 1).append("engaged", 1).append("turns", 1).append("users",
-                            new Document("$size", new Document("$setDifference", List.of("$users", Arrays.asList((Object) null)))))));
+                            new Document("$size", new Document("$setDifference", List.of(new Document("$reduce",
+                                    new Document("input", "$users").append("initialValue", List.of()).append("in",
+                                            new Document("$setUnion", List.of("$$value", "$$this")))),
+                                    Arrays.asList((Object) null)))))));
             List<HealthUsagePoint> points = new ArrayList<>();
             for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
                 Document key = d.get("_id", Document.class);
@@ -394,24 +399,79 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins) {
+    public Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom,
+                                                                  LocalDate to, Collection<String> interactive, Collection<String> origins) {
         if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
             return Map.of();
         }
         try {
+            Document inWindow = new Document("$gte", List.of("$" + FIELD_DAY, windowFrom.toString()));
+            Document interactiveOrigin = new Document("$in", List.of("$" + FIELD_ORIGIN, List.copyOf(interactive == null ? List.of() : interactive)));
             List<Document> pipeline = List.of(
                     new Document("$match",
-                            and(in(FIELD_AGENT, agentIds), gte(FIELD_DAY, from.toString()), lte(FIELD_DAY, to.toString()), ne(FIELD_TIMESTAMP, null),
-                                    ne(FIELD_DISCARDED, true), in(FIELD_ORIGIN, origins))),
-                    new Document("$group", new Document("_id", new Document("a", "$" + FIELD_AGENT).append("c", "$" + FIELD_CONVERSATION))),
-                    new Document("$group", new Document("_id", "$_id.a").append("sessions", new Document("$sum", 1))));
-            Map<String, Long> sessions = new LinkedHashMap<>();
+                            and(in(FIELD_AGENT, agentIds), gte(FIELD_DAY, baselineFrom.toString()), lte(FIELD_DAY, to.toString()),
+                                    ne(FIELD_TIMESTAMP, null), ne(FIELD_DISCARDED, true), in(FIELD_ORIGIN, origins))),
+                    // One document per (agent, conversation), flagged with where it had turns.
+                    new Document("$group", new Document("_id", new Document("a", "$" + FIELD_AGENT).append("c", "$" + FIELD_CONVERSATION))
+                            .append("iNow", flag(new Document("$and", List.of(inWindow, interactiveOrigin))))
+                            .append("aNow", flag(inWindow))
+                            .append("iBefore", flag(new Document("$and", List.of(new Document("$not", List.of(inWindow)), interactiveOrigin))))
+                            .append("aBefore", flag(new Document("$not", List.of(inWindow))))),
+                    new Document("$group", new Document("_id", "$_id.a").append("iNow", new Document("$sum", "$iNow"))
+                            .append("aNow", new Document("$sum", "$aNow")).append("iBefore", new Document("$sum", "$iBefore"))
+                            .append("aBefore", new Document("$sum", "$aBefore"))));
+            Map<String, HealthPortfolioSessions> sessions = new LinkedHashMap<>();
             for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
-                sessions.put(d.getString("_id"), number(d.get("sessions")));
+                sessions.put(d.getString("_id"), new HealthPortfolioSessions(number(d.get("iNow")), number(d.get("aNow")),
+                        number(d.get("iBefore")), number(d.get("aBefore"))));
             }
             return sessions;
         } catch (MongoException e) {
             throw new HealthStoreException("Could not count the sessions of agents", e);
+        }
+    }
+
+    private static Document flag(Document condition) {
+        return new Document("$max", new Document("$cond", List.of(condition, 1, 0)));
+    }
+
+    @Override
+    public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
+        List<Bson> pipeline = List.of(
+                Aggregates.match(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until)), ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
+                Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                consumer.accept(key.getString("a"), LocalDate.parse(key.getString("d")));
+            }
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of recent health turns", e);
+        }
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit) {
+        return agentDays(eq(FIELD_USER, userId), limit);
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
+        return agentDays(eq(FIELD_CONVERSATION, conversationId), Integer.MAX_VALUE);
+    }
+
+    private Map<String, Set<LocalDate>> agentDays(Bson filter, int limit) {
+        List<Bson> pipeline = List.of(Aggregates.match(and(filter, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
+                Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
+        Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                days.computeIfAbsent(key.getString("a"), k -> new TreeSet<>()).add(LocalDate.parse(key.getString("d")));
+            }
+            return days;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of health turns", e);
         }
     }
 

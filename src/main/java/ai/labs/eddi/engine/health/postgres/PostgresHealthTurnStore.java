@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health.postgres;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -393,19 +395,43 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 + "FROM health_turns WHERE " + usageWhere(withVersion) + " AND user_id IS NOT NULL GROUP BY user_id) u WHERE last_day >= ?";
     }
 
+    /**
+     * Daily usage. Distinct users are every user id of the day's rows (of the
+     * group), the same rule as the period count and as the MongoDB store: a
+     * conversation with turns of two users counts both.
+     */
     static String dailyUsageSql(boolean withVersion, String groupBy) {
         String group = switch (groupBy == null ? "none" : groupBy) {
             case "version" -> "CAST(agent_version AS TEXT)";
             case "origin" -> "origin";
             default -> "CAST(NULL AS TEXT)";
         };
-        return "SELECT day, grp, COUNT(*), COUNT(*) FILTER (WHERE max_in > min_out), COALESCE(SUM(turns), 0), COUNT(DISTINCT user_id) FROM "
-                + "(SELECT day, " + group + " AS grp, conversation_id, " + CONVERSATION_SUMMARY + ", MIN(user_id) AS user_id FROM health_turns WHERE "
-                + usageWhere(withVersion) + " GROUP BY day, grp, conversation_id) c GROUP BY day, grp";
+        return "WITH r AS (SELECT day, " + group + " AS grp, conversation_id, step_index, agent_output, user_input, user_id FROM health_turns "
+                + "WHERE " + usageWhere(withVersion) + "), "
+                + "c AS (SELECT day, grp, conversation_id, " + CONVERSATION_SUMMARY + " FROM r GROUP BY day, grp, conversation_id), "
+                + "u AS (SELECT day, grp, COUNT(DISTINCT user_id) AS users FROM r GROUP BY day, grp) "
+                + "SELECT c.day, c.grp, COUNT(*), COUNT(*) FILTER (WHERE c.max_in > c.min_out), COALESCE(SUM(c.turns), 0), MAX(u.users) "
+                + "FROM c JOIN u ON c.day = u.day AND c.grp IS NOT DISTINCT FROM u.grp GROUP BY c.day, c.grp";
     }
 
-    static final String SESSIONS_BY_AGENT = "SELECT agent_id, COUNT(DISTINCT conversation_id) FROM health_turns WHERE agent_id = ANY(?) "
-            + "AND day >= ? AND day <= ? AND recorded_at_ms IS NOT NULL AND NOT discarded AND origin = ANY(?) GROUP BY agent_id";
+    /**
+     * The portfolio's traffic in one pass: one row per (agent, conversation) with
+     * flags for where it had turns, summed per agent. Binds the window's first day
+     * three times (in the select list), then agents, baseline start, last day, the
+     * interactive origins (twice) and all origins.
+     */
+    static final String PORTFOLIO_SESSIONS = "SELECT agent_id, SUM(i_now), SUM(a_now), SUM(i_before), SUM(a_before) FROM (SELECT agent_id, "
+            + "conversation_id, MAX(CASE WHEN day >= ? AND origin = ANY(?) THEN 1 ELSE 0 END) AS i_now, "
+            + "MAX(CASE WHEN day >= ? THEN 1 ELSE 0 END) AS a_now, MAX(CASE WHEN day < ? AND origin = ANY(?) THEN 1 ELSE 0 END) AS i_before, "
+            + "MAX(CASE WHEN day < ? THEN 1 ELSE 0 END) AS a_before FROM health_turns WHERE agent_id = ANY(?) AND day >= ? AND day <= ? "
+            + "AND recorded_at_ms IS NOT NULL AND NOT discarded AND origin = ANY(?) GROUP BY agent_id, conversation_id) c GROUP BY agent_id";
+
+    static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE updated_at_ms >= ? AND updated_at_ms < ? "
+            + "AND day IS NOT NULL AND agent_id IS NOT NULL LIMIT ?";
+    static final String AGENT_DAYS_OF_USER = "SELECT DISTINCT agent_id, day FROM health_turns WHERE user_id = ? AND day IS NOT NULL "
+            + "AND agent_id IS NOT NULL LIMIT ?";
+    static final String AGENT_DAYS_OF_CONVERSATION = "SELECT DISTINCT agent_id, day FROM health_turns WHERE conversation_id = ? "
+            + "AND day IS NOT NULL AND agent_id IS NOT NULL";
 
     private static int bindUsage(Connection connection, PreparedStatement s, HealthUsageQuery query, LocalDate from, int start)
             throws SQLException {
@@ -483,26 +509,82 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins) {
+    public Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom,
+                                                                  LocalDate to, Collection<String> interactive, Collection<String> origins) {
         if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
             return Map.of();
         }
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection();
-                PreparedStatement statement = connection.prepareStatement(SESSIONS_BY_AGENT)) {
-            statement.setArray(1, connection.createArrayOf("text", agentIds.toArray(new String[0])));
-            statement.setObject(2, from);
-            statement.setObject(3, to);
-            statement.setArray(4, connection.createArrayOf("text", origins.toArray(new String[0])));
-            Map<String, Long> sessions = new LinkedHashMap<>();
+                PreparedStatement statement = connection.prepareStatement(PORTFOLIO_SESSIONS)) {
+            Array interactiveArray = connection.createArrayOf("text", (interactive == null ? List.<String>of() : interactive).toArray(new String[0]));
+            int i = 1;
+            statement.setObject(i++, windowFrom);
+            statement.setArray(i++, interactiveArray);
+            statement.setObject(i++, windowFrom);
+            statement.setObject(i++, windowFrom);
+            statement.setArray(i++, interactiveArray);
+            statement.setObject(i++, windowFrom);
+            statement.setArray(i++, connection.createArrayOf("text", agentIds.toArray(new String[0])));
+            statement.setObject(i++, baselineFrom);
+            statement.setObject(i++, to);
+            statement.setArray(i, connection.createArrayOf("text", origins.toArray(new String[0])));
+            Map<String, HealthPortfolioSessions> sessions = new LinkedHashMap<>();
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
-                    sessions.put(r.getString(1), r.getLong(2));
+                    sessions.put(r.getString(1), new HealthPortfolioSessions(r.getLong(2), r.getLong(3), r.getLong(4), r.getLong(5)));
                 }
             }
             return sessions;
         } catch (SQLException e) {
             throw new HealthStoreException("Could not count the sessions of agents", e);
+        }
+    }
+
+    @Override
+    public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(AGENT_DAYS_UPDATED_SINCE)) {
+            statement.setLong(1, since.toEpochMilli());
+            statement.setLong(2, until.toEpochMilli());
+            statement.setInt(3, Math.max(1, limit));
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    consumer.accept(r.getString(1), r.getObject(2, LocalDate.class));
+                }
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the days of recent health turns", e);
+        }
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit) {
+        return agentDays(AGENT_DAYS_OF_USER, s -> {
+            s.setString(1, userId);
+            s.setInt(2, Math.max(1, limit));
+        });
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
+        return agentDays(AGENT_DAYS_OF_CONVERSATION, s -> s.setString(1, conversationId));
+    }
+
+    private Map<String, Set<LocalDate>> agentDays(String sql, Binder binder) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    days.computeIfAbsent(r.getString(1), k -> new TreeSet<>()).add(r.getObject(2, LocalDate.class));
+                }
+            }
+            return days;
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the days of health turns", e);
         }
     }
 

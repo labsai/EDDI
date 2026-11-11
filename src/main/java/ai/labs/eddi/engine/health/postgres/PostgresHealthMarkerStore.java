@@ -21,6 +21,7 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -41,15 +42,20 @@ public class PostgresHealthMarkerStore implements IHealthMarkerStore {
                 at_ms BIGINT NOT NULL,
                 kind VARCHAR(40) NOT NULL,
                 label VARCHAR(500) NOT NULL,
-                version INTEGER
+                version INTEGER,
+                tenant_id VARCHAR(255)
             )
             """;
     static final String[] CREATE_INDEXES = {"CREATE INDEX IF NOT EXISTS idx_health_markers_agent_at ON health_markers (agent_id, at_ms)",
-            "CREATE INDEX IF NOT EXISTS idx_health_markers_at ON health_markers (at_ms)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_markers_at ON health_markers (at_ms)",
+            "CREATE INDEX IF NOT EXISTS idx_health_markers_tenant_at ON health_markers (tenant_id, at_ms) WHERE agent_id IS NULL"};
 
-    static final String INSERT = "INSERT INTO health_markers (id, agent_id, at_ms, kind, label, version) VALUES (?, ?, ?, ?, ?, ?)";
-    static final String FIND = "SELECT id, agent_id, at_ms, kind, label, version FROM health_markers "
-            + "WHERE (agent_id = ? OR agent_id IS NULL) AND at_ms >= ? AND at_ms < ? ORDER BY at_ms LIMIT ?";
+    static final String INSERT = "INSERT INTO health_markers (id, agent_id, at_ms, kind, label, version, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            + "ON CONFLICT (id) DO NOTHING";
+    static final String SELECT = "SELECT id, agent_id, at_ms, kind, label, version, tenant_id FROM health_markers ";
+    static final String FIND_FOR_AGENT = SELECT + "WHERE agent_id = ? AND at_ms >= ? AND at_ms < ? ORDER BY at_ms DESC LIMIT ?";
+    static final String FIND_GLOBAL = SELECT
+            + "WHERE agent_id IS NULL AND tenant_id = ANY(?) AND at_ms >= ? AND at_ms < ? ORDER BY at_ms DESC LIMIT ?";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -88,6 +94,7 @@ public class PostgresHealthMarkerStore implements IHealthMarkerStore {
             } else {
                 statement.setInt(6, marker.version());
             }
+            statement.setString(7, marker.tenantId());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new HealthStoreException("Could not store a health marker", e);
@@ -95,26 +102,49 @@ public class PostgresHealthMarkerStore implements IHealthMarkerStore {
     }
 
     @Override
-    public List<HealthMarker> find(String agentId, Instant from, Instant to, int limit) {
+    public List<HealthMarker> findForAgent(String agentId, Instant from, Instant to, int limit) {
         ensureSchema();
-        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(FIND)) {
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(FIND_FOR_AGENT)) {
             statement.setString(1, agentId);
             statement.setLong(2, from.toEpochMilli());
             statement.setLong(3, to.toEpochMilli());
             statement.setInt(4, Math.max(1, limit));
-            List<HealthMarker> found = new ArrayList<>();
-            try (ResultSet r = statement.executeQuery()) {
-                while (r.next()) {
-                    int version = r.getInt(6);
-                    Integer v = r.wasNull() ? null : version;
-                    found.add(
-                            new HealthMarker(r.getString(1), r.getString(2), Instant.ofEpochMilli(r.getLong(3)), r.getString(4), r.getString(5), v));
-                }
-            }
-            return found;
+            return read(statement);
         } catch (SQLException e) {
             throw new HealthStoreException("Could not read health markers", e);
         }
+    }
+
+    @Override
+    public List<HealthMarker> findGlobal(Collection<String> tenantIds, Instant from, Instant to, int limit) {
+        if (tenantIds == null || tenantIds.isEmpty()) {
+            return List.of();
+        }
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(FIND_GLOBAL)) {
+            statement.setArray(1, connection.createArrayOf("text", tenantIds.toArray(new String[0])));
+            statement.setLong(2, from.toEpochMilli());
+            statement.setLong(3, to.toEpochMilli());
+            statement.setInt(4, Math.max(1, limit));
+            return read(statement);
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read health markers", e);
+        }
+    }
+
+    private static List<HealthMarker> read(PreparedStatement statement) throws SQLException {
+        List<HealthMarker> found = new ArrayList<>();
+        try (ResultSet r = statement.executeQuery()) {
+            while (r.next()) {
+                int version = r.getInt(6);
+                Integer v = r.wasNull() ? null : version;
+                found.add(new HealthMarker(r.getString(1), r.getString(2), Instant.ofEpochMilli(r.getLong(3)), r.getString(4), r.getString(5), v,
+                        r.getString(7)));
+            }
+        }
+        return found;
     }
 
     @Override

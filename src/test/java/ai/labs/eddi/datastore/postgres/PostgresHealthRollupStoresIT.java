@@ -44,8 +44,8 @@ class PostgresHealthRollupStoresIT extends PostgresTestBase implements HealthRol
         turns.findByUserId("nobody", 1);
         daily.find("nobody", LocalDate.EPOCH, LocalDate.EPOCH);
         dirty.count();
-        markers.find("nobody", Instant.EPOCH, Instant.EPOCH, 1);
-        truncateTables(DATA_SOURCE, "health_turns", "health_daily", "health_dirty", "health_markers");
+        markers.findForAgent("nobody", Instant.EPOCH, Instant.EPOCH, 1);
+        truncateTables(DATA_SOURCE, "health_turns", "health_daily", "health_dirty", "health_markers", "health_rollup_state");
     }
 
     @Override

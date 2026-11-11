@@ -144,7 +144,7 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         var toStore = new GlobalVariable(tenantId, key, variable.value(), variable.description(), exportable);
         store.upsert(toStore);
         resolver.invalidateCache();
-        markChange(false);
+        markChange(tenantId);
 
         LOGGER.infof("Global variable upserted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.ok().build();
@@ -158,15 +158,15 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         requireAdminForReservedKey(tenantId, key, "delete");
         store.delete(tenantId, key);
         resolver.invalidateCache();
-        markChange(true);
+        markChange(tenantId);
 
         LOGGER.infof("Global variable deleted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.noContent().build();
     }
 
-    private void markChange(boolean deleted) {
+    private void markChange(String tenantId) {
         if (healthMarkers != null && healthMarkers.isResolvable()) {
-            healthMarkers.get().globalVariableChanged(deleted);
+            healthMarkers.get().globalVariableChanged(tenantId);
         }
     }
 

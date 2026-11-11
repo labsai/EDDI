@@ -21,7 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * Computes Agent Health's measures from what a period holds — pure functions
@@ -41,6 +43,7 @@ public final class HealthMeasures {
     static final String HINT_NEEDS_OUTCOMES = "Available once conversation outcomes are recorded";
     static final String HINT_NO_DATA = "No data in this period";
     static final String HINT_RATINGS_UNAVAILABLE = "Ratings could not be read";
+    static final String HINT_MIXED_APDEX = "Days of this period were rolled up with different Apdex thresholds (eddi.health.apdex-t)";
     static final String HINT_USAGE_UNAVAILABLE = "Older than the turn-row retention: people and sessions are not counted";
 
     /** Rating counts of a period (conversation ratings and reply thumbs). */
@@ -56,7 +59,11 @@ public final class HealthMeasures {
      */
     public record Totals(long turns, long agentFailedTurns, long platformAffectedTurns, long fallbackTurns, Map<String, Long> failuresByClass,
             Map<String, Long> errorKinds, double costUsd, long totalTokens, long guardrailTrips, long apdexTimed, long apdexSatisfied,
-            long apdexTolerating, List<Long> durationBuckets) {
+            long apdexTolerating, List<Long> durationBuckets, Set<Long> apdexTs) {
+
+        public Totals {
+            apdexTs = apdexTs == null ? Set.of() : Set.copyOf(apdexTs);
+        }
 
         public static final Totals EMPTY = of(List.of());
 
@@ -67,7 +74,11 @@ public final class HealthMeasures {
             Map<String, Long> classes = new TreeMap<>();
             Map<String, Long> kinds = new TreeMap<>();
             long[] buckets = new long[HealthTurnAggregator.DURATION_BOUNDS_MS.length + 1];
+            Set<Long> ts = new TreeSet<>();
             for (HealthTurnAggregate row : rows) {
+                if (row.durationCount() > 0) {
+                    ts.add(row.apdexTMs());
+                }
                 turns += row.turns();
                 agentFailed += row.agentFailedTurns();
                 platformAffected += row.platformAffectedTurns();
@@ -90,7 +101,7 @@ public final class HealthMeasures {
                 bucketList.add(b);
             }
             return new Totals(turns, agentFailed, platformAffected, fallback, classes, kinds, cost, tokens, guardrails, timed, satisfied,
-                    tolerating, bucketList);
+                    tolerating, bucketList, ts);
         }
     }
 
@@ -103,9 +114,14 @@ public final class HealthMeasures {
      * @param ratings
      *            ratings, or {@code null} when they could not be read
      */
-    public record PeriodData(Totals totals, HealthUsage usage, RatingStats ratings) {
+    public record PeriodData(Totals totals, HealthUsage usage, RatingStats ratings, double exposureDays) {
         public PeriodData {
             totals = totals == null ? Totals.EMPTY : totals;
+        }
+
+        /** Two such periods compare at equal exposure. */
+        public PeriodData(Totals totals, HealthUsage usage, RatingStats ratings) {
+            this(totals, usage, ratings, 1.0);
         }
     }
 
@@ -180,8 +196,14 @@ public final class HealthMeasures {
         Stat now = stat(id, current);
         Stat before = baseline == null ? null : stat(id, baseline);
         Double baselineValue = before == null ? null : before.value();
+        double ratio = baseline == null ? 1.0 : exposureRatio(current, baseline);
+        if (before != null && before.test() instanceof Count && baselineValue != null) {
+            // A count is compared at equal exposure: a window that ends this morning
+            // is held against the same fraction of the previous period.
+            baselineValue = baselineValue * ratio;
+        }
         Double delta = now.value() != null && baselineValue != null ? now.value() - baselineValue : null;
-        boolean significant = before != null && significant(d, now, before);
+        boolean significant = before != null && significant(d, now, before, ratio);
         String band = "GREY";
         String hint = now.hint();
         if (now.value() != null) {
@@ -191,7 +213,7 @@ public final class HealthMeasures {
                 band = HealthDefaults.band(now.value(), d.thresholds());
             }
         }
-        return new Measure(d.id(), d.label(), d.kind(), d.critical(), d.unit(), now.value(), now.n(), now.interval(), baselineValue, delta,
+        return new Measure(d.id(), label(d, current), d.kind(), d.critical(), d.unit(), now.value(), now.n(), now.interval(), baselineValue, delta,
                 significant, band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);
     }
 
@@ -223,7 +245,7 @@ public final class HealthMeasures {
                 case LOWER -> delta < 0 ? Boolean.TRUE : delta > 0 ? Boolean.FALSE : null;
                 case NONE -> null;
             };
-            deltas.add(new CompareDelta(d.id(), a.value(), b.value(), delta, significant(d, b, a), better));
+            deltas.add(new CompareDelta(d.id(), a.value(), b.value(), delta, significant(d, b, a, exposureRatio(to, from)), better));
         }
         return deltas;
     }
@@ -251,7 +273,26 @@ public final class HealthMeasures {
 
     // ------------------------------------------------------------------ statistics
 
-    private static boolean significant(Definition d, Stat now, Stat before) {
+    /**
+     * The current period's exposure over the baseline's (1 when either is unknown).
+     */
+    static double exposureRatio(PeriodData current, PeriodData baseline) {
+        return current.exposureDays() > 0 && baseline.exposureDays() > 0 ? current.exposureDays() / baseline.exposureDays() : 1.0;
+    }
+
+    /** The Apdex label names its T; other labels are the definition's. */
+    private static String label(Definition d, PeriodData data) {
+        if ("apdex".equals(d.id()) && data.totals().apdexTs().size() == 1) {
+            return d.label().replace(")", ", T = " + seconds(data.totals().apdexTs().iterator().next()) + ")");
+        }
+        return d.label();
+    }
+
+    private static String seconds(long ms) {
+        return ms % 1000 == 0 ? (ms / 1000) + " s" : ms + " ms";
+    }
+
+    private static boolean significant(Definition d, Stat now, Stat before, double exposureRatio) {
         if (now.value() == null || before.value() == null || now.n() < d.minSample() || before.n() < d.minSample()) {
             return false;
         }
@@ -264,7 +305,7 @@ public final class HealthMeasures {
             return HealthStatistics.significantMeans(m1.mean(), m1.variance(), m1.n(), m2.mean(), m2.variance(), m2.n());
         }
         if (a instanceof Count c1 && b instanceof Count c2) {
-            return HealthStatistics.significantCounts(c1.count(), c2.count());
+            return HealthStatistics.significantCounts(c1.count(), c2.count(), exposureRatio);
         }
         return false;
     }
@@ -275,6 +316,15 @@ public final class HealthMeasures {
         }
         double bounded = Math.max(0.0, Math.min(n, x));
         return new Stat(bounded / n, n, HealthStatistics.wilson(bounded, n), new Proportion(bounded, n), breakdown, null);
+    }
+
+    /**
+     * The same value without a significance test: returning users depend on how
+     * much history lies before a window, which differs between a period and its
+     * baseline even with a fixed look-back once the retention clips it.
+     */
+    private static Stat untested(Stat stat) {
+        return new Stat(stat.value(), stat.n(), stat.interval(), new NoTest(), stat.breakdown(), stat.hint());
     }
 
     private static Stat ratio(double numerator, long denominator) {
@@ -319,7 +369,8 @@ public final class HealthMeasures {
             case "sessions" -> u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : count(u.sessions());
             case "engagedSessions" -> u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : count(u.engagedSessions());
             case "distinctUsers" -> u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : count(u.distinctUsers());
-            case "returningUserShare" -> u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : proportion(u.returningUsers(), u.distinctUsers(), null);
+            case "returningUserShare" ->
+                u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : untested(proportion(u.returningUsers(), u.distinctUsers(), null));
             case "turnsPerSession" -> u == null ? Stat.none(HINT_USAGE_UNAVAILABLE) : ratio(u.turns(), u.sessions());
             default -> Stat.none(HINT_NO_DATA);
         };
@@ -333,6 +384,10 @@ public final class HealthMeasures {
         long n = t.apdexTimed();
         if (n <= 0) {
             return Stat.none(HINT_NO_DATA);
+        }
+        if (t.apdexTs().size() > 1) {
+            // Days rolled up under different eddi.health.apdex-t values do not add up.
+            return Stat.none(HINT_MIXED_APDEX);
         }
         double mean = (t.apdexSatisfied() + t.apdexTolerating() / 2.0) / n;
         double meanOfSquares = (t.apdexSatisfied() + t.apdexTolerating() / 4.0) / n;

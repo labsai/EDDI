@@ -10,7 +10,9 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.health.HealthPortfolioService.AgentRef;
+import ai.labs.eddi.engine.health.model.HealthMarker;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -86,6 +88,24 @@ public class HealthAccess {
     private static Response notFound(String message) {
         return Response.status(Response.Status.NOT_FOUND).type(MediaType.APPLICATION_JSON_TYPE)
                 .entity(ErrorResponses.body("not_found", message)).build();
+    }
+
+    /**
+     * The global-variable tenants whose change markers the agent's charts show:
+     * {@code default}, and the tenant of the agent's space when it has one. A
+     * descriptor that cannot be read yields {@code default} only.
+     */
+    public List<String> markerTenants(String agentId) {
+        List<String> tenants = new ArrayList<>(List.of(HealthMarker.DEFAULT_TENANT));
+        try {
+            DocumentDescriptor descriptor = descriptorStore.readCurrentDescriptor(agentId);
+            if (descriptor != null && descriptor.getSpaceId() != null && !descriptor.getSpaceId().isBlank()) {
+                tenants.add(SpaceTenants.tenantFor(descriptor.getSpaceId()));
+            }
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            // default only
+        }
+        return tenants;
     }
 
     /** Whether the caller may read the agent's ratings (the quality section). */

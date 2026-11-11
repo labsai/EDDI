@@ -66,16 +66,23 @@ class HealthChangeMarkersTest {
     }
 
     @Test
-    @DisplayName("global variable and snippet markers concern every agent and name nothing")
+    @DisplayName("global variable and snippet markers name nothing, carry their tenant, and coalesce per kind, tenant and hour")
     void deploymentWide() {
-        markers.globalVariableChanged(false);
-        markers.snippetChanged(true);
+        markers.globalVariableChanged("t.team.1");
+        markers.globalVariableChanged("t.team.1");
+        markers.globalVariableChanged(null);
+        markers.snippetChanged();
         ArgumentCaptor<HealthMarker> marker = ArgumentCaptor.forClass(HealthMarker.class);
-        verify(store, times(2)).append(marker.capture());
-        assertNull(marker.getAllValues().get(0).agentId());
-        assertEquals(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, marker.getAllValues().get(0).kind());
-        assertEquals(HealthMarker.KIND_SNIPPET_CHANGE, marker.getAllValues().get(1).kind());
-        assertEquals("A prompt snippet was deleted", marker.getAllValues().get(1).label());
+        verify(store, times(4)).append(marker.capture());
+        HealthMarker first = marker.getAllValues().get(0);
+        assertNull(first.agentId());
+        assertEquals("t.team.1", first.tenantId());
+        assertEquals(HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, first.kind());
+        assertEquals(first.id(), marker.getAllValues().get(1).id(), "same kind, tenant and hour: one marker");
+        assertEquals(Instant.parse("2026-11-10T12:00:00Z"), first.at());
+        assertEquals(HealthMarker.DEFAULT_TENANT, marker.getAllValues().get(2).tenantId());
+        assertEquals(HealthMarker.KIND_SNIPPET_CHANGE, marker.getAllValues().get(3).kind());
+        assertEquals("Prompt snippets changed", marker.getAllValues().get(3).label());
     }
 
     @Test

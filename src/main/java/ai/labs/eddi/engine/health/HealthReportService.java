@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.health.HealthMeasures.RatingStats;
 import ai.labs.eddi.engine.health.HealthMeasures.Totals;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
 import ai.labs.eddi.engine.health.model.HealthMarker;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -39,10 +40,12 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -94,6 +97,10 @@ public class HealthReportService {
     private final IDeploymentStore deploymentStore;
     private final HealthSettings settings;
     private final Clock clock;
+    private final HealthQueryCache cache;
+
+    /** How far before a window the returning-user look-back reaches, at most. */
+    static final int RETURNING_LOOKBACK_DAYS = 30;
 
     @Inject
     public HealthReportService(IHealthTurnStore turnStore, IHealthDailyStore dailyStore, IHealthDirtyDayStore dirtyStore,
@@ -114,6 +121,7 @@ public class HealthReportService {
         this.deploymentStore = deploymentStore;
         this.settings = settings;
         this.clock = clock;
+        this.cache = new HealthQueryCache(settings.cacheTtl(), clock);
     }
 
     /** Today, UTC. */
@@ -132,7 +140,27 @@ public class HealthReportService {
      * @param origins
      *            the origins asked for, or {@code null} for the preset's default
      */
-    public record Scope(String agentId, Window window, Integer version, List<String> origins) {
+    public record Scope(String agentId, Window window, Integer version, List<String> origins, List<String> markerTenants) {
+
+        /** With the default marker tenant only. */
+        public Scope(String agentId, Window window, Integer version, List<String> origins) {
+            this(agentId, window, version, origins, List.of(HealthMarker.DEFAULT_TENANT));
+        }
+    }
+
+    /**
+     * How many days of data a window holds: its days, less what of today has not
+     * happened yet when it ends today. Count measures compare their baseline at
+     * this exposure, so a window ending this morning is not "significantly" behind
+     * a full previous period.
+     */
+    double exposureDays(Window window) {
+        if (!window.to().equals(today())) {
+            return window.days();
+        }
+        Instant now = clock.instant();
+        double elapsed = Duration.between(today().atStartOfDay(ZoneOffset.UTC).toInstant(), now).toMillis() / 86_400_000.0;
+        return window.days() - 1 + Math.max(1.0 / 24, Math.min(1.0, elapsed));
     }
 
     // ------------------------------------------------------------------ report
@@ -141,7 +169,7 @@ public class HealthReportService {
     public AgentHealth report(Scope scope, String agentName, boolean qualityAllowed) {
         Window window = scope.window();
         Window baseline = window.baseline();
-        List<HealthTurnAggregate> rows = dailyStore.find(scope.agentId(), baseline.from(), window.to());
+        List<HealthTurnAggregate> rows = daily(scope.agentId(), baseline.from(), window.to());
         String preset = preset(rows);
         List<String> origins = scope.origins() != null ? scope.origins() : HealthPeriods.defaultOrigins(preset);
         Predicate<HealthTurnAggregate> selected = selected(scope.version(), origins);
@@ -184,7 +212,12 @@ public class HealthReportService {
         Totals totals = Totals.of(rows.stream().filter(selected).filter(r -> window.contains(r.day())).toList());
         HealthUsage usage = usage(agentId, window, version, origins);
         RatingStats ratings = qualityAllowed ? ratings(agentId, window, version, origins) : null;
-        return new PeriodData(totals, usage, ratings);
+        return new PeriodData(totals, usage, ratings, exposureDays(window));
+    }
+
+    /** An agent's daily rows, cached for {@code eddi.health.cache-ttl}. */
+    private List<HealthTurnAggregate> daily(String agentId, LocalDate from, LocalDate to) {
+        return cache.get(List.of("daily", agentId, from, to), () -> dailyStore.find(agentId, from, to));
     }
 
     /**
@@ -196,7 +229,13 @@ public class HealthReportService {
         if (window.from().isBefore(oldest)) {
             return null;
         }
-        return turnStore.usage(new HealthUsageQuery(agentId, window.from(), window.to(), version, origins), oldest);
+        // The same length of look-back for every window (clipped to the retention),
+        // so a current period is not judged "more returning" than its baseline just
+        // because it had more history behind it.
+        LocalDate lookback = window.from().minusDays(RETURNING_LOOKBACK_DAYS);
+        LocalDate from = lookback.isBefore(oldest) ? oldest : lookback;
+        HealthUsageQuery query = new HealthUsageQuery(agentId, window.from(), window.to(), version, origins);
+        return cache.get(List.of("usage", query, from), () -> turnStore.usage(query, from));
     }
 
     /**
@@ -206,6 +245,11 @@ public class HealthReportService {
      * have no origin; the origin filter does not narrow them further.
      */
     RatingStats ratings(String agentId, Window window, Integer version, List<String> origins) {
+        return cache.get(List.of("ratings", agentId, window, version == null ? "" : version, origins.contains(HealthOrigins.AGENT_TEST)),
+                () -> readRatings(agentId, window, version, origins));
+    }
+
+    private RatingStats readRatings(String agentId, Window window, Integer version, List<String> origins) {
         try {
             Instant from = window.from().atStartOfDay(ZoneOffset.UTC).toInstant();
             Instant to = window.to().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
@@ -228,10 +272,16 @@ public class HealthReportService {
         return summaries == null || summaries.isEmpty() ? null : summaries.get(0);
     }
 
-    /** The last day the rollup has processed for the agent. */
+    /**
+     * The last day the rollup has fully processed for the agent: the day before the
+     * earliest day that has waited longer than one rollup interval, else today. A
+     * day marked a moment ago (any active agent's today) is merely waiting for the
+     * next pass, not behind.
+     */
     LocalDate dataThrough(String agentId) {
         try {
-            return dirtyStore.earliestPending(agentId).map(d -> d.minusDays(1)).filter(d -> d.isBefore(today())).orElse(today());
+            Instant overdue = clock.instant().minus(settings.rollupInterval());
+            return dirtyStore.earliestPending(agentId, overdue).map(d -> d.minusDays(1)).filter(d -> d.isBefore(today())).orElse(today());
         } catch (RuntimeException e) {
             return today().minusDays(1);
         }
@@ -297,7 +347,7 @@ public class HealthReportService {
      */
     public HealthSeries series(Scope scope, List<String> measures, String groupBy, boolean qualityAllowed) {
         Window window = scope.window();
-        List<HealthTurnAggregate> rows = dailyStore.find(scope.agentId(), window.from(), window.to());
+        List<HealthTurnAggregate> rows = daily(scope.agentId(), window.from(), window.to());
         String preset = preset(rows);
         List<String> origins = scope.origins() != null ? scope.origins() : HealthPeriods.defaultOrigins(preset);
         List<HealthTurnAggregate> chosen = rows.stream().filter(selected(scope.version(), origins)).toList();
@@ -309,8 +359,9 @@ public class HealthReportService {
         }
         boolean needsUsage = measures.stream().anyMatch(HealthReportService::usesUsage);
         if (needsUsage && !window.from().isBefore(oldestTurnDay())) {
-            for (HealthUsagePoint point : turnStore
-                    .dailyUsage(new HealthUsageQuery(scope.agentId(), window.from(), window.to(), scope.version(), origins), groupBy)) {
+            HealthUsageQuery usageQuery = new HealthUsageQuery(scope.agentId(), window.from(), window.to(), scope.version(), origins);
+            for (HealthUsagePoint point : cache.get(List.of("dailyUsage", usageQuery, groupBy == null ? "none" : groupBy),
+                    () -> turnStore.dailyUsage(usageQuery, groupBy))) {
                 usageByGroup.computeIfAbsent(point.group(), k -> new HashMap<>()).put(point.day(), point);
                 rowsByGroup.computeIfAbsent(point.group(), k -> new TreeMap<>());
             }
@@ -348,7 +399,7 @@ public class HealthReportService {
                 series.add(new Series(measure, grouped ? group.getKey() : null, unit, points));
             }
         }
-        return new HealthSeries(scope.agentId(), period(window), series, markers(scope.agentId(), window));
+        return new HealthSeries(scope.agentId(), period(window), series, markers(scope.agentId(), window, scope.markerTenants()));
     }
 
     /**
@@ -407,21 +458,33 @@ public class HealthReportService {
         }
     }
 
+    /** The agent's own markers read per series, at most. */
+    static final int MAX_AGENT_MARKERS = 150;
     /**
-     * The change markers of a window: the stored ones (the agent's and the
-     * deployment-wide ones) and the derived first turn of each version.
+     * Deployment-wide markers read per series, at most (they are coalesced per
+     * hour).
      */
-    List<Marker> markers(String agentId, Window window) {
+    static final int MAX_GLOBAL_MARKERS = 50;
+
+    /**
+     * The change markers of a window: the agent's own, the deployment-wide ones of
+     * the agent's tenants, and the derived first turn of each version. Read
+     * separately and newest first, so a flood of one kind cannot crowd out the
+     * agent's deployments; returned oldest first, at most {@link #MAX_MARKERS} (the
+     * newest).
+     */
+    List<Marker> markers(String agentId, Window window, List<String> tenants) {
         List<HealthMarker> found = new ArrayList<>();
         Instant from = window.from().atStartOfDay(ZoneOffset.UTC).toInstant();
         Instant to = window.to().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
         try {
-            found.addAll(markerStore.find(agentId, from, to, MAX_MARKERS));
+            found.addAll(markerStore.findForAgent(agentId, from, to, MAX_AGENT_MARKERS));
+            found.addAll(markerStore.findGlobal(tenants == null ? List.of(HealthMarker.DEFAULT_TENANT) : tenants, from, to, MAX_GLOBAL_MARKERS));
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not read Agent Health markers: %s", e.getMessage());
         }
         try {
-            dailyStore.firstDayByVersion(agentId).forEach((version, day) -> {
+            firstDays(agentId).forEach((version, day) -> {
                 if (window.contains(day)) {
                     found.add(new HealthMarker("vft-" + version, agentId, day.atStartOfDay(ZoneOffset.UTC).toInstant(),
                             HealthMarker.KIND_VERSION_FIRST_TURN, "First turn on v" + version, version));
@@ -430,12 +493,18 @@ public class HealthReportService {
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not derive version markers: %s", e.getMessage());
         }
-        found.sort(Comparator.comparing(HealthMarker::at).thenComparing(HealthMarker::id));
+        found.sort(Comparator.comparing(HealthMarker::at).thenComparing(HealthMarker::id).reversed());
+        List<HealthMarker> newest = new ArrayList<>(found.subList(0, Math.min(found.size(), MAX_MARKERS)));
+        Collections.reverse(newest);
         List<Marker> markers = new ArrayList<>();
-        for (HealthMarker m : found.subList(0, Math.min(found.size(), MAX_MARKERS))) {
+        for (HealthMarker m : newest) {
             markers.add(new Marker(m.id(), m.at().toString(), m.kind(), m.label(), m.version()));
         }
         return markers;
+    }
+
+    private Map<Integer, LocalDate> firstDays(String agentId) {
+        return cache.get(List.of("firstDays", agentId), () -> dailyStore.firstDayByVersion(agentId));
     }
 
     // ------------------------------------------------------------------ compare
@@ -453,7 +522,7 @@ public class HealthReportService {
         int newer = Math.max(fromVersion, toVersion);
         int older = Math.min(fromVersion, toVersion);
         LocalDate today = today();
-        Map<Integer, LocalDate> firstDays = dailyStore.firstDayByVersion(agentId);
+        Map<Integer, LocalDate> firstDays = firstDays(agentId);
         LocalDate newerStart = firstDays.get(newer);
         Window newerWindow;
         Window olderWindow;
@@ -469,7 +538,7 @@ public class HealthReportService {
             olderWindow = new Window(olderEnd.minusDays(days - 1L), olderEnd);
         }
         LocalDate earliest = olderWindow.from().isBefore(newerWindow.from()) ? olderWindow.from() : newerWindow.from();
-        List<HealthTurnAggregate> rows = dailyStore.find(agentId, earliest, today);
+        List<HealthTurnAggregate> rows = daily(agentId, earliest, today);
         String preset = preset(rows);
         List<String> origins = requestedOrigins != null ? requestedOrigins : HealthPeriods.defaultOrigins(preset);
 
@@ -493,17 +562,67 @@ public class HealthReportService {
         return new DateRange(window.from().toString(), window.to().toString());
     }
 
-    /** For the portfolio: the daily rows of many agents. */
+    /**
+     * For the portfolio: the daily rows of many agents. Cached per agent and range,
+     * so a page of the portfolio and the next one read the database once; the
+     * caller's VIEW filtering happens before (on the agent list), never inside the
+     * cache.
+     */
     List<HealthTurnAggregate> dailyRows(List<String> agentIds, LocalDate from, LocalDate to) {
-        return dailyStore.findForAgents(agentIds, from, to);
+        List<HealthTurnAggregate> rows = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        Map<String, List<HealthTurnAggregate>> cached = new LinkedHashMap<>();
+        for (String agentId : agentIds) {
+            List<HealthTurnAggregate> hit = cache.peek(List.of("daily", agentId, from, to));
+            if (hit == null) {
+                missing.add(agentId);
+            } else {
+                cached.put(agentId, hit);
+            }
+        }
+        if (!missing.isEmpty()) {
+            Map<String, List<HealthTurnAggregate>> read = byAgent(dailyStore.findForAgents(missing, from, to));
+            for (String agentId : missing) {
+                List<HealthTurnAggregate> agentRows = read.getOrDefault(agentId, List.of());
+                cache.put(List.of("daily", agentId, from, to), agentRows);
+                cached.put(agentId, agentRows);
+            }
+        }
+        cached.values().forEach(rows::addAll);
+        return rows;
     }
 
-    /** For the portfolio: sessions per agent. */
-    Map<String, Long> sessionsByAgent(List<String> agentIds, Window window, List<String> origins) {
-        if (window.from().isBefore(oldestTurnDay())) {
+    /**
+     * For the portfolio: every agent's traffic of the window and its baseline in
+     * one pass over the turn rows, cached per agent the same way. Empty when the
+     * baseline reaches past the turn retention.
+     */
+    Map<String, HealthPortfolioSessions> portfolioSessions(List<String> agentIds, Window window) {
+        Window baseline = window.baseline();
+        if (baseline.from().isBefore(oldestTurnDay())) {
             return Map.of();
         }
-        return turnStore.sessionsByAgent(agentIds, window.from(), window.to(), origins);
+        List<String> all = HealthPeriods.defaultOrigins(HealthDefaults.PRESET_TASK);
+        Map<String, HealthPortfolioSessions> sessions = new LinkedHashMap<>();
+        List<String> missing = new ArrayList<>();
+        for (String agentId : agentIds) {
+            HealthPortfolioSessions hit = cache.peek(List.of("portfolioSessions", agentId, window));
+            if (hit == null) {
+                missing.add(agentId);
+            } else {
+                sessions.put(agentId, hit);
+            }
+        }
+        if (!missing.isEmpty()) {
+            Map<String, HealthPortfolioSessions> read = turnStore.portfolioSessions(missing, baseline.from(), window.from(), window.to(),
+                    HealthOrigins.INTERACTIVE, all);
+            for (String agentId : missing) {
+                HealthPortfolioSessions agentSessions = read.getOrDefault(agentId, HealthPortfolioSessions.NONE);
+                cache.put(List.of("portfolioSessions", agentId, window), agentSessions);
+                sessions.put(agentId, agentSessions);
+            }
+        }
+        return sessions;
     }
 
     /** The daily rows grouped by agent, for the portfolio. */

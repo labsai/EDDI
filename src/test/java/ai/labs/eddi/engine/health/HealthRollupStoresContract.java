@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
 import ai.labs.eddi.engine.health.model.HealthMarker;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -18,9 +19,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -122,25 +125,64 @@ public interface HealthRollupStoresContract {
         HealthDirtyDay fresh = dirty().oldest(10).stream().filter(d -> d.day().equals(DAY)).findFirst().orElseThrow();
         assertTrue(dirty().clear(fresh));
         assertEquals(1, dirty().count());
-        assertEquals(DAY.minusDays(1), dirty().earliestPending("agent").orElseThrow());
-        assertTrue(dirty().earliestPending("nobody").isEmpty());
+        Instant later = Instant.now().plusSeconds(60);
+        assertEquals(DAY.minusDays(1), dirty().earliestPending("agent", later).orElseThrow());
+        assertTrue(dirty().earliestPending("agent", Instant.now().minusSeconds(3600)).isEmpty(), "marked just now: not overdue");
+        assertTrue(dirty().earliestPending("nobody", later).isEmpty());
+    }
+
+    @Test
+    @DisplayName("defer moves an entry to the back and counts the attempt; a re-mark resets it; a stale token defers nothing")
+    default void dirtyDefer() {
+        dirty().mark("agent", List.of(DAY));
+        dirty().mark("agent", List.of(DAY.minusDays(1)));
+        HealthDirtyDay first = dirty().oldest(1).get(0);
+        Instant later = Instant.now().plusSeconds(3600);
+        assertEquals(1, dirty().defer(first, later));
+        assertEquals(2, dirty().defer(first, later));
+        HealthDirtyDay head = dirty().oldest(1).get(0);
+        assertFalse(head.day().equals(first.day()), "the deferred entry went to the back");
+        HealthDirtyDay deferred = dirty().oldest(10).stream().filter(d -> d.day().equals(first.day())).findFirst().orElseThrow();
+        assertEquals(2, deferred.attempts());
+        dirty().mark("agent", List.of(first.day()));
+        assertEquals(0, dirty().oldest(10).stream().filter(d -> d.day().equals(first.day())).findFirst().orElseThrow().attempts());
+        assertEquals(0, dirty().defer(first, later), "the token changed with the re-mark");
+    }
+
+    @Test
+    @DisplayName("the self-heal watermark round-trips and is absent at first")
+    default void watermark() {
+        assertTrue(dirty().selfHealWatermark().isEmpty());
+        Instant at = Instant.parse("2026-11-10T10:00:00Z");
+        dirty().setSelfHealWatermark(at);
+        dirty().setSelfHealWatermark(at.plusSeconds(60));
+        assertEquals(at.plusSeconds(60), dirty().selfHealWatermark().orElseThrow());
+        assertEquals(0, dirty().count(), "the watermark is not a queue entry");
     }
 
     // ------------------------------------------------------------------ markers
 
     @Test
-    @DisplayName("markers: the agent's and the deployment-wide ones in range, oldest first; retention by time")
+    @DisplayName("markers: the agent's own and the tenants' deployment-wide ones, each newest first; duplicates coalesce; retention")
     default void markerQueries() {
         Instant t = DAY.atStartOfDay(ZoneOffset.UTC).toInstant();
         markers().append(new HealthMarker("m-1", "agent", t.plusSeconds(60), HealthMarker.KIND_DEPLOYMENT, "v2 deployed (production)", 2));
-        markers().append(new HealthMarker("m-2", null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "A global variable was changed", null));
+        markers().append(new HealthMarker("m-5", "agent", t.plusSeconds(120), HealthMarker.KIND_DEPLOYMENT, "v3 deployed (production)", 3));
+        markers().append(new HealthMarker("g-1", null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, "default"));
+        markers().append(new HealthMarker("g-1", null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, "default"));
+        markers().append(new HealthMarker("g-2", null, t, HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, "t.other"));
         markers().append(new HealthMarker("m-3", "other", t, HealthMarker.KIND_DEPLOYMENT, "v1 deployed (production)", 1));
         markers().append(new HealthMarker("m-4", "agent", t.minusSeconds(86_400 * 10L), HealthMarker.KIND_DEPLOYMENT, "old", 1));
 
-        List<HealthMarker> found = markers().find("agent", t, t.plusSeconds(86_400), 10);
-        assertEquals(List.of("m-2", "m-1"), found.stream().map(HealthMarker::id).toList());
-        assertEquals(new HealthMarker("m-1", "agent", t.plusSeconds(60), HealthMarker.KIND_DEPLOYMENT, "v2 deployed (production)", 2),
-                found.get(1));
+        List<HealthMarker> own = markers().findForAgent("agent", t, t.plusSeconds(86_400), 10);
+        assertEquals(List.of("m-5", "m-1"), own.stream().map(HealthMarker::id).toList());
+        assertEquals(new HealthMarker("m-1", "agent", t.plusSeconds(60), HealthMarker.KIND_DEPLOYMENT, "v2 deployed (production)", 2), own.get(1));
+        assertEquals(List.of("m-5"), markers().findForAgent("agent", t, t.plusSeconds(86_400), 1).stream().map(HealthMarker::id).toList());
+        List<HealthMarker> global = markers().findGlobal(List.of("default"), t, t.plusSeconds(86_400), 10);
+        assertEquals(List.of("g-1"), global.stream().map(HealthMarker::id).toList());
+        assertEquals("default", global.get(0).tenantId());
+        assertEquals(2, markers().findGlobal(List.of("default", "t.other"), t, t.plusSeconds(86_400), 10).size());
+        assertTrue(markers().findGlobal(List.of(), t, t.plusSeconds(86_400), 10).isEmpty());
         assertEquals(1, markers().deleteOlderThan(t.minusSeconds(86_400)));
     }
 
@@ -175,8 +217,37 @@ public interface HealthRollupStoresContract {
         List<HealthUsagePoint> byVersion = turns().dailyUsage(new HealthUsageQuery("agent", DAY, DAY, null, List.of("api", "schedule")), "version");
         assertEquals(Set.of("1", "2"), Set.copyOf(byVersion.stream().map(HealthUsagePoint::group).toList()));
 
-        assertEquals(Map.of("agent", 3L), turns().sessionsByAgent(List.of("agent", "nobody"), DAY, DAY, List.of("api", "schedule")));
-        assertTrue(turns().sessionsByAgent(List.of(), DAY, DAY, List.of("api")).isEmpty());
+        // The portfolio's one-pass count: window DAY, baseline DAY-1.
+        assertEquals(Map.of("agent", new HealthPortfolioSessions(2, 3, 1, 1)),
+                turns().portfolioSessions(List.of("agent", "nobody"), DAY.minusDays(1), DAY, DAY, List.of("api"), List.of("api", "schedule")));
+        assertTrue(turns().portfolioSessions(List.of(), DAY, DAY, DAY, List.of("api"), List.of("api")).isEmpty());
+    }
+
+    @Test
+    @DisplayName("distinct users count every user id of the rows — a conversation with two users counts both, per period and per day")
+    default void distinctUsersAcrossAConversation() {
+        turns().upsert(turn("c1", 0, "e0", "alice", DAY, 1, "api", true, true, false));
+        turns().upsert(turn("c1", 1, "e1", "bob", DAY, 1, "api", true, true, false));
+        HealthUsageQuery query = new HealthUsageQuery("agent", DAY, DAY, null, List.of("api"));
+        assertEquals(2, turns().usage(query, DAY).distinctUsers());
+        assertEquals(2, turns().dailyUsage(query, "none").get(0).distinctUsers());
+    }
+
+    @Test
+    @DisplayName("the (agent, day)s of a user's or a conversation's rows, and of rows written in a time range")
+    default void agentDays() {
+        turns().upsert(turn("c1", 0, "e0", "alice", DAY, 1, "api", true, true, false));
+        turns().upsert(turn("c2", 0, "e0", "alice", DAY.minusDays(2), 1, "api", true, true, false));
+        turns().upsert(turn("c3", 0, "e0", "bob", DAY, 1, "api", true, true, false));
+        assertEquals(Map.of("agent", Set.of(DAY, DAY.minusDays(2))), turns().agentDaysOfUser("alice", 100));
+        assertEquals(Map.of("agent", Set.of(DAY)), turns().agentDaysOfConversation("c3"));
+        assertTrue(turns().agentDaysOfConversation("nope").isEmpty());
+
+        Map<String, Set<LocalDate>> recent = new HashMap<>();
+        Instant from = DAY.atStartOfDay(ZoneOffset.UTC).toInstant();
+        turns().forEachAgentDayUpdatedSince(from, from.plusSeconds(86_400), 100,
+                (agent, day) -> recent.computeIfAbsent(agent, k -> new TreeSet<>()).add(day));
+        assertEquals(Map.of("agent", Set.of(DAY)), recent);
     }
 
     @Test

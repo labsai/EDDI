@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.HealthMeasures.PeriodData;
 import ai.labs.eddi.engine.health.HealthMeasures.Totals;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
@@ -35,6 +36,11 @@ import java.util.TreeMap;
  * measures got <em>significantly</em> worse come first, ranked by the largest
  * such change ({@link HealthMeasures#worsening}); then by the worst band of the
  * key measures (red before amber before green); then by traffic; then by name.
+ * <p>
+ * <b>Paging</b>: {@code nextCursor} is an offset into this order, recomputed on
+ * every page (from cached numbers, see {@code HealthQueryCache}); an agent
+ * whose numbers change between two pages can move, so a page may repeat or skip
+ * one.
  * <p>
  * <b>Platform incidents</b> are days on which one platform failure class
  * ({@code TRANSIENT}, {@code RATE_LIMITED}, {@code TIMEOUT}) hit at least
@@ -72,12 +78,9 @@ public class HealthPortfolioService {
         List<String> ids = agents.stream().map(AgentRef::agentId).toList();
         Map<String, List<HealthTurnAggregate>> rowsByAgent = HealthReportService
                 .byAgent(ids.isEmpty() ? List.of() : reports.dailyRows(ids, baseline.from(), window.to()));
-        List<String> interactive = HealthOrigins.INTERACTIVE;
-        List<String> allOrigins = HealthPeriods.defaultOrigins(HealthDefaults.PRESET_TASK);
-        Map<String, Long> interactiveNow = ids.isEmpty() ? Map.of() : reports.sessionsByAgent(ids, window, interactive);
-        Map<String, Long> interactiveBefore = ids.isEmpty() ? Map.of() : reports.sessionsByAgent(ids, baseline, interactive);
-        Map<String, Long> allNow = ids.isEmpty() ? Map.of() : reports.sessionsByAgent(ids, window, allOrigins);
-        Map<String, Long> allBefore = ids.isEmpty() ? Map.of() : reports.sessionsByAgent(ids, baseline, allOrigins);
+        Map<String, HealthPortfolioSessions> traffic = ids.isEmpty() ? Map.of() : reports.portfolioSessions(ids, window);
+        double nowExposure = reports.exposureDays(window);
+        double beforeExposure = baseline.days();
 
         Map<LocalDate, Map<String, Set<String>>> hits = new TreeMap<>();
         List<Row> rows = new ArrayList<>();
@@ -86,12 +89,13 @@ public class HealthPortfolioService {
             String preset = HealthReportService.preset(agentRows);
             Set<String> origins = Set.copyOf(HealthPeriods.defaultOrigins(preset));
             boolean task = HealthDefaults.PRESET_TASK.equals(preset);
-            long sessions = (task ? allNow : interactiveNow).getOrDefault(agent.agentId(), 0L);
-            long sessionsBefore = (task ? allBefore : interactiveBefore).getOrDefault(agent.agentId(), 0L);
+            HealthPortfolioSessions agentTraffic = traffic.getOrDefault(agent.agentId(), HealthPortfolioSessions.NONE);
+            long sessions = task ? agentTraffic.allNow() : agentTraffic.interactiveNow();
+            long sessionsBefore = task ? agentTraffic.allBefore() : agentTraffic.interactiveBefore();
             List<HealthTurnAggregate> now = agentRows.stream().filter(r -> origins.contains(r.origin()) && window.contains(r.day())).toList();
             List<HealthTurnAggregate> before = agentRows.stream().filter(r -> origins.contains(r.origin()) && baseline.contains(r.day())).toList();
-            PeriodData current = new PeriodData(Totals.of(now), new HealthUsage(sessions, 0, 0, 0, 0), null);
-            PeriodData previous = new PeriodData(Totals.of(before), new HealthUsage(sessionsBefore, 0, 0, 0, 0), null);
+            PeriodData current = new PeriodData(Totals.of(now), new HealthUsage(sessions, 0, 0, 0, 0), null, nowExposure);
+            PeriodData previous = new PeriodData(Totals.of(before), new HealthUsage(sessionsBefore, 0, 0, 0, 0), null, beforeExposure);
             List<Measure> key = new ArrayList<>();
             double worsening = 0;
             int worstBand = 0;
@@ -101,7 +105,9 @@ public class HealthPortfolioService {
                 worsening = Math.max(worsening, HealthMeasures.worsening(m));
                 worstBand = Math.max(worstBand, bandRank(m.band()));
             }
-            Double delta = sessionsBefore > 0 ? (sessions - sessionsBefore) / (double) sessionsBefore : null;
+            // Relative to the baseline at the window's exposure (today is not over yet).
+            double expected = sessionsBefore * (nowExposure / beforeExposure);
+            Double delta = expected > 0 ? (sessions - expected) / expected : null;
             collectHits(agent.agentId(), now, window, hits);
             rows.add(new Row(new PortfolioItem(agent.agentId(), agent.agentName(), null, preset, null, sessions, delta, key, false), worsening,
                     worstBand));

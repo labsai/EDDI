@@ -23,8 +23,20 @@ import java.time.Instant;
  *            what happened, for display; never carries a value or any content
  * @param version
  *            the agent version it concerns, or {@code null}
+ * @param tenantId
+ *            for a deployment-wide marker, the global-variable tenant it
+ *            concerns ({@code default}, or a space's tenant); {@code null} for
+ *            an agent's own marker
  */
-public record HealthMarker(String id, String agentId, Instant at, String kind, String label, Integer version) {
+public record HealthMarker(String id, String agentId, Instant at, String kind, String label, Integer version, String tenantId) {
+
+    /** The tenant of deployment-wide changes outside any space. */
+    public static final String DEFAULT_TENANT = "default";
+
+    /** An agent's own marker. */
+    public HealthMarker(String id, String agentId, Instant at, String kind, String label, Integer version) {
+        this(id, agentId, at, kind, label, version, null);
+    }
 
     public static final String KIND_DEPLOYMENT = "DEPLOYMENT";
     public static final String KIND_VERSION_FIRST_TURN = "VERSION_FIRST_TURN";

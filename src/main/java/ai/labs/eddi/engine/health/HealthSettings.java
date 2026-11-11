@@ -26,6 +26,8 @@ public class HealthSettings {
     static final int DEFAULT_ORPHAN_SWEEP_MAX = 50_000;
     /** Default {@code eddi.health.rollup-interval}. */
     static final Duration DEFAULT_ROLLUP_INTERVAL = Duration.ofMinutes(5);
+    /** Default {@code eddi.health.cache-ttl}. */
+    static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(60);
     /** Default {@code eddi.health.daily-retention}. */
     static final Duration DEFAULT_DAILY_RETENTION = Duration.ofDays(730);
 
@@ -37,6 +39,7 @@ public class HealthSettings {
     private final Duration rollupInterval;
     private final Duration dailyRetention;
     private final Duration apdexT;
+    private final Duration cacheTtl;
 
     @Inject
     public HealthSettings(@ConfigProperty(name = "eddi.health.enabled", defaultValue = "true") boolean enabled,
@@ -46,7 +49,8 @@ public class HealthSettings {
             @ConfigProperty(name = "eddi.health.orphan-sweep-max", defaultValue = "50000") int orphanSweepMax,
             @ConfigProperty(name = "eddi.health.rollup-interval", defaultValue = "5m") Duration rollupInterval,
             @ConfigProperty(name = "eddi.health.daily-retention", defaultValue = "730d") Duration dailyRetention,
-            @ConfigProperty(name = "eddi.health.apdex-t", defaultValue = "4s") Duration apdexT) {
+            @ConfigProperty(name = "eddi.health.apdex-t", defaultValue = "4s") Duration apdexT,
+            @ConfigProperty(name = "eddi.health.cache-ttl", defaultValue = "60s") Duration cacheTtl) {
         this.enabled = enabled;
         this.queueCapacity = Math.max(1, queueCapacity);
         this.factsRetention = positiveOr(factsRetention, Duration.ofDays(90));
@@ -55,12 +59,13 @@ public class HealthSettings {
         this.rollupInterval = positiveOr(rollupInterval, DEFAULT_ROLLUP_INTERVAL);
         this.dailyRetention = positiveOr(dailyRetention, DEFAULT_DAILY_RETENTION);
         this.apdexT = positiveOr(apdexT, Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS));
+        this.cacheTtl = cacheTtl == null || cacheTtl.isNegative() ? DEFAULT_CACHE_TTL : cacheTtl;
     }
 
     /** Collection settings; everything else at its default — for tests. */
     public HealthSettings(boolean enabled, int queueCapacity, Duration factsRetention) {
         this(enabled, queueCapacity, factsRetention, DEFAULT_ORPHAN_SWEEP_WINDOW, DEFAULT_ORPHAN_SWEEP_MAX, DEFAULT_ROLLUP_INTERVAL,
-                DEFAULT_DAILY_RETENTION, Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS));
+                DEFAULT_DAILY_RETENTION, Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS), DEFAULT_CACHE_TTL);
     }
 
     /**
@@ -68,7 +73,7 @@ public class HealthSettings {
      */
     HealthSettings(boolean enabled, int queueCapacity, Duration factsRetention, Duration orphanSweepWindow, int orphanSweepMax) {
         this(enabled, queueCapacity, factsRetention, orphanSweepWindow, orphanSweepMax, DEFAULT_ROLLUP_INTERVAL, DEFAULT_DAILY_RETENTION,
-                Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS));
+                Duration.ofMillis(HealthTurnAggregator.DEFAULT_APDEX_T_MS), DEFAULT_CACHE_TTL);
     }
 
     private static Duration positiveOr(Duration value, Duration fallback) {
@@ -143,5 +148,13 @@ public class HealthSettings {
      */
     public long apdexTMs() {
         return apdexT.toMillis();
+    }
+
+    /**
+     * How long the health views cache what they read from the stores; zero switches
+     * the cache off.
+     */
+    public Duration cacheTtl() {
+        return cacheTtl;
     }
 }

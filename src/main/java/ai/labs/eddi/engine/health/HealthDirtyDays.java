@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,9 +37,20 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * covers were written, and the rollup clears an entry only while it still
  * carries the token it read before reading the rows, so rows written while a
  * day is being rolled up always leave the day dirty for the next pass. A flush
- * that fails keeps its pairs for the next one; pairs noted on a node that dies
- * before its flush are the only loss (the day is re-rolled by the next write to
- * it).
+ * that fails keeps its pairs for the next one.
+ * <p>
+ * <b>Atomic against the flush.</b> {@link #note} adds inside
+ * {@code ConcurrentHashMap.compute}, and {@link #flush} takes an agent's set
+ * out with {@code remove}: both run under the map's per-key lock, so a set the
+ * flush took can no longer be added to, and a day noted meanwhile goes into a
+ * fresh set for the next flush.
+ * <p>
+ * <b>Shutdown and crashes.</b> The recorder flushes after its worker drained
+ * (CDI destroys beans in no defined order, so this bean's own pre-destroy flush
+ * may run first). Pairs noted on a node that is killed before its next flush —
+ * at most a few seconds of them — are recovered by the rollup's self-heal pass,
+ * which re-marks the days of turn rows written since its last pass
+ * ({@code HealthRollupService}).
  */
 @ApplicationScoped
 public class HealthDirtyDays {
@@ -68,11 +80,25 @@ public class HealthDirtyDays {
         if (agentId == null || days == null || days.isEmpty()) {
             return;
         }
-        Set<LocalDate> set = pending.computeIfAbsent(agentId, k -> ConcurrentHashMap.newKeySet());
-        for (LocalDate day : days) {
-            if (day != null) {
-                set.add(day);
+        pending.compute(agentId, (k, set) -> {
+            Set<LocalDate> target = set == null ? new HashSet<>() : set;
+            for (LocalDate day : days) {
+                if (day != null) {
+                    target.add(day);
+                }
             }
+            return target.isEmpty() ? null : target;
+        });
+    }
+
+    /**
+     * Notes the (agent, day) pairs of rows about to be deleted — or just deleted —
+     * by an erasure, a conversation delete or the orphan sweep: their daily rows
+     * must be recomputed without them.
+     */
+    public void noteAll(Map<String, Set<LocalDate>> agentDays) {
+        if (agentDays != null) {
+            agentDays.forEach(this::note);
         }
     }
 
@@ -102,18 +128,28 @@ public class HealthDirtyDays {
 
     /** Pairs waiting for the next flush — for tests. */
     int pendingCount() {
-        return pending.values().stream().mapToInt(Set::size).sum();
+        int count = 0;
+        for (String agentId : List.copyOf(pending.keySet())) {
+            Set<LocalDate> copy = new HashSet<>();
+            pending.computeIfPresent(agentId, (k, set) -> {
+                copy.addAll(set);
+                return set;
+            });
+            count += copy.size();
+        }
+        return count;
     }
 
     /** Writes the noted pairs to the store. */
     @Scheduled(every = "5s", delayed = "5s", identity = "health-dirty-flush", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     public void flush() {
         for (String agentId : List.copyOf(pending.keySet())) {
+            // Taken out under the key's lock: no note can add to this set any more.
             Set<LocalDate> set = pending.remove(agentId);
             if (set == null || set.isEmpty()) {
                 continue;
             }
-            List<LocalDate> days = List.copyOf(set);
+            List<LocalDate> days = new ArrayList<>(set);
             try {
                 store.get().mark(agentId, days);
             } catch (RuntimeException e) {

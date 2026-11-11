@@ -29,7 +29,7 @@ class MongoHealthRollupStoresIT extends MongoTestBase implements HealthRollupSto
 
     @BeforeEach
     void setUp() {
-        dropCollections("healthturns", "healthdaily", "healthdirty", "healthmarkers");
+        dropCollections("healthturns", "healthdaily", "healthdirty", "healthmarkers", "healthrollupstate");
         turns = new MongoHealthTurnStore(getDatabase());
         daily = new MongoHealthDailyStore(getDatabase());
         dirty = new MongoHealthDirtyDayStore(getDatabase());

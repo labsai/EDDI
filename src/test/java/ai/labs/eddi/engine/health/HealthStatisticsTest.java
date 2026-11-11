@@ -58,10 +58,21 @@ class HealthStatisticsTest {
     }
 
     @Test
+    @DisplayName("counts at unequal exposure: a morning's 40 sessions against yesterday's 100 a day are no drop")
+    void countsAtExposure() {
+        // 6.375 days of a 7-day window against 7 full days: 40 + 6 * 100 = 640 vs 700.
+        assertFalse(HealthStatistics.significantCounts(640, 700, 6.375 / 7));
+        assertTrue(HealthStatistics.significantCounts(640, 700, 1.0) == HealthStatistics.significantCounts(640, 700));
+        assertTrue(HealthStatistics.significantCounts(300, 700, 6.375 / 7), "a real drop still shows");
+        assertFalse(HealthStatistics.significantCounts(10, 10, 0));
+    }
+
+    @Test
     @DisplayName("percentile interpolates inside the bucket and answers the last bound for the overflow bucket")
     void percentile() {
         long[] bounds = {100, 200, 400};
-        // 10 turns: 5 in (0,100], 5 in (100,200] — p95 is 95 % into the second bucket.
+        // 10 turns: 5 in (0,100], 5 in (100,200] — rank 9.5 lies 90 % into the second
+        // bucket.
         assertEquals(190.0, HealthStatistics.percentile(List.of(5L, 5L, 0L, 0L), bounds, 0.95), 1e-9);
         assertEquals(400.0, HealthStatistics.percentile(List.of(0L, 0L, 0L, 3L), bounds, 0.95));
         assertNull(HealthStatistics.percentile(List.of(0L, 0L, 0L, 0L), bounds, 0.95));

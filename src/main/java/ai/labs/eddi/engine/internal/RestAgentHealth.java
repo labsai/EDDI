@@ -51,7 +51,8 @@ public class RestAgentHealth implements IRestAgentHealth {
     public HealthSeries readSeries(String agentId, List<String> measures, String period, String from, String to, Integer version,
                                    List<String> origins, String groupBy) {
         access.requireView(agentId);
-        Scope scope = scope(agentId, period, from, to, version, origins);
+        Scope base = scope(agentId, period, from, to, version, origins);
+        Scope scope = new Scope(base.agentId(), base.window(), base.version(), base.origins(), access.markerTenants(agentId));
         List<String> ids = measures(measures);
         String grouping = groupBy == null || groupBy.isBlank() ? "none" : groupBy.trim();
         if (!GROUP_BY.contains(grouping)) {

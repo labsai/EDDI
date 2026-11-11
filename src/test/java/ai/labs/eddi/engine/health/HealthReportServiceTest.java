@@ -79,7 +79,7 @@ class HealthReportServiceTest {
         deployments = mock(IDeploymentStore.class);
         service = new HealthReportService(turns, daily, dirty, markers, ratings, testRuns, deployments, HealthSettings.defaults(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
-        when(dirty.earliestPending(any())).thenReturn(Optional.empty());
+        when(dirty.earliestPending(any(), any())).thenReturn(Optional.empty());
         when(turns.usage(any(), any())).thenReturn(new HealthUsage(10, 8, 40, 6, 2));
         when(ratings.summarize(any(), any())).thenReturn(List.of(RatingSummary.empty("all")));
     }
@@ -118,7 +118,10 @@ class HealthReportServiceTest {
         assertEquals(50, reliability.measures().get(0).n());
         // Usage: current period and a baseline inside the turn retention.
         ArgumentCaptor<HealthUsageQuery> query = ArgumentCaptor.forClass(HealthUsageQuery.class);
-        verify(turns, times(2)).usage(query.capture(), eq(TODAY.minusDays(90)));
+        ArgumentCaptor<LocalDate> lookback = ArgumentCaptor.forClass(LocalDate.class);
+        verify(turns, times(2)).usage(query.capture(), lookback.capture());
+        // A fixed 30-day look-back before each window.
+        assertEquals(List.of(TODAY.minusDays(59), TODAY.minusDays(89)), lookback.getAllValues());
         assertEquals(HealthOrigins.INTERACTIVE, query.getAllValues().get(0).origins());
     }
 
@@ -135,10 +138,29 @@ class HealthReportServiceTest {
     }
 
     @Test
-    @DisplayName("dataThrough is the day before the earliest day still waiting for the rollup")
+    @DisplayName("dataThrough is the day before the earliest day overdue for the rollup — one marked a moment ago is not behind")
     void dataThrough() {
-        when(dirty.earliestPending("agent")).thenReturn(Optional.of(TODAY.minusDays(2)));
+        when(dirty.earliestPending("agent", NOW.minus(HealthSettings.defaults().rollupInterval()))).thenReturn(Optional.of(TODAY.minusDays(2)));
         assertEquals(TODAY.minusDays(3), service.dataThrough("agent"));
+        when(dirty.earliestPending("agent", NOW.minus(HealthSettings.defaults().rollupInterval()))).thenReturn(Optional.empty());
+        assertEquals(TODAY, service.dataThrough("agent"));
+    }
+
+    @Test
+    @DisplayName("a window ending today counts the elapsed part of today; a past window its full days")
+    void exposure() {
+        assertEquals(6.5, service.exposureDays(last(7)), 1e-9, "12:00 UTC");
+        assertEquals(7.0, service.exposureDays(new Window(TODAY.minusDays(13), TODAY.minusDays(7))), 1e-9);
+    }
+
+    @Test
+    @DisplayName("repeated reads within the cache TTL hit the store once")
+    void cached() {
+        when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 1, "api", 10)));
+        service.report(new Scope("agent", last(7), null, null), "A", false);
+        service.report(new Scope("agent", last(7), null, null), "A", false);
+        verify(daily, times(1)).find(eq("agent"), any(), any());
+        verify(turns, times(2)).usage(any(), any());
     }
 
     @Test
@@ -177,12 +199,16 @@ class HealthReportServiceTest {
         Window window = last(3);
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 7, "api", 40), row(TODAY, 8, "api", 60)));
         when(turns.dailyUsage(any(), eq("version"))).thenReturn(List.of(new HealthUsagePoint(TODAY, "8", 5, 4, 60, 3)));
-        when(markers.find(eq("agent"), any(), any(), anyInt())).thenReturn(
+        when(markers.findForAgent(eq("agent"), any(), any(), anyInt())).thenReturn(
                 List.of(new HealthMarker("m-1", "agent", TODAY.minusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().plusSeconds(60),
                         HealthMarker.KIND_DEPLOYMENT, "v8 deployed (production)", 8)));
+        when(markers.findGlobal(eq(List.of("default", "t.team.1")), any(), any(), anyInt())).thenReturn(
+                List.of(new HealthMarker("g-x", null, TODAY.minusDays(2).atStartOfDay(ZoneOffset.UTC).toInstant(),
+                        HealthMarker.KIND_GLOBAL_VARIABLE_CHANGE, "Global variables changed", null, "t.team.1")));
         when(daily.firstDayByVersion("agent")).thenReturn(Map.of(7, TODAY.minusDays(40), 8, TODAY));
 
-        HealthSeries series = service.series(new Scope("agent", window, null, null), List.of("agentFailureRate", "sessions"), "version", true);
+        HealthSeries series = service.series(new Scope("agent", window, null, null, List.of("default", "t.team.1")),
+                List.of("agentFailureRate", "sessions"), "version", true);
 
         Series v7 = series.series().stream().filter(s -> s.measure().equals("agentFailureRate") && "7".equals(s.group())).findFirst().orElseThrow();
         assertEquals(3, v7.points().size());
@@ -191,7 +217,7 @@ class HealthReportServiceTest {
         assertEquals(40, v7.points().get(2).n());
         Series sessions8 = series.series().stream().filter(s -> s.measure().equals("sessions") && "8".equals(s.group())).findFirst().orElseThrow();
         assertEquals(5.0, sessions8.points().get(2).value());
-        assertEquals(List.of("m-1", "vft-8"), series.markers().stream().map(Marker::id).toList());
+        assertEquals(List.of("g-x", "m-1", "vft-8"), series.markers().stream().map(Marker::id).toList());
     }
 
     @Test
