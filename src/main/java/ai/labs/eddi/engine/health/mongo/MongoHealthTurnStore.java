@@ -8,6 +8,9 @@ import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
+import ai.labs.eddi.engine.health.model.HealthUsage;
+import ai.labs.eddi.engine.health.model.HealthUsagePoint;
+import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
@@ -30,18 +33,22 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
+import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.ne;
@@ -254,6 +261,158 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         } catch (MongoException e) {
             throw new HealthStoreException("Could not read the health turns of an agent's day", e);
         }
+    }
+
+    @Override
+    public Set<LocalDate> daysOf(String conversationId, Collection<String> executionIds) {
+        if (conversationId == null || executionIds == null || executionIds.isEmpty()) {
+            return Set.of();
+        }
+        try {
+            List<String> ids = new LinkedHashSet<>(executionIds).stream().map(e -> id(conversationId, e)).toList();
+            Set<LocalDate> days = new TreeSet<>();
+            for (Document d : turns.find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
+                String day = d.getString(FIELD_DAY);
+                if (day != null) {
+                    days.add(LocalDate.parse(day));
+                }
+            }
+            return days;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of health turns", e);
+        }
+    }
+
+    /** The rows an adoption count reads: recorded, not discarded, in range. */
+    static Bson usageFilter(HealthUsageQuery query, LocalDate from) {
+        List<Bson> filters = new ArrayList<>();
+        filters.add(eq(FIELD_AGENT, query.agentId()));
+        filters.add(gte(FIELD_DAY, from.toString()));
+        filters.add(lte(FIELD_DAY, query.to().toString()));
+        filters.add(ne(FIELD_TIMESTAMP, null));
+        filters.add(ne(FIELD_DISCARDED, true));
+        filters.add(in(FIELD_ORIGIN, query.origins()));
+        if (query.version() != null) {
+            filters.add(eq(FIELD_AGENT_VERSION, query.version()));
+        }
+        return and(filters);
+    }
+
+    /**
+     * A conversation is engaged when its last turn with a person's input comes
+     * after its first turn with output ({@code HealthTurnFactory} engagement rule).
+     */
+    private static Document conversationSummary(Object groupId) {
+        return new Document("_id", groupId)
+                .append("minOut", new Document("$min", new Document("$cond", Arrays.asList("$" + FIELD_AGENT_OUTPUT, "$" + FIELD_STEP, null))))
+                .append("maxIn", new Document("$max", new Document("$cond", Arrays.asList("$" + FIELD_USER_INPUT, "$" + FIELD_STEP, null))))
+                .append("turns", new Document("$sum", 1)).append("user", new Document("$first", "$" + FIELD_USER));
+    }
+
+    private static Document engagedExpression() {
+        return new Document("$cond",
+                List.of(new Document("$and",
+                        List.of(new Document("$ne", Arrays.asList("$minOut", null)), new Document("$ne", Arrays.asList("$maxIn", null)),
+                                new Document("$gt", List.of("$maxIn", "$minOut")))),
+                        1, 0));
+    }
+
+    @Override
+    public HealthUsage usage(HealthUsageQuery query, LocalDate lookbackFrom) {
+        if (query.origins().isEmpty()) {
+            return HealthUsage.EMPTY;
+        }
+        try {
+            long sessions = 0;
+            long engaged = 0;
+            long turnCount = 0;
+            List<Document> conversations = List.of(new Document("$match", usageFilter(query, query.from())),
+                    new Document("$group", conversationSummary("$" + FIELD_CONVERSATION)),
+                    new Document("$group", new Document("_id", null).append("sessions", new Document("$sum", 1))
+                            .append("engaged", new Document("$sum", engagedExpression())).append("turns", new Document("$sum", "$turns"))));
+            for (Document d : turns.aggregate(conversations).allowDiskUse(true)) {
+                sessions = number(d.get("sessions"));
+                engaged = number(d.get("engaged"));
+                turnCount = number(d.get("turns"));
+            }
+            LocalDate lookback = lookbackFrom == null || lookbackFrom.isAfter(query.from()) ? query.from() : lookbackFrom;
+            long users = 0;
+            long returning = 0;
+            List<Document> people = List.of(new Document("$match", and(usageFilter(query, lookback), ne(FIELD_USER, null))),
+                    new Document("$group",
+                            new Document("_id", "$" + FIELD_USER).append("first", new Document("$min", "$" + FIELD_DAY)).append("last",
+                                    new Document("$max", "$" + FIELD_DAY))),
+                    new Document("$match", gte("last", query.from().toString())),
+                    new Document("$group", new Document("_id", null).append("users", new Document("$sum", 1)).append("returning",
+                            new Document("$sum",
+                                    new Document("$cond", List.of(new Document("$lt", List.of("$first", query.from().toString())), 1, 0))))));
+            for (Document d : turns.aggregate(people).allowDiskUse(true)) {
+                users = number(d.get("users"));
+                returning = number(d.get("returning"));
+            }
+            return new HealthUsage(sessions, engaged, turnCount, users, returning);
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the usage of an agent", e);
+        }
+    }
+
+    @Override
+    public List<HealthUsagePoint> dailyUsage(HealthUsageQuery query, String groupBy) {
+        if (query.origins().isEmpty()) {
+            return List.of();
+        }
+        Object group = switch (groupBy == null ? "none" : groupBy) {
+            case "version" -> "$" + FIELD_AGENT_VERSION;
+            case "origin" -> "$" + FIELD_ORIGIN;
+            default -> null;
+        };
+        try {
+            Document conversationKey = new Document("c", "$" + FIELD_CONVERSATION).append("d", "$" + FIELD_DAY).append("g", group);
+            List<Document> pipeline = List.of(new Document("$match", usageFilter(query, query.from())),
+                    new Document("$group", conversationSummary(conversationKey)),
+                    new Document("$group",
+                            new Document("_id", new Document("d", "$_id.d").append("g", "$_id.g")).append("sessions", new Document("$sum", 1))
+                                    .append("engaged", new Document("$sum", engagedExpression()))
+                                    .append("turns", new Document("$sum", "$turns")).append("users", new Document("$addToSet", "$user"))),
+                    new Document("$project", new Document("sessions", 1).append("engaged", 1).append("turns", 1).append("users",
+                            new Document("$size", new Document("$setDifference", List.of("$users", Arrays.asList((Object) null)))))));
+            List<HealthUsagePoint> points = new ArrayList<>();
+            for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
+                Document key = d.get("_id", Document.class);
+                Object g = key.get("g");
+                points.add(new HealthUsagePoint(LocalDate.parse(key.getString("d")), g == null ? null : String.valueOf(g), number(d.get("sessions")),
+                        number(d.get("engaged")), number(d.get("turns")), number(d.get("users"))));
+            }
+            return points;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the daily usage of an agent", e);
+        }
+    }
+
+    @Override
+    public Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins) {
+        if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<Document> pipeline = List.of(
+                    new Document("$match",
+                            and(in(FIELD_AGENT, agentIds), gte(FIELD_DAY, from.toString()), lte(FIELD_DAY, to.toString()), ne(FIELD_TIMESTAMP, null),
+                                    ne(FIELD_DISCARDED, true), in(FIELD_ORIGIN, origins))),
+                    new Document("$group", new Document("_id", new Document("a", "$" + FIELD_AGENT).append("c", "$" + FIELD_CONVERSATION))),
+                    new Document("$group", new Document("_id", "$_id.a").append("sessions", new Document("$sum", 1))));
+            Map<String, Long> sessions = new LinkedHashMap<>();
+            for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
+                sessions.put(d.getString("_id"), number(d.get("sessions")));
+            }
+            return sessions;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the sessions of agents", e);
+        }
+    }
+
+    private static long number(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
     }
 
     @Override

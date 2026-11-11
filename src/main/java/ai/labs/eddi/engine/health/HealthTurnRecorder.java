@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.health.HealthTurnFactory.Capture;
+import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PreDestroy;
@@ -15,6 +16,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -54,20 +58,31 @@ public class HealthTurnRecorder {
     private final Instance<IHealthTurnStore> store;
     private final HealthSettings settings;
     private final HealthMetrics metrics;
+    private final HealthDirtyDays dirtyDays;
     private final Clock clock;
     private final ThreadPoolExecutor executor;
     private final AtomicLong lastQueueWarning = new AtomicLong();
     private final AtomicLong lastStoreWarning = new AtomicLong();
 
     @Inject
+    public HealthTurnRecorder(Instance<IHealthTurnStore> store, HealthSettings settings, HealthMetrics metrics, HealthDirtyDays dirtyDays) {
+        this(store, settings, metrics, dirtyDays, Clock.systemUTC());
+    }
+
+    /** Without marking days dirty — for tests that only look at the turn rows. */
     public HealthTurnRecorder(Instance<IHealthTurnStore> store, HealthSettings settings, HealthMetrics metrics) {
-        this(store, settings, metrics, Clock.systemUTC());
+        this(store, settings, metrics, null, Clock.systemUTC());
     }
 
     HealthTurnRecorder(Instance<IHealthTurnStore> store, HealthSettings settings, HealthMetrics metrics, Clock clock) {
+        this(store, settings, metrics, null, clock);
+    }
+
+    HealthTurnRecorder(Instance<IHealthTurnStore> store, HealthSettings settings, HealthMetrics metrics, HealthDirtyDays dirtyDays, Clock clock) {
         this.store = store;
         this.settings = settings;
         this.metrics = metrics;
+        this.dirtyDays = dirtyDays;
         this.clock = clock;
         AtomicInteger threads = new AtomicInteger();
         this.executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(settings.queueCapacity()), task -> {
@@ -133,16 +148,22 @@ public class HealthTurnRecorder {
     void write(Capture capture) {
         try {
             IHealthTurnStore turns = store.get();
+            HealthTurn turn = capture.turn();
             if (!capture.settled()) {
                 // What the conversation keeps may be the earlier execution, or nothing at
                 // all: never replace a row on the strength of this one.
-                turns.insertIfAbsent(capture.turn());
+                turns.insertIfAbsent(turn);
+                markDirty(turn, turn.day() == null ? Set.of() : Set.of(turn.day()));
             } else {
-                turns.upsert(capture.turn());
+                turns.upsert(turn);
+                // The stored row keeps the day it was first recorded on: a turn resumed
+                // after midnight changed yesterday's numbers, not today's.
+                markDirty(turn, storedDays(turns, turn.conversationId(), List.of(turn.executionId()), turn.day()));
                 // After the new row: the discard is only true once the replacing turn
                 // exists.
                 if (!capture.discardedExecutionIds().isEmpty()) {
-                    turns.markDiscarded(capture.turn(), capture.discardedExecutionIds());
+                    turns.markDiscarded(turn, capture.discardedExecutionIds());
+                    markDirty(turn, storedDays(turns, turn.conversationId(), capture.discardedExecutionIds(), null));
                 }
             }
             metrics.recorded();
@@ -152,6 +173,28 @@ public class HealthTurnRecorder {
                 LOGGER.warnf("Could not store an Agent Health turn row (conversation %s): %s — rows are being lost; see "
                         + "eddi_health_dropped_total", sanitize(capture.turn().conversationId()), sanitize(e.getMessage()));
             }
+        }
+    }
+
+    /**
+     * The days the executions are stored on, or {@code fallback} when that cannot
+     * be read.
+     */
+    private static Set<LocalDate> storedDays(IHealthTurnStore turns, String conversationId, List<String> executionIds, LocalDate fallback) {
+        try {
+            Set<LocalDate> days = turns.daysOf(conversationId, executionIds);
+            if (days != null && !days.isEmpty()) {
+                return days;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read the stored day of a health turn: %s", e.getMessage());
+        }
+        return fallback == null ? Set.of() : Set.of(fallback);
+    }
+
+    private void markDirty(HealthTurn turn, Set<LocalDate> days) {
+        if (dirtyDays != null && turn.agentId() != null) {
+            dirtyDays.note(turn.agentId(), days);
         }
     }
 

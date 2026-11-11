@@ -5,10 +5,15 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.HealthTurn;
+import ai.labs.eddi.engine.health.model.HealthUsage;
+import ai.labs.eddi.engine.health.model.HealthUsagePoint;
+import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -73,6 +78,39 @@ public interface IHealthTurnStore {
      * holding them all in memory — what a rollup of that day reads.
      */
     void forEachByAgentAndDay(String agentId, LocalDate day, Consumer<HealthTurn> consumer);
+
+    /**
+     * The UTC days the given executions of a conversation are stored on — the days
+     * a write to them changed, which the rollup must recompute. A resumed turn
+     * keeps the day it was first recorded on, which is not the day of the write.
+     * Executions with no row (or only a discard marker) are skipped.
+     */
+    Set<LocalDate> daysOf(String conversationId, Collection<String> executionIds);
+
+    /**
+     * Sessions, engagement and people of one agent over a period, counted in the
+     * database from the non-discarded rows.
+     *
+     * @param lookbackFrom
+     *            the first day searched for earlier turns of the period's users
+     *            ({@link HealthUsage#returningUsers()}); not after
+     *            {@code query.from()}
+     */
+    HealthUsage usage(HealthUsageQuery query, LocalDate lookbackFrom);
+
+    /**
+     * {@link #usage} per day — and per version or origin when {@code groupBy} is
+     * {@code version} / {@code origin}; {@code null} or {@code none} for no
+     * grouping. Only days with rows appear, in no particular order. Returning users
+     * are not counted per day.
+     */
+    List<HealthUsagePoint> dailyUsage(HealthUsageQuery query, String groupBy);
+
+    /**
+     * Distinct conversations per agent over the days given — the portfolio's
+     * traffic. Agents without rows are absent.
+     */
+    Map<String, Long> sessionsByAgent(Collection<String> agentIds, LocalDate from, LocalDate to, Collection<String> origins);
 
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);

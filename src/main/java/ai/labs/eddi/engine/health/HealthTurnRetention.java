@@ -15,7 +15,8 @@ import java.time.ZoneOffset;
 
 /**
  * Deletes Agent Health turn rows older than {@code eddi.health.facts-retention}
- * (90 days by default), once a day.
+ * (90 days by default), and daily rows and change markers older than
+ * {@code eddi.health.daily-retention} (730 days), once a day.
  * <p>
  * <b>Why a plain {@code @Scheduled} sweep and not a
  * {@code ScheduleFireExecutor} system job</b> (the {@code alerts-maintenance}
@@ -37,16 +38,26 @@ public class HealthTurnRetention {
     private static final Logger LOGGER = Logger.getLogger(HealthTurnRetention.class);
 
     private final IHealthTurnStore store;
+    private final IHealthDailyStore dailyStore;
+    private final IHealthMarkerStore markerStore;
     private final HealthSettings settings;
     private final Clock clock;
 
     @Inject
-    public HealthTurnRetention(IHealthTurnStore store, HealthSettings settings) {
-        this(store, settings, Clock.systemUTC());
+    public HealthTurnRetention(IHealthTurnStore store, IHealthDailyStore dailyStore, IHealthMarkerStore markerStore, HealthSettings settings) {
+        this(store, dailyStore, markerStore, settings, Clock.systemUTC());
     }
 
+    /** Turn rows only — for tests. */
     HealthTurnRetention(IHealthTurnStore store, HealthSettings settings, Clock clock) {
+        this(store, null, null, settings, clock);
+    }
+
+    HealthTurnRetention(IHealthTurnStore store, IHealthDailyStore dailyStore, IHealthMarkerStore markerStore, HealthSettings settings,
+            Clock clock) {
         this.store = store;
+        this.dailyStore = dailyStore;
+        this.markerStore = markerStore;
         this.settings = settings;
         this.clock = clock;
     }
@@ -62,6 +73,29 @@ public class HealthTurnRetention {
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Failed to delete expired Agent Health turn rows; the next daily sweep retries");
         }
+        LocalDate dailyCutoff = dailyCutoff();
+        if (dailyStore != null) {
+            try {
+                long deleted = dailyStore.deleteOlderThan(dailyCutoff);
+                if (deleted > 0) {
+                    LOGGER.infof("Deleted %d Agent Health daily row(s) from before %s", deleted, dailyCutoff);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health daily rows; the next daily sweep retries");
+            }
+        }
+        if (markerStore != null) {
+            try {
+                markerStore.deleteOlderThan(dailyCutoff.atStartOfDay(ZoneOffset.UTC).toInstant());
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health change markers; the next daily sweep retries");
+            }
+        }
+    }
+
+    /** The first UTC day whose daily rows and markers are kept. */
+    LocalDate dailyCutoff() {
+        return LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(settings.dailyRetentionDays());
     }
 
     /**

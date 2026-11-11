@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.health.HealthChangeMarkers;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -102,6 +103,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      */
     @Inject
     ConversationUpgradeService conversationUpgradeService;
+
+    /**
+     * Agent Health change markers. Field-injected for the same reason; null in the
+     * unit tests that build this class by hand.
+     */
+    @Inject
+    Instance<HealthChangeMarkers> healthMarkers;
 
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
@@ -428,7 +436,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         Callable<Void> deployAgentCallable = () -> {
             try {
                 Status outcome = checkDeploymentStatus(environment, agentId, version);
-                if (EnumSet.of(NOT_FOUND, ERROR).contains(outcome)) {
+                boolean deployedNow = EnumSet.of(NOT_FOUND, ERROR).contains(outcome);
+                if (deployedNow) {
                     var reported = new AtomicReference<Status>();
                     agentFactory.deployAgent(environment, agentId, version, status -> {
                         reported.set(status);
@@ -453,6 +462,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
                 if (outcome == READY) {
                     deploymentListener.onDeploymentEvent(new DeploymentEvent(agentId, version, environment, READY));
+                    if (deployedNow && healthMarkers != null && healthMarkers.isResolvable()) {
+                        // A change marker for Agent Health charts; a redeploy of an agent that
+                        // was already READY changed nothing and records nothing.
+                        healthMarkers.get().deployed(agentId, version, environment.toString());
+                    }
                     // Lifecycle hook: re-enable the schedules the undeploy switched off.
                     enableSchedulesForAgent(agentId);
                 } else if (outcome != IN_PROGRESS) {

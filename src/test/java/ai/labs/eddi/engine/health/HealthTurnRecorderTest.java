@@ -22,8 +22,10 @@ import org.mockito.InOrder;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -216,6 +218,40 @@ class HealthTurnRecorderTest {
         assertEquals(0.0, dropped(HealthMetrics.REASON_QUEUE_FULL));
         assertEquals(0.0, dropped(HealthMetrics.REASON_STORE_ERROR));
         assertEquals(0.0, registry.get("eddi.health.queue.depth").gauge().value());
+    }
+
+    @Test
+    @DisplayName("a resumed turn marks the day its row is stored on (the first-recorded day), not the day of the resume")
+    void marksTheStoredDayDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate firstDay = LocalDate.of(2026, 11, 9);
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory(), null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("an undo marks the days of the discarded executions too; an unreadable day falls back to the capture's")
+    void marksDiscardedDaysDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate undoneDay = LocalDate.of(2026, 11, 8);
+        when(store.daysOf(eq("conv-1"), any())).thenThrow(new HealthStoreException("down", null)).thenReturn(Set.of(undoneDay));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory, null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(LocalDate.of(2026, 11, 10)));
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(undoneDay));
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
+        } finally {
+            marking.shutdown();
+        }
     }
 
     private static void assertTrueEventually(BooleanSupplier condition) {
