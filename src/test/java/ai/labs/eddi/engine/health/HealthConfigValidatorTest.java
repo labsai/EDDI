@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.HealthConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.DisplayName;
@@ -159,6 +160,20 @@ class HealthConfigValidatorTest {
             assertEquals(Resolved.DEFAULTS, policy.of("agent", null));
             assertEquals(Resolved.DEFAULTS, policy.of(null, 1));
             assertFalse(policy.selfReportToolEnabled("agent", 1));
+        }
+
+        @Test
+        @DisplayName("require: an absent version gives the defaults; a store that cannot be read throws, uncached, for the evaluation to retry")
+        void requireThrowsOnReadFailure() throws Exception {
+            IAgentStore store = mock(IAgentStore.class);
+            when(store.read("agent", 1)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+            when(store.read("agent", 2)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+            HealthConfigPolicy policy = new HealthConfigPolicy(store, HealthSettings.defaults());
+            assertThrows(HealthStoreException.class, () -> policy.require("agent", 1));
+            assertFalse(policy.cached("agent", 1).isPresent());
+            assertEquals(Resolved.DEFAULTS, policy.of("agent", 1), "the lenient reader still answers");
+            assertEquals(Resolved.DEFAULTS, policy.require("agent", 2));
+            assertEquals(Resolved.DEFAULTS, policy.require("agent", null));
         }
 
         @Test

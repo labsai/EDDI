@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
@@ -21,6 +22,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -99,9 +102,10 @@ class HealthOutcomeGdprParticipantTest {
         when(outcomeInstance.isResolvable()).thenReturn(true);
         when(outcomeInstance.get()).thenReturn(outcomes);
         doAnswer(inv -> {
-            ((Consumer<String>) inv.getArgument(2)).accept("live");
+            ((BiConsumer<String, String>) inv.getArgument(2)).accept("live", "agent-1");
+            ((BiConsumer<String, String>) inv.getArgument(2)).accept("gone", "agent-1");
             return null;
-        }).when(turns).forEachConversationUpdatedSince(any(), anyInt(), any());
+        }).when(turns).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
         doAnswer(inv -> {
             ((Consumer<String>) inv.getArgument(2)).accept("live");
             ((Consumer<String>) inv.getArgument(2)).accept("gone");
@@ -118,7 +122,8 @@ class HealthOutcomeGdprParticipantTest {
 
         verify(outcomes).deleteOlderThan(LocalDate.of(2026, 8, 12));
         verify(outcomes).deleteByConversationId("gone");
-        verify(turns).deleteByConversationId("gone");
+        verify(turns).deleteConversationReturningDays("gone");
+        verify(turns, never()).deleteConversationReturningDays("live");
         verify(outcomes, never()).deleteByConversationId("live");
     }
 
@@ -138,10 +143,10 @@ class HealthOutcomeGdprParticipantTest {
         doAnswer(inv -> {
             int limit = inv.getArgument(1);
             for (int i = 0; i < Math.min(limit, 10); i++) {
-                ((Consumer<String>) inv.getArgument(2)).accept("t" + i);
+                ((BiConsumer<String, String>) inv.getArgument(2)).accept("t" + i, "agent-1");
             }
             return null;
-        }).when(turns).forEachConversationUpdatedSince(any(), anyInt(), any());
+        }).when(turns).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
         doAnswer(inv -> {
             int limit = inv.getArgument(1);
             for (int i = 0; i < Math.min(limit, 10); i++) {
@@ -159,7 +164,81 @@ class HealthOutcomeGdprParticipantTest {
 
         verify(outcomes).deleteByConversationId("o0");
         verify(outcomes).deleteByConversationId("o1");
-        verify(turns).deleteByConversationId("t0");
-        verify(turns, never()).deleteByConversationId("t5");
+        verify(turns).deleteConversationReturningDays("t0");
+        verify(turns, never()).deleteConversationReturningDays("t5");
+    }
+
+    @Test
+    @DisplayName("the orphan sweep gives capacity the turn rows leave unused to the remaining evaluated conversations")
+    @SuppressWarnings("unchecked")
+    void unusedCapacityGoesToOutcomes() throws Exception {
+        IHealthTurnStore turns = mock(IHealthTurnStore.class);
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
+        when(conversationInstance.isResolvable()).thenReturn(true);
+        when(conversationInstance.get()).thenReturn(conversations);
+        Instance<IHealthOutcomeStore> outcomeInstance = mock(Instance.class);
+        when(outcomeInstance.isResolvable()).thenReturn(true);
+        when(outcomeInstance.get()).thenReturn(outcomes);
+        doAnswer(inv -> {
+            ((BiConsumer<String, String>) inv.getArgument(2)).accept("t0", "agent-1");
+            return null;
+        }).when(turns).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
+        doAnswer(inv -> {
+            int limit = inv.getArgument(1);
+            for (int i = 0; i < Math.min(limit, 10); i++) {
+                ((Consumer<String>) inv.getArgument(2)).accept("o" + i);
+            }
+            return null;
+        }).when(outcomes).forEachConversationEvaluatedSince(any(), anyInt(), any());
+        when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+
+        HealthSettings settings = new HealthSettings(true, 10, Duration.ofDays(90), Duration.ofHours(48), 4);
+        HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, settings, new HealthMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(Instant.parse("2026-11-10T03:00:00Z"), ZoneOffset.UTC));
+        retention.outcomeStore = outcomeInstance;
+        retention.removeOrphans();
+
+        verify(turns).deleteConversationReturningDays("t0");
+        verify(outcomes).deleteByConversationId("o0");
+        verify(outcomes).deleteByConversationId("o1");
+        verify(outcomes).deleteByConversationId("o2");
+        verify(outcomes, never()).deleteByConversationId("o3");
+    }
+
+    @Test
+    @DisplayName("a failed session-outcome delete does not skip the turn rows' delete or their day marks")
+    @SuppressWarnings("unchecked")
+    void outcomeDeleteFailureKeepsTurnMarks() throws Exception {
+        IHealthTurnStore turns = mock(IHealthTurnStore.class);
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
+        when(conversationInstance.isResolvable()).thenReturn(true);
+        when(conversationInstance.get()).thenReturn(conversations);
+        Instance<IHealthOutcomeStore> outcomeInstance = mock(Instance.class);
+        when(outcomeInstance.isResolvable()).thenReturn(true);
+        when(outcomeInstance.get()).thenReturn(outcomes);
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        Instance<HealthDirtyDays> dirtyInstance = mock(Instance.class);
+        when(dirtyInstance.isResolvable()).thenReturn(true);
+        when(dirtyInstance.get()).thenReturn(dirty);
+        doAnswer(inv -> {
+            ((BiConsumer<String, String>) inv.getArgument(2)).accept("gone", "agent-1");
+            return null;
+        }).when(turns).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
+        HealthDeletedRows deleted = new HealthDeletedRows(3L, Map.of("agent-1", Set.of(LocalDate.of(2026, 11, 9))));
+        when(turns.deleteConversationReturningDays("gone")).thenReturn(deleted);
+        when(outcomes.deleteByConversationId("gone")).thenThrow(new HealthStoreException("down", null));
+        when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+
+        HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, HealthSettings.defaults(),
+                new HealthMetrics(new SimpleMeterRegistry()), Clock.fixed(Instant.parse("2026-11-10T03:00:00Z"), ZoneOffset.UTC));
+        retention.outcomeStore = outcomeInstance;
+        retention.dirtyDays = dirtyInstance;
+
+        assertEquals(3L, retention.removeOrphans());
+        verify(dirty).markDeletedRows("gone", Set.of("agent-1"), deleted);
     }
 }

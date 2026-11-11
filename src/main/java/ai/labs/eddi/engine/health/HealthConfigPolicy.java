@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.HealthConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -23,9 +24,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 /**
  * The {@link HealthConfig} of one agent version, read once per version and
  * cached — versions are immutable — like {@code ConversationRatingPolicy}. A
- * version without one, an unknown version, or one that cannot be read yields
- * the defaults; a read failure is not cached, so a store that blinked does not
- * decide outcomes for half an hour.
+ * version without one or an unknown version yields the defaults; a read failure
+ * yields them too ({@link #of}) or throws ({@link #require}, the outcome
+ * evaluation, which retries) and is never cached, so a store that blinked does
+ * not decide outcomes for half an hour.
  * <p>
  * Lenient on purpose: an agent that reached the store without the save-time
  * checks ({@link HealthConfigValidator}) — a ZIP import, an older version — has
@@ -97,8 +99,31 @@ public class HealthConfigPolicy {
         this.settings = settings;
     }
 
-    /** The resolved settings of one agent version; the defaults when unknown. */
+    /**
+     * The resolved settings of one agent version; the defaults when unknown or when
+     * the store cannot be read — for callers that must answer anyway (the
+     * self-report tool, the drill-down).
+     */
     public Resolved of(String agentId, Integer version) {
+        try {
+            return require(agentId, version);
+        } catch (HealthStoreException e) {
+            LOGGER.debugf("Could not read agent %s v%s for its health setting: %s", sanitize(agentId), version, sanitize(e.getMessage()));
+            return Resolved.DEFAULTS;
+        }
+    }
+
+    /**
+     * As {@link #of}, but a store that cannot be read throws instead of yielding
+     * the defaults — what the outcome evaluation uses, so a session is never
+     * judged, and stored as final, under settings that were merely unavailable. An
+     * absent version still yields the defaults.
+     *
+     * @throws HealthStoreException
+     *             when the agent store fails (not cached: the next call reads
+     *             again)
+     */
+    public Resolved require(String agentId, Integer version) {
         if (agentId == null || version == null) {
             return Resolved.DEFAULTS;
         }
@@ -106,10 +131,12 @@ public class HealthConfigPolicy {
             try {
                 AgentConfiguration configuration = agentStore.read(agentId, version);
                 return Resolved.of(configuration == null ? null : configuration.getHealthConfig());
-            } catch (Exception e) {
-                LOGGER.debugf("Could not read agent %s v%s for its health setting: %s", sanitize(agentId), version, sanitize(e.getMessage()));
-                // null is not cached: the next call reads the store again.
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // Absent, not unavailable: the defaults — null is not cached, so an id
+                // re-imported later is read again.
                 return null;
+            } catch (Exception e) {
+                throw new HealthStoreException("Could not read the health setting of an agent version", e);
             }
         });
         return known == null ? Resolved.DEFAULTS : known;

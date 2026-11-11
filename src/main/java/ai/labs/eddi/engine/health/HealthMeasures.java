@@ -467,8 +467,10 @@ public final class HealthMeasures {
         Stat stat = stat0(id, data);
         OutcomeStats o = data.outcomes();
         if (o != null && o.pending() != null && OUTCOME_MEASURES.contains(id)) {
-            // The value stands for what is evaluated so far; say so.
-            return new Stat(stat.value(), stat.n(), stat.interval(), stat.test(), stat.breakdown(), o.pending());
+            // The value stands for what is evaluated so far; say so — after the reason a
+            // value is withheld, when there is one.
+            String hint = stat.hint() == null ? o.pending() : stat.hint() + "; " + o.pending();
+            return new Stat(stat.value(), stat.n(), stat.interval(), stat.test(), stat.breakdown(), hint);
         }
         return stat;
     }

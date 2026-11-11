@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.ConversationActivity;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -84,12 +85,19 @@ public interface IHealthTurnStore {
 
     /**
      * The conversations with rows written in [{@code since}, {@code until}), each
-     * with the newest {@code updatedAt} of those rows, ordered by it (oldest
-     * first), at most {@code limit} — the outcome evaluation's incremental feed. A
-     * caller that gets {@code limit} entries continues from the last entry's
-     * {@code lastUpdatedAt} (inclusive): the order makes that a gapless page.
+     * with the newest {@code updatedAt} of those rows, ordered by it and then by
+     * conversation id (oldest first), at most {@code limit} — the outcome
+     * evaluation's incremental feed. With {@code afterConversationId}, only the
+     * entries after the pair ({@code since}, {@code afterConversationId}) in that
+     * order: a caller that gets {@code limit} entries continues with the last
+     * entry's {@code lastUpdatedAt} and conversation id, a gapless page even when
+     * more than a page of conversations share one {@code lastUpdatedAt}.
+     *
+     * @param afterConversationId
+     *            the last conversation of the previous page, or {@code null} for
+     *            every entry from {@code since} on
      */
-    List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit);
+    List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit);
 
     /**
      * An agent's rows of the UTC days {@code from} to {@code to} (both inclusive),
@@ -142,10 +150,12 @@ public interface IHealthTurnStore {
                                                            Collection<String> interactive, Collection<String> origins);
 
     /**
-     * Streams the distinct (agent, day) pairs of the rows written in
-     * [{@code since}, {@code until}) — at most {@code limit} — to {@code consumer}.
-     * What the rollup's self-heal pass re-marks dirty, so a dirty mark lost on a
-     * node (a hard kill before its flush) never leaves a day stale.
+     * Streams the distinct (agent, day) pairs of the rows written, or first
+     * discarded, in [{@code since}, {@code until}) — at most {@code limit} — to
+     * {@code consumer}. A discard keeps the row's write time (the write-ordering
+     * guard), so the time it was first discarded is stored separately and matched
+     * here. What the rollup's self-heal pass re-marks dirty, so a dirty mark lost
+     * on a node (a hard kill before its flush) never leaves a day stale.
      */
     void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer);
 
@@ -160,6 +170,39 @@ public interface IHealthTurnStore {
      * The (agent, day) pairs a conversation's rows are on — read before a delete.
      */
     Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId);
+
+    /**
+     * Deletes a conversation's rows and markers and answers the (agent, day) pairs
+     * they were on — atomically where the store can (PostgreSQL
+     * {@code DELETE ... RETURNING}), else read just before the delete. The delete
+     * never depends on the read: when the days cannot be read they are {@code null}
+     * and the rows are deleted all the same.
+     */
+    HealthDeletedRows deleteConversationReturningDays(String conversationId);
+
+    /**
+     * As {@link #deleteConversationReturningDays}, but deletes nothing — and
+     * answers {@code null} — when the days cannot be read: for a caller that does
+     * not know the conversation's agent either, so nothing could be re-rolled. The
+     * rows are then left to the orphan sweep, whose candidate read names the agent.
+     * On PostgreSQL the days come with the delete, so this never keeps anything.
+     */
+    HealthDeletedRows deleteConversationIfDaysKnown(String conversationId);
+
+    /**
+     * As {@link #forEachConversationUpdatedSince}, with the agent id each
+     * conversation's recent rows carry ({@code null} when a row has none) — what
+     * the orphan sweep needs to re-roll an orphan's days when they cannot be read
+     * at delete time. A conversation with rows of two agents is passed once per
+     * agent.
+     */
+    void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer);
+
+    /**
+     * As {@link #deleteConversationReturningDays}, for every row of a user — the
+     * GDPR erasure. The delete never depends on reading the days.
+     */
+    HealthDeletedRows deleteByUserIdReturningDays(String userId);
 
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);

@@ -373,7 +373,7 @@ class HealthTurnRecorderTest {
 
             InOrder order = inOrder(store);
             order.verify(store, timeout(5_000)).upsert(any());
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            order.verify(store, timeout(5_000)).deleteConversationReturningDays("conv-1");
         }
 
         @Test
@@ -393,7 +393,7 @@ class HealthTurnRecorderTest {
             order.verify(store).deleteByConversationId("conv-1");
             order.verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
             order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            order.verify(store, timeout(5_000)).deleteConversationReturningDays("conv-1");
             assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
         }
 
@@ -408,7 +408,7 @@ class HealthTurnRecorderTest {
             guarded.record(new ConversationMemory("conv-2", "agent-1", 2, "user-2"), null, null, null, false);
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 2.0);
 
-            verify(store, after(300).never()).deleteByConversationId(any());
+            verify(store, after(300).never()).deleteConversationReturningDays(any());
             assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
 
@@ -418,7 +418,7 @@ class HealthTurnRecorderTest {
             when(conversations.getStateAndRevision(any())).thenThrow(new IllegalStateException("db down"));
             assertDoesNotThrow(() -> guarded.record(memory(), null, null, null, false));
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
-            verify(store, after(300).never()).deleteByConversationId(any());
+            verify(store, after(300).never()).deleteConversationReturningDays(any());
         }
     }
 

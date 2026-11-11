@@ -50,6 +50,23 @@ class PostgresHealthTurnStoreTest {
     }
 
     @Test
+    @DisplayName("the self_reported_outcome check looks at the health_turns the search path resolves, not a namesake in another schema")
+    void selfReportedColumnOnResolvedTable() {
+        String sql = PostgresHealthTurnStore.HAS_SELF_REPORTED_COLUMN;
+        assertTrue(sql.contains("attrelid = to_regclass('health_turns')"), sql);
+        assertFalse(sql.contains("information_schema"), sql);
+    }
+
+    @Test
+    @DisplayName("the feed after a (time, conversation) pair binds since twice more and the id, in HAVING, keeping the order")
+    void feedAfterPair() {
+        String sql = PostgresHealthTurnStore.CONVERSATIONS_UPDATED_AFTER;
+        assertEquals(placeholders(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_BETWEEN) + 3, placeholders(sql));
+        assertTrue(sql.contains("HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?)"), sql);
+        assertTrue(sql.endsWith("ORDER BY last, conversation_id LIMIT ?"), sql);
+    }
+
+    @Test
     @DisplayName("the upsert binds every column once, replaces on conflict, keeps the first day, guards on updated_at, discard sticky")
     void upsertShape() {
         String sql = PostgresHealthTurnStore.UPSERT;
@@ -115,6 +132,14 @@ class PostgresHealthTurnStoreTest {
         assertTrue(PostgresHealthTurnStore.BY_CONVERSATION.contains("recorded_at_ms IS NOT NULL"));
         assertTrue(PostgresHealthTurnStore.BY_USER.contains("recorded_at_ms IS NOT NULL"));
         assertTrue(PostgresHealthTurnStore.MARK_DISCARDED.contains("DO UPDATE SET discarded = TRUE"));
+        // The discard time is set once, when the row flips, and updated_at_ms is left
+        // alone.
+        assertTrue(PostgresHealthTurnStore.MARK_DISCARDED.contains("discarded_at_ms = CASE WHEN health_turns.discarded "
+                + "THEN COALESCE(health_turns.discarded_at_ms, EXCLUDED.discarded_at_ms) ELSE EXCLUDED.discarded_at_ms END"));
+        assertFalse(PostgresHealthTurnStore.MARK_DISCARDED.contains("updated_at_ms"));
+        assertTrue(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE
+                .contains("((updated_at_ms >= ? AND updated_at_ms < ?) OR (discarded_at_ms >= ? AND discarded_at_ms < ?))"));
+        assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES).contains("idx_health_turns_discarded_rows"));
         assertTrue(PostgresHealthTurnStore.DELETE_OLDER.contains("day < ? OR (day IS NULL AND discarded_at_ms < ?)"));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES).contains("(agent_id, day)"));
         assertTrue(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_SINCE

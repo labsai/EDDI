@@ -35,6 +35,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -72,7 +73,7 @@ class HealthOutcomeEvaluatorTest {
         ratings = mock(IConversationRatingStore.class);
         fence = new HealthErasureFence(Clock.fixed(NOW, ZoneOffset.UTC));
         registry = new SimpleMeterRegistry();
-        when(policy.of(anyString(), any())).thenReturn(Resolved.DEFAULTS);
+        when(policy.require(anyString(), any())).thenReturn(Resolved.DEFAULTS);
         when(policy.windowOf(anyString(), any())).thenReturn(Duration.ofHours(24));
         when(outcomes.watermark()).thenReturn(Optional.empty());
         evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
@@ -144,13 +145,13 @@ class HealthOutcomeEvaluatorTest {
         @Test
         @DisplayName("the first pass reads the feed from the retention on, judges each conversation and moves the watermark to a minute ago")
         void firstPassBackfills() {
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt()))
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt()))
                     .thenReturn(List.of(new ConversationActivity("c1", NOW.minus(Duration.ofDays(2)))));
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
 
             HealthOutcomeEvaluator.Result result = evaluator.run(NOW.plusSeconds(60));
 
-            verify(turns).conversationsUpdatedBetween(NOW.minus(Duration.ofDays(90)), NOW.minus(HealthOutcomeEvaluator.GRACE),
+            verify(turns).conversationsUpdatedBetween(NOW.minus(Duration.ofDays(90)), null, NOW.minus(HealthOutcomeEvaluator.GRACE),
                     HealthOutcomeEvaluator.FEED_PAGE);
             HealthOutcome s = upserted().get(0);
             assertEquals(HealthOutcomes.ASSUMED_RESOLVED, s.outcome());
@@ -170,7 +171,7 @@ class HealthOutcomeEvaluatorTest {
             when(outcomes.watermark()).thenReturn(Optional.of(watermark));
             // Captured before the watermark, written after it moved past.
             Instant lateCapture = watermark.minus(Duration.ofMinutes(5));
-            when(turns.conversationsUpdatedBetween(eq(watermark.minus(Duration.ofMinutes(15))), any(), anyInt()))
+            when(turns.conversationsUpdatedBetween(eq(watermark.minus(Duration.ofMinutes(15))), isNull(), any(), anyInt()))
                     .thenReturn(List.of(new ConversationActivity("c1", lateCapture)));
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
 
@@ -185,7 +186,7 @@ class HealthOutcomeEvaluatorTest {
         void watermarkMonotonic() {
             Instant watermark = NOW.minus(Duration.ofMinutes(2));
             when(outcomes.watermark()).thenReturn(Optional.of(watermark));
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(List.of());
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
             evaluator.run(NOW.plusSeconds(60));
             verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
         }
@@ -193,7 +194,7 @@ class HealthOutcomeEvaluatorTest {
         @Test
         @DisplayName("M2: a failed evaluation holds the watermark at its capture, so the next pass retries it")
         void failureHoldsWatermark() {
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(List.of(
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of(
                     new ConversationActivity("bad", NOW.minusSeconds(300)), new ConversationActivity("c1", NOW.minusSeconds(120))));
             when(outcomes.findByConversation("bad")).thenThrow(new HealthStoreException("down", null));
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
@@ -205,18 +206,58 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
-        @DisplayName("M2: a failure older than the retry limit no longer holds the watermark")
-        void staleFailureReleased() {
-            Instant old = NOW.minus(Duration.ofHours(2));
-            when(outcomes.watermark()).thenReturn(Optional.of(old.minus(Duration.ofMinutes(1))));
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(List.of(new ConversationActivity("bad", old)));
+        @DisplayName("M2: a failure holds the watermark for the retry limit from its first failure, however old its capture — then it is released")
+        void failureRetriedFromFirstFailure() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            // A turn of the backfill, captured two days ago.
+            Instant captured = NOW.minus(Duration.ofDays(2));
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of(new ConversationActivity("bad", captured)));
             when(outcomes.findByConversation("bad")).thenThrow(new HealthStoreException("down", null));
+
             evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes).setWatermark(captured);
+
+            clock.now = NOW.plus(HealthOutcomeEvaluator.MAX_RETRY);
+            evaluator.run(clock.now.plusSeconds(60));
+            verify(outcomes).setWatermark(clock.now.minus(HealthOutcomeEvaluator.GRACE));
+        }
+
+        @Test
+        @DisplayName("M2: re-reading the overlap takes at most half of the pass, so a busy overlap cannot keep the feed from moving past the "
+                + "watermark")
+        void overlapCannotStallTheFeed() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant watermark = NOW.minus(Duration.ofMinutes(10));
+            when(outcomes.watermark()).thenReturn(Optional.of(watermark));
+            ConversationActivity beyond = new ConversationActivity("n1", watermark.plusSeconds(60));
+            when(turns.conversationsUpdatedBetween(eq(watermark.minus(Duration.ofMinutes(15))), isNull(), any(), anyInt())).thenReturn(List
+                    .of(new ConversationActivity("o1", watermark.minusSeconds(120)), new ConversationActivity("o2", watermark.minusSeconds(60)),
+                            beyond));
+            when(turns.conversationsUpdatedBetween(eq(watermark), isNull(), any(), anyInt())).thenReturn(List.of(beyond));
+            // The overlap is slow: o1 takes past half of the pass, o2 would take the rest.
+            when(outcomes.findByConversation("o1")).thenAnswer(inv -> {
+                clock.now = NOW.plusSeconds(40);
+                return List.of();
+            });
+            when(outcomes.findByConversation("o2")).thenAnswer(inv -> {
+                clock.now = NOW.plusSeconds(70);
+                return List.of();
+            });
+            when(turns.findByConversationSteps(anyString(), anyInt(), any(), anyInt())).thenReturn(List.of());
+
+            evaluator.run(NOW.plusSeconds(60));
+
+            verify(outcomes, never()).findByConversation("o2");
+            verify(outcomes).findByConversation("n1");
             verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
         }
 
         @Test
-        @DisplayName("a full page continues from its last conversation's newest capture, inclusive — no gap")
+        @DisplayName("a full page continues after its last conversation's (newest capture, id) pair — no gap, no repeat")
         void pagesWithoutGap() {
             Instant watermark = NOW.minus(Duration.ofHours(1));
             Instant since = watermark.minus(Duration.ofMinutes(15));
@@ -226,13 +267,14 @@ class HealthOutcomeEvaluatorTest {
                 full.add(new ConversationActivity("c" + i, since.plusSeconds(i)));
             }
             Instant last = since.plusSeconds(HealthOutcomeEvaluator.FEED_PAGE - 1L);
-            when(turns.conversationsUpdatedBetween(eq(since), any(), anyInt())).thenReturn(full);
-            when(turns.conversationsUpdatedBetween(eq(last), any(), anyInt())).thenReturn(List.of());
+            when(turns.conversationsUpdatedBetween(eq(since), isNull(), any(), anyInt())).thenReturn(full);
+            String lastId = "c" + (HealthOutcomeEvaluator.FEED_PAGE - 1);
+            when(turns.conversationsUpdatedBetween(eq(last), eq(lastId), any(), anyInt())).thenReturn(List.of());
             when(turns.findByConversationSteps(anyString(), anyInt(), any(), anyInt())).thenReturn(List.of());
 
             evaluator.run(NOW.plusSeconds(60));
 
-            verify(turns).conversationsUpdatedBetween(eq(last), any(), anyInt());
+            verify(turns).conversationsUpdatedBetween(eq(last), eq(lastId), any(), anyInt());
             verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
         }
 
@@ -242,7 +284,7 @@ class HealthOutcomeEvaluatorTest {
             MovableClock clock = new MovableClock();
             evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
                     clock);
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(
                     List.of(new ConversationActivity("c1", NOW.minusSeconds(600)), new ConversationActivity("c2", NOW.minusSeconds(500))));
             when(outcomes.findByConversation("c1")).thenAnswer(inv -> {
                 clock.now = NOW.plusSeconds(120);
@@ -260,7 +302,7 @@ class HealthOutcomeEvaluatorTest {
         @DisplayName("a pass whose time is already up reads nothing and leaves the watermark")
         void nothingPastTheDeadline() {
             HealthOutcomeEvaluator.Result result = evaluator.run(NOW);
-            verify(turns, never()).conversationsUpdatedBetween(any(), any(), anyInt());
+            verify(turns, never()).conversationsUpdatedBetween(any(), any(), any(), anyInt());
             verify(outcomes, never()).setWatermark(any());
             assertTrue(result.isEmpty());
         }
@@ -280,7 +322,7 @@ class HealthOutcomeEvaluatorTest {
             doAnswer(inv -> {
                 order.add("feed");
                 return List.of();
-            }).when(turns).conversationsUpdatedBetween(any(), any(), anyInt());
+            }).when(turns).conversationsUpdatedBetween(any(), any(), any(), anyInt());
             evaluator.run(NOW.plusSeconds(60));
             assertEquals(List.of("due", "feed"), order);
         }
@@ -334,7 +376,7 @@ class HealthOutcomeEvaluatorTest {
 
             HealthOutcome due = sessions.get(5);
             when(outcomes.findDue(any(), anyInt())).thenReturn(List.of(due));
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(List.of());
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
             evaluator.run(NOW.plusSeconds(60));
 
             verify(turns).findByConversationSteps("c1", 750, 900, LIMIT);
@@ -395,6 +437,7 @@ class HealthOutcomeEvaluatorTest {
             when(turns.findByConversationSteps("c1", 4, null, LIMIT)).thenReturn(List.of(turn("c1", 6, at, true, false, "user")));
             evaluator.evaluate("c1", null);
             assertEquals(4, upserted().get(0).sessionNo());
+            assertTrue(upserted().get(0).engaged(), "its stored first output (step 0) counts, though its rows are gone");
             assertTrue(deleted().isEmpty());
         }
 
@@ -426,11 +469,20 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("a healthConfig that cannot be read fails the evaluation: nothing is written under defaults, it is retried")
+        void configUnavailable() {
+            when(policy.require(anyString(), any())).thenThrow(new HealthStoreException("down", null));
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            assertThrows(HealthStoreException.class, () -> evaluator.evaluate("c1", null));
+            verify(outcomes, never()).upsert(any());
+        }
+
+        @Test
         @DisplayName("m2: each session is judged by its own version's healthConfig")
         void ownVersionConfig() {
             Resolved v1 = new Resolved(Map.of(), false, Map.of(), false);
-            when(policy.of("agent", 1)).thenReturn(v1);
-            when(policy.of("agent", 2)).thenReturn(Resolved.DEFAULTS);
+            when(policy.require("agent", 1)).thenReturn(v1);
+            when(policy.require("agent", 2)).thenReturn(Resolved.DEFAULTS);
             when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
             evaluator.evaluate("c1", null);
             assertEquals(HealthOutcomes.ENDED_QUIETLY, upserted().get(0).outcome(), "v1 turned the silence assumption off");
@@ -465,7 +517,7 @@ class HealthOutcomeEvaluatorTest {
         @Test
         @DisplayName("due sessions are judged in their own range; a failing conversation does not stop the others")
         void dueSessions() {
-            when(turns.conversationsUpdatedBetween(any(), any(), anyInt())).thenReturn(List.of());
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
             HealthOutcome b = stored("c1", 2, NOW.minus(Duration.ofDays(2)));
             HealthOutcome a = stored("c1", 6, NOW.minus(Duration.ofDays(1)));
             HealthOutcome broken = stored("c2", 0, NOW);
@@ -497,6 +549,23 @@ class HealthOutcomeEvaluatorTest {
             assertEquals(1, queued.size());
             queued.get(0).run();
             verify(outcomes).markDue("c1", List.of(9), NOW);
+        }
+
+        @Test
+        @DisplayName("a changed conversation rating marks every session: the one it was in before is not known")
+        void ratingChangedMarksAll() {
+            Instant created = NOW.minus(Duration.ofDays(3));
+            when(outcomes.findByConversation("c1"))
+                    .thenReturn(List.of(stored("c1", 0, created.minusSeconds(60)), stored("c1", 9, NOW.minusSeconds(60))));
+            ConversationRating rating = new ConversationRating("r", "c1", -1, "agent", 1, "production", "api", "user", null, 0, 0.0, List.of(), null,
+                    created, NOW);
+            evaluator.onRatingSaved(new ConversationRatingSaved(rating));
+            verify(outcomes).markDue(eq("c1"), isNull(), eq(NOW));
+
+            ConversationRating reply = new ConversationRating("r2", "c1", 3, "agent", 1, "production", "api", "user", null, 0, 0.0, List.of(), null,
+                    created, NOW);
+            evaluator.onRatingSaved(new ConversationRatingSaved(reply));
+            verify(outcomes).markDue("c1", List.of(0), NOW);
         }
 
         @Test
@@ -532,7 +601,8 @@ class HealthOutcomeEvaluatorTest {
             verify(ratings, times(1)).readByConversation("c1");
 
             when(ratings.readByConversation("c2")).thenThrow(new RuntimeException("down"));
-            assertFalse(evaluator.new LazyRatings("c2").negative(0, 9, from, until), "unknown is not negative");
+            assertThrows(HealthStoreException.class, () -> evaluator.new LazyRatings("c2").negative(0, 9, from, until),
+                    "unknown is not \"not negative\": the evaluation fails and is retried");
         }
 
         @Test

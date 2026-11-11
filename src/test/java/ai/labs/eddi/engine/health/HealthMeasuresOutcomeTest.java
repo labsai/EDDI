@@ -189,4 +189,16 @@ class HealthMeasuresOutcomeTest {
         }
         assertNotEquals("Outcomes are still being evaluated", HealthMeasures.pointOf("tokensPerTurn", data).hint(), "not an outcome measure");
     }
+
+    @Test
+    @DisplayName("a pending evaluation's hint is added to the reason a value is withheld, never in its place")
+    void pendingHintKeepsWithholdingReason() {
+        List<HealthOutcomeCount> counts = List.of(c("ASSUMED_RESOLVED", "agent_closed", 20), c("ENDED_QUIETLY", "inferred", 80));
+        Totals totals = new Totals(10, 0, 0, 0, Map.of(), Map.of(), 1.0, 0, 0, 0, 0, 0, List.of(), null);
+        PeriodData data = new PeriodData(totals, null, null, 1.0, OutcomeStats.of(counts, 0.5).withPending("Outcomes are still being evaluated"));
+        Measure m = HealthMeasures.pointOf("resolutionRate", data);
+        assertNull(m.value());
+        assertTrue(m.hint().contains("coverage"), m.hint());
+        assertTrue(m.hint().endsWith("Outcomes are still being evaluated"), m.hint());
+    }
 }

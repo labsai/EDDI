@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
 import ai.labs.eddi.engine.ratings.ConversationRatingWithdrawn;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -54,19 +56,24 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li><b>the incremental feed</b> — conversations with turn rows captured since
  * the stored watermark <em>minus</em> {@code eddi.health.outcome-feed-overlap}
  * (15 minutes), up to one minute ago; paged by each conversation's newest
- * capture, oldest first, so a pass can stop anywhere and the next resumes
- * without a gap. Rows are ordered by their <em>capture</em> time, set on the
- * turn's node before the row waits on that node's health queue, so a row can
- * reach the store after the watermark passed its capture time; the overlap
+ * capture (then its id), oldest first, so a pass can stop anywhere and the next
+ * resumes without a gap. Rows are ordered by their <em>capture</em> time, set
+ * on the turn's node before the row waits on that node's health queue, so a row
+ * can reach the store after the watermark passed its capture time; the overlap
  * re-reads every conversation of the last minutes each pass (the evaluation is
  * idempotent) and catches a row that late — the trade-off is that much
- * re-evaluation. The first pass starts at the turn-row retention, so turns
- * recorded before outcomes existed are judged too, a bounded batch per
- * pass.</li>
+ * re-evaluation, bounded: the re-read of the overlap gets at most half of the
+ * pass's time and conversations, then the feed goes on from the watermark, so a
+ * busy overlap can never stop it from moving on. The first pass starts at the
+ * turn-row retention, so turns recorded before outcomes existed are judged too,
+ * a bounded batch per pass.</li>
  * </ol>
- * A conversation whose evaluation fails holds the watermark at its capture
- * time, so the next passes retry it — for at most {@link #MAX_RETRY}, then it
- * is left (a WARN; its next change or due time evaluates it again).
+ * A conversation whose evaluation fails holds the watermark at its capture time
+ * (never further back than the watermark), so the next passes retry it — for at
+ * most {@link #MAX_RETRY} from its first failure, then it is left (a WARN; its
+ * next change or due time evaluates it again). A failure is any store that
+ * cannot be read — turn rows, outcomes, the agent's {@code healthConfig}, the
+ * ratings — so no session is judged on what was merely unavailable.
  * <p>
  * Per conversation it reads the turn rows of a <em>range of steps</em>, oldest
  * first: from the latest stored session on (the feed), or one stored session's
@@ -91,7 +98,10 @@ public class HealthOutcomeEvaluator {
 
     /** Rows younger than this are left for the next pass. */
     static final Duration GRACE = Duration.ofMinutes(1);
-    /** How long a failed conversation holds the feed's watermark back. */
+    /**
+     * How long, from its first failure, a failed conversation holds the feed's
+     * watermark back.
+     */
     static final Duration MAX_RETRY = Duration.ofHours(1);
     /** Conversations read per page of the feed. */
     static final int FEED_PAGE = 500;
@@ -127,6 +137,14 @@ public class HealthOutcomeEvaluator {
      */
     private Executor ratingExecutor;
     private ExecutorService ownedExecutor;
+    /**
+     * When the feed first failed to evaluate a conversation, by this node's clock:
+     * the retry limit runs from then, not from the turn's capture, so a backfilled
+     * turn captured days ago is retried as long as a fresh one. Bounded and per
+     * node — on another node the limit starts again, which only retries longer.
+     */
+    private final Cache<String, Instant> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
+            .build();
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
     private int maxRangeTurns = MAX_RANGE_TURNS;
 
@@ -204,6 +222,11 @@ public class HealthOutcomeEvaluator {
         if (since.isBefore(oldest)) {
             since = oldest;
         }
+        // Re-reading the overlap gets at most half of what is left of the pass, so the
+        // replay can never keep the feed from moving past the watermark.
+        Instant overlapDeadline = now.plus(Duration.between(now, deadline).dividedBy(2));
+        int overlapLimit = done[0] + Math.max(0, MAX_CONVERSATIONS - done[0]) / 2;
+        String after = null;
         Set<String> seen = new HashSet<>();
         Instant failedAt = null;
         Instant reached = since;
@@ -214,9 +237,11 @@ public class HealthOutcomeEvaluator {
                 complete = false;
                 break;
             }
-            List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(since, until, FEED_PAGE);
+            List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(since, after, until, FEED_PAGE);
             read = true;
             Instant next = until;
+            String nextAfter = null;
+            boolean leftOverlap = false;
             for (ConversationActivity activity : page) {
                 if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
                     // Resume at this conversation's newest capture next time.
@@ -224,17 +249,26 @@ public class HealthOutcomeEvaluator {
                     complete = false;
                     break;
                 }
-                if (seen.add(activity.conversationId()) && !evaluateSafely(activity.conversationId(), null, done)) {
-                    failedAt = failedAt == null || activity.lastUpdatedAt().isBefore(failedAt) ? activity.lastUpdatedAt() : failedAt;
+                if (activity.lastUpdatedAt().isBefore(watermark) && (!clock.instant().isBefore(overlapDeadline) || done[0] >= overlapLimit)) {
+                    // The overlap's share is used up: the rest of it is left, the feed
+                    // goes on from the watermark.
+                    next = watermark;
+                    leftOverlap = true;
+                    break;
+                }
+                if (seen.add(activity.conversationId())) {
+                    failedAt = evaluateInFeed(activity, done, failedAt);
                 }
             }
-            if (complete && page.size() >= FEED_PAGE) {
-                Instant last = page.get(page.size() - 1).lastUpdatedAt();
-                // More than a page shares one millisecond: step past it rather than loop.
-                next = last.isAfter(since) ? last : since.plusMillis(1);
+            if (complete && !leftOverlap && page.size() >= FEED_PAGE) {
+                // Gapless: after the last entry's (capture, conversation) pair.
+                ConversationActivity last = page.get(page.size() - 1);
+                next = last.lastUpdatedAt();
+                nextAfter = last.conversationId();
             }
             reached = next;
             since = next;
+            after = nextAfter;
             if (!complete) {
                 break;
             }
@@ -243,16 +277,36 @@ public class HealthOutcomeEvaluator {
             return;
         }
         Instant stored = reached.isAfter(watermark) ? reached : watermark;
-        if (failedAt != null) {
-            if (failedAt.isAfter(until.minus(MAX_RETRY))) {
-                // Retried next pass, from here.
-                stored = failedAt.isBefore(stored) ? failedAt : stored;
-            } else {
-                LOGGER.warnf("Agent Health outcome evaluation kept failing for conversations captured at %s; they are evaluated again with "
-                        + "their next change or due time", failedAt);
-            }
+        if (failedAt != null && failedAt.isBefore(stored)) {
+            // Retried next pass, from here — never further back than the watermark: a
+            // failure inside the overlap is in the next pass's overlap again.
+            stored = failedAt.isBefore(watermark) ? watermark : failedAt;
         }
         outcomeStore.setWatermark(stored);
+    }
+
+    /**
+     * Evaluates one conversation of the feed.
+     *
+     * @return the capture the watermark is held at for a retry — the earlier of
+     *         {@code failedAt} and this conversation's, when it failed for less
+     *         than {@link #MAX_RETRY} since its first failure
+     */
+    private Instant evaluateInFeed(ConversationActivity activity, int[] done, Instant failedAt) {
+        String conversationId = activity.conversationId();
+        if (evaluateSafely(conversationId, null, done)) {
+            feedFailures.invalidate(conversationId);
+            return failedAt;
+        }
+        Instant now = clock.instant();
+        Instant first = feedFailures.get(conversationId, k -> now);
+        if (Duration.between(first, now).compareTo(MAX_RETRY) >= 0) {
+            feedFailures.invalidate(conversationId);
+            LOGGER.warnf("Agent Health outcome evaluation kept failing for conversation %s (captured at %s) since %s; it is evaluated again "
+                    + "with its next change or due time", sanitize(conversationId), activity.lastUpdatedAt(), first);
+            return failedAt;
+        }
+        return failedAt == null || activity.lastUpdatedAt().isBefore(failedAt) ? activity.lastUpdatedAt() : failedAt;
     }
 
     private void due(Instant deadline, int[] done) {
@@ -335,15 +389,19 @@ public class HealthOutcomeEvaluator {
         String origin = origin(stored.values(), from, live);
         String agentId = newest.agentId();
         Map<Integer, Resolved> configs = new HashMap<>();
-        Integer knownFirstOutput = null;
-        for (HealthOutcome o : stored.headMap(from, false).values()) {
-            if (o.firstOutputStep() != null && (knownFirstOutput == null || o.firstOutputStep() < knownFirstOutput)) {
-                knownFirstOutput = o.firstOutputStep();
-            }
-        }
         // A stored session whose first rows the retention removed (no row at all at
         // its first step, not even an undone one) keeps its key.
         int firstRead = rows.isEmpty() ? from : rows.get(0).stepIndex();
+        // The first output as earlier evaluations saw it: every earlier session's, and
+        // the re-read session's own when the step it names is no longer read (the
+        // retention removed it) — a step that is read is judged from its row again.
+        Integer knownFirstOutput = null;
+        for (HealthOutcome o : stored.headMap(from, true).values()) {
+            Integer step = o.firstOutputStep();
+            if (step != null && (o.sessionNo() < from || step < firstRead) && (knownFirstOutput == null || step < knownFirstOutput)) {
+                knownFirstOutput = step;
+            }
+        }
         Integer firstSessionNo = stored.containsKey(from) && firstRead > from ? Integer.valueOf(from) : null;
         List<HealthOutcome> sessions = new ArrayList<>(HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live,
                 origin, version -> configPolicy.windowOf(origin, configOf(configs, agentId, version)), version -> configOf(configs, agentId, version),
@@ -374,7 +432,7 @@ public class HealthOutcomeEvaluator {
     }
 
     private Resolved configOf(Map<Integer, Resolved> configs, String agentId, Integer version) {
-        return configs.computeIfAbsent(version == null ? -1 : version, v -> configPolicy.of(agentId, version));
+        return configs.computeIfAbsent(version == null ? -1 : version, v -> configPolicy.require(agentId, version));
     }
 
     /**
@@ -399,7 +457,12 @@ public class HealthOutcomeEvaluator {
 
     void onRatingSaved(@Observes ConversationRatingSaved saved) {
         if (saved != null && saved.rating() != null) {
-            handOff(() -> ratingChanged(saved.rating().conversationId(), saved.rating().stepIndex(), ratingTime(saved.rating())));
+            ConversationRating rating = saved.rating();
+            // A changed conversation rating moves to the session of its new time; the
+            // event does not say which session it was in before: mark them all, as a
+            // withdrawal does.
+            Instant at = rating.isConversationRating() && changed(rating) ? null : ratingTime(rating);
+            handOff(() -> ratingChanged(rating.conversationId(), rating.stepIndex(), at));
         }
     }
 
@@ -418,6 +481,11 @@ public class HealthOutcomeEvaluator {
         }
     }
 
+    /** Whether the rating was saved before, and this save changed it. */
+    private static boolean changed(ConversationRating rating) {
+        return rating.createdAt() != null && rating.updatedAt() != null && rating.updatedAt().isAfter(rating.createdAt());
+    }
+
     private static Instant ratingTime(ConversationRating rating) {
         return rating.updatedAt() != null ? rating.updatedAt() : rating.createdAt();
     }
@@ -426,7 +494,7 @@ public class HealthOutcomeEvaluator {
      * A rating was saved or withdrawn: the session(s) it can change are judged
      * again at the next pass — a reply rating's session (by step), a conversation
      * rating's session (the last one started at or before its time; all of them
-     * when withdrawn). Never throws.
+     * when withdrawn or changed, {@code at} {@code null}). Never throws.
      */
     void ratingChanged(String conversationId, int stepIndex, Instant at) {
         if (conversationId == null || conversationId.isBlank()) {
@@ -481,8 +549,9 @@ public class HealthOutcomeEvaluator {
                 try {
                     ratings = ratingStore == null ? List.of() : new ArrayList<>(ratingStore.readByConversation(conversationId));
                 } catch (RuntimeException e) {
-                    // Unknown is not negative: the silence rule applies as without ratings.
-                    ratings = List.of();
+                    // Unknown is not "not negative": fail the evaluation, so nothing is
+                    // written and the session is retried rather than stored as silence.
+                    throw new HealthStoreException("Could not read the ratings of a conversation", e);
                 }
             }
             for (ConversationRating r : ratings) {
