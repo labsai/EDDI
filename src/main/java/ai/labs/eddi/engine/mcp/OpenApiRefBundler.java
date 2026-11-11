@@ -98,7 +98,14 @@ final class OpenApiRefBundler {
      */
     static String bundle(String content, String location, OpenApiSpecFetcher fetcher) {
         JsonNode root = McpApiToolBuilder.deserializeLikeParser(content);
-        if (root == null || !needsBundling(root)) {
+        if (root == null) {
+            return content;
+        }
+        if (!needsBundling(root)) {
+            // Nothing to inline, but the other reference-bearing fields are checked all
+            // the same: a discriminator mapping is not a $ref and still makes the parser
+            // fetch.
+            requireInternalRefsOnly(root);
             return content;
         }
         var bundler = new OpenApiRefBundler(fetcher, location == null ? null : withoutFragment(URI.create(location)));
@@ -139,6 +146,21 @@ final class OpenApiRefBundler {
     /**
      * The last line of defence: the parser must be handed internal references only,
      * or it would fetch the rest itself.
+     * <p>
+     * swagger-parser 2.1.48 reads a document only through
+     * {@code ResolverCache.loadRef} (OpenAPI 3.0) and {@code ReferenceVisitor}
+     * (3.1). Every path into them starts at an object's {@code $ref} — schema,
+     * parameter, response, request body, header, example, link, callback, security
+     * scheme, path item — with one exception:
+     * {@code SchemaProcessor.processDiscriminatorSchema} and
+     * {@code ExternalRefProcessor.processDiscriminator} turn each discriminator
+     * {@code mapping} value into a schema {@code $ref} and resolve it. An example's
+     * {@code externalValue}, a link's {@code operationRef}, {@code $anchor},
+     * {@code $schema} and {@code $dynamicRef} are never read from anywhere; a
+     * schema {@code $id} only re-bases references and is removed by
+     * {@link #expand}. So the check covers {@code $ref} and discriminator mapping
+     * values; a mapping value that is not internal is refused rather than inlined,
+     * since it names a schema and not a node that could take its place.
      */
     private static void requireInternalRefsOnly(JsonNode root) {
         Deque<JsonNode> pending = new ArrayDeque<>();
@@ -148,13 +170,32 @@ final class OpenApiRefBundler {
             if (node.isObject()) {
                 JsonNode ref = node.get("$ref");
                 if (ref != null && ref.isValueNode() && !ref.asText().trim().startsWith("#")) {
-                    throw new IllegalStateException("OpenAPI spec still holds an external $ref after inlining; refused");
+                    throw new IllegalArgumentException("OpenAPI spec still holds an external $ref after inlining; refused");
+                }
+                JsonNode mapping = node.path("discriminator").path("mapping");
+                if (mapping.isObject()) {
+                    for (JsonNode value : mapping) {
+                        if (value.isValueNode() && !isInternalMappingValue(value.asText().trim())) {
+                            throw new IllegalArgumentException("OpenAPI spec has a discriminator mapping to '" + value.asText().trim()
+                                    + "', outside the document: only #/... references and component names are allowed there");
+                        }
+                    }
                 }
             }
             if (node.isContainerNode()) {
                 node.forEach(pending::push);
             }
         }
+    }
+
+    /**
+     * A mapping value swagger-parser resolves in the document itself: a {@code #}
+     * reference, or a bare component name, which {@code Schema.set$ref} turns into
+     * {@code #/components/schemas/<name>} when it holds no {@code .} and no
+     * {@code /}.
+     */
+    static boolean isInternalMappingValue(String value) {
+        return value.startsWith("#") || value.indexOf('.') < 0 && value.indexOf('/') < 0;
     }
 
     private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain) {

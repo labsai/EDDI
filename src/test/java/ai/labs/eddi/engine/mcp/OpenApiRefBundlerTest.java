@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.parser.OpenAPIV3Parser;
+import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -221,6 +224,57 @@ class OpenApiRefBundlerTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> OpenApiRefBundler.bundle(specReferencing("https://example.com/defs.json#/Missing"), null, fetcher));
         assertTrue(e.getMessage().contains("points at nothing"), e.getMessage());
+    }
+
+    private static String specWithMapping(String mappingValue) {
+        return """
+                {"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"Pet":{"type":"object","properties":{"kind":{"type":"string"}},
+                   "discriminator":{"propertyName":"kind","mapping":{"dog":"%s"}}},
+                   "Dog":{"type":"object"}}}}
+                """.formatted(mappingValue);
+    }
+
+    @Test
+    @DisplayName("a discriminator mapping to a remote schema is refused before parsing: it is not a $ref, but the parser fetches it")
+    void remoteDiscriminatorMappingRefused() {
+        // SchemaProcessor.processDiscriminatorSchema turns each mapping value into a
+        // schema $ref and resolves it - a fetch the $ref walk alone did not see.
+        OpenApiSpecFetcher fetcher = mock(OpenApiSpecFetcher.class);
+        for (String value : new String[]{"http://169.254.169.254/latest/dog.json", "https://evil.example/dog.json#/Dog", "dog.yaml"}) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> McpApiToolBuilder.parseSpec(specWithMapping(value), fetcher), value);
+            assertTrue(e.getMessage().contains("discriminator mapping"), e.getMessage());
+        }
+        verify(fetcher, never()).fetchSpec(anyString());
+    }
+
+    @Test
+    @DisplayName("an internal discriminator mapping - a #/ reference or a bare component name - still parses")
+    void internalDiscriminatorMappingKept() {
+        OpenApiSpecFetcher fetcher = mock(OpenApiSpecFetcher.class);
+        assertEquals("#/components/schemas/Dog", McpApiToolBuilder.parseSpec(specWithMapping("#/components/schemas/Dog"), fetcher)
+                .getComponents().getSchemas().get("Pet").getDiscriminator().getMapping().get("dog"));
+        assertEquals("Dog", McpApiToolBuilder.parseSpec(specWithMapping("Dog"), fetcher)
+                .getComponents().getSchemas().get("Pet").getDiscriminator().getMapping().get("dog"));
+        verify(fetcher, never()).fetchSpec(anyString());
+    }
+
+    @Test
+    @DisplayName("backstop: handed a remote $ref directly, the parser refuses it from its block list, before any DNS lookup")
+    void parserBlockListRefusesEveryHost() {
+        // Bypasses the bundler on purpose: if a reference-bearing field were ever
+        // missed, this is what the parser does with it. The .invalid host cannot
+        // resolve, so a DNS failure would read "Failed to resolve IP"; the deny list
+        // is checked first and says so instead.
+        String spec = specReferencing("https://refs.example.invalid/defs.json#/Pet");
+        for (String version : new String[]{"3.0.0", "3.1.0"}) {
+            SwaggerParseResult result = new OpenAPIV3Parser().readContents(spec.replace("3.0.0", version), null,
+                    McpApiToolBuilder.parseOptions());
+            String messages = String.valueOf(result.getMessages());
+            assertTrue(messages.contains("explicit denylist"), version + ": " + messages);
+            assertFalse(messages.contains("Failed to resolve IP"), version + ": " + messages);
+        }
     }
 
     @Test

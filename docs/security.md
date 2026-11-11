@@ -631,7 +631,11 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > followed same-scheme redirects unchecked and read the body without a limit.
 > A recursive schema across remote documents is cut where it recurses (an empty
 > schema), and a schema `$id` is dropped, since every reference is already
-> resolved.
+> resolved. A discriminator `mapping` value is resolved by the parser like a
+> `$ref`, so one outside the document is refused. Backstop: the parser runs
+> with a remote-reference deny list of `*`, which its checker applies to every
+> host before any DNS lookup, so a reference-bearing field the bundler did not
+> know about is refused rather than fetched.
 
 ### Scheme Allowlist
 
