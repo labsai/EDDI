@@ -234,7 +234,8 @@ public class HealthTurnRecorder {
         } catch (RuntimeException e) {
             if (due(lastCleanupWarning)) {
                 LOGGER.warnf("Could not check or remove the Agent Health rows of an erased or deleted conversation (%s); the daily "
-                        + "orphan sweep removes them: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
+                        + "orphan sweep removes them if it can check them within its window, else they expire with "
+                        + "eddi.health.facts-retention: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
             }
         }
     }

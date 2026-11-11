@@ -115,6 +115,8 @@ public class HealthTurnRetention {
      */
     long removeOrphans() {
         if (conversations == null || !conversations.isResolvable()) {
+            LOGGER.warn("Agent Health orphan sweep skipped: no conversation store to check against; rows of deleted "
+                    + "conversations expire with eddi.health.facts-retention");
             return 0L;
         }
         Instant since = clock.instant().minus(settings.orphanSweepWindow());

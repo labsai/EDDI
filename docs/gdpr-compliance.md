@@ -200,8 +200,9 @@ principal, not a user: erasing or exporting it is refused with 400.
     conversation that no longer exists — is deleted right after the write when that check and the
     clean-up succeed ([details](agent-health.md#gdpr)). If a node did not confirm the cluster stop,
     the fence had expired, the conversation check cannot answer, or the clean-up delete fails, the
-    row stays — with a WARN — until a daily orphan sweep finds its conversation gone (the erasure
-    deletes the user's conversations) and deletes it. That sweep only looks at rows written within
+    row stays until a daily orphan sweep finds its conversation gone (the erasure deletes the user's
+    conversations) and deletes it. Failed checks and clean-ups log a rate-limited WARN, not one per
+    row, and an expired fence logs nothing. That sweep only looks at rows captured within
     `eddi.health.orphan-sweep-window` (48 hours, by the time the row was captured, not written),
     checks at most `eddi.health.orphan-sweep-max` conversations per run without resuming where it
     stopped, and keeps a row whenever the conversation store cannot answer. A failure that outlasts
