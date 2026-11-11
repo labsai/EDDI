@@ -101,6 +101,7 @@ class ReservedPrincipalsTest {
             Map.entry("bounce:", "email suppression reason, e.g. bounce:5.1.1 (EmailReplySender)"),
             Map.entry("in:", "email ledger idempotency key of an inbound mail"),
             Map.entry("imap:", "email ledger sourceRef (IMAP folder:uidvalidity:uid)"),
+            Map.entry("signature-of:", "email ledger sourceRef of a DKIM replay marker, naming the mail's own row (EmailInboundProcessor)"),
             Map.entry("email-poll:", "schedule name (EmailPollSchedules)"),
             Map.entry("loop:", "inbound mail refusal reason"),
             Map.entry("unauthenticated:", "inbound mail refusal reason"),

@@ -292,7 +292,7 @@ public class SenderAuthenticator {
         String refusal = null;
         for (DkimResult pass : passing) {
             if (dmarc.aligned(pass.domain(), fromDomain, policy.mode())) {
-                String why = policyRefusal(pass, verification, parsed, evaluatedAt);
+                String why = policyRefusal(pass, verification, evaluatedAt);
                 if (why == null) {
                     return new MailAuthentication(Verdict.ALIGNED_PASS, pass.domain(),
                             "a signature of the From domain verifies (" + mode(policy) + " alignment)", false, results,
@@ -318,7 +318,7 @@ public class SenderAuthenticator {
      * Why an aligned, verifying signature still does not authenticate this message,
      * or null when it does. A fixed sentence, never message text.
      */
-    String policyRefusal(DkimResult pass, DkimVerifier.Verification verification, InboundMail parsed, Instant evaluatedAt) {
+    String policyRefusal(DkimResult pass, DkimVerifier.Verification verification, Instant evaluatedAt) {
         String content = contentHeadersRefusal(pass, verification, requireSignedContentHeaders);
         if (content != null) {
             return content;
