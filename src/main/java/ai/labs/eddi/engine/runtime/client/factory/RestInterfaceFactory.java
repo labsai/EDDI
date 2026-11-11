@@ -61,14 +61,22 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         this.selfResolved = true;
     }
 
+    /**
+     * A loopback client for {@code clazz}. On a store interface,
+     * {@code getCurrentVersion} is sent over HTTP like every other endpoint
+     * ({@link CurrentVersionRouting} says why it otherwise would not be).
+     */
     @Override
     public <T> T get(Class<T> clazz) {
-        RestClientBuilder builder = RestClientBuilder.newBuilder().baseUri(URI.create(apiServerURI));
         LoopbackCallerAuthFilter filter = selfResolved ? resolveAuthFilter() : null;
-        if (filter != null) {
-            builder = builder.register(filter);
-        }
-        return builder.build(clazz);
+        T client = loopbackBuilder(URI.create(apiServerURI), filter).build(clazz);
+        return CurrentVersionRouting.route(clazz, client, apiServerURI,
+                storeUri -> loopbackBuilder(storeUri, filter).build(CurrentVersionRouting.CurrentVersionEndpoint.class));
+    }
+
+    private static RestClientBuilder loopbackBuilder(URI baseUri, LoopbackCallerAuthFilter filter) {
+        RestClientBuilder builder = RestClientBuilder.newBuilder().baseUri(baseUri);
+        return filter != null ? builder.register(filter) : builder;
     }
 
     /** The address {@link #get(Class)} clients call. */
@@ -83,7 +91,9 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     @Override
     public <T> T get(Class<T> clazz, String serverUrl) {
-        return RestClientBuilder.newBuilder().baseUri(URI.create(serverUrl)).build(clazz);
+        T client = RestClientBuilder.newBuilder().baseUri(URI.create(serverUrl)).build(clazz);
+        return CurrentVersionRouting.route(clazz, client, serverUrl,
+                storeUri -> RestClientBuilder.newBuilder().baseUri(storeUri).build(CurrentVersionRouting.CurrentVersionEndpoint.class));
     }
 
     /**
