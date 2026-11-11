@@ -48,6 +48,26 @@ export function ResolutionSplit({ measure, onDrill }: { measure: Measure; onDril
       </p>
     );
   }
+  if (split.withheld) {
+    // Coverage is below the minimum: no shares to draw, but the sessions behind each source are real.
+    return (
+      <div className="space-y-1" data-testid="resolution-split-withheld">
+        <p className="text-xs text-muted-foreground">
+          {t("health.resolution.withheld", "The split is withheld while too few sessions have a known outcome. Sessions per source:")}
+        </p>
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+          {split.parts.map((p) => (
+            <li key={p.key} className="px-1">
+              <span className="block font-medium text-foreground">{t(SEGMENT[p.key].label[0], SEGMENT[p.key].label[1])}</span>
+              <span className="block tabular-nums text-muted-foreground" data-testid={`resolution-n-${p.key}`}>
+                {t("health.sampleSize", { n: p.n, defaultValue: "n={{n}}" })}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   return (
     <div className="space-y-2" data-testid="resolution-split">
       <p className="text-xs text-muted-foreground">{t("health.resolution.shareNote", "Where the resolved sessions come from")}</p>

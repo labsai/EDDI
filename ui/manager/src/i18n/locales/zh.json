@@ -4496,7 +4496,8 @@
       "newer": "较新",
       "same": "请选择两个不同的版本。",
       "olderWindow": "较旧版本的最后",
-      "needTwo": "此智能体只有一个版本，暂时没有可比较的内容。"
+      "needTwo": "此智能体只有一个版本，暂时没有可比较的内容。",
+      "noTurns": "v{{version}} 在其时间窗口内没有轮次，因此没有数值。"
     },
     "profile": {
       "open": "配置文件",
@@ -4584,7 +4585,8 @@
       "worse": "更差",
       "vsBaseline": "与上一时间段相比",
       "significant": "显著",
-      "notSignificant": "在正常波动范围内"
+      "notSignificant": "在正常波动范围内",
+      "untested": "未做显著性检验"
     },
     "critical": "关键指标：决定智能体的状态",
     "informational": "仅供参考",
@@ -4615,7 +4617,8 @@
       "selfReported": "自行报告",
       "selfReportedHint": "智能体自己的模型报告问题已解决。证据较弱。",
       "shareNote": "已解决会话的来源",
-      "whatMeans": "这些分类是什么意思？"
+      "whatMeans": "这些分类是什么意思？",
+      "withheld": "已知结果的会话过少，因此暂不显示构成比例。各来源的会话数："
     },
     "restricted": "您无权访问此部分。",
     "noMeasures": "此部分暂无指标。",
@@ -4624,9 +4627,9 @@
     "coverage": "结果覆盖率 {{value}}",
     "sessions": {
       "reviewDisabledTitle": "此版本已关闭对话审阅",
-      "reviewDisabledBody": "健康度数字不需要它，但列出背后的会话需要。请在智能体配置中启用对话审阅，并部署新版本。",
-      "forbiddenTitle": "您无权读取此智能体的对话",
-      "forbiddenBody": "列出会话需要读取该智能体对话的权限。请向智能体所有者申请访问权限。",
+      "reviewDisabledBody": "健康指标不需要它，但列出其背后的会话需要。请在智能体配置中启用对话审阅并部署新版本，或选择已启用的版本。",
+      "forbiddenTitle": "只有维护此智能体的人才能列出其会话",
+      "forbiddenBody": "列出会话需要对该智能体的编辑权限，与审阅其对话相同。健康指标本身对任何可查看该智能体的人开放。请向智能体所有者申请权限。",
       "title": "会话",
       "empty": "没有匹配的会话。",
       "started": "开始时间",
@@ -4639,7 +4642,10 @@
       "open": "打开",
       "more": "下一页",
       "evidence": "依据：{{list}}",
-      "previous": "上一页"
+      "previous": "上一页",
+      "notJudged": "不会为该来源评估结果",
+      "provisionalHint": "仍处于不活跃窗口内：之后的轮次可能改变该结果。",
+      "reviewScope": "仅列出已启用对话审阅的版本的会话。"
     },
     "noTrend": "有数据的天数不足，无法显示趋势。",
     "sparklineLabel": "{{label}}在该时间段内，从 {{min}} 到 {{max}}",
@@ -4658,7 +4664,8 @@
       "sortTraffic": "流量",
       "incident_other": "{{failureClass}}：{{count}} 个智能体，{{from}} 至 {{to}}",
       "loadMore": "加载更多",
-      "incident_one": "{{failureClass}}：{{count}} 个智能体，{{from}} 至 {{to}}"
+      "incident_one": "{{failureClass}}：{{count}} 个智能体，{{from}} 至 {{to}}",
+      "emptyStatus": "此部署尚未计算智能体状态，因此状态筛选不会匹配任何智能体。"
     },
     "measures": {
       "agentFailureRate": "智能体导致的故障",
@@ -4682,7 +4689,8 @@
       "engagedSessions": "有互动的会话",
       "distinctUsers": "独立用户",
       "returningUserShare": "回访用户",
-      "turnsPerSession": "每会话回合数"
+      "turnsPerSession": "每会话回合数",
+      "apdexWithT": "响应时间（Apdex，T = {{t}}）"
     },
     "sections": {
       "reliability": "可靠性",

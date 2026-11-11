@@ -50,6 +50,12 @@ describe("drillDownDenial", () => {
     expect(drillDownDenial(new ApiClientError(403, "no", "/x", undefined, { reason: "FORBIDDEN" }))).toBe("FORBIDDEN");
   });
 
+  it("reads the reason from the backend's whole 403 body", () => {
+    const body = (reason: string) => ({ error: "forbidden", reason, message: "Listing sessions needs EDIT on the agent." });
+    expect(drillDownDenial(new ApiClientError(403, "m", "/x", "forbidden", body("REVIEW_DISABLED")))).toBe("REVIEW_DISABLED");
+    expect(drillDownDenial(new ApiClientError(403, "m", "/x", "forbidden", body("FORBIDDEN")))).toBe("FORBIDDEN");
+  });
+
   it("reads a 403 without a recognisable reason as FORBIDDEN, and other errors as no denial", () => {
     expect(drillDownDenial(new ApiClientError(403, "no"))).toBe("FORBIDDEN");
     expect(drillDownDenial(new ApiClientError(500, "boom"))).toBeNull();

@@ -4496,7 +4496,8 @@
       "newer": "최신",
       "same": "서로 다른 두 버전을 선택하세요.",
       "olderWindow": "이전 버전의 마지막",
-      "needTwo": "이 에이전트에는 버전이 하나뿐이라 아직 비교할 것이 없습니다."
+      "needTwo": "이 에이전트에는 버전이 하나뿐이라 아직 비교할 것이 없습니다.",
+      "noTurns": "v{{version}}은(는) 해당 기간에 턴이 없어 값이 없습니다."
     },
     "profile": {
       "open": "프로필",
@@ -4584,7 +4585,8 @@
       "worse": "악화",
       "vsBaseline": "이전 기간 대비",
       "significant": "유의미",
-      "notSignificant": "정상 변동 범위 내"
+      "notSignificant": "정상 변동 범위 내",
+      "untested": "유의성 검정 안 함"
     },
     "critical": "핵심 지표: 에이전트의 상태를 좌우합니다",
     "informational": "참고용",
@@ -4615,7 +4617,8 @@
       "selfReported": "자체 보고",
       "selfReportedHint": "에이전트 자신의 모델이 문제가 해결되었다고 보고했습니다. 근거가 약합니다.",
       "shareNote": "해결된 세션의 출처",
-      "whatMeans": "이 분류는 무슨 뜻인가요?"
+      "whatMeans": "이 분류는 무슨 뜻인가요?",
+      "withheld": "결과가 확인된 세션이 너무 적어 구성 비율을 표시하지 않습니다. 출처별 세션 수:"
     },
     "restricted": "이 섹션에 접근할 권한이 없습니다.",
     "noMeasures": "이 섹션에는 아직 지표가 없습니다.",
@@ -4624,9 +4627,9 @@
     "coverage": "결과 커버리지 {{value}}",
     "sessions": {
       "reviewDisabledTitle": "이 버전에서는 대화 검토가 꺼져 있습니다",
-      "reviewDisabledBody": "상태 수치에는 필요하지 않지만, 그 근거가 된 세션을 나열하려면 필요합니다. 에이전트 설정에서 대화 검토를 켜고 새 버전을 배포하세요.",
-      "forbiddenTitle": "이 에이전트의 대화를 읽을 권한이 없습니다",
-      "forbiddenBody": "세션을 나열하려면 에이전트의 대화를 읽을 권한이 필요합니다. 에이전트 소유자에게 접근 권한을 요청하세요.",
+      "reviewDisabledBody": "상태 수치에는 필요하지 않지만 그 근거가 되는 세션을 나열하려면 필요합니다. 에이전트 설정에서 대화 검토를 켜고 새 버전을 배포하거나, 켜진 버전을 선택하세요.",
+      "forbiddenTitle": "이 에이전트를 관리하는 사람만 세션을 나열할 수 있습니다",
+      "forbiddenBody": "세션을 나열하려면 대화 검토와 마찬가지로 에이전트에 대한 편집 권한이 필요합니다. 상태 수치 자체는 에이전트를 볼 수 있는 모든 사람이 볼 수 있습니다. 에이전트 소유자에게 권한을 요청하세요.",
       "title": "세션",
       "empty": "일치하는 세션이 없습니다.",
       "started": "시작",
@@ -4639,7 +4642,10 @@
       "open": "열기",
       "more": "다음 페이지",
       "evidence": "근거: {{list}}",
-      "previous": "이전 페이지"
+      "previous": "이전 페이지",
+      "notJudged": "이 출처는 결과를 평가하지 않습니다",
+      "provisionalHint": "아직 비활성 기간 안입니다. 이후 턴이 이 결과를 바꿀 수 있습니다.",
+      "reviewScope": "대화 검토가 켜진 버전의 세션만 표시됩니다."
     },
     "noTrend": "추세를 보여 줄 만큼 데이터가 있는 날이 충분하지 않습니다.",
     "sparklineLabel": "기간 중 {{label}}, {{min}}에서 {{max}}까지",
@@ -4658,7 +4664,8 @@
       "sortTraffic": "트래픽",
       "incident_other": "{{failureClass}}: 에이전트 {{count}}개, {{from}} ~ {{to}}",
       "loadMore": "더 보기",
-      "incident_one": "{{failureClass}}: 에이전트 {{count}}개, {{from}} ~ {{to}}"
+      "incident_one": "{{failureClass}}: 에이전트 {{count}}개, {{from}} ~ {{to}}",
+      "emptyStatus": "이 배포에서는 아직 에이전트 상태를 계산하지 않아 상태 필터와 일치하는 에이전트가 없습니다."
     },
     "measures": {
       "agentFailureRate": "에이전트로 인한 실패",
@@ -4682,7 +4689,8 @@
       "engagedSessions": "상호작용이 있는 세션",
       "distinctUsers": "고유 사용자",
       "returningUserShare": "재방문 사용자",
-      "turnsPerSession": "세션당 턴"
+      "turnsPerSession": "세션당 턴",
+      "apdexWithT": "응답 시간(Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "신뢰성",

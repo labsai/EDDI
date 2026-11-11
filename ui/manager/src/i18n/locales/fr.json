@@ -4544,7 +4544,8 @@
       "newer": "Plus récente",
       "same": "Choisissez deux versions différentes.",
       "olderWindow": "Derniers jours de l'ancienne version",
-      "needTwo": "Cet agent n'a qu'une version : il n'y a encore rien à comparer."
+      "needTwo": "Cet agent n'a qu'une version : il n'y a encore rien à comparer.",
+      "noTurns": "v{{version}} n'a aucun tour dans sa fenêtre, donc aucune valeur."
     },
     "profile": {
       "open": "Profil",
@@ -4633,7 +4634,8 @@
       "worse": "moins bien",
       "vsBaseline": "par rapport à la période précédente",
       "significant": "significatif",
-      "notSignificant": "dans la variation normale"
+      "notSignificant": "dans la variation normale",
+      "untested": "non testé pour la significativité"
     },
     "critical": "Mesure critique : elle détermine le statut de l'agent",
     "informational": "À titre indicatif",
@@ -4664,7 +4666,8 @@
       "selfReported": "Auto-déclaré",
       "selfReportedHint": "Le modèle de l'agent a lui-même déclaré le problème résolu. Preuve faible.",
       "shareNote": "D'où viennent les sessions résolues",
-      "whatMeans": "Que signifient ces catégories ?"
+      "whatMeans": "Que signifient ces catégories ?",
+      "withheld": "La répartition est retenue tant que trop peu de sessions ont un résultat connu. Sessions par source :"
     },
     "restricted": "Vous n'avez pas accès à cette section.",
     "noMeasures": "Aucune mesure dans cette section pour l'instant.",
@@ -4673,9 +4676,9 @@
     "coverage": "Couverture des résultats {{value}}",
     "sessions": {
       "reviewDisabledTitle": "La revue des conversations est désactivée pour cette version",
-      "reviewDisabledBody": "Les chiffres de santé n'en ont pas besoin, mais la liste des sessions qui les sous-tendent, si. Activez la revue des conversations dans la configuration de l'agent et déployez une nouvelle version.",
-      "forbiddenTitle": "Vous n'avez pas le droit de lire les conversations de cet agent",
-      "forbiddenBody": "Lister les sessions exige l'autorisation de lire les conversations de l'agent. Demandez l'accès au propriétaire de l'agent.",
+      "reviewDisabledBody": "Les indicateurs de santé n'en ont pas besoin, mais lister les sessions qui les sous-tendent, si. Activez la revue des conversations dans la configuration de l'agent et déployez une nouvelle version, ou choisissez une version qui l'a activée.",
+      "forbiddenTitle": "Seules les personnes qui gèrent cet agent peuvent lister ses sessions",
+      "forbiddenBody": "Lister les sessions exige le droit de modification sur l'agent, comme pour revoir ses conversations. Les indicateurs de santé eux-mêmes sont ouverts à toute personne pouvant voir l'agent. Demandez l'accès au propriétaire de l'agent.",
       "title": "Sessions",
       "empty": "Aucune session ne correspond.",
       "started": "Début",
@@ -4688,7 +4691,10 @@
       "open": "Ouvrir",
       "more": "Page suivante",
       "evidence": "Preuve : {{list}}",
-      "previous": "Page précédente"
+      "previous": "Page précédente",
+      "notJudged": "Les résultats ne sont pas évalués pour cette origine",
+      "provisionalHint": "Encore dans sa fenêtre d'inactivité : un tour ultérieur peut modifier ce résultat.",
+      "reviewScope": "Seules les sessions des versions dont la revue des conversations est activée sont listées."
     },
     "noTrend": "Pas assez de jours avec des données pour une tendance.",
     "sparklineLabel": "{{label}} sur la période, de {{min}} à {{max}}",
@@ -4708,7 +4714,8 @@
       "incident_one": "{{failureClass}} : {{count}} agent, du {{from}} au {{to}}",
       "incident_many": "{{failureClass}} : {{count}} d'agents, du {{from}} au {{to}}",
       "incident_other": "{{failureClass}} : {{count}} agents, du {{from}} au {{to}}",
-      "loadMore": "Charger plus"
+      "loadMore": "Charger plus",
+      "emptyStatus": "Les statuts des agents ne sont pas encore calculés sur ce déploiement : un filtre de statut ne correspond à aucun agent."
     },
     "measures": {
       "agentFailureRate": "Échecs imputables à l'agent",
@@ -4732,7 +4739,8 @@
       "engagedSessions": "Sessions engagées",
       "distinctUsers": "Utilisateurs distincts",
       "returningUserShare": "Utilisateurs récurrents",
-      "turnsPerSession": "Tours par session"
+      "turnsPerSession": "Tours par session",
+      "apdexWithT": "Temps de réponse (Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "Fiabilité",

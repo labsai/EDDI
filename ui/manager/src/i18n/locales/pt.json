@@ -4544,7 +4544,8 @@
       "newer": "Mais recente",
       "same": "Escolha duas versões diferentes.",
       "olderWindow": "Últimos dias da versão mais antiga",
-      "needTwo": "Este agente tem só uma versão, então ainda não há o que comparar."
+      "needTwo": "Este agente tem só uma versão, então ainda não há o que comparar.",
+      "noTurns": "v{{version}} não tem turnos na sua janela, por isso não tem valores."
     },
     "profile": {
       "open": "Perfil",
@@ -4633,7 +4634,8 @@
       "worse": "pior",
       "vsBaseline": "em relação ao período anterior",
       "significant": "significativo",
-      "notSignificant": "dentro da variação normal"
+      "notSignificant": "dentro da variação normal",
+      "untested": "sem teste de significância"
     },
     "critical": "Medida crítica: define o estado do agente",
     "informational": "Apenas informativa",
@@ -4664,7 +4666,8 @@
       "selfReported": "Autorrelatado",
       "selfReportedHint": "O próprio modelo do agente informou que o problema foi resolvido. Evidência fraca.",
       "shareNote": "De onde vêm as sessões resolvidas",
-      "whatMeans": "O que isso significa?"
+      "whatMeans": "O que isso significa?",
+      "withheld": "A divisão fica retida enquanto poucas sessões têm um resultado conhecido. Sessões por fonte:"
     },
     "restricted": "Você não tem acesso a esta seção.",
     "noMeasures": "Esta seção ainda não tem medidas.",
@@ -4673,9 +4676,9 @@
     "coverage": "Cobertura de resultados {{value}}",
     "sessions": {
       "reviewDisabledTitle": "A revisão de conversas está desativada nesta versão",
-      "reviewDisabledBody": "Os números de saúde não precisam dela, mas listar as sessões por trás deles precisa. Ative a revisão de conversas na configuração do agente e implante uma nova versão.",
-      "forbiddenTitle": "Você não pode ler as conversas deste agente",
-      "forbiddenBody": "Listar sessões exige permissão para ler as conversas do agente. Peça acesso ao proprietário do agente.",
+      "reviewDisabledBody": "Os números de saúde não precisam dela, mas listar as sessões por trás deles precisa. Ative a revisão de conversas na configuração do agente e implante uma nova versão, ou escolha uma versão que a tenha ativada.",
+      "forbiddenTitle": "Só quem mantém este agente pode listar as suas sessões",
+      "forbiddenBody": "Listar sessões exige permissão de edição no agente, tal como rever as suas conversas. Os números de saúde em si estão abertos a quem pode ver o agente. Peça acesso ao proprietário do agente.",
       "title": "Sessões",
       "empty": "Nenhuma sessão corresponde.",
       "started": "Início",
@@ -4688,7 +4691,10 @@
       "open": "Abrir",
       "more": "Próxima página",
       "evidence": "Evidência: {{list}}",
-      "previous": "Página anterior"
+      "previous": "Página anterior",
+      "notJudged": "Os resultados não são avaliados para esta origem",
+      "provisionalHint": "Ainda dentro da janela de inatividade: um turno posterior pode mudar este resultado.",
+      "reviewScope": "Só são listadas as sessões de versões com a revisão de conversas ativada."
     },
     "noTrend": "Poucos dias com dados para uma tendência.",
     "sparklineLabel": "{{label}} no período, de {{min}} a {{max}}",
@@ -4708,7 +4714,8 @@
       "incident_one": "{{failureClass}}: {{count}} agente, de {{from}} a {{to}}",
       "incident_many": "{{failureClass}}: {{count}} de agentes, de {{from}} a {{to}}",
       "incident_other": "{{failureClass}}: {{count}} agentes, de {{from}} a {{to}}",
-      "loadMore": "Carregar mais"
+      "loadMore": "Carregar mais",
+      "emptyStatus": "Os estados dos agentes ainda não são calculados nesta implantação, por isso nenhum agente corresponde a um filtro de estado."
     },
     "measures": {
       "agentFailureRate": "Falhas causadas pelo agente",
@@ -4732,7 +4739,8 @@
       "engagedSessions": "Sessões com interação",
       "distinctUsers": "Usuários distintos",
       "returningUserShare": "Usuários recorrentes",
-      "turnsPerSession": "Turnos por sessão"
+      "turnsPerSession": "Turnos por sessão",
+      "apdexWithT": "Tempo de resposta (Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "Confiabilidade",

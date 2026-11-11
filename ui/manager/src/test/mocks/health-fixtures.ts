@@ -30,6 +30,12 @@ export const HEALTH_AGENTS = {
   paged: "health-paged",
   /** The whole health endpoint answers 403. */
   denied: "health-denied",
+  /** The health endpoint answers 404 (unknown agent). */
+  missing: "health-missing",
+  /** Outcome coverage is below the minimum: the rates are withheld (null) but `n` stays. */
+  lowCoverage: "health-lowcoverage",
+  /** The outcome evaluation is catching up: values are kept and carry a hint. */
+  evaluating: "health-evaluating",
   /** Unknown section, unknown measure id, null value with a delta. */
   unknown: "health-unknown",
 } as const;
@@ -60,7 +66,9 @@ function reliability(over: Record<string, Partial<Measure>> = {}): HealthSection
     measures: [
       measure({ id: "agentFailureRate", label: "Agent-caused failures", unit: "ratio", value: 0.004, n: 4210, interval: { low: 0.002, high: 0.007 }, baseline: 0.005, delta: -0.001, critical: true, thresholds: lower(0.01, 0.03), ...over.agentFailureRate }),
       measure({ id: "platformFailureRate", label: "Platform failures", kind: "INFORMATIONAL", unit: "ratio", value: 0.011, n: 4210, band: "GREY", ...over.platformFailureRate }),
-      measure({ id: "apdex", label: "Apdex", unit: "score", value: 0.93, n: 4210, thresholds: higher(0.85, 0.7), ...over.apdex }),
+      // The label names the Apdex threshold T; there is no separate field for it.
+      measure({ id: "apdex", label: "Response time (Apdex, T = 4 s)", unit: "score", value: 0.93, n: 4210, thresholds: higher(0.85, 0.7), ...over.apdex }),
+      // No variance to test: `significant` is always false, even with a delta.
       measure({ id: "turnDurationP95", label: "Turn duration (p95)", unit: "ms", value: 3200, n: 4210, baseline: 3100, delta: 100, thresholds: lower(4000, 8000), ...over.turnDurationP95 }),
     ],
   };
@@ -194,6 +202,27 @@ export function healthFor(agentId: string): AgentHealth {
       h.sections.quality = { restricted: true, measures: [] };
       return h;
     }
+    case HEALTH_AGENTS.lowCoverage: {
+      const h = baseHealth(agentId, "Few Outcomes");
+      const hint = "Outcome coverage is 32 %, below the minimum of 50 %";
+      const withheld = (m: Measure): Measure => ({ ...m, value: null, interval: null, delta: null, baseline: null, significant: false, band: "GREY", hint });
+      h.sections.effectiveness = effectiveness({}, 0.32);
+      const eff = h.sections.effectiveness;
+      eff.measures = eff.measures.map((m) => {
+        if (m.id === "outcomeCoverage") return { ...m, value: 0.32, n: 1820, band: "RED" as const };
+        const w = withheld(m);
+        // Every part is null, too, but the sessions behind each source are counted.
+        return m.id === "resolutionRate" ? { ...w, breakdown: (m.breakdown ?? []).map((b) => ({ ...b, value: null })) } : w;
+      });
+      return h;
+    }
+    case HEALTH_AGENTS.evaluating: {
+      const h = baseHealth(agentId, "Catching Up");
+      const hint = "Outcomes are still being evaluated (through 2026-11-02)";
+      const eff = h.sections.effectiveness!;
+      eff.measures = eff.measures.map((m) => ({ ...m, hint }));
+      return h;
+    }
     case HEALTH_AGENTS.preH4: {
       const h = baseHealth(agentId, "Pre-status Agent");
       h.status = null;
@@ -252,8 +281,10 @@ export function days(count: number, end = "2026-11-10"): string[] {
   return Array.from({ length: count }, (_, i) => new Date(last - (count - 1 - i) * 86_400_000).toISOString().slice(0, 10));
 }
 
-export function seriesFor(measureId: string, base: number, unit: Series["unit"], count = 30): Series {
+/** Daily points; `allNull` answers a measure with no daily values yet (a point per day, every value null). */
+export function seriesFor(measureId: string, base: number, unit: Series["unit"], count = 30, allNull = false): Series {
   const points: SeriesPoint[] = days(count).map((day, i) => {
+    if (allNull) return { day, value: null, n: 0 };
     // One empty day, as the contract promises ("a point with value null, n 0").
     if (i === 7) return { day, value: null, n: 0 };
     const wobble = Math.sin(i / 3) * 0.1 + (i > 22 ? -0.15 : 0);
@@ -309,15 +340,28 @@ export function portfolioFixture(): Portfolio {
       item(HEALTH_AGENTS.healthy, "Support", {}),
       item(HEALTH_AGENTS.preH4, "Pre-status Agent", { sessions: 90, sessionsDelta: null }),
       item(HEALTH_AGENTS.noData, "Brand New Agent", { sessions: 12, sessionsDelta: null, keyMeasures: [] }),
+      // The period reaches past the turn-row retention: sessions cannot be counted, and the cost says why it has no value.
+      item(HEALTH_AGENTS.evaluating, "Long Window", {
+        sessions: null,
+        sessionsDelta: null,
+        hint: "Sessions cannot be counted beyond the 90-day turn retention.",
+        keyMeasures: [
+          measure({ id: "costPerSession", label: "Cost per session", unit: "usd", value: null, n: 0, band: "GREY", hint: "Sessions cannot be counted for this period" }),
+        ],
+      }),
     ],
-    platformIncidents: [{ from: "2026-11-08T02:00:00Z", to: "2026-11-08T03:30:00Z", failureClass: "RATE_LIMITED", agents: 12 }],
+    // Incidents are detected per day: `from` and `to` are days, not instants.
+    platformIncidents: [{ from: "2026-11-08", to: "2026-11-08", failureClass: "RATE_LIMITED", agents: 12 }],
     nextCursor: null,
   };
 }
 
 export const SESSION_ROWS: HealthSessionRow[] = [
+  // `sessionNo` is the step index the session starts at: 0 for a conversation's first session, the index of its first turn for a later one.
   { conversationId: "conv-aa", sessionNo: 0, startedAt: "2026-11-09T10:00:00Z", endedAt: "2026-11-09T10:05:00Z", agentVersion: 8, origin: "api", engaged: true, outcome: "ABANDONED", evidence: "inferred", provisional: false, turns: 6, costUsd: 0.031, failures: 1 },
   { conversationId: "conv-bb", sessionNo: 0, startedAt: "2026-11-09T11:00:00Z", endedAt: "2026-11-09T11:08:00Z", agentVersion: 8, origin: "v1", engaged: true, outcome: "ASSUMED_RESOLVED", evidence: "silence", provisional: false, turns: 4, costUsd: 0.02, failures: 0 },
-  { conversationId: "conv-cc", sessionNo: 1, startedAt: "2026-11-09T12:00:00Z", endedAt: null, agentVersion: 8, origin: "email", engaged: true, outcome: "RESOLVED", evidence: "external_event", provisional: true, turns: 9, costUsd: null, failures: 0 },
-  { conversationId: "conv-dd", sessionNo: 0, startedAt: "2026-11-09T13:00:00Z", endedAt: "2026-11-09T13:02:00Z", agentVersion: 7, origin: "api", engaged: true, outcome: "ASSUMED_RESOLVED", evidence: "agent_closed", provisional: false, turns: 3, costUsd: 0.011, failures: 0 },
+  { conversationId: "conv-cc", sessionNo: 17, startedAt: "2026-11-09T12:00:00Z", endedAt: null, agentVersion: 8, origin: "email", engaged: true, outcome: "RESOLVED", evidence: "external_event", provisional: true, turns: 9, costUsd: null, failures: 0 },
+  { conversationId: "conv-dd", sessionNo: 3, startedAt: "2026-11-09T13:00:00Z", endedAt: "2026-11-09T13:02:00Z", agentVersion: 7, origin: "api", engaged: true, outcome: "ASSUMED_RESOLVED", evidence: "agent_closed", provisional: false, turns: 3, costUsd: 0.011, failures: 0 },
+  // An origin that is not judged: no outcome, no evidence. Listed only when that origin is asked for.
+  { conversationId: "conv-ee", sessionNo: 0, startedAt: "2026-11-09T14:00:00Z", endedAt: "2026-11-09T14:01:00Z", agentVersion: 8, origin: "schedule", engaged: true, outcome: null, evidence: null, provisional: false, turns: 2, costUsd: 0.004, failures: 0 },
 ];

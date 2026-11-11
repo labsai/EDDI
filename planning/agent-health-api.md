@@ -330,3 +330,20 @@ What the H3 backend does where this contract leaves room. Nothing above changed 
 - **Series** of the effectiveness measures are per **session end day**; a day without closed sessions is `value: null, n: 0`.
 - Not done in H3: the "mostly assumed from silence" **reason** (H4 status rules; the breakdown carries what it needs), and
   `healthConfig` interactive-origin overrides (plan §4.5) — which origins are judged is fixed for now.
+
+## 14. How the Manager UI reads §12 and §13
+
+Not a contract: a record of what the UI does with the backend's precisions, so a later change here knows what to check.
+
+- Portfolio `sessions: null` renders "—" with the item's `hint`; `sessionsDelta: null` renders nothing. Key measures
+  without a value show their own `hint`.
+- `platformIncidents[].from/to` and every `period`, `baseline`, `dataThrough` and compare `window` value are UTC days.
+- A rate with `value: null` shows "—" and its `hint`; the resolution split lists each part's `n` instead of shares when
+  the measure and every part are `null`. A `hint` is shown whether or not there is a value.
+- `significant: false` on `turnDurationP95`, `costPerSession`, `tokensPerTurn`, `turnsPerSession`, `guardrailTripRate`,
+  `returningUserShare` and `outcomeCoverage` reads "not tested for significance" (the UI keeps the list of ids).
+- The Apdex label's `T = …` is parsed and put into the translated label.
+- The drill-down is not requested without EDIT (`canEdit` on the panel); a 403's `reason` picks the explanation.
+  `outcome`/`evidence` `null` render "—"; `sessionNo` is only part of the row key.
+- Statuses stay hidden while `status` is `null` (until H4); the profile, presets, export and report-link calls run against
+  mocks until H4, H4b and H5 land.

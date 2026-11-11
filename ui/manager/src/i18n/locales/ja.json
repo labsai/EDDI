@@ -4496,7 +4496,8 @@
       "newer": "新しい方",
       "same": "異なる2つのバージョンを選択してください。",
       "olderWindow": "古いバージョンの直近",
-      "needTwo": "このエージェントにはバージョンが1つしかないため、まだ比較するものがありません。"
+      "needTwo": "このエージェントにはバージョンが1つしかないため、まだ比較するものがありません。",
+      "noTurns": "v{{version}} はその期間にターンがないため、値がありません。"
     },
     "profile": {
       "open": "プロファイル",
@@ -4584,7 +4585,8 @@
       "worse": "悪化",
       "vsBaseline": "前の期間との比較",
       "significant": "有意",
-      "notSignificant": "通常の変動の範囲内"
+      "notSignificant": "通常の変動の範囲内",
+      "untested": "有意性は未検定"
     },
     "critical": "重要な指標: エージェントのステータスを左右します",
     "informational": "参考情報",
@@ -4615,7 +4617,8 @@
       "selfReported": "自己申告",
       "selfReportedHint": "エージェント自身のモデルが問題の解決を報告しました。根拠は弱いです。",
       "shareNote": "解決済みセッションの内訳",
-      "whatMeans": "これらは何を意味しますか？"
+      "whatMeans": "これらは何を意味しますか？",
+      "withheld": "結果が判明しているセッションが少なすぎるため、内訳は表示されません。ソース別のセッション数："
     },
     "restricted": "このセクションにはアクセスできません。",
     "noMeasures": "このセクションにはまだ指標がありません。",
@@ -4624,9 +4627,9 @@
     "coverage": "結果のカバー率 {{value}}",
     "sessions": {
       "reviewDisabledTitle": "このバージョンでは会話レビューが無効です",
-      "reviewDisabledBody": "健全性の数値には不要ですが、その元になったセッションを一覧するには必要です。エージェントの設定で会話レビューを有効にし、新しいバージョンをデプロイしてください。",
-      "forbiddenTitle": "このエージェントの会話を読み取る権限がありません",
-      "forbiddenBody": "セッションを一覧するには、エージェントの会話を読み取る権限が必要です。エージェントのオーナーにアクセスを依頼してください。",
+      "reviewDisabledBody": "ヘルスの数値には不要ですが、その根拠となるセッションの一覧には必要です。エージェントの設定で会話レビューを有効にして新しいバージョンをデプロイするか、有効なバージョンを選んでください。",
+      "forbiddenTitle": "このエージェントを管理する人だけがセッションを一覧できます",
+      "forbiddenBody": "セッションの一覧には、会話のレビューと同じく、エージェントの編集権限が必要です。ヘルスの数値自体は、エージェントを閲覧できる人なら誰でも見られます。エージェントの所有者にアクセスを依頼してください。",
       "title": "セッション",
       "empty": "一致するセッションはありません。",
       "started": "開始",
@@ -4639,7 +4642,10 @@
       "open": "開く",
       "more": "次のページ",
       "evidence": "根拠: {{list}}",
-      "previous": "前のページ"
+      "previous": "前のページ",
+      "notJudged": "このオリジンの結果は評価されません",
+      "provisionalHint": "まだ非アクティブ期間内です。以降のターンでこの結果が変わる可能性があります。",
+      "reviewScope": "会話レビューが有効なバージョンのセッションのみ表示されます。"
     },
     "noTrend": "傾向を示すには、データのある日数が足りません。",
     "sparklineLabel": "期間中の{{label}}（{{min}} から {{max}}）",
@@ -4658,7 +4664,8 @@
       "sortTraffic": "トラフィック",
       "incident_other": "{{failureClass}}: {{count}} エージェント、{{from}} から {{to}}",
       "loadMore": "さらに読み込む",
-      "incident_one": "{{failureClass}}: {{count}} エージェント、{{from}} から {{to}}"
+      "incident_one": "{{failureClass}}: {{count}} エージェント、{{from}} から {{to}}",
+      "emptyStatus": "このデプロイではエージェントのステータスがまだ算出されていないため、ステータスフィルターに一致するエージェントはありません。"
     },
     "measures": {
       "agentFailureRate": "エージェント起因の失敗",
@@ -4682,7 +4689,8 @@
       "engagedSessions": "やり取りのあったセッション",
       "distinctUsers": "ユニークユーザー",
       "returningUserShare": "リピーター",
-      "turnsPerSession": "セッションあたりのターン数"
+      "turnsPerSession": "セッションあたりのターン数",
+      "apdexWithT": "応答時間（Apdex、T = {{t}}）"
     },
     "sections": {
       "reliability": "信頼性",

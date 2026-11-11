@@ -4544,7 +4544,8 @@
       "newer": "Más reciente",
       "same": "Elige dos versiones distintas.",
       "olderWindow": "Últimos días de la versión anterior",
-      "needTwo": "Este agente solo tiene una versión, así que aún no hay nada que comparar."
+      "needTwo": "Este agente solo tiene una versión, así que aún no hay nada que comparar.",
+      "noTurns": "v{{version}} no tiene turnos en su ventana, así que no tiene valores."
     },
     "profile": {
       "open": "Perfil",
@@ -4633,7 +4634,8 @@
       "worse": "peor",
       "vsBaseline": "frente al periodo anterior",
       "significant": "significativo",
-      "notSignificant": "dentro de la variación normal"
+      "notSignificant": "dentro de la variación normal",
+      "untested": "sin prueba de significancia"
     },
     "critical": "Medida crítica: determina el estado del agente",
     "informational": "Solo informativa",
@@ -4664,7 +4666,8 @@
       "selfReported": "Autoinformado",
       "selfReportedHint": "El propio modelo del agente informó de que el problema estaba resuelto. Evidencia débil.",
       "shareNote": "De dónde proceden las sesiones resueltas",
-      "whatMeans": "¿Qué significan?"
+      "whatMeans": "¿Qué significan?",
+      "withheld": "El desglose se retiene mientras muy pocas sesiones tengan un resultado conocido. Sesiones por fuente:"
     },
     "restricted": "No tienes acceso a esta sección.",
     "noMeasures": "Esta sección aún no tiene medidas.",
@@ -4673,9 +4676,9 @@
     "coverage": "Cobertura de resultados {{value}}",
     "sessions": {
       "reviewDisabledTitle": "La revisión de conversaciones está desactivada en esta versión",
-      "reviewDisabledBody": "Las cifras de salud no la necesitan, pero listar las sesiones que hay detrás sí. Activa la revisión de conversaciones en la configuración del agente y despliega una nueva versión.",
-      "forbiddenTitle": "No puedes leer las conversaciones de este agente",
-      "forbiddenBody": "Listar sesiones requiere permiso para leer las conversaciones del agente. Pide acceso al propietario del agente.",
+      "reviewDisabledBody": "Las cifras de salud no lo necesitan, pero listar las sesiones que las respaldan sí. Activa la revisión de conversaciones en la configuración del agente y despliega una nueva versión, o elige una versión que la tenga activada.",
+      "forbiddenTitle": "Solo quienes mantienen este agente pueden listar sus sesiones",
+      "forbiddenBody": "Listar sesiones requiere permiso de edición sobre el agente, igual que revisar sus conversaciones. Las cifras de salud están abiertas a quien pueda ver el agente. Pide acceso al propietario del agente.",
       "title": "Sesiones",
       "empty": "Ninguna sesión coincide.",
       "started": "Inicio",
@@ -4688,7 +4691,10 @@
       "open": "Abrir",
       "more": "Página siguiente",
       "evidence": "Evidencia: {{list}}",
-      "previous": "Página anterior"
+      "previous": "Página anterior",
+      "notJudged": "Los resultados no se evalúan para este origen",
+      "provisionalHint": "Aún dentro de su ventana de inactividad: un turno posterior puede cambiar este resultado.",
+      "reviewScope": "Solo se listan las sesiones de versiones con la revisión de conversaciones activada."
     },
     "noTrend": "No hay suficientes días con datos para una tendencia.",
     "sparklineLabel": "{{label}} durante el periodo, de {{min}} a {{max}}",
@@ -4708,7 +4714,8 @@
       "incident_one": "{{failureClass}}: {{count}} agente, de {{from}} a {{to}}",
       "incident_many": "{{failureClass}}: {{count}} de agentes, de {{from}} a {{to}}",
       "incident_other": "{{failureClass}}: {{count}} agentes, de {{from}} a {{to}}",
-      "loadMore": "Cargar más"
+      "loadMore": "Cargar más",
+      "emptyStatus": "Los estados de los agentes aún no se calculan en este despliegue, por lo que ningún agente coincide con un filtro de estado."
     },
     "measures": {
       "agentFailureRate": "Fallos causados por el agente",
@@ -4732,7 +4739,8 @@
       "engagedSessions": "Sesiones con interacción",
       "distinctUsers": "Usuarios distintos",
       "returningUserShare": "Usuarios recurrentes",
-      "turnsPerSession": "Turnos por sesión"
+      "turnsPerSession": "Turnos por sesión",
+      "apdexWithT": "Tiempo de respuesta (Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "Fiabilidad",

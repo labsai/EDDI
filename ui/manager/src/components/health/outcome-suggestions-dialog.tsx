@@ -43,7 +43,12 @@ export function OutcomeSuggestionsDialog({ open, onClose, agentId }: { open: boo
                 <div className="flex flex-wrap items-center gap-2">
                   <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.action}</code>
                   <span aria-hidden="true">→</span>
-                  <Badge variant="secondary">{enumLabel(t, "outcome", s.suggested)}</Badge>
+                  {s.suggested === null || s.suggested === undefined ? (
+                    // The action's name matched no heuristic: nothing is suggested, the person decides.
+                    <span className="text-muted-foreground" data-testid="health-suggestion-none">—</span>
+                  ) : (
+                    <Badge variant="secondary">{enumLabel(t, "outcome", s.suggested)}</Badge>
+                  )}
                   <span className="ms-auto text-xs text-muted-foreground tabular-nums">
                     {t("health.count.sessions", { count: s.sessionsEndingWith, defaultValue: "{{count}} sessions" })}
                   </span>

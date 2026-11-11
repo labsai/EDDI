@@ -12,6 +12,7 @@ import {
   formatInterval,
   formatMeasureValue,
   isResolutionRate,
+  isUntestable,
   measureLabel,
 } from "./format";
 import { ResolutionSplit } from "./resolution-split";
@@ -27,7 +28,7 @@ function Delta({ measure }: { measure: Measure }) {
   const toneWord =
     tone === "better" ? t("health.delta.better", "better") : tone === "worse" ? t("health.delta.worse", "worse") : null;
   return (
-    <p className={cn("flex flex-wrap items-center gap-x-1.5 text-xs", TONE_CLASS[tone])} data-testid="health-delta" data-tone={tone}>
+    <p className={cn("flex flex-wrap items-center gap-x-1.5 text-xs", TONE_CLASS[tone])} data-testid="health-delta" data-tone={tone} data-significance={measure.significant ? "significant" : isUntestable(measure) ? "untested" : "variation"}>
       <Icon className="h-3.5 w-3.5 rtl:-scale-x-100" aria-hidden="true" />
       <span className="font-medium tabular-nums">{formatDelta(measure.delta, measure.unit, t("health.unit.pp", "pp"))}</span>
       <span className="text-muted-foreground">{t("health.delta.vsBaseline", "vs previous period")}</span>
@@ -36,7 +37,9 @@ function Delta({ measure }: { measure: Measure }) {
         ·{" "}
         {measure.significant
           ? t("health.delta.significant", "significant")
-          : t("health.delta.notSignificant", "within normal variation")}
+          : isUntestable(measure)
+            ? t("health.delta.untested", "not tested for significance")
+            : t("health.delta.notSignificant", "within normal variation")}
       </span>
     </p>
   );
@@ -83,7 +86,7 @@ export function MeasureCard({ measure, points, markers, actions, onResolutionDri
   return (
     <div className="space-y-2 rounded-lg border border-border bg-background/50 p-3" data-testid="health-measure" data-measure-id={measure.id}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+        <h4 className="flex items-center gap-1.5 text-sm font-medium text-foreground" data-testid="health-measure-label">
           {label}
           {measure.critical && (
             <span title={critical}>
@@ -112,7 +115,8 @@ export function MeasureCard({ measure, points, markers, actions, onResolutionDri
         )}
       </div>
 
-      {(noValue || measure.band === "GREY") && measure.hint && (
+      {/* A hint can accompany a value too: "Outcomes are still being evaluated" keeps the figure. */}
+      {measure.hint && (
         <p className="text-xs text-muted-foreground" data-testid="health-hint">
           {measure.hint}
         </p>

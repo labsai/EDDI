@@ -4537,7 +4537,8 @@
       "newer": "Newer",
       "same": "Pick two different versions.",
       "olderWindow": "Older version's last",
-      "needTwo": "This agent has only one version, so there is nothing to compare yet."
+      "needTwo": "This agent has only one version, so there is nothing to compare yet.",
+      "noTurns": "v{{version}} has no turns in its window, so it has no values."
     },
     "profile": {
       "open": "Profile",
@@ -4625,7 +4626,8 @@
       "worse": "worse",
       "vsBaseline": "vs previous period",
       "significant": "significant",
-      "notSignificant": "within normal variation"
+      "notSignificant": "within normal variation",
+      "untested": "not tested for significance"
     },
     "critical": "Critical measure: drives the agent's status",
     "informational": "For information",
@@ -4656,7 +4658,8 @@
       "selfReported": "Self-reported",
       "selfReportedHint": "The agent's own model reported the problem as solved. Weak evidence.",
       "shareNote": "Where the resolved sessions come from",
-      "whatMeans": "What do these mean?"
+      "whatMeans": "What do these mean?",
+      "withheld": "The split is withheld while too few sessions have a known outcome. Sessions per source:"
     },
     "restricted": "You don't have access to this section.",
     "noMeasures": "No measures in this section yet.",
@@ -4665,9 +4668,9 @@
     "coverage": "Outcome coverage {{value}}",
     "sessions": {
       "reviewDisabledTitle": "Conversation review is switched off for this version",
-      "reviewDisabledBody": "Health numbers do not need it, but listing the sessions behind them does. Enable conversation review in the agent's configuration and deploy a new version.",
-      "forbiddenTitle": "You may not read this agent's conversations",
-      "forbiddenBody": "Listing sessions needs permission to read the agent's conversations. Ask the agent's owner for access.",
+      "reviewDisabledBody": "Health numbers do not need it, but listing the sessions behind them does. Enable conversation review in the agent's configuration and deploy a new version, or pick a version that has it on.",
+      "forbiddenTitle": "Only people who maintain this agent can list its sessions",
+      "forbiddenBody": "Listing sessions needs edit permission on the agent, the same as reviewing its conversations. The health numbers themselves are open to anyone who can view it. Ask the agent's owner for access.",
       "title": "Sessions",
       "empty": "No sessions match.",
       "started": "Started",
@@ -4680,7 +4683,10 @@
       "open": "Open",
       "more": "Next page",
       "evidence": "Evidence: {{list}}",
-      "previous": "Previous page"
+      "previous": "Previous page",
+      "notJudged": "This origin is not judged for outcomes",
+      "provisionalHint": "Still inside its inactivity window: a later turn can change this outcome.",
+      "reviewScope": "Only sessions of versions with conversation review enabled are listed."
     },
     "noTrend": "Not enough days with data for a trend.",
     "sparklineLabel": "{{label}} over the period, from {{min}} to {{max}}",
@@ -4699,7 +4705,8 @@
       "sortTraffic": "Traffic",
       "incident_one": "{{failureClass}}: {{count}} agent, {{from}} to {{to}}",
       "incident_other": "{{failureClass}}: {{count}} agents, {{from}} to {{to}}",
-      "loadMore": "Load more"
+      "loadMore": "Load more",
+      "emptyStatus": "Agent statuses are not calculated on this deployment yet, so a status filter matches no agent."
     },
     "measures": {
       "agentFailureRate": "Agent-caused failures",
@@ -4723,7 +4730,8 @@
       "engagedSessions": "Engaged sessions",
       "distinctUsers": "Distinct users",
       "returningUserShare": "Returning users",
-      "turnsPerSession": "Turns per session"
+      "turnsPerSession": "Turns per session",
+      "apdexWithT": "Response time (Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "Reliability",

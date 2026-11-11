@@ -118,11 +118,16 @@ export interface PortfolioItem {
   status: HealthStatus | null;
   preset: string;
   topReason: Reason | null;
-  sessions: number;
+  /** `null` when sessions cannot be counted (the period reaches past the turn-row retention); `hint` then says why. */
+  sessions: number | null;
+  /** Relative change of `sessions`; `null` when either side is not counted or outcomes are still being evaluated. */
   sessionsDelta: number | null;
+  /** Why `sessions` is null (a field the contract's section 4 lacks; see section 12). */
+  hint?: string | null;
   keyMeasures: Measure[];
   platformIncident: boolean;
 }
+/** `from` and `to` are DAYS (`YYYY-MM-DD`), not instants: incidents are detected per day. */
 export interface PlatformIncident { from: string; to: string; failureClass: string; agents: number }
 export interface Portfolio { items: PortfolioItem[]; platformIncidents: PlatformIncident[]; nextCursor: string | null }
 export type PortfolioSort = "attention" | "name" | "traffic";
@@ -173,14 +178,18 @@ export const EVIDENCE_SOURCES: readonly EvidenceSource[] = [
 ];
 export interface HealthSessionRow {
   conversationId: string;
+  /** The step index the session starts at (0 for a conversation's first session), NOT an ordinal. */
   sessionNo: number;
   startedAt: string;
   endedAt: string | null;
   agentVersion: number | null;
   origin: string;
   engaged: boolean;
-  outcome: SessionOutcome | string;
-  evidence: EvidenceSource | string;
+  /** `null` for origins that are not judged (schedule, webhook, a2a, group-member, delegated, agent-test). */
+  outcome: SessionOutcome | string | null;
+  /** `null` together with `outcome`. */
+  evidence: EvidenceSource | string | null;
+  /** True while the session is inside its inactivity window: the outcome is the one known so far and may still change. */
   provisional: boolean;
   turns: number;
   costUsd: number | null;
@@ -190,7 +199,8 @@ export interface HealthSessionsPage { items: HealthSessionRow[]; nextCursor: str
 
 export interface OutcomeSuggestion {
   action: string;
-  suggested: SessionOutcome | string;
+  /** `null` when the action name matches no heuristic. */
+  suggested: SessionOutcome | string | null;
   sessionsEndingWith: number;
   reason: string;
 }
@@ -338,7 +348,11 @@ export async function downloadHealthExport(
 
 export type DrillDownDenial = "REVIEW_DISABLED" | "FORBIDDEN";
 
-/** Why the drill-down refused: the contract's `{ reason }` body on a 403. */
+/**
+ * Why the drill-down refused: the `reason` of the 403 body
+ * (`{ error: "forbidden", reason, message }`). `FORBIDDEN` means the caller lacks EDIT on the
+ * agent (the conversation-review reader rule); `REVIEW_DISABLED` that review is off on the version.
+ */
 export function drillDownDenial(error: unknown): DrillDownDenial | null {
   if (!(error instanceof ApiClientError) || error.status !== 403) return null;
   const reason = (error.body as { reason?: unknown } | undefined)?.reason;

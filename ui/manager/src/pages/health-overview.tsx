@@ -7,7 +7,7 @@ import { HEALTH_PERIODS } from "@/components/health/api";
 import { useHealthPortfolio } from "@/components/health/use-agent-health";
 import { Button, Skeleton, cn, getErrorMessage } from "@/components/health/deps";
 import { BandBadge, StatusBadge } from "@/components/health/band-badge";
-import { formatDateTime, formatDays, formatDelta, formatMeasureValue, formatSignedPercent, measureLabel, periodDays, selectClass, STATUS_META } from "@/components/health/format";
+import { formatDays, formatDelta, formatMeasureValue, formatShortDate, formatSignedPercent, measureLabel, periodDays, selectClass, STATUS_META } from "@/components/health/format";
 
 const STATUS_ORDER: HealthStatus[] = ["NEEDS_ATTENTION", "WATCH", "HEALTHY", "NOT_ENOUGH_DATA"];
 const SORTS: PortfolioSort[] = ["attention", "name", "traffic"];
@@ -37,11 +37,17 @@ function Row({ item }: { item: PortfolioItem }) {
             {t("health.overview.affected", "Affected by a platform incident")}
           </span>
         )}
-        <span className="ms-auto text-xs text-muted-foreground tabular-nums">
-          {t("health.count.sessions", { count: item.sessions, defaultValue: "{{count}} sessions" })}
+        <span className="ms-auto text-xs text-muted-foreground tabular-nums" data-testid="health-row-sessions">
+          {item.sessions === null || item.sessions === undefined ? (
+            // Uncounted is not zero: the period reaches past the turn-row retention.
+            <span title={item.hint ?? undefined} data-testid="health-row-sessions-unknown">—</span>
+          ) : (
+            t("health.count.sessions", { count: item.sessions, defaultValue: "{{count}} sessions" })
+          )}
           {item.sessionsDelta !== null && item.sessionsDelta !== undefined && <span> ({formatSignedPercent(item.sessionsDelta)})</span>}
         </span>
       </div>
+      {item.hint && <p className="mt-1 text-xs text-muted-foreground" data-testid="health-row-hint">{item.hint}</p>}
       {item.topReason && <p className="mt-1 text-sm text-foreground" data-testid="health-row-reason">{item.topReason.text}</p>}
       {item.keyMeasures.length > 0 && (
         <ul className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -57,6 +63,7 @@ function Row({ item }: { item: PortfolioItem }) {
                   <span className="text-muted-foreground tabular-nums">{formatDelta(m.delta, m.unit, t("health.unit.pp", "pp"))}</span>
                 )}
               </div>
+              {m.hint && <p className="mt-0.5 text-muted-foreground" data-testid="health-row-measure-hint">{m.hint}</p>}
             </li>
           ))}
         </ul>
@@ -131,8 +138,9 @@ export function HealthOverviewPage() {
                   {t("health.overview.incident", {
                     failureClass: i.failureClass,
                     count: i.agents,
-                    from: formatDateTime(i.from),
-                    to: formatDateTime(i.to),
+                    // Incidents are detected per day: `from` and `to` are days, not instants.
+                    from: formatShortDate(i.from),
+                    to: formatShortDate(i.to),
                     defaultValue: "{{failureClass}}: {{count}} agents, {{from}} to {{to}}",
                   })}
                 </li>
@@ -146,6 +154,12 @@ export function HealthOverviewPage() {
       {portfolio.isError && <p className="text-sm text-destructive" role="alert">{getErrorMessage(portfolio.error)}</p>}
       {portfolio.data && items.length === 0 && (
         <p className="text-sm text-muted-foreground" data-testid="health-overview-empty">{t("health.overview.empty", "No agents match.")}</p>
+      )}
+      {portfolio.data && items.length === 0 && status.length > 0 && (
+        // Until statuses are calculated every agent's status is null, which no status filter matches.
+        <p className="text-xs text-muted-foreground" data-testid="health-overview-empty-status">
+          {t("health.overview.emptyStatus", "Agent statuses are not calculated on this deployment yet, so a status filter matches no agent.")}
+        </p>
       )}
       <ul className="space-y-3">
         {items.map((item) => <Row key={item.agentId} item={item} />)}

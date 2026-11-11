@@ -4496,7 +4496,8 @@
       "newer": "Neuer",
       "same": "Wählen Sie zwei verschiedene Versionen.",
       "olderWindow": "Letzte Zeit der älteren Version",
-      "needTwo": "Dieser Agent hat nur eine Version, es gibt also noch nichts zu vergleichen."
+      "needTwo": "Dieser Agent hat nur eine Version, es gibt also noch nichts zu vergleichen.",
+      "noTurns": "v{{version}} hat in seinem Zeitfenster keine Turns und daher keine Werte."
     },
     "profile": {
       "open": "Profil",
@@ -4584,7 +4585,8 @@
       "worse": "schlechter",
       "vsBaseline": "gegenüber dem Vorzeitraum",
       "significant": "signifikant",
-      "notSignificant": "im normalen Schwankungsbereich"
+      "notSignificant": "im normalen Schwankungsbereich",
+      "untested": "nicht auf Signifikanz geprüft"
     },
     "critical": "Kritischer Messwert: bestimmt den Status des Agents",
     "informational": "Zur Information",
@@ -4615,7 +4617,8 @@
       "selfReported": "Selbst gemeldet",
       "selfReportedHint": "Das eigene Modell des Agents meldete das Problem als gelöst. Schwacher Beleg.",
       "shareNote": "Woher die gelösten Sitzungen stammen",
-      "whatMeans": "Was bedeutet das?"
+      "whatMeans": "Was bedeutet das?",
+      "withheld": "Die Aufteilung wird zurückgehalten, solange zu wenige Sitzungen ein bekanntes Ergebnis haben. Sitzungen pro Quelle:"
     },
     "restricted": "Sie haben keinen Zugriff auf diesen Bereich.",
     "noMeasures": "In diesem Bereich gibt es noch keine Messwerte.",
@@ -4624,9 +4627,9 @@
     "coverage": "Ergebnisabdeckung {{value}}",
     "sessions": {
       "reviewDisabledTitle": "Die Unterhaltungsprüfung ist für diese Version ausgeschaltet",
-      "reviewDisabledBody": "Die Gesundheitswerte brauchen sie nicht, die Auflistung der Sitzungen dahinter aber schon. Aktivieren Sie die Unterhaltungsprüfung in der Konfiguration des Agents und deployen Sie eine neue Version.",
-      "forbiddenTitle": "Sie dürfen die Unterhaltungen dieses Agents nicht lesen",
-      "forbiddenBody": "Zum Auflisten der Sitzungen ist die Berechtigung zum Lesen der Unterhaltungen des Agents nötig. Bitten Sie den Eigentümer des Agents um Zugriff.",
+      "reviewDisabledBody": "Die Gesundheitswerte brauchen sie nicht, das Auflisten der zugrunde liegenden Sitzungen aber schon. Aktivieren Sie die Konversationsprüfung in der Konfiguration des Agents und stellen Sie eine neue Version bereit, oder wählen Sie eine Version, bei der sie aktiv ist.",
+      "forbiddenTitle": "Nur Personen, die diesen Agent pflegen, können seine Sitzungen auflisten",
+      "forbiddenBody": "Das Auflisten von Sitzungen erfordert Bearbeitungsrechte für den Agent, genau wie das Prüfen seiner Konversationen. Die Gesundheitswerte selbst sind für alle sichtbar, die den Agent ansehen dürfen. Bitten Sie den Besitzer des Agents um Zugriff.",
       "title": "Sitzungen",
       "empty": "Keine passenden Sitzungen.",
       "started": "Beginn",
@@ -4639,7 +4642,10 @@
       "open": "Öffnen",
       "more": "Nächste Seite",
       "evidence": "Beleg: {{list}}",
-      "previous": "Vorherige Seite"
+      "previous": "Vorherige Seite",
+      "notJudged": "Für diese Herkunft werden keine Ergebnisse bewertet",
+      "provisionalHint": "Noch innerhalb des Inaktivitätsfensters: ein späterer Turn kann dieses Ergebnis ändern.",
+      "reviewScope": "Es werden nur Sitzungen von Versionen aufgelistet, bei denen die Konversationsprüfung aktiviert ist."
     },
     "noTrend": "Zu wenige Tage mit Daten für einen Trend.",
     "sparklineLabel": "{{label}} im Zeitraum, von {{min}} bis {{max}}",
@@ -4658,7 +4664,8 @@
       "sortTraffic": "Aufkommen",
       "incident_one": "{{failureClass}}: {{count}} Agent, {{from}} bis {{to}}",
       "incident_other": "{{failureClass}}: {{count}} Agents, {{from}} bis {{to}}",
-      "loadMore": "Mehr laden"
+      "loadMore": "Mehr laden",
+      "emptyStatus": "Agent-Status werden in dieser Installation noch nicht berechnet, daher passt kein Agent zu einem Statusfilter."
     },
     "measures": {
       "agentFailureRate": "Vom Agent verursachte Fehler",
@@ -4682,7 +4689,8 @@
       "engagedSessions": "Aktive Sitzungen",
       "distinctUsers": "Verschiedene Nutzer",
       "returningUserShare": "Wiederkehrende Nutzer",
-      "turnsPerSession": "Turns pro Sitzung"
+      "turnsPerSession": "Turns pro Sitzung",
+      "apdexWithT": "Antwortzeit (Apdex, T = {{t}})"
     },
     "sections": {
       "reliability": "Zuverlässigkeit",

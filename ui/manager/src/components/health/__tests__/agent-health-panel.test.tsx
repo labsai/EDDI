@@ -194,7 +194,7 @@ describe("AgentHealthPanel", () => {
     await userEvent.click(within(coverage).getByTestId("health-map-outcomes"));
     const dialog = await screen.findByTestId("health-suggestions-dialog");
     expect(await within(dialog).findByText("order_confirmed")).toBeInTheDocument();
-    expect(within(dialog).getByTestId("health-suggestions").querySelectorAll("li")).toHaveLength(2);
+    expect(within(dialog).getByTestId("health-suggestions").querySelectorAll("li")).toHaveLength(3);
     expect(within(dialog).getByTestId("health-suggestions-config-link")).toHaveAttribute("href", `/manage/studio/${HEALTH_AGENTS.healthy}`);
   });
 

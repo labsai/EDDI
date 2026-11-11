@@ -6251,3 +6251,10 @@ export const agentTestHandlers = [
     return HttpResponse.json(run, { status: 202 });
   }),
 ];
+
+/**
+ * The Agent Health mocks for the operations the backend exposes (H2b, H3). They are re-exported
+ * here so the OpenAPI contract test, which grades every handler array this module exports against
+ * `openapi-operations.json`, checks their paths and methods. See `health-handlers.ts`.
+ */
+export { healthHandlers } from "./health-handlers";

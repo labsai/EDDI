@@ -8,7 +8,11 @@ import { AccessibleDialog, Badge, Button, Skeleton, formatUsd, getErrorMessage }
 import type { DrillFilter } from "./drill";
 import { enumLabel, formatDateTime } from "./format";
 
-/** Why the drill-down refused, in words the person can act on. */
+/**
+ * Why the drill-down refused, in words the person can act on. The two reasons are different
+ * problems with different owners: `FORBIDDEN` is about the person (listing sessions needs EDIT
+ * on the agent), `REVIEW_DISABLED` is about the agent's version.
+ */
 export function DrillDownDenied({ reason }: { reason: "REVIEW_DISABLED" | "FORBIDDEN" }) {
   const { t } = useTranslation();
   return (
@@ -20,15 +24,15 @@ export function DrillDownDenied({ reason }: { reason: "REVIEW_DISABLED" | "FORBI
           <p className="text-muted-foreground">
             {t(
               "health.sessions.reviewDisabledBody",
-              "Health numbers do not need it, but listing the sessions behind them does. Enable conversation review in the agent's configuration and deploy a new version.",
+              "Health numbers do not need it, but listing the sessions behind them does. Enable conversation review in the agent's configuration and deploy a new version, or pick a version that has it on.",
             )}
           </p>
         </div>
       ) : (
         <div className="space-y-1">
-          <p className="font-medium text-foreground">{t("health.sessions.forbiddenTitle", "You may not read this agent's conversations")}</p>
+          <p className="font-medium text-foreground">{t("health.sessions.forbiddenTitle", "Only people who maintain this agent can list its sessions")}</p>
           <p className="text-muted-foreground">
-            {t("health.sessions.forbiddenBody", "Listing sessions needs permission to read the agent's conversations. Ask the agent's owner for access.")}
+            {t("health.sessions.forbiddenBody", "Listing sessions needs edit permission on the agent, the same as reviewing its conversations. The health numbers themselves are open to anyone who can view it. Ask the agent's owner for access.")}
           </p>
         </div>
       )}
@@ -63,6 +67,12 @@ function SessionsBody({ agentId, query, filter, onClose }: { agentId: string; qu
       {sessions.data && sessions.data.items.length === 0 && (
         <p className="text-sm text-muted-foreground">{t("health.sessions.empty", "No sessions match.")}</p>
       )}
+      {sessions.data && query.version == null && !denial && (
+        // Without a version the page holds only sessions of versions that have conversation review on.
+        <p className="text-xs text-muted-foreground" data-testid="health-sessions-scope">
+          {t("health.sessions.reviewScope", "Only sessions of versions with conversation review enabled are listed.")}
+        </p>
+      )}
       {sessions.data && sessions.data.items.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-start text-xs" data-testid="health-sessions-table">
@@ -79,13 +89,22 @@ function SessionsBody({ agentId, query, filter, onClose }: { agentId: string; qu
             </thead>
             <tbody>
               {sessions.data.items.map((s) => (
-                <tr key={`${s.conversationId}-${s.sessionNo}`} className="border-t border-border" data-testid="health-session-row" data-outcome={s.outcome} data-evidence={s.evidence}>
+                <tr key={`${s.conversationId}-${s.sessionNo}`} className="border-t border-border" data-testid="health-session-row" data-outcome={s.outcome ?? ""} data-evidence={s.evidence ?? ""}>
                   <td className="p-1.5 tabular-nums">{formatDateTime(s.startedAt)}</td>
                   <td className="p-1.5">
-                    <Badge variant="secondary">{enumLabel(t, "outcome", s.outcome)}</Badge>
-                    {s.provisional && <span className="ms-1 text-muted-foreground">{t("health.sessions.provisional", "provisional")}</span>}
+                    {s.outcome === null || s.outcome === undefined ? (
+                      // Origins that are not judged (schedules, webhooks, groups, ...) have no outcome.
+                      <span className="text-muted-foreground" title={t("health.sessions.notJudged", "This origin is not judged for outcomes")} data-testid="health-session-not-judged">—</span>
+                    ) : (
+                      <Badge variant="secondary">{enumLabel(t, "outcome", s.outcome)}</Badge>
+                    )}
+                    {s.provisional && (
+                      <span className="ms-1 text-muted-foreground" title={t("health.sessions.provisionalHint", "Still inside its inactivity window: a later turn can change this outcome.")} data-testid="health-session-provisional">
+                        {t("health.sessions.provisional", "provisional")}
+                      </span>
+                    )}
                   </td>
-                  <td className="p-1.5">{enumLabel(t, "evidence", s.evidence)}</td>
+                  <td className="p-1.5">{s.evidence === null || s.evidence === undefined ? "—" : enumLabel(t, "evidence", s.evidence)}</td>
                   <td className="p-1.5">{enumLabel(t, "origin", s.origin)}</td>
                   <td className="p-1.5 text-end tabular-nums">{s.turns}</td>
                   <td className="p-1.5 text-end tabular-nums">{s.costUsd === null ? "—" : formatUsd(s.costUsd)}</td>
@@ -126,19 +145,23 @@ export function SessionsDialog({
   agentId,
   query,
   filter,
+  canEdit = true,
 }: {
   open: boolean;
   onClose: () => void;
   agentId: string;
   query: HealthQuery;
   filter: DrillFilter | null;
+  /** Listing sessions needs EDIT on the agent; without it nothing is requested and the reason is shown. */
+  canEdit?: boolean;
 }) {
   const { t } = useTranslation();
   const title = filter ? t(filter.title[0], filter.title[1]) : t("health.sessions.title", "Sessions");
   const identity = JSON.stringify([filter?.outcome, filter?.evidence, query.period, query.version, [...(query.origins ?? [])].sort()]);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={title} maxWidth="max-w-3xl" testId="health-sessions-dialog">
-      {filter && <SessionsBody key={identity} agentId={agentId} query={query} filter={filter} onClose={onClose} />}
+      {filter && !canEdit && <DrillDownDenied reason="FORBIDDEN" />}
+      {filter && canEdit && <SessionsBody key={identity} agentId={agentId} query={query} filter={filter} onClose={onClose} />}
     </AccessibleDialog>
   );
 }

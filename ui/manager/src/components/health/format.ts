@@ -31,11 +31,21 @@ export function formatDays(days: number): string {
 /** The number of days a period id stands for ("30d" is 30). */
 export const periodDays = (p: string): number => Number.parseInt(p, 10);
 
-/** A date as the person reads it in their language ("3 Nov", "3. Nov."). */
+const DAY_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A date as the person reads it in their language ("3 Nov", "3. Nov."). A bare day
+ * (`YYYY-MM-DD`, which is what periods, `dataThrough` and incidents carry) is a UTC day and is
+ * shown as that day whatever the browser's time zone; an instant is shown in the local zone.
+ */
 export function formatShortDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(activeLocale(), { day: "numeric", month: "short" }).format(d);
+  return new Intl.DateTimeFormat(activeLocale(), {
+    day: "numeric",
+    month: "short",
+    ...(DAY_ONLY.test(iso) ? { timeZone: "UTC" } : {}),
+  }).format(d);
 }
 
 /** A date-time in the app's language. */
@@ -197,6 +207,11 @@ export interface ResolutionSplit {
   silenceShare: number;
   /** More than half of the resolutions rest on users going quiet. */
   mostlySilence: boolean;
+  /**
+   * The rate is withheld (outcome coverage below the minimum): the measure and every part have
+   * `value: null` and only `n` is kept, so no shares can be drawn.
+   */
+  withheld: boolean;
 }
 
 /** The silence share beyond which the rate is flagged as mostly assumed (plan §4.4). */
@@ -208,7 +223,7 @@ export const SILENCE_WARN_SHARE = 0.5;
  * to the rate (summing to it) or as counts. Returns null when the measure has
  * no usable breakdown — the card then says so rather than faking a split.
  */
-export function resolutionSplit(measure: Pick<Measure, "breakdown">): ResolutionSplit | null {
+export function resolutionSplit(measure: Pick<Measure, "breakdown"> & Partial<Pick<Measure, "value">>): ResolutionSplit | null {
   const breakdown = measure.breakdown;
   if (!breakdown || breakdown.length === 0) return null;
   const byKey = new Map(breakdown.map((b) => [b.key, b]));
@@ -220,7 +235,9 @@ export function resolutionSplit(measure: Pick<Measure, "breakdown">): Resolution
   const total = raw.reduce((sum, p) => sum + p.value, 0);
   const parts = raw.map((p) => ({ ...p, share: total > 0 ? p.value / total : 0 }));
   const silenceShare = parts.find((p) => p.key === "silence")?.share ?? 0;
-  return { parts, total, silenceShare, mostlySilence: total > 0 && silenceShare > SILENCE_WARN_SHARE };
+  // A null rate with null parts is a withheld rate, not a rate of zero.
+  const withheld = (measure.value === null || measure.value === undefined) && breakdown.every((b) => b.value === null || b.value === undefined);
+  return { parts, total, silenceShare, mostlySilence: total > 0 && silenceShare > SILENCE_WARN_SHARE, withheld };
 }
 
 /** True when the measure is the resolution rate (always shown split). */
@@ -228,10 +245,30 @@ export const isResolutionRate = (m: Pick<Measure, "id">): boolean => m.id === "r
 
 // ── Labels and small pure helpers shared by several components ─────
 
-/** A measure the UI knows by id gets a translated label; an unknown id renders the backend's own. */
+/** The threshold T the backend puts in the Apdex label ("Response time (Apdex, T = 4 s)"). */
+const APDEX_T = /T\s*=\s*([^)]+)\)/;
+
+/**
+ * A measure the UI knows by id gets a translated label; an unknown id renders the backend's
+ * own. The Apdex label names its threshold T, which is data and not wording, so the translated
+ * label takes it from the backend's: "Response time (Apdex, T = 4 s)" must not shrink to "Apdex".
+ */
 export function measureLabel(t: TFunction, m: Pick<Measure, "id" | "label">): string {
+  if (m.id === "apdex") {
+    const threshold = APDEX_T.exec(m.label)?.[1]?.trim();
+    if (threshold) return t("health.measures.apdexWithT", { t: threshold, defaultValue: "Response time (Apdex, T = {{t}})" });
+  }
   return t(`health.measures.${m.id.replace(/[^A-Za-z0-9]/g, "_")}`, m.label);
 }
+
+/**
+ * Measures with no variance to test: their `significant` is always false, which means "not
+ * tested", not "within normal variation" (planning/agent-health-api.md section 12).
+ */
+const UNTESTABLE = new Set(["turnDurationP95", "costPerSession", "tokensPerTurn", "turnsPerSession", "guardrailTripRate", "returningUserShare", "outcomeCoverage"]);
+
+/** True when the backend never tests this measure's change for significance. */
+export const isUntestable = (m: Pick<Measure, "id">): boolean => UNTESTABLE.has(m.id);
 
 const SECTION_TITLE: Record<string, string> = {
   reliability: "Reliability",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { drillForMeasure, drillForResolution } from "../drill";
-import { formatAge, formatDays, formatDelta, formatSignedPercent, resolutionSplit } from "../format";
+import { formatAge, formatDays, formatDelta, formatShortDate, formatSignedPercent, isUntestable, resolutionSplit } from "../format";
 import { chunkMeasures } from "../use-agent-health";
 import { fromInput, parseDecimal, toInput, unmatchedViolations } from "../profile-utils";
 
@@ -144,5 +144,45 @@ describe("unmatchedViolations", () => {
       draft,
     );
     expect(rest.map((v) => v.message)).toEqual(["b", "d", "f"]);
+  });
+});
+
+describe("a withheld resolution rate", () => {
+  const parts = ["confirmed", "selfReported", "agentClosed", "silence"].map((key) => ({ key, label: key, value: null, n: 10 }));
+
+  it("is withheld when the measure and every part are null, and keeps the counts", () => {
+    const split = resolutionSplit({ value: null, breakdown: parts })!;
+    expect(split.withheld).toBe(true);
+    expect(split.parts.map((p) => p.n)).toEqual([10, 10, 10, 10]);
+    expect(split.mostlySilence).toBe(false);
+  });
+
+  it("is not withheld when there is a value, or when a legacy caller passes no value at all", () => {
+    expect(resolutionSplit({ value: 0.5, breakdown: [{ key: "confirmed", label: "c", value: 0.5, n: 3 }] })!.withheld).toBe(false);
+    expect(resolutionSplit({ breakdown: [{ key: "confirmed", label: "c", value: 0.5, n: 3 }] })!.withheld).toBe(false);
+  });
+});
+
+describe("measures the backend never tests for significance", () => {
+  it("names them by id", () => {
+    expect(isUntestable({ id: "turnDurationP95" })).toBe(true);
+    expect(isUntestable({ id: "costPerSession" })).toBe(true);
+    expect(isUntestable({ id: "agentFailureRate" })).toBe(false);
+  });
+});
+
+describe("formatShortDate with a bare day", () => {
+  it("shows the UTC day in a time zone behind UTC", () => {
+    const before = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      // Midnight UTC is the evening of the 7th in Los Angeles; a day (period, incident) must stay the 8th.
+      expect(formatShortDate("2026-11-08")).toMatch(/\b8\b/);
+      // An instant is shown where the person is.
+      expect(formatShortDate("2026-11-08T03:00:00Z")).toMatch(/\b7\b/);
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
   });
 });

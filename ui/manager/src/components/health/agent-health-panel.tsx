@@ -46,7 +46,8 @@ type Dialog = "compare" | "profile" | "reports" | "suggestions" | null;
  * then status and top reasons, one card per section, the checks, and the
  * actions: compare versions, edit the profile, owner report links, export.
  * `canEdit` gates the profile and the report links (the backend enforces it
- * too); everything else needs only the VIEW that reaching this page implies.
+ * too) and the sessions drill-down, which needs EDIT on top of review being
+ * enabled; everything else needs only the VIEW that reaching this page implies.
  */
 export function AgentHealthPanel({
   agentId,
@@ -183,7 +184,7 @@ export function AgentHealthPanel({
         </div>
       )}
 
-      <SessionsDialog open={drill !== null} onClose={() => setDrill(null)} agentId={agentId} query={query} filter={drill} />
+      <SessionsDialog open={drill !== null} onClose={() => setDrill(null)} agentId={agentId} query={query} filter={drill} canEdit={canEdit} />
       <OutcomeSuggestionsDialog open={dialog === "suggestions"} onClose={() => setDialog(null)} agentId={agentId} />
       <CompareDialog open={dialog === "compare"} onClose={() => setDialog(null)} agentId={agentId} latestVersion={latestVersion} />
       {canEdit && <ProfileDialog open={dialog === "profile"} onClose={() => setDialog(null)} agentId={agentId} info={info} />}
