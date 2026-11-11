@@ -249,7 +249,18 @@ describe("tool-scopes", () => {
         "PATCH /llmstore/llms/{id}",
         "PATCH /apicallstore/apicalls/{id}",
         "PATCH /mcpcallsstore/mcpcalls/{id}",
+        // Agent Health profile (H4): a re-banding, undone by putting back the
+        // profile read before. Never its DELETE, never a report-link write.
+        "PUT /agents/{agentId}/health/profile",
       ]);
+    });
+
+    it("never creates or revokes an owner report link, and never deletes a health profile", () => {
+      expect(WRITE_ENDPOINTS).not.toContain("POST /agents/{agentId}/health/reports");
+      expect(WRITE_ENDPOINTS).not.toContain("DELETE /agents/{agentId}/health/reports/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("DELETE /agents/{agentId}/health/profile");
+      expect(READ_ENDPOINTS).toContain("GET /agents/{agentId}/health/reports");
+      expect(READ_ENDPOINTS).not.toContain("GET /health/reports/{token}");
     });
 
     it("can create a group but never update, duplicate or delete one", () => {

@@ -22,6 +22,7 @@ import {
   grantsTeamBudgetReads,
   grantsOversightReads,
   grantsHealthReads,
+  grantsHealthWrites,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -715,7 +716,7 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
 
 /**
  * Agent Health — gated on {@link grantsHealthReads}: every line names one of the
- * seven health reads, so the section is absent rather than wrong when they are
+ * ten health reads, so the section is absent rather than wrong when they are
  * not granted. Self-contained on purpose (many changes touch this file).
  */
 const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, over time):
@@ -728,9 +729,37 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   Each measure has \`value\` and its sample size \`n\`, an \`interval\` (95 %),
   the previous period's \`baseline\`, \`delta\`, \`significant\` (a real change,
   not noise) and a \`band\` (GREEN, AMBER, RED; GREY = too little data or no
-  threshold — read the \`hint\`). \`status\` is null and \`reasons\` empty
-  until health profiles exist. A \`restricted\` quality section means the
+  threshold — read the \`hint\`). A \`restricted\` quality section means the
   caller may not read ratings.
+- \`status\` is the headline: NEEDS_ATTENTION (a critical measure is RED),
+  WATCH (any measure AMBER or RED, or a significant change for the worse of at
+  least 2 pp for rates, 10 % otherwise), HEALTHY, or NOT_ENOUGH_DATA (every
+  scored measure GREY). Quality (ratings) never counts towards it.
+  \`reasons\` explain it, most severe first: \`severity\` RED, AMBER or INFO,
+  a short \`text\` with the value and change ("Resolution 41 % (−12 pp since
+  v8 on 3 Nov)"), and a \`markerId\` when a deployment or version start likely
+  explains it. "Resolution rests mostly on silence" is an INFO reason: more
+  than half of the resolutions are people going quiet — say so whenever you
+  quote the resolution rate.
+- How health is judged is the agent's health profile:
+  \`GET /agents/{agentId}/health/profile\` (VIEW) returns the effective one —
+  \`preset\` (support, sales, assistant, task; without one, task for an agent
+  driven only by schedules, webhooks, A2A or groups, else support), \`critical\`
+  measures, \`thresholds\` (green/red per measure), \`budgets\`
+  (costPerResolvedUsd, costPerSessionUsd, tokensPerTurn — each makes its cost
+  measure scored: green up to it, red from 1.5×), \`slo\` (agentTurnSuccess,
+  default 0.99, which also sets the failure bands at the error budget and five
+  times it; apdexTMs; minTurnsForBurnAlert, default 50) and \`overrides\`
+  (a measure or section IGNORED until a day, with a reason; expired ones are
+  ignored) — with \`stored: false\` when these are only the preset's defaults.
+  \`GET /health/presets\` lists the presets. Profiles are not versioned and do
+  not travel with agent export or sync.
+- Owner report links are read-only, branded health pages for people without a
+  Manager account (\`/manage/health-report/<token>\`, served unauthenticated by
+  \`GET /health/reports/{token}\`). \`GET /agents/{agentId}/health/reports\`
+  (EDIT) lists the live ones — id, expiry, sections, period, creator — never
+  their tokens. You cannot create or revoke one: an admin does that in the
+  Manager, which shows the token once.
 - Effectiveness is judged per session: a conversation splits after its origin's
   inactivity window (24 h; e-mail 72 h; per origin in the agent's
   \`healthConfig.inactivityWindowHours\`). Inside its window a session is OPEN
@@ -783,12 +812,30 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   \`/health/compare?from=7&to=8\` (the newer since its first turn, the older
   over its last \`days\`, default 14); \`deltas\` say \`better\` and
   \`significant\` per measure.
-- \`GET /health/agents\` lists every agent the caller may view, the ones
-  needing attention first, with sessions, \`sessionsDelta\` and key measures.
+- \`GET /health/agents\` lists every agent the caller may view with its 7-day
+  \`status\` and \`topReason\`, the ones needing attention first (status, then
+  the largest change for the worse, then traffic), with sessions,
+  \`sessionsDelta\` and key measures; \`status=\` (repeatable) filters.
 - Numbers lag by up to one rollup interval (\`dataThrough\`). Daily rows reach
   back two years; sessions, outcomes, users and engagement only as far as the
-  turn rows (90 days). You cannot change thresholds; a health profile is the
-  admin's.`;
+  turn rows (90 days). A changed
+  profile re-bands at once (a PROFILE_CHANGE marker on the charts).`;
+
+/**
+ * Agent Health write — gated on {@link grantsHealthWrites}.
+ */
+const BODY_HEALTH_WRITES = `Agent Health changes (each one asks for approval):
+- \`PUT /agents/{agentId}/health/profile\` stores a profile (EDIT on the
+  agent); every field is optional and falls back to the preset, and a save
+  replaces the stored profile, so read it first and send back the whole of it
+  with your change — keep what you read, it is how the change is undone.
+  Invalid fields come back as 400 \`violations\` with a dotted \`path\`
+  (thresholds.resolutionRate.red, overrides[0].reason): fix those and retry
+  once. A save re-bands every measure at once and leaves a PROFILE_CHANGE
+  marker; changing \`slo.apdexTMs\` recounts the retained days. Never change a
+  profile to make an agent look healthy: say what the numbers are, and change
+  thresholds only when the admin asks for them. Deleting a profile and
+  revoking a report link are the admin's, in the Manager.`;
 
 /**
  * Alerts — gated on {@link grantsAlertReads}: every line names one of the alert
@@ -805,7 +852,15 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   JSON — or actions; \`op\` is exists, eq, neq, in, gt, gte, lt, lte or
   contains; no expressions). An OUTPUT_MATCH alert names the path, op and
   constant; it carries the runtime value only when the rule sets
-  \`includeValue\` AND the agent version has conversation review on. Every alert
+  \`includeValue\` AND the agent version has conversation review on. Or
+  HEALTH (Agent Health changed for the worse, evaluated after each health
+  rollup, never in a turn: \`healthTriggers\` STATUS_CHANGE — the 7-day status
+  entered WATCH or NEEDS_ATTENTION, narrowed by \`healthStatuses\`; BURN_RATE —
+  agent-caused failures burn the SLO's error budget at 2× or more over the
+  last 3 days and today, each with at least the profile's
+  \`minTurnsForBurnAlert\` turns; CRITICAL_TREND — a critical measure got
+  significantly worse). Each fires when it starts, not again while it lasts;
+  health only alerts, it never acts. Every alert
   lands in the Manager's Alerts inbox; a rule can also deliver to a Slack
   channel (through a Slack channel integration) and to an HMAC-signed webhook,
   which must be an https URL (a plain http URL is refused when the rule is
@@ -2129,6 +2184,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     ...(grantsTeamBudgetReads(endpoints) ? [BODY_TEAM_BUDGETS] : []),
     ...(grantsOversightReads(endpoints) ? [BODY_OVERSIGHT] : []),
     ...(grantsHealthReads(endpoints) ? [BODY_HEALTH] : []),
+    ...(grantsHealthWrites(endpoints) ? [BODY_HEALTH_WRITES] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,
