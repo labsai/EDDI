@@ -2242,9 +2242,11 @@ together, or none), HITL, GDPR erasure — applies unchanged. The refusal the mo
 limit and no reset time.
 
 > **A run cap bounds an autonomous run; it is not an abuse limit for end users.** The run is identified
-> by context the runtime sets (`scheduleFireId`, `groupConversationId`), and a caller that can put its own
-> context on a turn could name a fresh run to reset the count. Use a fixed window — which a client cannot
-> reset — for fair use per user.
+> by context the runtime sets (`scheduleFireId`, `groupConversationId`). Both are
+> [reserved context keys](passing-context-information.md#reserved-context-keys), so a client cannot send
+> them; without either, the run is the conversation, which lasts as long as the user keeps it going. An
+> operator who permits one of them for clients (`eddi.conversation.client-context.permitted-reserved-keys`)
+> lets a caller name a fresh run and reset the count. Use a fixed window for fair use per user.
 
 **What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
 point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a
