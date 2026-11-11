@@ -270,7 +270,34 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | `/.well-known/agent-card.json`, `/.well-known/agent.json`, `/a2a/agents/*/agent.json`, `/a2a/agents/*/.well-known/agent-card.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
 | `/.well-known/capabilities`, `/.well-known/capabilities/skills` | **Permit** (GET) — A2A capability discovery, and additionally gated by `eddi.a2a.capabilities.public` (default `false`, which answers 404) |
 | `/mcp`, `/mcp/*`, `/secretstore`, `/secretstore/*` | **Authenticated** — named explicitly rather than inheriting the catch-all, so a future permit rule cannot open them by accident; `HighValueSurfaceGuard` refuses a production boot if either is reachable unauthenticated |
+| `/health/reports/*` | **Permit** (GET/HEAD) — Agent Health [owner report links](agent-health.md#owner-report-links): the link's token is the credential. See [below](#agent-health-owner-reports) |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
+
+#### Agent Health owner reports
+
+`GET /health/reports/{token}` is unauthenticated on purpose: a business owner
+without a Manager account reads an agent's health through a link an editor
+created. The rule `health-report` permits exactly `GET` and `HEAD` of
+`/health/reports/*` — the portfolio (`/health/agents`), the presets and every
+`/agents/{agentId}/health/*` endpoint, link creation and revocation included,
+stay behind the catch-all. What protects it:
+
+- **The token** is 256 random bits (`SecureRandom`, base64url), shown once in the
+  creation response. Only its SHA-256 is stored and a request is answered by a
+  hash lookup in a unique index: no stored value is a usable link, and no token
+  is compared character by character.
+- **No enumeration**: a malformed (never looked up), unknown, expired or revoked
+  token gets the same `404`. Links expire after 1–90 days and can be revoked.
+- **Rate limits** per node: 30 reads a minute per link, 300 for all reports, 60
+  unknown tokens; `429` with `Retry-After` beyond. Keyed by link, not client IP.
+- **What it shows**: the link's sections of the §1 report shape and the brand —
+  no drill-down, conversation ids, user ids or series; `quality` only when the
+  creator could read the agent's ratings.
+- **Headers**: `Cache-Control: no-store`, `Referrer-Policy: no-referrer` (the
+  token is in the page URL), `X-Robots-Tag: noindex`; no CORS of its own.
+- Creation, listing and revocation need `EDIT` on the agent and are logged
+  without the token. The Platform Operator cannot create links (its tool results
+  are kept in conversation memory and the audit ledger).
 
 > **`@PermitAll` does not make a path public.** Quarkus evaluates these path policies *before* declarative RBAC, so an endpoint annotated `@PermitAll` but not named in a `permit` rule still answers `401`. That ordering is also why the discovery document above needs its own rule: quarkus-oidc serves it from a Vert.x filter at priority 50, and authorization runs at 100 — higher first.
 

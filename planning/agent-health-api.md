@@ -330,3 +330,68 @@ What the H3 backend does where this contract leaves room. Nothing above changed 
 - **Series** of the effectiveness measures are per **session end day**; a day without closed sessions is `value: null, n: 0`.
 - Not done in H3: the "mostly assumed from silence" **reason** (H4 status rules; the breakdown carries what it needs), and
   `healthConfig` interactive-origin overrides (plan §4.5) — which origins are judged is fixed for now.
+
+## 14. Backend notes (H4, H4b)
+
+What the H4 and H4b backend does where this contract leaves room. Points marked **deviation** add to or narrow a
+shape above; the UI should know about them.
+
+- **Status (§1).** `HEALTHY` | `WATCH` | `NEEDS_ATTENTION` | `NOT_ENOUGH_DATA`, never `null` any more. Rules: every counted
+  measure `GREY` → `NOT_ENOUGH_DATA`; a critical measure `RED` → `NEEDS_ATTENTION`; any counted measure `AMBER` or `RED`, or
+  a significant change for the worse of at least 2 pp (rates, scores) or 10 % (others) → `WATCH`; else `HEALTHY`. Counted:
+  scored measures (a budget makes a cost measure scored) that no active override ignores. **Deviation — the quality
+  section never counts** (who may read ratings differs per caller, so a status that moved with it would leak ratings, and
+  the portfolio would need per-agent rating reads); profiles cannot make a quality measure critical. The status describes
+  the selection asked for (`version`, `origin`).
+- **Reasons (§1 `Reason`).** At most 5, ordered by severity, critical first, then size of the change. **Deviation —
+  `severity` is `RED` | `AMBER` | `INFO`**: `AMBER` also for a significant change for the worse on a `GREEN` measure,
+  `INFO` for reasons that do not move the status — "Resolution rests mostly on silence: 64 % of resolved sessions are
+  assumed because people went quiet" (always when `silence` is more than half of the resolved sessions, also while the rate
+  is withheld; answers §11.1's "mostly assumed from silence" server-side) and "Not enough data: …" with
+  `NOT_ENOUGH_DATA`. `text` formats: "Resolution 41 % (−12 pp since v8 on 3 Nov)" (with `markerId`: the newest
+  `DEPLOYMENT` or `VERSION_FIRST_TURN` marker of the period), "… (−12 pp vs. the previous period)" (no marker), "Agent-caused
+  failures 8 % (target ≤ 1 %)" (a band without a significant change). `measureId` is `null` only on a generic
+  "Not enough data in this period".
+- **No index.** §1 has no field for the weighted 0–100 index; none is computed (plan decision 1).
+- **Portfolio (§4).** Real `status` and `topReason` (the first reason; **never a `markerId`** — markers are read per agent
+  by the report). The status uses the same rules over the portfolio's period (default 7 days), so it can differ from a
+  30-day report. `sort=attention` = status severity (`NEEDS_ATTENTION`, `WATCH`, `HEALTHY`, `NOT_ENOUGH_DATA`), then the
+  largest significant worsening, then traffic, then name. `status=` filters.
+- **Profile (§5), confirmed with precisions.** `GET` answers the **effective** profile (preset merged with the stored
+  profile, `stored`, `updatedAt`, `updatedBy`): `thresholds` lists every banded measure except the cost ones,
+  `slo.agentTurnSuccess` and `slo.minTurnsForBurnAlert` are filled with their defaults (0.99, 50), `slo.apdexTMs` is `null`
+  for the deployment's `eddi.health.apdex-t`. `PUT` replaces the stored profile with the body **as sent** (a field left out
+  falls back to the preset); every field is optional; `agentId` in the body must match the path or be absent. `400` body:
+  `{"error": "bad_request", "message": …, "violations": [{"path", "message"}]}` with paths `preset`, `critical[i]`,
+  `thresholds.<id>`, `thresholds.<id>.green|red`, `budgets.<field>`, `slo.<field>`, `overrides`, `overrides[i]`,
+  `overrides[i].measure|section|state|reason|until`. `DELETE` answers `204`. **Deviation — `budgets` fields**:
+  `costPerResolvedUsd`, `costPerSessionUsd`, `tokensPerTurn`; each makes its measure `SCORED` (green ≤ budget, red ≥ 1.5 ×
+  budget). `slo.agentTurnSuccess` also sets `agentFailureRate`'s bands (green = 1 − SLO, red = 5 × that) unless
+  `thresholds.agentFailureRate` is given. `overrides[].until` is a day `YYYY-MM-DD`, inclusive, at most 366 days ahead;
+  `state` is `IGNORED` only.
+- **Presets (§5).** `GET /health/presets` returns `[{id, label, description, critical, thresholds}]` with `thresholds` as
+  `{measureId: {green, red, higherIsBetter}}` — the §1 `Thresholds` shape. **Deviation:** `description` is an addition.
+- **Report links (§9).** `POST` body `{expiresInDays (1–90, default 30), sections (default all but quality), period
+  ("7d" | "30d" | "90d", default "30d")}` — **deviation: `period` is an addition**. `201` answers `{id, url, path, expiresAt,
+  sections, period}` — **`path` is an addition** (`/manage/health-report/<token>`; `url` is it on `eddi.self.base-url` when
+  set, else on the request's base). `quality` without the ratings right is `403` (not 400). At most 20 live links per
+  agent (`400` beyond). §11.2 confirmed: `GET …/reports` returns a **bare array** of `{id, expiresAt, sections, period,
+  createdAt, createdBy}`, live links only. `DELETE …/reports/{id}` is `204`, `404` for an unknown id.
+- **Public report.** `GET /health/reports/{token}` answers `{agentName, period, baseline, status, reasons, preset,
+  generatedAt, dataThrough, sections, checks, expiresAt, brand}` — **deviation from "§1 shape"**: no `agentId`,
+  `version` or `origins`; `sections` holds only the link's sections (others are absent, not `restricted`); `reasons` only
+  of those sections; `checks` only with `reliability`; `brand` is `{productName, tagline, poweredBy, logoUrl, primaryColor}`
+  from the white-label settings. `404 {"error": "not_found"}` for a malformed, unknown, expired or revoked token alike;
+  `429` with `Retry-After: 60` past the rate limits (30/min per link, 300/min all reports, 60/min unknown tokens, per node).
+  Headers: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`.
+- **UI route for the owner report: `/manage/health-report/<token>`.** The Manager is already served without sign-in under
+  `/manage/*` (static-assets permit); its router must render this route without starting the Keycloak login, and read
+  the report from `GET /health/reports/{token}` without an `Authorization` header.
+- **HEALTH alerts (plan §6.4).** `source: "HEALTH"`, `condition: {healthTriggers: ["STATUS_CHANGE" | "BURN_RATE" |
+  "CRITICAL_TREND"], healthStatuses?: ["WATCH" | "NEEDS_ATTENTION"]}`. Evaluated after each rollup pass over a 7-day window;
+  burn-rate windows are **whole UTC days** (long = last 3 days, short = today; 2× the error budget in both, each with
+  `slo.minTurnsForBurnAlert` turns). Edge-triggered per rule and agent. The alert `match` adds `healthStatus`,
+  `previousHealthStatus` and `measureId`; `conversationId` and `agentVersion` are `null`.
+- **Not done:** the Manager's alert-rule editor does not offer `HEALTH` yet; report links have no MCP tool, and the
+  Platform Operator may list links but neither create nor revoke them (a token in a tool result would be stored in its
+  conversation and the audit ledger; its write scope holds no `DELETE`). It may save a profile (gated), not delete one.
