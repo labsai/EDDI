@@ -280,6 +280,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+| `eddi.alerts.test-max-per-minute` | `6` | Test sends (`POST /alerts/rules/test`) one caller may make per minute, per node; each posts to every target of the rule. Over it, `429 TEST_THROTTLED`. `0` or less turns the bound off |
 
 ---
 
@@ -588,6 +589,7 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
 | `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
+| `eddi.slack.max-body-bytes` | `1048576` | Largest body, in bytes, the Slack webhooks (`POST /integrations/slack/events`, `/interactive`) accept (413 above). A declared length over it is refused before the body is read; otherwise at most this much is read, before the signature is checked. Slack's own payloads are a few KB |
 | `eddi.webhook.max-body-bytes` | `262144` | Largest body, in bytes, the signed inbound webhook endpoint (`POST /integrations/webhook/{integrationId}`) reads before answering 413. The cap is applied to the raw bytes before the signature is checked, so it also bounds what an unauthenticated caller can make EDDI buffer |
 
 ### Email
@@ -624,7 +626,10 @@ Details:
 | `eddi.email.dns.servers` | *(unset — the system's resolvers)* | Comma-separated DNS servers for DKIM key and DMARC record lookups: `host`, `host:port` or `[v6]:port`. Point an air-gapped deployment at its own resolver. DNSSEC is not required; a validating resolver adds it. A value that cannot be used makes every lookup fail temporarily, with one ERROR — no mail is then authenticated |
 | `eddi.email.dns.timeout` | `5s` | Timeout of one DNS query (one retry). A timeout makes that signature or policy check temporary, never a pass |
 | `eddi.email.dns.cache-max-entries` | `10000` | Size of the TXT answer cache shared by all mailboxes |
-| `eddi.email.dns.cache-max-ttl` | `1h` | Longest time an answer is cached; shorter record TTLs (and, for a missing name, the zone's SOA minimum) are honoured. Temporary failures are never cached |
+| `eddi.email.dns.cache-max-ttl` | `1h` | Longest time an answer is cached; shorter record TTLs (and, for a missing name, the zone's SOA minimum) are honoured. A temporary failure is cached for two minutes, so a key server that times out costs one timeout, not one per signature and mail; a deferred mail is retried after five |
+| `eddi.email.dkim.max-signature-age` | `7d` | How old a DKIM signature may be, at the delivery instant, for an aligned pass — judged on its `t=`, else on the `Date` if the signature covers it (a signature with neither is not an aligned pass). Anyone holding someone's genuine signed mail can deliver it to the mailbox again; this bounds for how long that runs as its author. `0` disables the bound, leaving replays to the message ledger (`eddi.email.ledger-retention`) |
+| `eddi.email.dkim.require-signed-content-headers` | `true` | An aligned pass needs every `Content-Type`, `Content-Transfer-Encoding` and `MIME-Version` of the message signed: none may occur more often than the signature's `h=` lists it. A signer that does not list one at all still passes when the message has at most one, a non-multipart `Content-Type` and an identity (`7bit`/`8bit`/`binary`) transfer encoding. **Risk of `false`**: whoever holds a signed mail can prepend a `Content-Type` with a boundary of their own and make EDDI read, as the signer's words, a part they had the signer quote. Relax it only for a signer you know omits these headers from multipart mail |
+| `eddi.email.max-html-characters` | `2097152` | Characters of a mail's HTML (all its HTML parts together) handed to the HTML parser; the rest is cut and the mail flagged `html_truncated`. The plain-text part, when there is one, is what the agent reads anyway |
 | `eddi.email.dkim.max-delivery-age` | `7d` | When a transport passes the time the mailbox server accepted a message (IMAP `INTERNALDATE`), DKIM `x=` (expiry) and `t=` (not in the future) are judged at that instant, so a short-lived signature that was valid on delivery still verifies when the mail is processed later. The instant is never taken as later than now nor earlier than now minus this, so a broken or forged value cannot revive an old signature; without one, signatures are judged at the current time |
 | `eddi.email.poll.max-messages-per-poll` | `50` | Mails one poll of one mailbox processes at most; the rest wait for the next poll. Mails that are still deferred (a budget, a temporary authentication result) do not count |
 | `eddi.email.poll.max-duration` | `2m` | Time one poll may spend before it stops starting new mails. Keep it well below `eddi.schedule.fire-timeout` |

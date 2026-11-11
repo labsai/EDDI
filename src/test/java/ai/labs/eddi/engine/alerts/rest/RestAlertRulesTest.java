@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.api.IRestAlertRules.TestResult;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,8 +83,85 @@ class RestAlertRulesTest {
         schedule = mock(AlertMaintenanceSchedule.class);
         when(store.create(any())).thenAnswer(inv -> ((AlertRule) inv.getArgument(0)).withId(RULE_ID));
         when(store.update(any())).thenReturn(true);
-        rest = new RestAlertRules(store, eventStore, cache, new AlertAccess(guard, conversationGuard), senders, schedule,
+        router = mock(ChannelTargetRouter.class);
+        when(router.channelTargetsAgent("slack", "C0123ABC", AGENT)).thenReturn(true);
+        rest = new RestAlertRules(store, eventStore, cache, new AlertAccess(guard, conversationGuard, router), senders, schedule,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private ChannelTargetRouter router;
+
+    @Nested
+    @DisplayName("Slack channels and test sends")
+    class SlackScope {
+
+        private final DeliveryTarget foreign = DeliveryTarget.slack("C0THEIRS");
+        private final DeliveryTarget unknown = DeliveryTarget.slack("C0NOBODY");
+
+        @Test
+        @DisplayName("an editor cannot post into a channel served by another agent's integration, nor learn whether it exists")
+        void editorRefusedForeignChannel() throws Exception {
+            asEditor();
+            when(router.channelTargetsAgent("slack", "C0THEIRS", OTHER_AGENT)).thenReturn(true);
+
+            WebApplicationException theirs = assertThrows(WebApplicationException.class,
+                    () -> rest.createRule(scoped(AlertScope.agent(AGENT), foreign)));
+            WebApplicationException nobody = assertThrows(WebApplicationException.class,
+                    () -> rest.createRule(scoped(AlertScope.agent(AGENT), unknown)));
+
+            assertEquals(403, theirs.getResponse().getStatus());
+            @SuppressWarnings("unchecked")
+            Map<String, String> theirsBody = (Map<String, String>) theirs.getResponse().getEntity();
+            @SuppressWarnings("unchecked")
+            Map<String, String> nobodyBody = (Map<String, String>) nobody.getResponse().getEntity();
+            assertEquals(AlertErrors.SLACK_CHANNEL_NOT_PERMITTED, theirsBody.get("error"));
+            assertEquals(theirsBody.get("error"), nobodyBody.get("error"));
+            assertEquals(theirsBody.get("message").replace("C0THEIRS", "X"), nobodyBody.get("message").replace("C0NOBODY", "X"));
+            assertError(403, AlertErrors.SLACK_CHANNEL_NOT_PERMITTED, () -> rest.testRule(scoped(AlertScope.agent(AGENT), foreign)));
+            verify(store, never()).create(any());
+            verify(senders, never()).send(any(), any());
+        }
+
+        @Test
+        @DisplayName("an update cannot move a rule's target into a foreign channel")
+        void editorRefusedOnUpdate() {
+            asEditor();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), SLACK)));
+
+            assertError(403, AlertErrors.SLACK_CHANNEL_NOT_PERMITTED, () -> rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), foreign)));
+            verify(store, never()).update(any());
+        }
+
+        @Test
+        @DisplayName("an editor may still delete a rule whose channel no longer belongs to the agent")
+        void deleteNotBlocked() {
+            asEditor();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), foreign)));
+
+            assertEquals(204, rest.deleteRule(RULE_ID).getStatus());
+        }
+
+        @Test
+        @DisplayName("an administrator may name any channel")
+        void adminAnyChannel() {
+            asAdmin();
+            assertEquals(201, rest.createRule(scoped(AlertScope.agent(AGENT), foreign)).getStatus());
+        }
+
+        @Test
+        @DisplayName("test sends are throttled per caller")
+        void testThrottled() throws Exception {
+            asEditor();
+            rest.testThrottle = new AlertTestThrottle(2);
+
+            rest.testRule(scoped(AlertScope.agent(AGENT), SLACK));
+            rest.testRule(scoped(AlertScope.agent(AGENT), SLACK));
+            WebApplicationException third = assertThrows(WebApplicationException.class,
+                    () -> rest.testRule(scoped(AlertScope.agent(AGENT), SLACK)));
+
+            assertEquals(429, third.getResponse().getStatus());
+            verify(senders, times(2)).send(any(), any());
+        }
     }
 
     private void asEditor() {

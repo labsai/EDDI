@@ -37,8 +37,19 @@ public final class AlertErrors {
     public static final String INVALID_PARAMETER = "INVALID_PARAMETER";
     /** Nothing to retry: no delivery of the event has failed. */
     public static final String NOTHING_TO_RETRY = "NOTHING_TO_RETRY";
+    /**
+     * A non-administrator named a Slack channel that no integration targeting the
+     * rule's agent serves.
+     */
+    public static final String SLACK_CHANNEL_NOT_PERMITTED = "SLACK_CHANNEL_NOT_PERMITTED";
+    /** Too many test sends by this caller in the current minute. */
+    public static final String TEST_THROTTLED = "TEST_THROTTLED";
 
     private AlertErrors() {
+    }
+
+    public static ClientErrorException tooManyRequests(String code, String message) {
+        return new ClientErrorException(message, response(Response.Status.TOO_MANY_REQUESTS, code, message));
     }
 
     public static BadRequestException badRequest(String code, String message) {

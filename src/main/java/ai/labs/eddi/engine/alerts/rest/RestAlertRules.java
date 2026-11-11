@@ -52,6 +52,13 @@ public class RestAlertRules implements IRestAlertRules {
     private final AlertMaintenanceSchedule maintenanceSchedule;
     private final Clock clock;
 
+    /**
+     * Bounds test sends per caller. Field-injected so the constructors stay the
+     * ones the tests use; null there, and then tests are not throttled.
+     */
+    @Inject
+    AlertTestThrottle testThrottle;
+
     @Inject
     public RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access,
             AlertSenders senders, AlertMaintenanceSchedule maintenanceSchedule) {
@@ -99,6 +106,7 @@ public class RestAlertRules implements IRestAlertRules {
         AlertRule rule = assignTargetIds(forStorage(body), null);
         validate(rule);
         access.requireWritable(rule);
+        access.requireDeliverable(rule);
         Instant now = clock.instant();
         String caller = access.caller();
         AlertRule stored = ruleStore.create(rule.withId(null).withAudit(caller, now, caller, now));
@@ -115,6 +123,7 @@ public class RestAlertRules implements IRestAlertRules {
         AlertRule rule = assignTargetIds(restoreUrls(forStorage(body), current), current);
         validate(rule);
         access.requireWritable(rule);
+        access.requireDeliverable(rule);
         String caller = access.caller();
         AlertRule updated = rule.withId(current.id()).withAudit(current.createdBy(), current.createdAt(), caller, clock.instant());
         if (!ruleStore.update(updated)) {
@@ -159,6 +168,11 @@ public class RestAlertRules implements IRestAlertRules {
         }
         validate(rule);
         access.requireWritable(rule);
+        access.requireDeliverable(rule);
+        if (testThrottle != null && !testThrottle.tryAcquire(access.caller())) {
+            throw AlertErrors.tooManyRequests(AlertErrors.TEST_THROTTLED,
+                    "At most " + testThrottle.maxPerMinute() + " test alerts per minute; try again shortly");
+        }
         String agentId = rule.scope().singleAgent();
         Instant now = clock.instant();
         String summary = "Test alert from rule \"" + rule.name() + "\" — sent from the Manager; nothing happened.";

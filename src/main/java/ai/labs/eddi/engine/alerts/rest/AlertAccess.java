@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -42,11 +43,22 @@ public class AlertAccess {
 
     private final ResourceAccessGuard accessGuard;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final ChannelTargetRouter channelTargetRouter;
 
     @Inject
-    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard) {
+    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard,
+            ChannelTargetRouter channelTargetRouter) {
         this.accessGuard = accessGuard;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.channelTargetRouter = channelTargetRouter;
+    }
+
+    /**
+     * Without a channel router: no non-administrator can name a Slack target
+     * ({@link #requireDeliverable}).
+     */
+    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard) {
+        this(accessGuard, conversationAccessGuard, null);
     }
 
     /** Unrestricted visibility: every agent's rules and events. */
@@ -131,6 +143,35 @@ public class AlertAccess {
             throw AlertErrors.forbidden(AlertErrors.WEBHOOK_ADMIN_ONLY, "Webhook targets are an administrator's; use Slack or the inbox");
         }
         requireAgent(agentId);
+    }
+
+    /**
+     * May the caller send this rule's alerts where it says? A Slack target posts
+     * with the bot token of whichever integration serves the channel, so an editor
+     * of one agent could otherwise post into any channel of any integration —
+     * another team's included. Editors may name only a channel whose serving
+     * integration targets the rule's agent; administrators (the role) any.
+     * <p>
+     * The refusal reads the same whether the channel is served by another
+     * integration or by none, so it does not tell a caller which channels exist.
+     * Checked on what is being stored or tested, not on a stored rule being
+     * deleted, so a rule whose channel changed hands can still be removed.
+     */
+    public void requireDeliverable(AlertRule rule) {
+        if (hasAdminRole() || rule == null) {
+            return;
+        }
+        String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
+        for (DeliveryTarget target : rule.delivery()) {
+            if (target == null || target.type() != DeliveryTarget.DeliveryType.SLACK) {
+                continue;
+            }
+            if (channelTargetRouter == null || agentId == null
+                    || !channelTargetRouter.channelTargetsAgent("slack", target.channelId(), agentId)) {
+                throw AlertErrors.forbidden(AlertErrors.SLACK_CHANNEL_NOT_PERMITTED,
+                        "Slack channel " + target.channelId() + " is not served by a Slack integration that targets this agent");
+            }
+        }
     }
 
     /** May the caller see or act on this event? */
