@@ -1455,6 +1455,8 @@ To use **Google Custom Search** (more reliable/structured), configure these prop
 eddi.tools.websearch.provider=google
 eddi.tools.websearch.google.api-key=YOUR_GOOGLE_API_KEY
 eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
+# Optional: another service that serves the Custom Search JSON API (default: Google)
+# eddi.tools.websearch.google.base-url=https://search.example.com/customsearch/v1
 ```
 
 **Docker Environment Variables:**
@@ -1462,6 +1464,7 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 - `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+- `EDDI_TOOLS_WEBSEARCH_GOOGLE_BASE_URL=...` (optional)
 
 #### Web Scraper Tool
 
