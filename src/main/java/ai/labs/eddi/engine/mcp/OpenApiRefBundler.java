@@ -21,6 +21,8 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Inlines every external {@code $ref} of an OpenAPI document before
  * swagger-parser sees it, so the parser never touches the network.
@@ -250,7 +252,7 @@ final class OpenApiRefBundler {
         }
         String key = docUrl + "#" + fragment;
         if (chain.contains(key)) {
-            LOGGER.debugf("OpenAPI $ref %s is recursive; replaced by an empty schema", OpenApiSpecFetcher.forMessage(target));
+            LOGGER.debugf("OpenAPI $ref %s is recursive; replaced by an empty schema", sanitize(OpenApiSpecFetcher.forMessage(target)));
             return NODES.objectNode();
         }
         if (chain.size() >= MAX_REF_DEPTH) {

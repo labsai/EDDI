@@ -28,7 +28,10 @@ Seven confirmed findings from a security review of the outbound paths.
   that extends the existing ones merges cleanly. Paths are canonicalized (case, matrix parameters, repeated
   slashes) before matching. The MCP tools `resume_conversation`, `approve_group_phase` and
   `submit_group_human_input` refuse a marked `/mcp` request through the shared `AgentOriginatedRequests` helper,
-  which reads the header from the `CurrentVertxRequest` quarkus-mcp-server sets for each message.
+  which reads the header from the `CurrentVertxRequest` quarkus-mcp-server sets for each message. Decision paths
+  are matched segment by segment (`AgentOriginatedRequests.isDecisionPath` / `containsDecisionPath`), not by a
+  regex: the earlier pattern's two open-ended id groups backtracked polynomially on a caller-chosen path of
+  repeated `a/conversations/` (CodeQL `java/polynomial-redos`).
 - **Startup WARN with a forward proxy and SSRF protection both on**: the proxy resolves targets itself, so it must
   enforce the egress deny list. Routing unchanged.
 - **Crawler `maxBytesPerPage` capped at 50 MB** (validated; stored values and `CrawlRequest` clamped).

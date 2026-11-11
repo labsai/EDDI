@@ -43,10 +43,6 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
 
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final Pattern GUARDED = Pattern.compile("^/?hitl/(?:samples|autonomy|analytics/rebuild)(?:/.*)?$");
-    /** The endpoints that record a human's decision on a HITL pause. */
-    private static final Pattern DECISIONS = Pattern
-            .compile("^/?(?:agents/.+/resume(?:/stream)?|groups/.+/conversations/.+/(?:approve(?:/stream)?|human-input))/?$");
-
     @Override
     public void filter(ContainerRequestContext request) {
         String path = request.getUriInfo().getPath();
@@ -67,22 +63,23 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
             return false;
         }
         String canonical = canonical(path);
-        return GUARDED.matcher(canonical).matches() || DECISIONS.matcher(canonical).matches();
+        return GUARDED.matcher(canonical).matches() || AgentOriginatedRequests.isDecisionPath(canonical);
     }
 
     private static boolean isDecision(String path) {
-        return path != null && DECISIONS.matcher(canonical(path)).matches();
+        return path != null && AgentOriginatedRequests.isDecisionPath(canonical(path));
     }
 
     /**
      * The path as routing sees it, so no spelling slips past the patterns: lower
      * case, matrix parameters ({@code resume;x=1}) dropped and repeated slashes
-     * collapsed. An identifier segment matches {@code .+}, so an id that decodes to
-     * contain a {@code /} ({@code %2F}) still ends in {@code /resume}. No
-     * {@code LegacyPathRewriteFilter} alias leads here: its rewrites cover the
-     * configuration stores and {@code /administration/{env}} only, and it is
-     * {@code @PreMatching}, so this post-matching filter reads the rewritten path
-     * anyway.
+     * collapsed. A decision path is matched segment by segment
+     * ({@link AgentOriginatedRequests#isDecisionPath}) and an identifier may span
+     * several segments, so an id that decodes to contain a {@code /} ({@code %2F})
+     * still ends in {@code /resume}. No {@code LegacyPathRewriteFilter} alias leads
+     * here: its rewrites cover the configuration stores and
+     * {@code /administration/{env}} only, and it is {@code @PreMatching}, so this
+     * post-matching filter reads the rewritten path anyway.
      */
     static String canonical(String path) {
         return path.toLowerCase(Locale.ROOT).replaceAll(";[^/]*", "").replaceAll("/{2,}", "/");

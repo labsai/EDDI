@@ -180,7 +180,14 @@ class OpenApiRefBundlerTest {
         OpenApiSpecFetcher fetcher = mock(OpenApiSpecFetcher.class);
         when(fetcher.fetchSpec(anyString())).thenAnswer(invocation -> {
             String url = invocation.getArgument(0);
-            int n = Integer.parseInt(url.substring(url.lastIndexOf('/') + 2, url.indexOf(".json")));
+            int dot = url.indexOf(".json");
+            String token = dot > url.lastIndexOf('/') + 2 ? url.substring(url.lastIndexOf('/') + 2, dot) : "";
+            int n;
+            try {
+                n = Integer.parseInt(token);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("unexpected document URL " + url + ": '" + token + "' is not a number", e);
+            }
             return new OpenApiSpecFetcher.FetchedSpec("{\"$ref\":\"https://example.com/d" + (n + 1) + ".json\"}", url);
         });
 
