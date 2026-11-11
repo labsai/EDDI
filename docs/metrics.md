@@ -905,14 +905,16 @@ rule on `outcome="gave_up"` is in the
 
 ```text
 eddi_health_recorded_total          # Agent Health turn rows written
-eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown)
+eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown|erased|orphaned)
 eddi_health_queue_depth             # Gauge: turn records waiting for the health worker
 ```
 
-No tag carries an agent id. `eddi_health_dropped_total` should stay at zero:
+No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
 `queue_full` means the health worker cannot keep up with the turn rate (raise
 `eddi.health.queue-capacity` or look at the datastore's latency), `store_error`
-that writes fail, `shutdown` that rows were offered while the node stopped. A dropped row is a gap in the health views, never a slower or
+that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
+or removed because their user was erased or their conversation deleted — `orphaned` counts the rows the daily orphan sweep removed,
+each one a clean-up that had failed on the health worker. A dropped row is a gap in the health views, never a slower or
 failed turn. See [Agent Health](agent-health.md).
 
 ### Agent Identity & Signing Metrics

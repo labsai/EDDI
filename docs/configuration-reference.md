@@ -292,6 +292,8 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 | `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
 | `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks: the conversations of rows written within it are checked against the conversation store, and the rows of those that no longer exist deleted (`eddi_health_dropped_total{reason="orphaned"}`) |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN, and the rest wait for the next daily run |
 
 ---
 

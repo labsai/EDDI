@@ -19397,7 +19397,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_health_recorded_total` — Agent Health turn rows written, about one per conversation turn. `eddi_health_dropped_total` by `reason` — rows lost: `queue_full` (the health worker cannot keep up; raise `eddi.health.queue-capacity` or check datastore latency), `store_error` (writes fail) or `shutdown` (offered while the node was stopping). It should stay at zero; turns are never slowed by it.",
+          "description": "`eddi_health_recorded_total` — Agent Health turn rows written, about one per conversation turn. `eddi_health_dropped_total` by `reason` — rows lost: `queue_full` (the health worker cannot keep up; raise `eddi.health.queue-capacity` or check datastore latency), `store_error` (writes fail) or `shutdown` (offered while the node was stopping) should stay at zero; `erased` and `orphaned` are rows withheld or removed because their user was erased or their conversation deleted (`orphaned`: removed by the daily orphan sweep after the worker's own clean-up failed). Turns are never slowed by it.",
           "gridPos": {
             "h": 7,
             "w": 12,

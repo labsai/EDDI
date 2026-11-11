@@ -150,7 +150,11 @@ public final class HealthTurnFactory {
         int stepIndex = Math.max(0, memory.size() - 1);
         IConversationStep step = memory.getCurrentStep();
         String userId = memory.getUserId();
-        boolean paused = committed && memory.getConversationState() == ConversationState.AWAITING_HUMAN;
+        // A cancel that arrives after the pause was stored converts it to
+        // EXECUTION_INTERRUPTED in
+        // the store while the live memory still says AWAITING_HUMAN: no pause exists
+        // then.
+        boolean paused = committed && !memory.isCancelled() && memory.getConversationState() == ConversationState.AWAITING_HUMAN;
         Instant timestamp = now != null ? now : Instant.now();
 
         Integer version = memory.getAgentVersion();

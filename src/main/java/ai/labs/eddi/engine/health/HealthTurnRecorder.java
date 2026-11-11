@@ -63,9 +63,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * worker, never on the turn's thread.</li>
  * </ul>
  * Limits: when the conversation store cannot answer, or the cleanup delete
- * fails, the row stays (a WARN, at most once a minute; it expires with
- * {@code eddi.health.facts-retention}); an erasure that a node did not confirm
- * the cluster stop for is already reported incomplete ({@code clusterStop}).
+ * fails, the row stays (a WARN, at most once a minute) until the daily orphan
+ * sweep of {@link HealthTurnRetention} finds its conversation gone — the
+ * durable second chance; an erasure that a node did not confirm the cluster
+ * stop for is already reported incomplete ({@code clusterStop}).
  */
 @ApplicationScoped
 @Startup
@@ -232,8 +233,8 @@ public class HealthTurnRecorder {
             }
         } catch (RuntimeException e) {
             if (due(lastCleanupWarning)) {
-                LOGGER.warnf("Could not check or remove the Agent Health rows of an erased or deleted conversation (%s); they expire "
-                        + "with eddi.health.facts-retention: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
+                LOGGER.warnf("Could not check or remove the Agent Health rows of an erased or deleted conversation (%s); the daily "
+                        + "orphan sweep removes them: %s", sanitize(turn.conversationId()), sanitize(e.getMessage()));
             }
         }
     }
@@ -248,7 +249,16 @@ public class HealthTurnRecorder {
             return false;
         }
         StateAndRevision stored = conversations.get().getStateAndRevision(conversationId);
-        return stored != null && stored.state() == null && stored.revision() == null;
+        if (stored == null) {
+            // The store cannot say; the cleanup is skipped, so say so rather than fail
+            // silently.
+            if (due(lastCleanupWarning)) {
+                LOGGER.warnf("Could not tell whether conversation %s still exists; if it was deleted meanwhile, the daily orphan "
+                        + "sweep removes its Agent Health rows", sanitize(conversationId));
+            }
+            return false;
+        }
+        return stored.state() == null && stored.revision() == null;
     }
 
     private static boolean due(AtomicLong last) {

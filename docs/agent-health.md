@@ -152,8 +152,8 @@ permission.
 
 | Datastore | Collection / table |
 | --- | --- |
-| MongoDB | `healthturns`, `_id` `<conversationId>\|<executionId>`, indexed by `(agentId, day)`, `(conversationId, stepIndex)`, `userId`, `day`, `discardedAt` |
-| PostgreSQL | `health_turns`, primary key `(conversation_id, execution_id)`, indexed by `(agent_id, day)`, `user_id`, `day`, `discarded_at_ms` (markers); created on first use |
+| MongoDB | `healthturns`, `_id` `<conversationId>\|<executionId>`, indexed by `(agentId, day)`, `(conversationId, stepIndex)`, `userId`, `day`, `discardedAt`, `updatedAt` |
+| PostgreSQL | `health_turns`, primary key `(conversation_id, execution_id)`, indexed by `(agent_id, day)`, `user_id`, `day`, `discarded_at_ms` (markers), `updated_at_ms`; created on first use |
 
 ## Configuration
 
@@ -162,6 +162,8 @@ permission.
 | `eddi.health.enabled` | `true` | Off: no turn is recorded. Retention still runs |
 | `eddi.health.queue-capacity` | `10000` | Rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
 | `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks: the conversations of rows written within it are checked, and the rows of those that no longer exist deleted |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN, and the rest wait for the next day |
 
 ## Retention
 
@@ -176,6 +178,18 @@ health rows — only an explicit conversation delete does — so with a longer
 setting a conversation's rows outlive it until their own retention takes them.
 A user's [erasure](#gdpr) removes them whatever either setting says. Daily
 aggregates (H2b) will be kept longer and hold no personal data.
+
+The same daily job then runs the **orphan sweep**: it reads the distinct
+conversations of the rows (and discard markers) written within
+`eddi.health.orphan-sweep-window` (48 hours), asks the conversation store which
+of them still exist — one projected read per 500 ids — and deletes the rows of
+those that do not, counted (in rows) as
+`eddi_health_dropped_total{reason="orphaned"}`. Only a definite "does not
+exist" deletes: a batch the conversation store cannot answer keeps its rows,
+with a WARN, and the next day asks again. At most
+`eddi.health.orphan-sweep-max` conversations are checked per run (a WARN when
+there were more). Like the retention it runs on every node and is idempotent.
+It is the durable second chance for the [queued-row race](#gdpr) below.
 
 ## GDPR
 
@@ -202,7 +216,18 @@ Turn rows are personal data about a user's use of an agent:
   turn, on the worker. What it cannot cover: a node that did not confirm the
   erasure's cluster stop (the erasure then reports `clusterStop` as failed and
   must be re-run), a conversation store that cannot answer, or a cleanup delete
-  that fails — such a row stays until the retention removes it, with a WARN.
+  that fails. Each logs a WARN, at most once a minute (the stores EDDI ships
+  always answer the check; only a store without `getStateAndRevision` cannot).
+  Such a row stays only **until the next daily [orphan sweep](#retention)**,
+  which finds its conversation gone and deletes it — the erasure deletes the
+  user's conversations, so this covers a row left behind by an erasure (also
+  one a node wrote without having confirmed the cluster stop) as well as by a
+  conversation delete. The sweep's own limits: it looks only at rows written
+  within `eddi.health.orphan-sweep-window`, so if it cannot ask the
+  conversation store, or cannot delete, for longer than that, the row is left
+  to the retention (each failed run logs a WARN); and a conversation delete
+  whose own delete of older rows failed is not caught by it (that failure is
+  logged by the delete, and those rows expire with the retention).
 - **A turn whose snapshot was not stored** — a pause that lost its
   compare-and-store to a concurrent end or cancel, a write conflict, a fenced or
   failed write — is recorded unsettled: inserted only if absent, never as
@@ -222,8 +247,12 @@ See [GDPR & CCPA compliance](gdpr-compliance.md).
 
 ```text
 eddi_health_recorded_total   # Turn rows written
-eddi_health_dropped_total    # Turn records lost; tag: reason (queue_full|store_error|shutdown)
+eddi_health_dropped_total    # Turn records lost; tag: reason (queue_full|store_error|shutdown|erased|orphaned)
 eddi_health_queue_depth      # Gauge: records waiting for the health worker
 ```
 
-`eddi_health_dropped_total` should stay at zero. See [Metrics](metrics.md#agent-health-metrics).
+`eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
+and `shutdown`. `erased` and `orphaned` are rows withheld or removed because
+their user was erased or their conversation deleted; a rising `orphaned` (rows
+the daily sweep removed) means the worker's own clean-up had failed. See
+[Metrics](metrics.md#agent-health-metrics).

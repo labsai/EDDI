@@ -125,7 +125,9 @@ keeps at most 20 failure entries, and that turn rows outlive conversations when 
 the longer setting (the conversation-retention sweep does not delete them; erasure does).
 
 **Second review round (PR #1386).**
-- **Queued rows can no longer outlive an erasure or a conversation delete.** A row waiting on the health
+- **Queued rows no longer outlive an erasure or a conversation delete** (barring the documented limits: a node
+  that missed the cluster stop, a check that cannot answer, a failed clean-up; such a row stays until
+  retention, with a WARN). A row waiting on the health
   worker's queue could reach the store after a GDPR erasure or a purge had already deleted the user's or the
   conversation's rows.
   - `HealthErasureFence`, a `UserErasureParticipant` modelled on `AlertErasureFence`, is raised at erasure
@@ -139,6 +141,20 @@ the longer setting (the conversation-retention sweep does not delete them; erasu
   turn's snapshot was stored. A lost pause compare-and-store, a conflict, or a fenced or failed write is
   recorded unsettled: insert-only, no discards, never as paused.
 - **Docs.** The row key is documented as `(conversationId, executionId)`.
+- **A durable second chance for rows that land after a delete** (third round). If the worker's post-write
+  check or clean-up failed, such a row used to stay until retention (90 days). The daily
+  `health-turn-retention` job now also runs an **orphan sweep**:
+  - It reads the distinct conversations of rows and discard markers written within
+    `eddi.health.orphan-sweep-window` (48h), using new `updatedAt` indexes, and checks them against the
+    conversation store in batches of 500.
+  - It deletes the rows of conversations that no longer exist, counted as
+    `eddi_health_dropped_total{reason="orphaned"}`. Erasure deletes the user's conversations too, so this
+    covers erasures as well.
+  - It never deletes on uncertainty, and it is capped by `eddi.health.orphan-sweep-max`.
+
+  Also in this round:
+  - A pause that a cancel converted after it was stored is no longer recorded as `paused`.
+  - The worker WARNs (rate-limited) when the conversation store cannot answer its post-write check.
 
 ### What's next
 

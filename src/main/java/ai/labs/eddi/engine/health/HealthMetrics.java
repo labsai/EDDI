@@ -22,7 +22,11 @@ import java.util.concurrent.ThreadPoolExecutor;
  * application stops) — never expected in a healthy deployment — or
  * {@code erased} (withheld, or removed right after the write, because its user
  * was being erased or its conversation had been deleted; see
- * {@code HealthTurnRecorder});</li>
+ * {@code HealthTurnRecorder}) or {@code orphaned} (rows the daily orphan sweep
+ * removed because their conversation no longer exists — a write that landed
+ * after the delete and whose own clean-up failed; see
+ * {@code HealthTurnRetention}). {@code orphaned} counts rows, the others
+ * records;</li>
  * <li>{@code eddi.health.queue.depth} — records waiting for the health worker
  * (a gauge registered by {@code HealthTurnRecorder}).</li>
  * </ul>
@@ -44,6 +48,11 @@ public class HealthMetrics {
      * Records of a user being erased, or of a deleted conversation; not a fault.
      */
     static final String REASON_ERASED = "erased";
+    /**
+     * Rows of a deleted conversation that the orphan sweep removed; not a fault,
+     * but each one is a clean-up that failed earlier.
+     */
+    static final String REASON_ORPHANED = "orphaned";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -57,6 +66,7 @@ public class HealthMetrics {
         dropped0(REASON_STORE_ERROR);
         dropped0(REASON_SHUTDOWN);
         dropped0(REASON_ERASED);
+        dropped0(REASON_ORPHANED);
     }
 
     void registerQueueDepth(ThreadPoolExecutor executor) {
@@ -70,6 +80,12 @@ public class HealthMetrics {
 
     void dropped(String reason) {
         dropped0(reason).increment();
+    }
+
+    void dropped(String reason, long count) {
+        if (count > 0) {
+            dropped0(reason).increment(count);
+        }
     }
 
     private Counter dropped0(String reason) {

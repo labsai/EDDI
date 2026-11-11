@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.HealthTurn;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -85,6 +86,16 @@ public interface IHealthTurnStore {
 
     /** Deletes a conversation's rows and markers (the conversation was deleted). */
     long deleteByConversationId(String conversationId);
+
+    /**
+     * Streams to {@code consumer} the distinct conversation ids of the rows whose
+     * {@code updatedAt} is at or after {@code since}, and of the discard markers
+     * written since then — at most {@code limit} ids, in no particular order. What
+     * the orphan sweep ({@code HealthTurnRetention}) checks against the
+     * conversation store: a write that landed after its conversation was deleted is
+     * recent by construction.
+     */
+    void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer);
 
     /**
      * Deletes the rows of every day before {@code day}, and the discard markers

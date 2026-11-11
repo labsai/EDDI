@@ -105,13 +105,15 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
 
     /**
      * Rollups and drill-down read an agent's days; erasure finds rows by user;
-     * retention deletes by day and markers by their time. Rows by conversation use
-     * the primary key.
+     * retention deletes by day and markers by their time; the orphan sweep finds
+     * recently written rows by {@code updated_at_ms} (and markers by their time).
+     * Rows by conversation use the primary key.
      */
     static final String[] CREATE_INDEXES = {"CREATE INDEX IF NOT EXISTS idx_health_turns_agent_day ON health_turns (agent_id, day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_user ON health_turns (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_day ON health_turns (day)",
-            "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL"};
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
 
     /** The columns a row write binds, in bind order. */
     static final List<String> WRITTEN = List.of("conversation_id", "execution_id", "step_index", "agent_id", "agent_version",
@@ -148,6 +150,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     static final String BY_AGENT_DAYS = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ? ORDER BY day, recorded_at_ms LIMIT ?";
     static final String BY_AGENT_DAY = SELECT + "WHERE agent_id = ? AND day = ?";
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
+    static final String CONVERSATIONS_UPDATED_SINCE = "SELECT DISTINCT conversation_id FROM health_turns "
+            + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
     static final String DELETE_OLDER = "DELETE FROM health_turns WHERE day < ? OR (day IS NULL AND discarded_at_ms < ?)";
 
     /** Rows fetched per round trip while a rollup streams an agent-day. */
@@ -352,6 +356,33 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     public long deleteByConversationId(String conversationId) {
         return delete("DELETE FROM health_turns WHERE conversation_id = ?", "Could not delete a conversation's health turns",
                 s -> s.setString(1, conversationId));
+    }
+
+    @Override
+    public void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer) {
+        ensureSchema();
+        long at = since.toEpochMilli();
+        try (Connection connection = dataSourceInstance.get().getConnection()) {
+            // Cursor-backed, as in forEachByAgentAndDay: a large window streams.
+            boolean autoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(CONVERSATIONS_UPDATED_SINCE)) {
+                statement.setFetchSize(STREAM_FETCH_SIZE);
+                statement.setLong(1, at);
+                statement.setLong(2, at);
+                statement.setInt(3, Math.max(1, limit));
+                try (ResultSet rows = statement.executeQuery()) {
+                    while (rows.next()) {
+                        consumer.accept(rows.getString(1));
+                    }
+                }
+                connection.commit();
+            } finally {
+                connection.setAutoCommit(autoCommit);
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     @Override

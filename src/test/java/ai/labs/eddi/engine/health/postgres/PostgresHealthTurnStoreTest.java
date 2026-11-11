@@ -15,10 +15,13 @@ import javax.sql.DataSource;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -114,6 +117,11 @@ class PostgresHealthTurnStoreTest {
         assertTrue(PostgresHealthTurnStore.MARK_DISCARDED.contains("DO UPDATE SET discarded = TRUE"));
         assertTrue(PostgresHealthTurnStore.DELETE_OLDER.contains("day < ? OR (day IS NULL AND discarded_at_ms < ?)"));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES).contains("(agent_id, day)"));
+        assertTrue(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_SINCE
+                .contains("SELECT DISTINCT conversation_id FROM health_turns WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?)"));
+        assertTrue(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_SINCE.endsWith("LIMIT ?"));
+        assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES)
+                .contains("CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"));
     }
 
     @Test
@@ -128,6 +136,40 @@ class PostgresHealthTurnStoreTest {
         assertThrows(HealthStoreException.class, () -> store.upsert(turn()));
         assertThrows(HealthStoreException.class, () -> store.insertIfAbsent(turn()));
         assertThrows(HealthStoreException.class, () -> store.deleteByUserId("u"));
+        assertThrows(HealthStoreException.class, () -> store.forEachConversationUpdatedSince(Instant.now(), 10, id -> {
+        }));
         assertEquals(0L, store.markDiscarded(turn(), List.of()));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the orphan sweep binds the instant twice and the limit, streams in a transaction, and restores auto-commit")
+    void forEachConversationUpdatedSince() throws Exception {
+        Instance<DataSource> instance = mock(Instance.class);
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        PreparedStatement statement = mock(PreparedStatement.class);
+        ResultSet rows = mock(ResultSet.class);
+        when(instance.get()).thenReturn(dataSource);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(mock(Statement.class));
+        when(connection.getAutoCommit()).thenReturn(true);
+        when(connection.prepareStatement(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_SINCE)).thenReturn(statement);
+        when(statement.executeQuery()).thenReturn(rows);
+        when(rows.next()).thenReturn(true, true, false);
+        when(rows.getString(1)).thenReturn("c1", "c2");
+
+        List<String> ids = new ArrayList<>();
+        Instant since = Instant.parse("2026-11-08T00:00:00Z");
+        new PostgresHealthTurnStore(instance).forEachConversationUpdatedSince(since, 0, ids::add);
+
+        assertEquals(List.of("c1", "c2"), ids);
+        verify(statement).setLong(1, since.toEpochMilli());
+        verify(statement).setLong(2, since.toEpochMilli());
+        verify(statement).setInt(3, 1);
+        verify(statement).setFetchSize(PostgresHealthTurnStore.STREAM_FETCH_SIZE);
+        verify(connection).setAutoCommit(false);
+        verify(connection).commit();
+        verify(connection).setAutoCommit(true);
     }
 }
