@@ -1,0 +1,103 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.secrets.sanitize;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The export must never hand out what an editor's {@code GET} hides. The read
+ * redactor ({@link ConfigSecretRedactor}) hides a value by its field name
+ * alone; the export scrubber judged several of those names by entropy and
+ * shape, so a low-entropy literal under {@code nonAzureApiKey} was redacted on
+ * GET and exported in clear.
+ */
+@DisplayName("SecretScrubber — at least as strict by name as ConfigSecretRedactor")
+class SecretScrubberRedactorParityTest {
+
+    /** Low entropy and no known shape: only a name rule can catch it. */
+    private static final String LITERAL = "my-litellm-master-key";
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final SecretScrubber scrubber = new SecretScrubber(mapper);
+
+    private boolean exportedInClear(String parent, String field) throws Exception {
+        ObjectNode document = mapper.createObjectNode();
+        ObjectNode container = document.putObject(parent);
+        container.put(field, LITERAL);
+        String scrubbed = mapper.readTree(scrubber.scrubJson(mapper.writeValueAsString(document))).at("/" + parent + "/" + field).asText();
+        return LITERAL.equals(scrubbed);
+    }
+
+    @Test
+    @DisplayName("the reported case: parameters.nonAzureApiKey is not exported in clear")
+    void nonAzureApiKey() throws Exception {
+        assertTrue(ConfigSecretRedactor.isCredentialName("nonAzureApiKey"));
+        assertFalse(exportedInClear("parameters", "nonAzureApiKey"));
+    }
+
+    @Test
+    @DisplayName("every whole credential name the read redactor hides is hidden by the export")
+    void wholeNames() throws Exception {
+        List<String> leaked = new ArrayList<>();
+        for (String name : ConfigSecretRedactor.CREDENTIAL_NAMES) {
+            if (exportedInClear("parameters", name)) {
+                leaked.add(name);
+            }
+        }
+        assertTrue(leaked.isEmpty(), "exported in clear: " + leaked);
+    }
+
+    @Test
+    @DisplayName("every credential name ending the read redactor hides is hidden by the export")
+    void suffixes() throws Exception {
+        List<String> leaked = new ArrayList<>();
+        for (String suffix : ConfigSecretRedactor.CREDENTIAL_SUFFIXES) {
+            String name = "vendor" + Character.toUpperCase(suffix.charAt(0)) + suffix.substring(1);
+            if (exportedInClear("parameters", name)) {
+                leaked.add(name);
+            }
+        }
+        assertTrue(leaked.isEmpty(), "exported in clear: " + leaked);
+    }
+
+    @Test
+    @DisplayName("every credential query-parameter name is hidden inside a queryParams map")
+    void queryParameterNames() throws Exception {
+        List<String> leaked = new ArrayList<>();
+        for (String name : ConfigSecretRedactor.CREDENTIAL_QUERY_NAMES) {
+            if (exportedInClear("queryParams", name)) {
+                leaked.add(name);
+            }
+        }
+        for (String name : List.of("subscriptionKey", "accessKey", "appKey", "licenseKey", "clientKey", "signingKey", "sig")) {
+            if (exportedInClear("queryParams", name)) {
+                leaked.add(name);
+            }
+        }
+        assertTrue(leaked.isEmpty(), "exported in clear: " + leaked);
+    }
+
+    @Test
+    @DisplayName("a query-parameter name is not a credential outside a query map")
+    void queryNamesStayLocal() throws Exception {
+        // "key" names an identifier everywhere else (a map key, a lesson key); the
+        // redactor treats it as a credential only inside queryParams, and so does the
+        // export, so the round trip stays lossless.
+        ObjectNode document = mapper.createObjectNode();
+        document.putObject("settings").put("key", "customer");
+        String scrubbed = mapper.readTree(scrubber.scrubJson(mapper.writeValueAsString(document))).at("/settings/key").asText();
+        assertEquals("customer", scrubbed);
+    }
+}

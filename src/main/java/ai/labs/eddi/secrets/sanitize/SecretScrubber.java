@@ -835,6 +835,17 @@ public class SecretScrubber {
                 return true;
             }
         }
+        // Never narrower than the editor read: whatever ConfigSecretRedactor hides
+        // from a GET by its name alone (connectionString, nonAzureApiKey,
+        // secretAccessKey, any *ApiKey / *SecretKey, and in a query-parameter map
+        // key, sig, subscriptionKey, ...) is redacted here too. This scrubber judged
+        // those by entropy and shape instead, so a low-entropy literal such as
+        // nonAzureApiKey = "my-litellm-master-key" was hidden on GET and exported
+        // in clear.
+        if (ConfigSecretRedactor.isCredentialName(fieldName)
+                || (isQueryParamContainer(parentFieldName) && ConfigSecretRedactor.isCredentialQueryName(fieldName))) {
+            return true;
+        }
         if (!isHeaderContainer(parentFieldName)) {
             return false;
         }
@@ -884,6 +895,15 @@ public class SecretScrubber {
     /** Whether an enclosing field name denotes a map of HTTP headers. */
     private static boolean isHeaderContainer(String parentFieldName) {
         return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("headers");
+    }
+
+    /**
+     * Whether an enclosing field name denotes a query-parameter map — the same test
+     * {@link ConfigSecretRedactor} applies, so the two agree on which map's
+     * {@code key} or {@code sig} entry is a credential.
+     */
+    private static boolean isQueryParamContainer(String parentFieldName) {
+        return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("queryparams");
     }
 
     /**

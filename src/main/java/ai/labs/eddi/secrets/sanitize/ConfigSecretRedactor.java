@@ -125,8 +125,12 @@ public final class ConfigSecretRedactor {
     private static final Set<String> SCHEME_WORDS = Set.of("bearer", "basic", "digest", "token", "bot", "apikey", "api-key", "key", "ssws",
             "oauth", "negotiate", "hmac");
 
-    /** Whole (normalized) names that hold a credential wherever they appear. */
-    private static final Set<String> CREDENTIAL_NAMES = Set.of("apikey", "apikeys", "token", "secret", "secrets", "password", "passwd", "pwd",
+    /**
+     * Whole (normalized) names that hold a credential wherever they appear.
+     * Package-visible, with the two lists below, for the parity test that holds
+     * {@link SecretScrubber} (the export) to at least these rules.
+     */
+    static final Set<String> CREDENTIAL_NAMES = Set.of("apikey", "apikeys", "token", "secret", "secrets", "password", "passwd", "pwd",
             "passphrase", "credential", "credentials", "authorization", "connectionstring", "nonazureapikey", "secretaccesskey", "privatekey",
             "clientsecret", "signingsecret", "privatekeypem");
 
@@ -136,14 +140,14 @@ public final class ConfigSecretRedactor {
      * tokens ends in {@code tokens}, while {@code botToken}, {@code accessToken}
      * and {@code authToken} end in {@code token}.
      */
-    private static final List<String> CREDENTIAL_SUFFIXES = List.of("apikey", "token", "secret", "password", "passwd", "passphrase",
+    static final List<String> CREDENTIAL_SUFFIXES = List.of("apikey", "token", "secret", "password", "passwd", "passphrase",
             "privatekey", "secretkey", "credential", "credentials");
 
     /** A first word that turns a credential noun into a quantity of them. */
     private static final Set<String> QUANTITY_WORDS = Set.of("max", "min", "num", "number", "total", "budget", "count");
 
     /** Query-parameter names that carry a credential beyond the header rule. */
-    private static final Set<String> CREDENTIAL_QUERY_NAMES = Set.of("key", "sig", "signature", "subscriptionkey", "accesskey",
+    static final Set<String> CREDENTIAL_QUERY_NAMES = Set.of("key", "sig", "signature", "subscriptionkey", "accesskey",
             "appkey", "licensekey", "clientkey", "signingkey");
 
     /** Field names whose string value is a URL or a path with a query. */
