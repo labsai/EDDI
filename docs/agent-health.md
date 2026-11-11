@@ -384,22 +384,32 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    session was already overdue: a mark always sets the session due at its own
    time. Each due session is judged over
    its own steps only, up to the next stored session.
-2. **The feed** — conversations with turn rows captured since the watermark
-   (`healthrollupstate` / `health_rollup_state`, row `outcomes`) **minus
-   `eddi.health.outcome-feed-overlap`** (15 min), up to a minute ago, paged by
-   each conversation's newest capture (then its id), oldest first: a pass can
-   stop anywhere and the next resumes without a gap, even where more than a page
-   of conversations share one capture millisecond. Rows are ordered by *capture* time, set on the
-   turn's node before the row waits on that node's health queue, so a row can
-   reach the store after the watermark passed it; the overlap re-reads the last
-   minutes every pass and catches it — the price is re-judging those
-   conversations each pass (the evaluation is idempotent), at most half of the
-   pass's time and conversations: then the feed goes on from the watermark, so a
-   busy overlap never keeps it from moving on. A conversation whose evaluation
-   fails — any store it needs cannot be read: turn rows, outcomes, the agent
-   version's `healthConfig`, the ratings — holds the watermark at its capture
-   time (never further back than the watermark), so the following passes retry
-   it, for at most an hour from its first failure, however old the turn (then a
+2. **The feed** — conversations with turn rows captured up to a minute ago,
+   paged by each conversation's newest capture (then its id), oldest first.
+   Where it stands is a **cursor** of two such (capture, conversation) pairs
+   (`healthrollupstate` document `outcomes` / `health_rollup_state` rows
+   `outcomes` and `outcomes.replay`, written together), so a pass can stop
+   anywhere — even inside a run of more than a page, or more than a pass, of
+   conversations sharing one capture millisecond — and the next resumes right
+   after the last conversation read. Each pass has two parts:
+   - the **replay** re-reads what the feed already read, from
+     **`eddi.health.outcome-feed-overlap`** (15 min) behind its watermark. Rows
+     are ordered by *capture* time, set on the turn's node before the row waits
+     on that node's health queue, so a row can reach the store after the
+     watermark passed it; the replay catches it — the price is re-judging those
+     conversations (the evaluation is idempotent). It gets at most half of the
+     pass's time and conversations; what it does not reach it resumes next pass
+     from its own position, instead of skipping it;
+   - the **forward feed** then reads on from the watermark. While a replay is
+     pending, the stored watermark stays within one overlap of it, so the replay
+     never trails it by more than that; the replay's own position only moves
+     on, so the feed always does too.
+
+   A conversation whose evaluation fails, in either part — any store it needs
+   cannot be read: turn rows, outcomes, the agent version's `healthConfig`, the
+   ratings — sets the replay back to its capture time, so every following pass
+   retries it first, however far the forward feed has got, for at most an hour
+   from its first failure, however old the turn (then it is given up with a
    WARN; its next change or due time judges it). Nothing is written for it in
    the meantime: a session is never judged under default settings, or as
    silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns

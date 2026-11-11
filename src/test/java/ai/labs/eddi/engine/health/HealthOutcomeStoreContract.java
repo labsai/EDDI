@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -240,12 +241,28 @@ public interface HealthOutcomeStoreContract {
     }
 
     @Test
-    @DisplayName("the watermark is absent until set, then read back")
-    default void watermark() {
+    @DisplayName("the feed cursor is absent until set, then read back whole — every position, with and without its conversation, and a "
+            + "replay that is no longer pending")
+    default void feedCursor() {
+        assertTrue(store().feedCursor().isEmpty());
         assertTrue(store().watermark().isEmpty());
-        store().setWatermark(T0);
+
+        store().setFeedCursor(HealthFeedCursor.at(T0));
+        assertEquals(HealthFeedCursor.at(T0), store().feedCursor().orElseThrow());
         assertEquals(T0, store().watermark().orElseThrow());
-        store().setWatermark(T0.plusSeconds(5));
+
+        String longId = "c".repeat(200);
+        HealthFeedCursor both = new HealthFeedCursor(T0.plusSeconds(5), longId, T0.minusSeconds(60), "r1");
+        store().setFeedCursor(both);
+        assertEquals(both, store().feedCursor().orElseThrow());
         assertEquals(T0.plusSeconds(5), store().watermark().orElseThrow());
+
+        HealthFeedCursor replayFromStart = new HealthFeedCursor(T0.plusSeconds(6), null, T0.minusSeconds(30), null);
+        store().setFeedCursor(replayFromStart);
+        assertEquals(replayFromStart, store().feedCursor().orElseThrow());
+
+        HealthFeedCursor replayDone = new HealthFeedCursor(T0.plusSeconds(7), "a1", null, null);
+        store().setFeedCursor(replayDone);
+        assertEquals(replayDone, store().feedCursor().orElseThrow());
     }
 }

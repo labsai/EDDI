@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -120,9 +121,20 @@ public interface IHealthOutcomeStore {
     /** Deletes the sessions that ended before {@code day} (retention). */
     long deleteOlderThan(LocalDate day);
 
-    /** Where the evaluation's incremental feed stopped, if it ever ran. */
-    Optional<Instant> watermark();
+    /**
+     * Where the evaluation's incremental feed stands — its forward position and the
+     * overlap replay's — if it ever ran.
+     */
+    Optional<HealthFeedCursor> feedCursor();
 
-    /** Records where the incremental feed stopped. */
-    void setWatermark(Instant at);
+    /** Records where the incremental feed stands, both positions at once. */
+    void setFeedCursor(HealthFeedCursor cursor);
+
+    /**
+     * How far the incremental feed has read once — the cursor's watermark — if it
+     * ever ran.
+     */
+    default Optional<Instant> watermark() {
+        return feedCursor().map(HealthFeedCursor::watermark);
+    }
 }

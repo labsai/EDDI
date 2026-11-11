@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health.postgres;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthOutcomeStore;
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -40,9 +41,12 @@ import java.util.stream.Collectors;
  * PostgreSQL implementation of {@link IHealthOutcomeStore}: table
  * {@code health_outcomes}, primary key {@code (conversation_id, session_no)},
  * written by {@code INSERT ... ON CONFLICT DO UPDATE} of every column. The
- * incremental feed's watermark is the row {@value #WATERMARK} of
- * {@code health_rollup_state}. The schema is created on first use, never at
- * construction: on a MongoDB deployment the datasource bean is inactive.
+ * incremental feed's cursor is two rows of {@code health_rollup_state}: the
+ * forward position in {@value #WATERMARK} ({@code at_ms}, {@code ref} the last
+ * conversation read at it) and the overlap replay's in {@value #REPLAY}, absent
+ * when none is pending — written together in one transaction. The schema is
+ * created on first use, never at construction: on a MongoDB deployment the
+ * datasource bean is inactive.
  */
 @ApplicationScoped
 @DefaultBean
@@ -50,6 +54,7 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
 
     static final String TABLE = "health_outcomes";
     static final String WATERMARK = "outcomes";
+    static final String REPLAY = "outcomes.replay";
 
     static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS health_outcomes (
@@ -85,6 +90,12 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
 
     /** The rollup's state table, shared with the dirty-day store. */
     static final String CREATE_STATE = "CREATE TABLE IF NOT EXISTS health_rollup_state (name VARCHAR(64) PRIMARY KEY, at_ms BIGINT NOT NULL)";
+    /**
+     * The conversation a feed position was read up to, sized like
+     * {@code conversation_id}; nullable, so the dirty-day store's rows, which never
+     * set it, are unaffected — whichever store creates the table first.
+     */
+    static final String ADD_STATE_REF_COLUMN = "ALTER TABLE health_rollup_state ADD COLUMN IF NOT EXISTS ref VARCHAR(255)";
 
     static final List<String> COLUMNS = List.of("conversation_id", "session_no", "agent_id", "agent_version", "user_id", "origin", "engaged",
             "started_at_ms", "ended_at_ms", "turns", "cost_usd", "failures", "outcome", "evidence", "provisional", "day", "due_at_ms",
@@ -107,9 +118,10 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     static final String MARK_DUE_SESSIONS = MARK_DUE + " AND session_no = ANY(?)";
     static final String BY_USER = SELECT + "WHERE user_id = ? ORDER BY ended_at_ms DESC LIMIT ?";
     static final String EVALUATED_SINCE = "SELECT DISTINCT conversation_id FROM health_outcomes WHERE evaluated_at_ms >= ? LIMIT ?";
-    static final String READ_WATERMARK = "SELECT at_ms FROM health_rollup_state WHERE name = ?";
-    static final String WRITE_WATERMARK = "INSERT INTO health_rollup_state (name, at_ms) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET at_ms = "
-            + "EXCLUDED.at_ms";
+    static final String READ_CURSOR = "SELECT name, at_ms, ref FROM health_rollup_state WHERE name IN (?, ?)";
+    static final String WRITE_CURSOR = "INSERT INTO health_rollup_state (name, at_ms, ref) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET "
+            + "at_ms = EXCLUDED.at_ms, ref = EXCLUDED.ref";
+    static final String DELETE_CURSOR = "DELETE FROM health_rollup_state WHERE name = ?";
 
     /**
      * Binds agent, from, to, the origins array and, with a version, the version.
@@ -166,6 +178,7 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
                 statement.execute(index);
             }
             statement.execute(CREATE_STATE);
+            statement.execute(ADD_STATE_REF_COLUMN);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new HealthStoreException("Could not create the " + TABLE + " schema", e);
@@ -405,23 +418,66 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
-    public Optional<Instant> watermark() {
-        try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(READ_WATERMARK)) {
+    public Optional<HealthFeedCursor> feedCursor() {
+        try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(READ_CURSOR)) {
             s.setString(1, WATERMARK);
+            s.setString(2, REPLAY);
+            Instant watermark = null;
+            String afterId = null;
+            Instant replayAt = null;
+            String replayAfterId = null;
             try (ResultSet r = s.executeQuery()) {
-                return r.next() ? Optional.of(Instant.ofEpochMilli(r.getLong(1))) : Optional.empty();
+                while (r.next()) {
+                    if (WATERMARK.equals(r.getString(1))) {
+                        watermark = Instant.ofEpochMilli(r.getLong(2));
+                        afterId = r.getString(3);
+                    } else {
+                        replayAt = Instant.ofEpochMilli(r.getLong(2));
+                        replayAfterId = r.getString(3);
+                    }
+                }
             }
+            return watermark == null ? Optional.empty() : Optional.of(new HealthFeedCursor(watermark, afterId, replayAt, replayAfterId));
         } catch (SQLException e) {
-            throw new HealthStoreException("Could not read the health outcome watermark", e);
+            throw new HealthStoreException("Could not read the health outcome feed cursor", e);
         }
     }
 
     @Override
-    public void setWatermark(Instant at) {
-        update(WRITE_WATERMARK, "Could not store the health outcome watermark", (c, s) -> {
-            s.setString(1, WATERMARK);
-            s.setLong(2, at.toEpochMilli());
-        });
+    public void setFeedCursor(HealthFeedCursor cursor) {
+        try (Connection connection = connection()) {
+            boolean autoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement s = connection.prepareStatement(WRITE_CURSOR)) {
+                    s.setString(1, WATERMARK);
+                    s.setLong(2, cursor.watermark().toEpochMilli());
+                    s.setString(3, cursor.afterId());
+                    s.executeUpdate();
+                }
+                if (cursor.replayAt() == null) {
+                    try (PreparedStatement s = connection.prepareStatement(DELETE_CURSOR)) {
+                        s.setString(1, REPLAY);
+                        s.executeUpdate();
+                    }
+                } else {
+                    try (PreparedStatement s = connection.prepareStatement(WRITE_CURSOR)) {
+                        s.setString(1, REPLAY);
+                        s.setLong(2, cursor.replayAt().toEpochMilli());
+                        s.setString(3, cursor.replayAfterId());
+                        s.executeUpdate();
+                    }
+                }
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            } finally {
+                connection.setAutoCommit(autoCommit);
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not store the health outcome feed cursor", e);
+        }
     }
 
     @FunctionalInterface
