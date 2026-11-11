@@ -16,12 +16,24 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Refuses an oversight write that an agent's own tool call makes: any non-read
- * request carrying {@link AgentCallMarker#HEADER} to {@code /hitl/samples/**},
- * {@code /hitl/autonomy/**} or {@code /hitl/analytics/rebuild} answers 403
- * {@code AGENT_ORIGINATED}. Sample verdicts and every change to earned autonomy
- * are human actions; the engine sets the header on every httpcall, so not even
- * a forwarded caller token lets an agent produce its own evidence.
+ * Refuses an oversight write or a HITL decision that an agent's own tool call
+ * makes: any non-read request carrying {@link AgentCallMarker#HEADER} to
+ * {@code /hitl/samples/**}, {@code /hitl/autonomy/**},
+ * {@code /hitl/analytics/rebuild}, a paused conversation's
+ * {@code /agents/{id}/resume} (and {@code /resume/stream}), or a group's
+ * {@code /groups/{id}/conversations/{id}/approve} (and {@code /approve/stream})
+ * and {@code /human-input} answers 403 {@code AGENT_ORIGINATED}. Sample
+ * verdicts, every change to earned autonomy and every approval decision are
+ * human actions — a resume verdict is counted as human-verified evidence toward
+ * earned autonomy.
+ * <p>
+ * The engine sets the header on an httpcall aimed at this deployment (loopback,
+ * {@code eddi.self.base-url}, {@code eddi.hitl.oversight.self-hosts}, or the
+ * origin the turn's caller addressed) and on every request that carries a
+ * released {@code ${caller:token}}, so not even a forwarded caller token lets
+ * an agent produce its own evidence or decide a pause as the human it talks to.
+ * A request from outside EDDI — a script, a proxy, another product — carries no
+ * such header, and the filter cannot tell it apart from a person.
  *
  * @since 6.7.0
  */
@@ -30,12 +42,18 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
 
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final Pattern GUARDED = Pattern.compile("^/?hitl/(?:samples|autonomy|analytics/rebuild)(?:/.*)?$");
+    /** The endpoints that record a human's decision on a HITL pause. */
+    private static final Pattern DECISIONS = Pattern
+            .compile("^/?(?:agents/[^/]+/resume(?:/stream)?|groups/[^/]+/conversations/[^/]+/(?:approve(?:/stream)?|human-input))/?$");
 
     @Override
     public void filter(ContainerRequestContext request) {
-        if (refused(request.getMethod(), request.getUriInfo().getPath(), request.getHeaderString(AgentCallMarker.HEADER))) {
-            request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED,
-                    "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions"));
+        String path = request.getUriInfo().getPath();
+        if (refused(request.getMethod(), path, request.getHeaderString(AgentCallMarker.HEADER))) {
+            String message = isDecision(path)
+                    ? "This request was made by an agent's tool call; deciding a paused conversation is a human action"
+                    : "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions";
+            request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED, message));
         }
     }
 
@@ -44,6 +62,10 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
         if (marker == null || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
             return false;
         }
-        return path != null && GUARDED.matcher(path.toLowerCase(Locale.ROOT)).matches();
+        return path != null && (GUARDED.matcher(path.toLowerCase(Locale.ROOT)).matches() || isDecision(path));
+    }
+
+    private static boolean isDecision(String path) {
+        return path != null && DECISIONS.matcher(path.toLowerCase(Locale.ROOT)).matches();
     }
 }

@@ -231,12 +231,24 @@ Neither an agent nor a model can influence its own promotion:
   `X-EDDI-Agent-Call: true`, set after the configured headers so no configuration removes or replaces it. "This
   deployment" is the own origin (`eddi.self.base-url`, or the derived listener address), any loopback address, and the
   hosts in `eddi.hitl.oversight.self-hosts` (the public or in-cluster names it is also reached by, `host` or
-  `host:port`). Calls to any other host carry no EDDI header. Any non-read request with the header to
-  `/hitl/samples/**`, `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a
-  forwarded `${caller:token}`. If agents reach this deployment under a name none of those cover, list it in
+  `host:port`), **and the origin the turn's caller addressed** — the public hostname a browser used, which is exactly
+  where `${caller:token}` is released. Independently of the target, **every request that carries a released
+  `${caller:token}`** is marked — an httpcall header, or the `Authorization` of an MCP server (`mcpServers`,
+  `mcpcalls`): the token is only ever released to this deployment, so such a request is one by definition. Calls to
+  any other host carry no EDDI header. Any non-read request with the header to `/hitl/samples/**`,
+  `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a forwarded
+  `${caller:token}`. If agents reach this deployment under a name none of those cover, list it in
   `eddi.hitl.oversight.self-hosts`.
-- **The self-ungating guard** refuses an approved tool call that writes to those paths, and an agent-document write that
-  changes `hitlConfig.oversight` (an agent could otherwise lower its own sample rate or loosen its own policy).
+- **Agent-originated HITL decisions are refused the same way.** A marked `POST /agents/{conversationId}/resume` (and
+  `/resume/stream`), `POST /groups/{groupId}/conversations/{id}/approve` (and `/approve/stream`) and
+  `POST /groups/{groupId}/conversations/{id}/human-input` answer 403 `AGENT_ORIGINATED`. Without that, a
+  prompt-injected agent chatting with an approver could resume *another* paused conversation as that approver, with
+  `${caller:token}`, and the decision would count as a verified human's evidence toward earned autonomy. (Until this
+  release only loopback, `eddi.self.base-url` and the self-hosts list were marked, and no decision endpoint read the
+  marker.)
+- **The self-ungating guard** refuses an approved tool call that writes to those paths — the oversight API and the
+  decision endpoints above — and an agent-document write that changes `hitlConfig.oversight` (an agent could otherwise
+  lower its own sample rate or loosen its own policy).
 - **The overlay field is transient** (`@JsonIgnore`): configuration can neither pre-set nor clear a suspension.
 - **Apply** re-checks the evidence server-side, requires the reviewed agent version, validates, writes through the agent
   store and is audited; it never deploys.

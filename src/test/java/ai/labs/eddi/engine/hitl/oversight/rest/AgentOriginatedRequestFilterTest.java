@@ -35,6 +35,23 @@ class AgentOriginatedRequestFilterTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"POST,agents/c2/resume", "POST,/agents/c2/resume/stream", "POST,agents/c2/resume/",
+            "POST,groups/g1/conversations/gc1/approve", "POST,groups/g1/conversations/gc1/approve/stream",
+            "POST,groups/g1/conversations/gc1/human-input", "post,AGENTS/C2/RESUME"})
+    @DisplayName("a marked HITL decision is refused: an agent may not resume a pause as the approver it talks to")
+    void decisionRefused(String method, String path) {
+        assertTrue(AgentOriginatedRequestFilter.refused(method, path, "true"), path);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"POST,agents/c2/resume,", "GET,agents/c2/approval-status,true", "POST,agents/c2,true", "POST,agents/c2/stream,true",
+            "POST,groups/g1/conversations/gc1/followup,true", "POST,agents/c2/resumex,true"}, nullValues = "")
+    @DisplayName("an unmarked decision, a read and a plain conversation turn pass")
+    void decisionPasses(String method, String path, String marker) {
+        assertFalse(AgentOriginatedRequestFilter.refused(method, path, marker), path);
+    }
+
+    @ParameterizedTest
     @CsvSource(value = {"GET,hitl/samples,true", "HEAD,hitl/autonomy,true", "PATCH,hitl/samples/s1,", "POST,hitl/analytics/summary,true",
             "POST,agentstore/agents,true", "POST,hitl/samplesx,true"}, nullValues = "")
     @DisplayName("reads, unmarked requests and other paths pass")

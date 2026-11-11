@@ -1641,6 +1641,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // disable redirect-following outright, so the request can only ever reach the
         // origin the caller vouched for.
         boolean headerCarriesCredential = false;
+        boolean callerTokenReleased = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
             // Resolve global variable references, then vault references in headers
@@ -1673,6 +1674,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             if (callerTokenReferenced) {
                 // Echo redaction covers the caller's token too, not only vault plaintexts.
                 addCredential(resolvedSecrets, callerIdentityResolver.currentCallerToken());
+                // resolveValue returned, so the token was released into this request.
+                callerTokenReleased = true;
             }
             if (!Objects.equals(beforeCallerResolution, headerValue)) {
                 // A ${caller:token}/${caller:userId} was resolved into this header.
@@ -1737,9 +1740,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setHttpHeader(headerName, headerValue);
         }
         // Engine-owned, set after the configured headers so no config can drop it — and
-        // only
-        // on a call to this deployment, so no EDDI header reaches a third-party API.
-        AgentCallMarker.apply(agentCallMarker, request, targetUri);
+        // only on a call to this deployment, so no EDDI header reaches a third-party
+        // API. A request carrying the released caller token is one by construction
+        // (the token is only released to this deployment), so it is always marked.
+        AgentCallMarker.apply(agentCallMarker, request, targetUri, callerTokenReleased);
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

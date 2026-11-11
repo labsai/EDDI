@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.invocation.InvocationContext;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentity;
@@ -231,6 +232,13 @@ class McpToolProviderManagerAdditionalTest {
         void toolCallCarriesTheCaller() throws Exception {
             context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
             assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("a tool call that carries the caller's token is marked as an agent's call")
+        void toolCallCarryingTheTokenIsMarked() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals(AgentCallMarker.VALUE, headersFor(callerBoundServer(), toolCall()).get(AgentCallMarker.HEADER));
         }
 
         @Test

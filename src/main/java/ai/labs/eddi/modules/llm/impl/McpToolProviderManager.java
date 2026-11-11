@@ -9,6 +9,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.tracing.TracePropagation;
@@ -1461,6 +1462,11 @@ public class McpToolProviderManager {
             return Map.of();
         }
         String resolved = callerIdentityResolver.resolveValue(configuredKey, URI.create(config.getUrl()));
+        if (CallerIdentityResolver.containsTokenReference(configuredKey)) {
+            // The caller's token was released, which happens only towards this
+            // deployment: mark the request as an agent's, as an httpcall carrying it is.
+            return Map.of("Authorization", withBearerPrefix(resolved), AgentCallMarker.HEADER, AgentCallMarker.VALUE);
+        }
         return Map.of("Authorization", withBearerPrefix(resolved));
     }
 
