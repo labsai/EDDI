@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -61,6 +63,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("Agent Health settings, retention and the orphan sweep")
 class HealthTurnRetentionTest {
 
+    private static final LocalDate DAY = LocalDate.of(2026, 11, 9);
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-10T00:30:00Z"), ZoneOffset.UTC);
 
     private SimpleMeterRegistry registry;
@@ -99,11 +102,11 @@ class HealthTurnRetentionTest {
         IHealthTurnStore store = mock(IHealthTurnStore.class);
         doAnswer(inv -> {
             int limit = inv.getArgument(1);
-            Consumer<String> consumer = inv.getArgument(2);
-            ids.stream().limit(limit).forEach(consumer);
+            BiConsumer<String, String> consumer = inv.getArgument(2);
+            ids.stream().limit(limit).forEach(id -> consumer.accept(id, "agent"));
             return null;
-        }).when(store).forEachConversationUpdatedSince(any(), anyInt(), any());
-        when(store.deleteByConversationId(anyString())).thenReturn(2L);
+        }).when(store).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
+        when(store.deleteConversationReturningDays(anyString())).thenReturn(new HealthDeletedRows(2L, Map.of("agent", Set.of(DAY))));
         return store;
     }
 
@@ -171,10 +174,10 @@ class HealthTurnRetentionTest {
 
             assertEquals(4L, removed);
             assertEquals(4.0, orphaned());
-            verify(store).deleteByConversationId("gone-1");
-            verify(store).deleteByConversationId("gone-2");
-            verify(store, never()).deleteByConversationId("live");
-            verify(store).forEachConversationUpdatedSince(eq(Instant.parse("2026-11-08T00:30:00Z")), eq(50_001), any());
+            verify(store).deleteConversationReturningDays("gone-1");
+            verify(store).deleteConversationReturningDays("gone-2");
+            verify(store, never()).deleteConversationReturningDays("live");
+            verify(store).forEachConversationAgentUpdatedSince(eq(Instant.parse("2026-11-08T00:30:00Z")), eq(50_001), any());
         }
 
         @Test
@@ -189,7 +192,7 @@ class HealthTurnRetentionTest {
             assertEquals(0L, retention(store, conversations, HealthSettings.defaults(), CLOCK).removeOrphans());
 
             verify(conversations, times(2)).loadListingSummaries(any());
-            verify(store, never()).deleteByConversationId(anyString());
+            verify(store, never()).deleteConversationReturningDays(anyString());
             assertEquals(0.0, orphaned());
         }
 
@@ -201,7 +204,7 @@ class HealthTurnRetentionTest {
             when(conversations.loadListingSummaries(any())).thenReturn(null);
 
             assertEquals(0L, retention(store, conversations, HealthSettings.defaults(), CLOCK).removeOrphans());
-            verify(store, never()).deleteByConversationId(anyString());
+            verify(store, never()).deleteConversationReturningDays(anyString());
         }
 
         @Test
@@ -219,25 +222,25 @@ class HealthTurnRetentionTest {
 
             assertEquals(2_000L, retention(store, conversations, settings, CLOCK).removeOrphans());
 
-            verify(store).forEachConversationUpdatedSince(any(), eq(1_001), any());
+            verify(store).forEachConversationAgentUpdatedSince(any(), eq(1_001), any());
             assertEquals(List.of(500, 500), batchSizes);
-            verify(store, times(1_000)).deleteByConversationId(anyString());
-            verify(store, never()).deleteByConversationId("gone-1000");
+            verify(store, times(1_000)).deleteConversationReturningDays(anyString());
+            verify(store, never()).deleteConversationReturningDays("gone-1000");
         }
 
         @Test
         @DisplayName("a failing read or delete is logged, never thrown; the other orphans are still removed")
         void failuresContained() throws Exception {
             IHealthTurnStore failingRead = mock(IHealthTurnStore.class);
-            doThrow(new HealthStoreException("down", null)).when(failingRead).forEachConversationUpdatedSince(any(), anyInt(), any());
+            doThrow(new HealthStoreException("down", null)).when(failingRead).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
             IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
             when(conversations.loadListingSummaries(any())).thenReturn(Map.of());
             assertEquals(0L, retention(failingRead, conversations, HealthSettings.defaults(), CLOCK).removeOrphans());
 
             IHealthTurnStore store = storeWith(List.of("gone-1", "gone-2"));
-            when(store.deleteByConversationId("gone-1")).thenThrow(new HealthStoreException("down", null));
+            when(store.deleteConversationReturningDays("gone-1")).thenThrow(new HealthStoreException("down", null));
             assertEquals(2L, retention(store, conversations, HealthSettings.defaults(), CLOCK).removeOrphans());
-            verify(store).deleteByConversationId("gone-2");
+            verify(store).deleteConversationReturningDays("gone-2");
         }
 
         @Test
@@ -245,7 +248,7 @@ class HealthTurnRetentionTest {
         void noConversationStore() {
             IHealthTurnStore store = mock(IHealthTurnStore.class);
             assertEquals(0L, retention(store, HealthSettings.defaults()).removeOrphans());
-            verify(store, never()).forEachConversationUpdatedSince(any(), anyInt(), any());
+            verify(store, never()).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
         }
 
         @Test
@@ -258,7 +261,56 @@ class HealthTurnRetentionTest {
 
             retention(store, conversations, HealthSettings.defaults(), CLOCK).sweep();
 
-            verify(store).deleteByConversationId("gone");
+            verify(store).deleteConversationReturningDays("gone");
+        }
+
+        @SuppressWarnings("unchecked")
+        private HealthDirtyDays dirtyDays(HealthTurnRetention retention) {
+            HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+            Instance<HealthDirtyDays> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(dirty);
+            retention.dirtyDays = instance;
+            return dirty;
+        }
+
+        @Test
+        @DisplayName("an orphan's deleted rows and its agents from the candidate read go to the dirty marks")
+        void orphanMarksDays() throws Exception {
+            IHealthTurnStore store = storeWith(List.of("gone"));
+            HealthDeletedRows unknown = new HealthDeletedRows(2L, null);
+            when(store.deleteConversationReturningDays("gone")).thenReturn(unknown);
+            IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+            when(conversations.loadListingSummaries(any())).thenReturn(Map.of());
+            HealthTurnRetention retention = retention(store, conversations, HealthSettings.defaults(), CLOCK);
+            HealthDirtyDays dirty = dirtyDays(retention);
+
+            assertEquals(2L, retention.removeOrphans());
+            verify(dirty).markDeletedRows("gone", Set.of("agent"), unknown);
+        }
+
+        @Test
+        @DisplayName("an orphan whose rows name no agent is never deleted blind: it waits for the next sweep")
+        void orphanWithoutAgentIsKept() throws Exception {
+            IHealthTurnStore store = mock(IHealthTurnStore.class);
+            doAnswer(inv -> {
+                BiConsumer<String, String> consumer = inv.getArgument(2);
+                consumer.accept("no-agent", null);
+                consumer.accept("two-agents", "a1");
+                consumer.accept("two-agents", "a2");
+                consumer.accept("two-agents", null);
+                return null;
+            }).when(store).forEachConversationAgentUpdatedSince(any(), anyInt(), any());
+            HealthDeletedRows deleted = new HealthDeletedRows(3L, Map.of());
+            when(store.deleteConversationReturningDays("two-agents")).thenReturn(deleted);
+            IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+            when(conversations.loadListingSummaries(any())).thenReturn(Map.of());
+            HealthTurnRetention retention = retention(store, conversations, HealthSettings.defaults(), CLOCK);
+            HealthDirtyDays dirty = dirtyDays(retention);
+
+            assertEquals(3L, retention.removeOrphans());
+            verify(store, never()).deleteConversationReturningDays("no-agent");
+            verify(dirty).markDeletedRows("two-agents", Set.of("a1", "a2"), deleted);
         }
     }
 
@@ -453,6 +505,18 @@ class HealthTurnRetentionTest {
                 rows.values().removeIf(turn -> conversationId.equals(turn.conversationId()));
                 return before - rows.size();
             }
+        }
+
+        @Override
+        public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+            return new HealthDeletedRows(deleteByConversationId(conversationId), Map.of());
+        }
+
+        @Override
+        public synchronized void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer) {
+            rows.values().stream().filter(turn -> turn.updatedAt() != null && !turn.updatedAt().isBefore(since))
+                    .map(turn -> new AbstractMap.SimpleImmutableEntry<>(turn.conversationId(), turn.agentId())).distinct().limit(limit).toList()
+                    .forEach(e -> consumer.accept(e.getKey(), e.getValue()));
         }
 
         @Override

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health.postgres;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -158,6 +159,10 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
     static final String CONVERSATIONS_UPDATED_SINCE = "SELECT DISTINCT conversation_id FROM health_turns "
             + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
+    static final String CONVERSATION_AGENTS_UPDATED_SINCE = "SELECT DISTINCT conversation_id, agent_id FROM health_turns "
+            + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
+    /** The delete and the days of what it deleted, in one statement. */
+    static final String DELETE_CONVERSATION_RETURNING = "DELETE FROM health_turns WHERE conversation_id = ? RETURNING agent_id, day";
     static final String DELETE_OLDER = "DELETE FROM health_turns WHERE day < ? OR (day IS NULL AND discarded_at_ms < ?)";
 
     /** Rows fetched per round trip while a rollup streams an agent-day. */
@@ -570,6 +575,49 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     @Override
     public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
         return agentDays(AGENT_DAYS_OF_CONVERSATION, s -> s.setString(1, conversationId));
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(DELETE_CONVERSATION_RETURNING)) {
+            statement.setString(1, conversationId);
+            long deleted = 0;
+            Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    deleted++;
+                    String agentId = r.getString(1);
+                    LocalDate day = r.getObject(2, LocalDate.class);
+                    if (agentId != null && day != null) {
+                        days.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
+                    }
+                }
+            }
+            return new HealthDeletedRows(deleted, days);
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not delete a conversation's health turns", e);
+        }
+    }
+
+    @Override
+    public void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer) {
+        ensureSchema();
+        long at = since.toEpochMilli();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(CONVERSATION_AGENTS_UPDATED_SINCE)) {
+            statement.setLong(1, at);
+            statement.setLong(2, at);
+            statement.setInt(3, Math.max(1, limit));
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    consumer.accept(r.getString(1), r.getString(2));
+                }
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     private Map<String, Set<LocalDate>> agentDays(String sql, Binder binder) {

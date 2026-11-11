@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -52,7 +53,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * rollup's self-heal pass, which re-marks the days of turn rows written since
  * its last pass ({@code HealthRollupService}). The self-heal cannot see a
  * <em>deleted</em> row, which is why deletions are marked at once
- * ({@link #markDeleted}).
+ * ({@link #markDeleted}), with one retry.
+ * <p>
+ * <b>Residual loss.</b> Only when both attempts of that write fail is a
+ * deletion's mark held in memory for the next flush (with a WARN naming the
+ * agent). If the node then stops before a flush succeeds, the mark is lost: the
+ * daily rows of those days keep the deleted rows' counts until the day is
+ * re-rolled for another reason (a later turn of the agent on that day, a
+ * {@link #markRange}) or the row ages out at
+ * {@code eddi.health.daily-retention}. When a delete cannot tell which days its
+ * rows were on, every retained day of the conversation's agent is marked
+ * instead ({@link #markDeletedRows}).
  */
 @ApplicationScoped
 public class HealthDirtyDays {
@@ -100,8 +111,9 @@ public class HealthDirtyDays {
      * without them. Not debounced: deletions are rare, and unlike a written row a
      * deleted one leaves nothing the rollup's self-heal could find again, so a mark
      * held in memory and lost with the node would leave the deleted counts in the
-     * daily rows until their retention. Only when the write fails are the pairs
-     * noted for the next flush.
+     * daily rows until their retention. A failed write is retried once; only when
+     * that fails too are the pairs noted for the next flush, with a WARN (the
+     * residual loss the class comment describes).
      */
     public void markDeleted(Map<String, Set<LocalDate>> agentDays) {
         if (agentDays == null) {
@@ -111,14 +123,61 @@ public class HealthDirtyDays {
             if (agentId == null || days == null || days.isEmpty()) {
                 return;
             }
-            try {
-                store.get().mark(agentId, days);
-            } catch (RuntimeException e) {
-                note(agentId, days);
-                LOGGER.debugf("Could not mark the days of deleted Agent Health rows dirty at once (kept for the next flush): %s",
-                        e.getMessage());
+            RuntimeException failure = null;
+            // One retry before falling back: the fallback lives in memory, so a crash
+            // before the next successful flush would lose the mark.
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try {
+                    store.get().mark(agentId, days);
+                    return;
+                } catch (RuntimeException e) {
+                    failure = e;
+                }
             }
+            note(agentId, days);
+            LOGGER.warnf("Could not mark %d day(s) of deleted Agent Health rows of agent %s dirty at once; they are queued for the next "
+                    + "flush, and lost if this node stops before one succeeds: %s", days.size(), sanitize(agentId),
+                    sanitize(failure.getMessage()));
         });
+    }
+
+    /**
+     * Marks the days of a conversation's deleted rows dirty: the days themselves
+     * when the delete could answer them; otherwise — rare, the store could not be
+     * read — every retained day of each agent the rows belonged to
+     * ({@link #markRetained}), since a deleted row leaves nothing the self-heal
+     * could find. With neither the days nor an agent nothing can be re-rolled: a
+     * WARN, and the daily rows keep the counts until their own retention.
+     */
+    public void markDeletedRows(String conversationId, Collection<String> agentIds, HealthDeletedRows deleted) {
+        if (deleted != null && deleted.daysKnown()) {
+            markDeleted(deleted.agentDays());
+            return;
+        }
+        List<String> agents = agentIds == null ? List.of() : agentIds.stream().filter(a -> a != null && !a.isBlank()).distinct().toList();
+        if (agents.isEmpty()) {
+            LOGGER.warnf("The days of the deleted Agent Health rows of conversation %s are unknown and so is its agent: its daily rows "
+                    + "keep the deleted counts until eddi.health.daily-retention", sanitize(conversationId));
+            return;
+        }
+        LOGGER.warnf("The days of the deleted Agent Health rows of conversation %s could not be read; re-rolling every retained day of "
+                + "agent(s) %s instead", sanitize(conversationId), sanitize(String.join(", ", agents)));
+        agents.forEach(this::markRetained);
+    }
+
+    /**
+     * Marks every day of the agent within the turn-row retention dirty at once
+     * (write-through like {@link #markDeleted}; queued for the next flush only if
+     * the write fails).
+     */
+    public void markRetained(String agentId) {
+        LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        LocalDate from = today.minusDays(settings.factsRetentionDays());
+        Set<LocalDate> days = new HashSet<>();
+        for (LocalDate day = from; !day.isAfter(today); day = day.plusDays(1)) {
+            days.add(day);
+        }
+        markDeleted(Map.of(agentId, days));
     }
 
     /**

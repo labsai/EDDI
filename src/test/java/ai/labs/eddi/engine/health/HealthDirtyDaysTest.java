@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
+import java.util.Arrays;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
@@ -131,11 +134,61 @@ class HealthDirtyDaysTest {
     }
 
     @Test
-    @DisplayName("a deletion mark the store refuses is kept for the next flush")
+    @DisplayName("a deletion mark the store refuses twice is kept for the next flush")
     void markDeletedFallsBackToTheQueue() {
         doThrow(new HealthStoreException("down", null)).when(store).mark(any(), any());
         dirty.markDeleted(Map.of("a", Set.of(TODAY, TODAY.minusDays(1))));
+        verify(store, times(2)).mark(eq("a"), any());
         assertEquals(2, dirty.pendingCount());
+    }
+
+    @Test
+    @DisplayName("a deletion mark is retried once before it falls back to the in-memory queue")
+    void markDeletedRetriesOnce() {
+        doThrow(new HealthStoreException("blip", null)).doNothing().when(store).mark(any(), any());
+        dirty.markDeleted(Map.of("a", Set.of(TODAY)));
+        verify(store, times(2)).mark("a", Set.of(TODAY));
+        assertEquals(0, dirty.pendingCount());
+    }
+
+    @Test
+    @DisplayName("deleted rows with known days mark exactly those days")
+    void deletedRowsKnownDays() {
+        dirty.markDeletedRows("conv", List.of("other"), new HealthDeletedRows(1L, Map.of("a", Set.of(TODAY))));
+        verify(store).mark("a", Set.of(TODAY));
+        verify(store, never()).mark(eq("other"), any());
+    }
+
+    @Test
+    @DisplayName("deleted rows with unknown days mark every retained day of each known agent")
+    @SuppressWarnings("unchecked")
+    void deletedRowsUnknownDays() {
+        dirty.markDeletedRows("conv", Arrays.asList("a", null, "a", " "), new HealthDeletedRows(3L, null));
+        ArgumentCaptor<Collection<LocalDate>> days = ArgumentCaptor.forClass(Collection.class);
+        verify(store).mark(eq("a"), days.capture());
+        assertEquals(91, days.getValue().size(), "today and the 90 retained days before it");
+        assertTrue(days.getValue().containsAll(Set.of(TODAY, TODAY.minusDays(90))));
+        verify(store, times(1)).mark(any(), any());
+
+        dirty.markDeletedRows("conv", List.of("b"), null);
+        verify(store).mark(eq("b"), any());
+    }
+
+    @Test
+    @DisplayName("deleted rows whose days and agent are both unknown mark nothing (logged)")
+    void deletedRowsNothingKnown() {
+        dirty.markDeletedRows("conv", List.of(), new HealthDeletedRows(1L, null));
+        dirty.markDeletedRows("conv", null, null);
+        verify(store, never()).mark(any(), any());
+        assertEquals(0, dirty.pendingCount());
+    }
+
+    @Test
+    @DisplayName("an agent's retained range the store refuses is queued for the next flush")
+    void retainedRangeFallsBack() {
+        doThrow(new HealthStoreException("down", null)).when(store).mark(any(), any());
+        dirty.markRetained("a");
+        assertEquals(91, dirty.pendingCount());
     }
 
     @Test

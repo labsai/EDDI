@@ -101,3 +101,18 @@ presets, status and reasons.
 - A version's first turn (markers, compare windows) ignores `agent-test` rows unless they are asked for.
 - Portfolio: sessions are `null` with a hint when the period reaches past the turn-row retention, and `sessionsDelta`
   when the baseline does; `sort=traffic` falls back to daily-row turns.
+
+## 🐛 fix(health): deleted rows' days come with the delete; unknown days re-roll the agent (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteConversationReturningDays` deletes a conversation's rows and answers their (agent, day)s:
+  PostgreSQL `DELETE ... RETURNING agent_id, day`; MongoDB reads the pairs just before the delete and deletes even when
+  that read fails (`HealthDeletedRows.agentDays` is then `null`).
+- Unknown days (`HealthDirtyDays.markDeletedRows`): every retained day of the conversation's agent is marked dirty, with
+  a WARN. The purge reads the agent from the conversation before deleting its snapshot; the recorder uses the row's agent.
+- Orphan sweep: the candidate read returns each conversation's agent ids; an orphan whose rows name no agent is kept for
+  the next sweep (WARN with the count) rather than deleted blind.
+- Deletion marks retry the write once before falling back to the in-memory queue, and WARN when they do. The residual
+  (both attempts fail, then the node stops before the next successful flush) is documented: those days keep the deleted
+  counts until re-rolled for another reason or `eddi.health.daily-retention`.

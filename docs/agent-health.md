@@ -171,7 +171,20 @@ They are recomputed, never incremented:
    drained; a node that is killed loses at most a few seconds of notes, which
    the self-heal pass (step 2) recovers. An erasure, a conversation delete and
    the orphan sweep mark the days of the rows they delete, so the daily rows
-   lose those counts at the next pass.
+   lose those counts at the next pass. A conversation's rows are deleted
+   together with their days (PostgreSQL `DELETE … RETURNING`; on MongoDB the
+   days are read just before the delete). When those days cannot be read, the
+   delete still goes ahead and **every retained day** of the conversation's
+   agent is marked instead, with a WARN — the agent comes from the
+   conversation (purge), the row (the recorder's clean-up) or the sweep's
+   candidate read. These marks are written to the store at once, not on the
+   five-second flush, because the self-heal cannot find a deleted row; a failed
+   write is retried once. **Residual:** when both attempts fail (a WARN names
+   the agent), the mark waits in memory for the next flush, and if the node
+   stops before a flush succeeds it is lost. The daily rows of those days then
+   keep the deleted rows' counts until the day is re-rolled for another reason
+   (such as a later write of the agent on that day) or reaches
+   `eddi.health.daily-retention`.
 2. The `health-rollup` system schedule (a heartbeat, every
    `eddi.health.rollup-interval`, default 5 minutes; created at startup, run by
    one node at a time under the schedule store's claim) first **self-heals** —
@@ -412,7 +425,11 @@ of them still exist — one projected read per 500 ids — and deletes the rows 
 those that do not, counted (in rows) as
 `eddi_health_dropped_total{reason="orphaned"}`. Only a definite "does not
 exist" deletes: a batch the conversation store cannot answer keeps its rows,
-with a WARN, and the next day asks again. At most
+with a WARN, and the next day asks again. An orphan is deleted only when its
+rows name an agent: should its days be unreadable at delete time, that agent's
+retained days are re-rolled instead. Rows that name no agent are kept for the
+next sweep (a WARN with their count) rather than deleted without a way to
+correct the daily rows. At most
 `eddi.health.orphan-sweep-max` conversations are checked per run (a WARN when
 there were more); the sweep keeps no cursor, so conversations past the cap are
 not guaranteed a check before they leave the window, and their rows then stay

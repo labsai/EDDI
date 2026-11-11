@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
 import ai.labs.eddi.engine.health.model.HealthMarker;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -263,6 +264,30 @@ public interface HealthRollupStoresContract {
         turns().forEachAgentDayUpdatedSince(from, from.plusSeconds(86_400), 100,
                 (agent, day) -> recent.computeIfAbsent(agent, k -> new TreeSet<>()).add(day));
         assertEquals(Map.of("agent", Set.of(DAY)), recent);
+    }
+
+    @Test
+    @DisplayName("a conversation delete answers the (agent, day)s of what it deleted; the candidate read carries the agent")
+    default void deleteReturningDays() {
+        turns().upsert(turn("c1", 0, "e0", "alice", DAY, 1, "api", true, true, false));
+        turns().upsert(turn("c1", 1, "e1", "alice", DAY.minusDays(1), 1, "api", true, true, false));
+        turns().upsert(turn("c2", 0, "e0", "bob", DAY, 1, "api", true, true, false));
+
+        Map<String, Set<String>> candidates = new HashMap<>();
+        turns().forEachConversationAgentUpdatedSince(DAY.minusDays(3).atStartOfDay(ZoneOffset.UTC).toInstant(), 100,
+                (conversation, agent) -> candidates.computeIfAbsent(conversation, k -> new TreeSet<>()).add(agent));
+        assertEquals(Map.of("c1", Set.of("agent"), "c2", Set.of("agent")), candidates);
+
+        HealthDeletedRows deleted = turns().deleteConversationReturningDays("c1");
+        assertEquals(2L, deleted.deleted());
+        assertTrue(deleted.daysKnown());
+        assertEquals(Map.of("agent", Set.of(DAY, DAY.minusDays(1))), deleted.agentDays());
+        assertTrue(turns().agentDaysOfConversation("c1").isEmpty());
+        assertEquals(Map.of("agent", Set.of(DAY)), turns().agentDaysOfConversation("c2"));
+
+        HealthDeletedRows none = turns().deleteConversationReturningDays("nope");
+        assertEquals(0L, none.deleted());
+        assertTrue(none.agentDays().isEmpty());
     }
 
     @Test

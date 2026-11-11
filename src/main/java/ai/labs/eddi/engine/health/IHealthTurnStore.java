@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -141,6 +142,24 @@ public interface IHealthTurnStore {
      * The (agent, day) pairs a conversation's rows are on — read before a delete.
      */
     Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId);
+
+    /**
+     * Deletes a conversation's rows and markers and answers the (agent, day) pairs
+     * they were on — atomically where the store can (PostgreSQL
+     * {@code DELETE ... RETURNING}), else read just before the delete. The delete
+     * never depends on the read: when the days cannot be read they are {@code null}
+     * and the rows are deleted all the same.
+     */
+    HealthDeletedRows deleteConversationReturningDays(String conversationId);
+
+    /**
+     * As {@link #forEachConversationUpdatedSince}, with the agent id each
+     * conversation's recent rows carry ({@code null} when a row has none) — what
+     * the orphan sweep needs to re-roll an orphan's days when they cannot be read
+     * at delete time. A conversation with rows of two agents is passed once per
+     * agent.
+     */
+    void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer);
 
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);

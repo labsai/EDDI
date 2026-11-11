@@ -11,8 +11,10 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.health.HealthDirtyDays;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
@@ -22,11 +24,8 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.time.LocalDate;
-
+import java.util.List;
 import java.util.Map;
-
-import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -208,11 +207,14 @@ public class ConversationPurgeService {
             throw new ResourceStoreException("Could not delete every attachment, memory checkpoint and tool-journal entry of conversation "
                     + conversationId + "; the conversation was not deleted. Retry the delete.");
         }
+        // The agent, while the snapshot still names it: the fallback for re-rolling the
+        // health days when the deleted rows' days cannot be read.
+        String agentId = agentOf(conversationId);
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
         // After the snapshot, never before: a health row still queued (on any node) is
         // removed by the recorder once it sees the conversation gone.
-        deleteHealthTurns(conversationId);
+        deleteHealthTurns(conversationId, agentId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
     }
 
@@ -225,25 +227,39 @@ public class ConversationPurgeService {
      * conversation its owner deleted.
      */
     void deleteHealthTurns(String conversationId) {
+        deleteHealthTurns(conversationId, null);
+    }
+
+    /**
+     * As above. The daily rows of the deleted rows' days are re-rolled; when the
+     * store cannot answer those days, every retained day of {@code agentId} is (see
+     * {@code HealthDirtyDays.markDeletedRows}). Neither ever blocks the delete.
+     */
+    void deleteHealthTurns(String conversationId, String agentId) {
         if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
             return;
         }
-        IHealthTurnStore turns = healthTurnStore.get();
-        Map<String, Set<LocalDate>> days = Map.of();
         try {
-            days = turns.agentDaysOfConversation(conversationId);
-        } catch (RuntimeException e) {
-            // Best effort, like the erasure: the delete must not depend on it.
-        }
-        try {
-            turns.deleteByConversationId(conversationId);
+            HealthDeletedRows deleted = healthTurnStore.get().deleteConversationReturningDays(conversationId);
             if (healthDirtyDays != null && healthDirtyDays.isResolvable()) {
-                // The daily rows of those days are recomputed without the conversation.
-                healthDirtyDays.get().markDeleted(days);
+                healthDirtyDays.get().markDeletedRows(conversationId, agentId == null ? List.of() : List.of(agentId), deleted);
             }
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
                     sanitize(conversationId), sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * The conversation's agent, best effort; {@code null} when it cannot be read.
+     */
+    private String agentOf(String conversationId) {
+        try {
+            Map<String, ConversationListingSummary> summaries = conversationMemoryStore.loadListingSummaries(List.of(conversationId));
+            ConversationListingSummary summary = summaries == null ? null : summaries.get(conversationId);
+            return summary == null ? null : summary.agentId();
+        } catch (Exception e) {
+            return null;
         }
     }
 

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health.mongo;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -458,6 +459,36 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     @Override
     public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
         return agentDays(eq(FIELD_CONVERSATION, conversationId), Integer.MAX_VALUE);
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+        // MongoDB has no delete that returns the deleted documents in bulk: read the
+        // pairs first, then delete — and delete even when the read fails.
+        Map<String, Set<LocalDate>> days;
+        try {
+            days = agentDays(eq(FIELD_CONVERSATION, conversationId), Integer.MAX_VALUE);
+        } catch (RuntimeException e) {
+            days = null;
+        }
+        return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+    }
+
+    @Override
+    public void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer) {
+        Date at = date(since);
+        List<Bson> pipeline = List.of(Aggregates.match(or(gte(FIELD_UPDATED, at), gte(FIELD_DISCARDED_AT, at))),
+                Aggregates.group(new Document("c", "$" + FIELD_CONVERSATION).append("a", "$" + FIELD_AGENT)), Aggregates.limit(Math.max(1, limit)));
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                if (key.get("c") != null) {
+                    consumer.accept(key.get("c").toString(), key.getString("a"));
+                }
+            }
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     private Map<String, Set<LocalDate>> agentDays(Bson filter, int limit) {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import io.quarkus.scheduler.Scheduled;
@@ -17,6 +18,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -160,10 +163,20 @@ public class HealthTurnRetention {
         }
         Instant since = clock.instant().minus(settings.orphanSweepWindow());
         int max = settings.orphanSweepMax();
+        // Conversation -> the agents of its recent rows, so an orphan whose days cannot
+        // be read at delete time can still have its agents' days re-rolled.
+        Map<String, Set<String>> agentsOf = new LinkedHashMap<>();
         List<String> candidates = new ArrayList<>();
         try {
-            // One more than the cap, to tell "exactly the cap" from "more than it".
-            store.forEachConversationUpdatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), candidates::add);
+            // One more than the cap, to tell "exactly the cap" from "more than it". The
+            // limit counts (conversation, agent) pairs; nearly always one per conversation.
+            store.forEachConversationAgentUpdatedSince(since, (int) Math.min(Integer.MAX_VALUE, max + 1L), (conversationId, agentId) -> {
+                Set<String> agents = agentsOf.computeIfAbsent(conversationId, k -> new LinkedHashSet<>());
+                if (agentId != null) {
+                    agents.add(agentId);
+                }
+            });
+            candidates.addAll(agentsOf.keySet());
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the conversations of recent Agent Health turn rows; the next daily sweep retries: %s",
                     sanitize(e.getMessage()));
@@ -179,6 +192,7 @@ public class HealthTurnRetention {
         long removed = 0;
         int unanswered = 0;
         int failedDeletes = 0;
+        int noAgent = 0;
         for (int from = 0; from < candidates.size(); from += BATCH) {
             List<String> batch = candidates.subList(from, Math.min(candidates.size(), from + BATCH));
             Map<String, ConversationListingSummary> existing;
@@ -197,15 +211,24 @@ public class HealthTurnRetention {
                 if (existing.containsKey(conversationId)) {
                     continue;
                 }
-                Map<String, Set<LocalDate>> days = daysOf(conversationId);
+                Set<String> agents = agentsOf.getOrDefault(conversationId, Set.of());
+                if (agents.isEmpty()) {
+                    // No agent to re-roll if the days cannot be read at delete time:
+                    // never delete blind. The rows wait for the next sweep (or the
+                    // retention).
+                    noAgent++;
+                    continue;
+                }
+                HealthDeletedRows deleted;
                 try {
-                    removed += store.deleteByConversationId(conversationId);
+                    deleted = store.deleteConversationReturningDays(conversationId);
                 } catch (RuntimeException e) {
                     failedDeletes++;
                     continue;
                 }
+                removed += deleted == null ? 0 : deleted.deleted();
                 if (dirtyDays != null && dirtyDays.isResolvable()) {
-                    dirtyDays.get().markDeleted(days);
+                    dirtyDays.get().markDeletedRows(conversationId, agents, deleted);
                 }
             }
         }
@@ -213,24 +236,16 @@ public class HealthTurnRetention {
         if (removed > 0) {
             LOGGER.infof("Removed %d Agent Health turn row(s) of conversations that no longer exist", removed);
         }
+        if (noAgent > 0) {
+            LOGGER.warnf("The Agent Health orphan sweep left %d orphaned conversation(s) whose rows name no agent: their daily rows could "
+                    + "not be re-rolled, so they are kept for the next sweep", noAgent);
+        }
         if (unanswered > 0 || failedDeletes > 0) {
             LOGGER.warnf("The Agent Health orphan sweep could not check %d conversation(s) and could not clean up %d; the next daily sweep "
                     + "retries while their rows are within eddi.health.orphan-sweep-window, after that they stay until "
                     + "eddi.health.facts-retention", unanswered, failedDeletes);
         }
         return removed;
-    }
-
-    /**
-     * The (agent, day)s of a conversation's rows; best effort, never in the way of
-     * the delete.
-     */
-    private Map<String, Set<LocalDate>> daysOf(String conversationId) {
-        try {
-            return store.agentDaysOfConversation(conversationId);
-        } catch (RuntimeException e) {
-            return Map.of();
-        }
     }
 
     /**
