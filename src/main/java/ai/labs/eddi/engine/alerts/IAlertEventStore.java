@@ -172,6 +172,25 @@ public interface IAlertEventStore {
     long redactRatingComment(String eventId, Instant now);
 
     /**
+     * GDPR (the erasure guarantee): blanks everything personal one event holds —
+     * the stored output value, its subject and a rating comment excerpt — unless
+     * its send claim is live at {@code now}.
+     *
+     * @return how many events changed (0 or 1)
+     */
+    long redactEventContent(String eventId, Instant now);
+
+    /**
+     * Explicit conversation delete: blanks the stored {@code OUTPUT_MATCH} value
+     * (and its subject) of every event of {@code conversationId}, skipping an event
+     * whose send claim is live at {@code now}.
+     */
+    long redactConversationOutputValues(String conversationId, Instant now);
+
+    /** How many events of {@code conversationId} still hold an output value. */
+    long countConversationOutputValues(String conversationId);
+
+    /**
      * Claims the right to send {@code eventId} until {@code until}: an atomic
      * conditional write that succeeds only when no claim is live at {@code now}
      * (none, or an expired one). While the claim is live, the GDPR redactions skip

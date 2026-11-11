@@ -183,6 +183,45 @@ public interface AlertStoreContract {
                 t.nextAttemptAt(), dedupeKey, 0, null, null, null, null, 0, subject, null);
     }
 
+    private static AlertEvent withOutputIn(AlertEvent t, String dedupeKey, String value, String subject, String conversationId) {
+        return new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.OUTPUT_MATCH, t.kind(), t.agentId(), t.agentVersion(), conversationId,
+                t.firedAt(), "Escalations", AlertMatch.output("properties.note exists", value), t.deliveries(), t.state(), t.nextAttemptAt(),
+                dedupeKey, 0, null, null, null, null, 0, subject, null);
+    }
+
+    /**
+     * The erasure guarantee's removals: a conversation's values, and one event's
+     * personal content.
+     */
+    @Test
+    default void erasureGuaranteeRedactsAConversationsValuesAndOneEvent() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        eventStore().insert(withOutputIn(t, "g1", "v1", "owner-1", "conv-a")).orElseThrow();
+        AlertEvent claimed = eventStore().insert(withOutputIn(t, "g2", "v2", "owner-1", "conv-a")).orElseThrow();
+        AlertEvent other = eventStore().insert(withOutputIn(t, "g3", "v3", "owner-2", "conv-b")).orElseThrow();
+        AlertEvent rated = eventStore().insert(event(AGENT, "g4", AlertEvent.State.PENDING, NOW, null)).orElseThrow();
+        assertEquals(2, eventStore().countConversationOutputValues("conv-a"));
+
+        Instant now = Instant.now();
+        assertTrue(eventStore().claimSend(claimed.id(), "A", now, now.plusSeconds(30)));
+        assertEquals(1, eventStore().redactConversationOutputValues("conv-a", now), "a live send claim is skipped");
+        assertEquals(1, eventStore().countConversationOutputValues("conv-a"));
+        assertEquals(1, eventStore().redactConversationOutputValues("conv-a", now.plusSeconds(30)));
+        assertEquals(0, eventStore().countConversationOutputValues("conv-a"));
+        assertEquals(0, eventStore().countOutputValues("owner-1"), "the subject goes with the value");
+        assertEquals(1, eventStore().countConversationOutputValues("conv-b"), "another conversation is untouched");
+
+        assertTrue(eventStore().claimSend(rated.id(), "B", now, now.plusSeconds(30)));
+        eventStore().redactEventContent(rated.id(), now);
+        assertEquals("It took forever", eventStore().read(rated.id()).orElseThrow().match().commentExcerpt(), "claimed: kept");
+        assertTrue(eventStore().releaseSend(rated.id(), "B"));
+        assertEquals(1, eventStore().redactEventContent(rated.id(), now));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertEquals(1, eventStore().redactEventContent(other.id(), now));
+        assertNull(eventStore().read(other.id()).orElseThrow().match().value());
+        assertEquals(0, eventStore().countOutputValues("owner-2"));
+    }
+
     @Test
     default void digestCoveredIdsRoundTripAndFindByDedupeKey() {
         AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);

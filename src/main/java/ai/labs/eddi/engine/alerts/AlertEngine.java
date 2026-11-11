@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.security.ConversationReviewPolicy;
@@ -57,19 +58,19 @@ public class AlertEngine {
     private final AlertMetrics metrics;
     private final ConversationReviewPolicy reviewPolicy;
     private final IConversationRatingStore ratingStore;
-    private final AlertErasureFence erasureFence;
+    private final ErasureGuard erasureGuard;
     private final Clock clock;
 
     @Inject
     public AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, AlertErasureFence erasureFence) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, erasureFence, Clock.systemUTC());
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, ErasureGuard erasureGuard) {
+        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, erasureGuard, Clock.systemUTC());
     }
 
     AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, AlertErasureFence erasureFence,
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, ErasureGuard erasureGuard,
             Clock clock) {
-        this.erasureFence = erasureFence;
+        this.erasureGuard = erasureGuard;
         this.ratingStore = ratingStore;
         this.ruleCache = ruleCache;
         this.eventStore = eventStore;
@@ -98,7 +99,8 @@ public class AlertEngine {
      * always.
      */
     boolean stillCurrent(ConversationRating rating) {
-        if (fenced(rating.userId(), rating.updatedAt())) {
+        // A rating of an erased user or conversation (GDPR) is not evaluated at all.
+        if (!guardAllows(rating.userId(), rating.conversationId(), rating.updatedAt())) {
             return false;
         }
         if (ratingStore == null || rating.id() == null) {
@@ -117,15 +119,19 @@ public class AlertEngine {
         if (stored.match() == null || stored.match().commentExcerpt() == null) {
             return stored;
         }
-        boolean erased = fenced(rating.userId(), rating.updatedAt())
-                || (ratingStore != null && rating.id() != null && ratingStore.readById(rating.id()).isEmpty());
-        if (!erased) {
+        // The erasure guarantee first: an erasure of the user or conversation that
+        // started while the event was written removes the excerpt (or leaves a
+        // pending removal that keeps that erasure failed until it is gone).
+        if (guardRemoved(stored, rating.userId(), rating.conversationId(), rating.updatedAt())) {
+            return stored.withMatch(stored.match().withoutCommentExcerpt(), stored.subjectUserId());
+        }
+        if (ratingStore == null || rating.id() == null || ratingStore.readById(rating.id()).isPresent()) {
             return stored;
         }
-        // Runs before this event's first delivery and before the maintenance pass may
-        // retry it (its nextAttemptAt is a claim lease away), so no send claim exists
-        // yet: the conditional redaction cannot be skipped, and nothing waits on
-        // itself.
+        // The rating alone was erased. Runs before this event's first delivery and
+        // before the maintenance pass may retry it (its nextAttemptAt is a claim lease
+        // away), so no send claim exists yet: the conditional redaction cannot be
+        // skipped, and nothing waits on itself.
         eventStore.redactRatingComment(stored.id(), clock.instant());
         return stored.withMatch(stored.match().withoutCommentExcerpt(), stored.subjectUserId());
     }
@@ -151,12 +157,10 @@ public class AlertEngine {
                 continue;
             }
             String value = null;
-            // Content captured before an erasure of its user started is never stored —
-            // and neither is content older than the fence can vouch for: a fence lasts
-            // FENCE_TTL, so a snapshot that waited in the queue longer than that could
-            // predate an erasure whose fence has already expired.
+            // Content of an erased conversation, or captured before an erasure of its
+            // user, is never stored (the durable tombstones of ErasureGuard).
             if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)
-                    && !fenced(snapshot.userId(), snapshot.capturedAt()) && fenceVouchesFor(snapshot.capturedAt())) {
+                    && guardAllows(snapshot.userId(), snapshot.conversationId(), snapshot.capturedAt())) {
                 value = OutputMatcher.resolve(rule.condition().path(), snapshot)
                         .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
             }
@@ -170,25 +174,29 @@ public class AlertEngine {
 
     /**
      * After the event is written: an erasure that started while it was being
-     * written (its fence now covers the capture time) may have swept before the
-     * event existed, so the value and its subject are blanked here, before
-     * delivery.
+     * written may have swept before the event existed, so the value and its subject
+     * are removed here, before delivery (see {@link ErasureGuard#afterWrite}).
      */
     private AlertEvent afterOutputInsert(TurnSnapshot snapshot, AlertEvent stored) {
-        if (stored.match() == null || stored.match().value() == null || !fenced(snapshot.userId(), snapshot.capturedAt())) {
+        if (stored.match() == null || stored.match().value() == null
+                || !guardRemoved(stored, snapshot.userId(), snapshot.conversationId(), snapshot.capturedAt())) {
             return stored;
         }
-        // Before delivery, as above: no send claim on this event can exist yet.
-        eventStore.redactOutputValues(snapshot.userId(), clock.instant());
         return stored.withMatch(stored.match().withoutValue(), null);
     }
 
-    private boolean fenced(String userId, Instant capturedAt) {
-        return erasureFence != null && erasureFence.covers(userId, capturedAt);
+    private boolean guardAllows(String userId, String conversationId, Instant capturedAt) {
+        return erasureGuard == null || erasureGuard.beforeWrite(userId, conversationId, capturedAt);
     }
 
-    private boolean fenceVouchesFor(Instant capturedAt) {
-        return erasureFence == null || erasureFence.vouchesFor(capturedAt);
+    /**
+     * {@code true} when the guard removed the event's personal content (or recorded
+     * its removal as pending). Before delivery, so no send claim on the event can
+     * exist yet and the conditional redaction is not skipped.
+     */
+    private boolean guardRemoved(AlertEvent stored, String userId, String conversationId, Instant capturedAt) {
+        return erasureGuard != null && erasureGuard.afterWrite(AlertErasureWriter.NAME, stored.id(), userId, conversationId, capturedAt,
+                () -> AlertErasureWriter.removeContent(eventStore, stored.id(), clock.instant()));
     }
 
     private boolean reviewEnabled(TurnSnapshot snapshot) {

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.alerts;
 import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -31,6 +32,11 @@ import java.util.Map;
  * created or last edited (with which of the two) and the events they
  * acknowledged — never the name of anybody else involved, and none of an
  * event's content beyond its rule, source, agent and times.
+ * <p>
+ * <b>The erasure guarantee.</b> After blanking,
+ * {@link ErasureGuard#verifyUserErased} retries the user's pending removals and
+ * requires no stored value and no pending removal to be left; otherwise the
+ * step fails and a re-run finishes it (see {@link AlertErasureWriter}).
  */
 @ApplicationScoped
 public class AlertGdprParticipant implements IGdprParticipant {
@@ -59,12 +65,19 @@ public class AlertGdprParticipant implements IGdprParticipant {
     private final IAlertEventStore eventStore;
     private final IAlertRuleStore ruleStore;
     private final AlertErasureRedactor redactor;
+    private final ErasureGuard erasureGuard;
 
     @Inject
-    public AlertGdprParticipant(IAlertEventStore eventStore, IAlertRuleStore ruleStore, AlertErasureRedactor redactor) {
+    public AlertGdprParticipant(IAlertEventStore eventStore, IAlertRuleStore ruleStore, AlertErasureRedactor redactor, ErasureGuard erasureGuard) {
         this.eventStore = eventStore;
         this.ruleStore = ruleStore;
         this.redactor = redactor;
+        this.erasureGuard = erasureGuard;
+    }
+
+    /** Without the erasure guard: tests of the redaction alone. */
+    AlertGdprParticipant(IAlertEventStore eventStore, IAlertRuleStore ruleStore, AlertErasureRedactor redactor) {
+        this(eventStore, ruleStore, redactor, null);
     }
 
     @Override
@@ -76,7 +89,13 @@ public class AlertGdprParticipant implements IGdprParticipant {
     public long erase(String userId) {
         // Waits for deliveries holding a send claim on one of the events (see
         // AlertErasureRedactor).
-        return redactor.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
+        long changed = redactor.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
+        if (erasureGuard != null) {
+            // Runs after the drain barrier of the erasure's stop step: nothing queued
+            // before the tombstone can still write, so 0 here stays 0.
+            erasureGuard.verifyUserErased(AlertErasureWriter.NAME, userId, () -> eventStore.countOutputValues(userId));
+        }
+        return changed;
     }
 
     @Override

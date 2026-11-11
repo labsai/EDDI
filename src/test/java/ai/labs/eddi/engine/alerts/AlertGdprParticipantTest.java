@@ -11,11 +11,21 @@ import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.PendingRemoval;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.alerts.AlertTestData.AGENT;
@@ -26,8 +36,12 @@ import static ai.labs.eddi.engine.alerts.AlertTestData.errorRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,6 +82,32 @@ class AlertGdprParticipantTest {
         verify(redactor).redactOutputValues("erin");
         verify(events).clearAcknowledger("erin");
         verify(rules).clearAuthor("erin");
+    }
+
+    @Test
+    @DisplayName("the erasure guarantee: rows left, or a pending removal that still fails, fail the step; a re-run clears it")
+    void verification() {
+        InMemoryErasureTombstoneStore tombstones = new InMemoryErasureTombstoneStore();
+        AlertErasureWriter writer = new AlertErasureWriter(mock(AlertDispatcher.class), events, redactor, Clock.fixed(NOW, ZoneOffset.UTC));
+        ErasureGuard guard = new ErasureGuard(tombstones, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+        participant = new AlertGdprParticipant(events, rules, redactor, guard);
+
+        when(events.countOutputValues("erin")).thenReturn(1L);
+        assertThrows(IllegalStateException.class, () -> participant.erase("erin"), "a value still stored is not a clean erasure");
+
+        when(events.countOutputValues("erin")).thenReturn(0L);
+        tombstones.addPendingRemoval(new PendingRemoval(AlertErasureWriter.NAME, "ev-1", guard.userKey(
+                KvKeys.sha256("erin")), CONVERSATION, NOW));
+        // The event still holds the value: a delivery holds its send claim.
+        AlertEvent holding = acknowledged("ev-1", null).withMatch(AlertMatch.output("x", "secret"), null);
+        when(events.read("ev-1")).thenReturn(Optional.of(holding));
+        assertThrows(IllegalStateException.class, () -> participant.erase("erin"), "a pending removal keeps the step failed");
+
+        when(events.read("ev-1")).thenReturn(Optional.empty());
+        participant.erase("erin");
+        verify(events, atLeastOnce()).redactEventContent(eq("ev-1"), any());
+        assertEquals(0, tombstones.pendingCount());
     }
 
     @Test

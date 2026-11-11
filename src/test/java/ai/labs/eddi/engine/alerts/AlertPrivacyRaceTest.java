@@ -13,7 +13,9 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.MatchOp;
-import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureMetrics;
+import ai.labs.eddi.engine.gdpr.erasure.InMemoryErasureTombstoneStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.security.ConversationReviewPolicy;
@@ -27,8 +29,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +45,6 @@ import static ai.labs.eddi.engine.alerts.AlertTestData.ratingRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -200,11 +201,11 @@ class AlertPrivacyRaceTest {
     }
 
     @Nested
-    @DisplayName("the erasure fence for queued work")
-    class Fence {
+    @DisplayName("the erasure guarantee for queued work (durable tombstones)")
+    class Guarantee {
 
-        private AlertErasureFence fence;
-        private Instant clockNow;
+        private InMemoryErasureTombstoneStore tombstones;
+        private ErasureGuard guard;
 
         private AlertRule outputRule() {
             return new AlertRule(RULE_ID, "Escalations", true, AlertScope.agent(AGENT), AlertSource.OUTPUT_MATCH,
@@ -213,32 +214,18 @@ class AlertPrivacyRaceTest {
         }
 
         @BeforeEach
-        void fenced() {
-            clockNow = NOW;
-            fence = new AlertErasureFence(new Clock() {
-                @Override
-                public ZoneOffset getZone() {
-                    return ZoneOffset.UTC;
-                }
-
-                @Override
-                public Clock withZone(ZoneId zone) {
-                    return this;
-                }
-
-                @Override
-                public Instant instant() {
-                    return clockNow;
-                }
-            });
+        void guarded() {
+            tombstones = new InMemoryErasureTombstoneStore();
+            guard = new ErasureGuard(tombstones, List.of(), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
             engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()), review,
-                    ratings, fence, Clock.fixed(NOW, ZoneOffset.UTC));
+                    ratings, guard, Clock.fixed(NOW, ZoneOffset.UTC));
             when(cache.rulesFor(AGENT)).thenReturn(List.of(outputRule()));
             when(review.reviewOf(AGENT, 2)).thenReturn(Optional.of(new AgentConfiguration.ConversationReview()));
         }
 
-        private TurnSnapshot capturedAt(Instant at) {
-            return new TurnSnapshot(CONVERSATION, AGENT, 2, Map.of("note", "call me at once"), null, null, OWNER, at);
+        private TurnSnapshot capturedAt(String conversationId, Instant at) {
+            return new TurnSnapshot(conversationId, AGENT, 2, Map.of("note", "call me at once"), null, null, OWNER, at);
         }
 
         private AlertEvent inserted() {
@@ -248,80 +235,113 @@ class AlertPrivacyRaceTest {
         }
 
         @Test
-        @DisplayName("captured before an erasure started: the alert fires, with no value and no subject")
-        void capturedBeforeFence() {
-            fence.stopInFlightWork(OWNER);
-            engine.evaluateOutput(capturedAt(NOW.minusSeconds(5)));
+        @DisplayName("captured before the user's erasure, run after it: the alert fires, with no value and no subject")
+        void queuedBeforeErasure() {
+            guard.tombstoneUser(OWNER, List.of());
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW.minusSeconds(5)));
             AlertEvent event = inserted();
             assertNull(event.match().value());
             assertNull(event.subjectUserId());
         }
 
         @Test
-        @DisplayName("captured after the erasure started: the value is kept (a new conversation)")
-        void capturedAfterFence() {
-            fence.stopInFlightWork(OWNER);
-            engine.evaluateOutput(capturedAt(NOW.plusSeconds(5)));
+        @DisplayName("however long it waited in the queue: an old capture is still refused (the tombstone outlives any queue)")
+        void queuedForAges() {
+            guard.tombstoneUser(OWNER, List.of());
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW.minus(Duration.ofDays(3))));
+            assertNull(inserted().match().value());
+        }
+
+        @Test
+        @DisplayName("an erased conversation's value is never stored, whenever it was captured")
+        void erasedConversation() {
+            guard.tombstoneConversation(CONVERSATION);
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW.plus(Duration.ofHours(1))));
+            assertNull(inserted().match().value());
+        }
+
+        @Test
+        @DisplayName("captured well after the erasure, in a new conversation: the value is kept")
+        void newActivity() {
+            guard.tombstoneUser(OWNER, List.of(CONVERSATION));
+            engine.evaluateOutput(capturedAt("conv-new", NOW.plus(Duration.ofMinutes(10))));
             assertEquals("call me at once", inserted().match().value());
         }
 
         @Test
-        @DisplayName("the fence goes up between the check and the insert: value and subject are blanked before delivery")
-        void fenceBetweenCheckAndInsert() {
+        @DisplayName("the tombstone commits between the check and the insert: the event's content is removed before delivery")
+        void tombstoneBetweenCheckAndInsert() {
             doAnswer(inv -> {
-                fence.stopInFlightWork(OWNER); // the erasure starts while the event is written
+                guard.tombstoneUser(OWNER, List.of(CONVERSATION)); // the erasure starts while the event is written
                 return Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID));
             }).when(store).insert(any());
-            engine.evaluateOutput(capturedAt(NOW.minusSeconds(5)));
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW.minusSeconds(5)));
 
             var order = inOrder(store, delivery);
             order.verify(store).insert(any());
-            order.verify(store).redactOutputValues(eq(OWNER), any());
+            order.verify(store).redactEventContent(eq(EVENT_ID), any());
             ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
             order.verify(delivery).deliver(delivered.capture(), any());
             assertNull(delivered.getValue().match().value());
             assertNull(delivered.getValue().subjectUserId());
+            assertEquals(0, tombstones.pendingCount());
         }
 
         @Test
-        @DisplayName("a fence expires: after its lifetime, content captured before it is stored again")
-        void expiry() {
-            fence.stopInFlightWork(OWNER);
-            assertTrue(fence.covers(OWNER, NOW.minusSeconds(1)));
-            clockNow = NOW.plus(AlertErasureFence.FENCE_TTL);
-            assertFalse(fence.covers(OWNER, NOW.minusSeconds(1)));
-            assertFalse(fence.covers("someone-else", NOW.minusSeconds(1)));
+        @DisplayName("the self-removal fails: a durable pending removal is left, and the value is still not delivered")
+        void selfRemovalFails() {
+            doAnswer(inv -> {
+                guard.tombstoneConversation(CONVERSATION);
+                return Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID));
+            }).when(store).insert(any());
+            // The redaction did not apply: the event still holds the value.
+            when(store.read(EVENT_ID)).thenAnswer(inv -> Optional.of(new AlertEvent(EVENT_ID, RULE_ID, "x", AlertSource.OUTPUT_MATCH,
+                    AlertEvent.Kind.ALERT, AGENT, 2, CONVERSATION, NOW, "s", AlertMatch.output("x", "call me at once"), List.of(),
+                    AlertEvent.State.PENDING, null, "k", 0, null, null, null, null, 0, null, null)));
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW.minusSeconds(5)));
+
+            assertEquals(1, tombstones.pendingCount());
+            ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
+            verify(delivery).deliver(delivered.capture(), any());
+            assertNull(delivered.getValue().match().value());
         }
 
         @Test
-        @DisplayName("content queued longer than a fence lives is never stored: an expired fence could have hidden an erasure")
-        void outlivedFence() {
-            // An erasure fenced the user, its fence expired, and only then the old
-            // snapshot reaches the worker: covers() no longer says anything.
-            clockNow = NOW.plus(AlertErasureFence.FENCE_TTL).plusSeconds(1);
-            engine.evaluateOutput(capturedAt(NOW));
-            AlertEvent event = inserted();
-            assertNull(event.match().value());
-            assertNull(event.subjectUserId());
-        }
-
-        @Test
-        @DisplayName("a fence set through the cluster broadcast (by hash) covers the same user")
-        void byHash() {
-            fence.stopInFlightWorkByHash(KvKeys.sha256(OWNER));
-            assertTrue(fence.covers(OWNER, NOW));
-            assertFalse(fence.covers(OWNER, NOW.plusSeconds(1)));
-        }
-
-        @Test
-        @DisplayName("a queued rating of a fenced user is not evaluated")
-        void ratingFenced() {
+        @DisplayName("a queued rating of an erased user is not evaluated")
+        void ratingOfErasedUser() {
             ConversationRating low = rating(1, "It kept looping.", List.of());
             when(cache.rulesFor(AGENT)).thenReturn(List.of(ratingRule(0.5, null, null, DeliveryTarget.slack("C0123ABC"))));
             when(ratings.readById(low.id())).thenReturn(Optional.of(low));
-            fence.stopInFlightWork(low.userId());
+            guard.tombstoneUser(low.userId(), List.of());
             engine.evaluateRating(low);
             verify(store, never()).insert(any());
+        }
+
+        @Test
+        @DisplayName("a rating whose conversation is erased between check and insert: the excerpt is removed before delivery")
+        void ratingTombstoneBetweenCheckAndInsert() {
+            ConversationRating low = rating(1, "It kept looping.", List.of());
+            when(cache.rulesFor(AGENT)).thenReturn(List.of(ratingRule(0.5, null, null, DeliveryTarget.slack("C0123ABC"))));
+            when(ratings.readById(low.id())).thenReturn(Optional.of(low));
+            doAnswer(inv -> {
+                guard.tombstoneConversation(low.conversationId());
+                return Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID));
+            }).when(store).insert(any());
+            engine.evaluateRating(low);
+
+            var order = inOrder(store, delivery);
+            order.verify(store).redactEventContent(eq(EVENT_ID), any());
+            ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
+            order.verify(delivery).deliver(delivered.capture(), any());
+            assertNull(delivered.getValue().match().commentExcerpt());
+        }
+
+        @Test
+        @DisplayName("tombstones unreadable: no value is stored (fail closed)")
+        void failClosed() {
+            tombstones.failReads = true;
+            engine.evaluateOutput(capturedAt(CONVERSATION, NOW));
+            assertNull(inserted().match().value());
         }
     }
 

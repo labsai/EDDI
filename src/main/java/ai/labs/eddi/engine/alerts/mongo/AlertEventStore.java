@@ -97,6 +97,9 @@ public class AlertEventStore implements IAlertEventStore {
                 new IndexOptions().name("idx_alertevent_unacknowledged"));
         events.createIndex(Indexes.ascending("subjectUserId"),
                 new IndexOptions().name("idx_alertevent_subject").partialFilterExpression(exists("subjectUserId", true)));
+        // An explicit conversation delete finds the stored values of the conversation.
+        events.createIndex(Indexes.ascending("conversationId"),
+                new IndexOptions().name("idx_alertevent_conversation_value").partialFilterExpression(exists("match.value", true)));
         events.createIndex(Indexes.ascending("match.ratingId"),
                 new IndexOptions().name("idx_alertevent_rating").partialFilterExpression(exists("match.ratingId", true)));
         windows.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_alertwindow_ttl").expireAfter(0L, TimeUnit.SECONDS));
@@ -316,6 +319,23 @@ public class AlertEventStore implements IAlertEventStore {
     public long redactRatingComment(String eventId, Instant now) {
         return events.updateOne(and(eq("_id", eventId), exists("match.commentExcerpt", true), unclaimed(now)), unset("match.commentExcerpt"))
                 .getModifiedCount();
+    }
+
+    @Override
+    public long redactEventContent(String eventId, Instant now) {
+        return events.updateOne(and(eq("_id", eventId), unclaimed(now)),
+                combine(unset("match.value"), unset("subjectUserId"), unset("match.commentExcerpt"))).getModifiedCount();
+    }
+
+    @Override
+    public long redactConversationOutputValues(String conversationId, Instant now) {
+        return events.updateMany(and(eq("conversationId", conversationId), exists("match.value", true), unclaimed(now)),
+                combine(unset("match.value"), unset("subjectUserId"))).getModifiedCount();
+    }
+
+    @Override
+    public long countConversationOutputValues(String conversationId) {
+        return events.countDocuments(and(eq("conversationId", conversationId), exists("match.value", true)));
     }
 
     private static Bson acknowledgement(String by, Instant at) {

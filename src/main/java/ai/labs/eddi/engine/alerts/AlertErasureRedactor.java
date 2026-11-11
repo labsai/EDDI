@@ -68,6 +68,15 @@ public class AlertErasureRedactor {
         return untilDone("output values", now -> eventStore.redactOutputValues(userId, now), () -> eventStore.countOutputValues(userId));
     }
 
+    /**
+     * Blanks every OUTPUT_MATCH value stored from {@code conversationId} — an
+     * explicit conversation delete.
+     */
+    public long redactConversationOutputValues(String conversationId) {
+        return untilDone("conversation output values", now -> eventStore.redactConversationOutputValues(conversationId, now),
+                () -> eventStore.countConversationOutputValues(conversationId));
+    }
+
     /** Blanks the comment excerpt of every event about these ratings. */
     public long redactRatingComments(Collection<String> ratingIds) {
         if (ratingIds == null || ratingIds.isEmpty()) {
