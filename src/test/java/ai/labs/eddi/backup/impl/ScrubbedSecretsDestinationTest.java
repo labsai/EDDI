@@ -73,6 +73,47 @@ class ScrubbedSecretsDestinationTest {
         assertFalse(merged.contains("live-billing-token"), merged);
     }
 
+    private static final String LLM_TARGET = """
+            {"tasks":[{"id":"t","type":"openai","port":443,"useTls":true,
+              "parameters":{"apiKey":"live-openai-key","modelName":"gpt-a"}}]}""";
+
+    @Test
+    @DisplayName("a changed provider type keeps the placeholder: the key would go to the other vendor's default endpoint")
+    void changedProviderType() throws Exception {
+        String source = """
+                {"tasks":[{"id":"t","type":"anthropic","port":443,"useTls":true,
+                  "parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-a"}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, LLM_TARGET, jsonSerialization);
+
+        assertFalse(merged.contains("live-openai-key"), merged);
+        assertTrue(merged.contains(ScrubbedSecrets.PLACEHOLDER), merged);
+    }
+
+    @Test
+    @DisplayName("a changed port or useTls keeps the placeholder")
+    void changedPortOrTls() throws Exception {
+        String port = """
+                {"tasks":[{"id":"t","type":"openai","port":8080,"useTls":true,
+                  "parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-a"}}]}""";
+        String tls = """
+                {"tasks":[{"id":"t","type":"openai","port":443,"useTls":false,
+                  "parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-a"}}]}""";
+
+        assertFalse(ScrubbedSecrets.restore(port, LLM_TARGET, jsonSerialization).contains("live-openai-key"));
+        assertFalse(ScrubbedSecrets.restore(tls, LLM_TARGET, jsonSerialization).contains("live-openai-key"));
+    }
+
+    @Test
+    @DisplayName("an unchanged provider type still gets its credential back")
+    void unchangedProviderType() throws Exception {
+        String source = """
+                {"tasks":[{"id":"t","type":"openai","port":443,"useTls":true,
+                  "parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-b"}}]}""";
+
+        assertTrue(ScrubbedSecrets.restore(source, LLM_TARGET, jsonSerialization).contains("live-openai-key"));
+    }
+
     @Test
     @DisplayName("an unchanged destination still gets its credential back")
     void unchangedDestination() throws Exception {

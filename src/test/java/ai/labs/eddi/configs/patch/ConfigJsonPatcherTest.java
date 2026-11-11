@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.patch;
 
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.llm.rest.RestLlmStore;
@@ -301,6 +302,131 @@ class ConfigJsonPatcherTest {
                 [{"op":"copy","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/parameters/backupKey"}]
                 """, LlmConfiguration.class, false);
         assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("backupKey"));
+    }
+
+    @Test
+    @DisplayName("an editor cannot add a baseUrl beside a hidden literal apiKey — the key would be sent to their endpoint")
+    void addingABaseUrlBesideAHiddenKeyIsRefused() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/baseUrl\",\"value\":\"https://attacker.example/v1\"}]";
+
+        var e = assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, patch, LlmConfiguration.class, true));
+        assertEquals(400, e.getResponse().getStatus());
+        String body = String.valueOf(e.getResponse().getEntity());
+        assertTrue(body.contains("/tasks/0/parameters/baseUrl"), body);
+        assertFalse(body.contains(PLAINTEXT_CREDENTIAL), body);
+        assertFalse(body.contains("attacker.example"), body);
+    }
+
+    @Test
+    @DisplayName("changing the provider type beside a hidden literal apiKey is refused, as is removing a stored baseUrl")
+    void changingTheProviderOrDroppingTheEndpointIsRefused() throws Exception {
+        var plaintext = mapper.readValue("""
+                {"tasks":[{"actions":["help"],"type":"openai","description":"d",
+                 "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-a",
+                  "baseUrl":"https://llm.internal.example/v1"}}]}
+                """, LlmConfiguration.class);
+
+        var type = assertThrows(BadRequestException.class, () -> patcher.apply(plaintext,
+                "[{\"op\":\"replace\",\"path\":\"/tasks/0/type\",\"value\":\"anthropic\"}]", LlmConfiguration.class, true));
+        assertTrue(String.valueOf(type.getResponse().getEntity()).contains("/tasks/0/type"));
+        assertThrows(BadRequestException.class, () -> patcher.apply(plaintext,
+                "[{\"op\":\"remove\",\"path\":\"/tasks/0/parameters/baseUrl\"}]", LlmConfiguration.class, true));
+        // A different path on the same origin is the same destination.
+        var samePlace = patcher.apply(plaintext,
+                "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/baseUrl\",\"value\":\"https://llm.internal.example/v2\"}]",
+                LlmConfiguration.class, true);
+        assertEquals(PLAINTEXT_CREDENTIAL, samePlace.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("an editor cannot change targetServerUrl on an httpcalls config whose Authorization header is a literal")
+    void changingTargetServerUrlBesideAHiddenHeaderIsRefused() throws Exception {
+        var httpcalls = mapper.readValue("""
+                {"targetServerUrl":"https://api.partner.example",
+                 "httpCalls":[{"name":"lookup","actions":["lookup"],
+                  "request":{"path":"/v1/items","method":"get",
+                   "headers":{"Authorization":"Bearer plain-test-credential-0123456789abcdef"}}}]}
+                """, ApiCallsConfiguration.class);
+        String patch = "[{\"op\":\"replace\",\"path\":\"/targetServerUrl\",\"value\":\"https://attacker.example\"}]";
+
+        var e = assertThrows(BadRequestException.class, () -> patcher.apply(httpcalls, patch, ApiCallsConfiguration.class, true));
+        String body = String.valueOf(e.getResponse().getEntity());
+        assertTrue(body.contains("/targetServerUrl"), body);
+        assertFalse(body.contains(PLAINTEXT_CREDENTIAL), body);
+
+        // The same patch from an administrator, who can read the header anyway, is a
+        // plain edit.
+        var admin = patcher.apply(httpcalls, patch, ApiCallsConfiguration.class, false);
+        assertEquals("https://attacker.example", admin.getTargetServerUrl());
+    }
+
+    @Test
+    @DisplayName("an administrator may point a literal credential at another endpoint")
+    void adminMayChangeTheDestination() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext,
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/baseUrl\",\"value\":\"https://other.example/v1\"}]",
+                LlmConfiguration.class, false);
+        assertEquals("https://other.example/v1", patched.tasks().get(0).getParameters().get("baseUrl"));
+        assertEquals(PLAINTEXT_CREDENTIAL, patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("a vault reference is not a hidden literal: an editor may change the endpoint beside it")
+    void destinationBesideAVaultReferenceMayChange() {
+        var patched = patcher.apply(stored,
+                "[{\"op\":\"add\",\"path\":\"/tasks/0/parameters/baseUrl\",\"value\":\"https://other.example/v1\"}]",
+                LlmConfiguration.class, true);
+        assertEquals("https://other.example/v1", patched.tasks().get(0).getParameters().get("baseUrl"));
+        assertEquals("${vault:anthropic-api-key}", patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("a destination change in another task, or a non-destination edit, does not touch the hidden key")
+    void unrelatedEditsBesideAHiddenKeyAreAllowed() throws Exception {
+        var plaintext = mapper.readValue("""
+                {"tasks":[{"actions":["a"],"type":"openai","description":"first",
+                  "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-a"}},
+                 {"actions":["b"],"type":"openai","description":"second","parameters":{"modelName":"gpt-b"}}]}
+                """, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext, """
+                [{"op":"add","path":"/tasks/1/parameters/baseUrl","value":"https://other.example/v1"},
+                 {"op":"replace","path":"/tasks/0/description","value":"renamed"}]
+                """, LlmConfiguration.class, true);
+        assertEquals(PLAINTEXT_CREDENTIAL, patched.tasks().get(0).getParameters().get("apiKey"));
+        assertEquals("https://other.example/v1", patched.tasks().get(1).getParameters().get("baseUrl"));
+    }
+
+    @Test
+    @DisplayName("an insert that shifts the credential's task is paired by the credential, not by index")
+    void destinationCheckFollowsAShiftedCredential() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        String newTask = "{\"actions\":[\"x\"],\"type\":\"openai\",\"description\":\"new\","
+                + "\"parameters\":{\"modelName\":\"gpt-x\",\"baseUrl\":\"https://other.example/v1\"}}";
+
+        // The new task carries its own baseUrl, and the credential's task moves to
+        // index 1 unchanged: compared with the new task by index this would refuse.
+        var shifted = patcher.apply(plaintext, "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":" + newTask + "}]",
+                LlmConfiguration.class, true);
+        assertEquals(PLAINTEXT_CREDENTIAL, shifted.tasks().get(1).getParameters().get("apiKey"));
+        assertNull(shifted.tasks().get(1).getParameters().get("baseUrl"));
+
+        // ...and the shifted task is still held to its own destination.
+        var e = assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":"
+                + newTask + "},{\"op\":\"add\",\"path\":\"/tasks/1/parameters/baseUrl\",\"value\":\"https://attacker.example/v1\"}]",
+                LlmConfiguration.class, true));
+        assertTrue(String.valueOf(e.getResponse().getEntity()).contains("/tasks/1/parameters/baseUrl"));
+    }
+
+    @Test
+    @DisplayName("copying the task that holds a hidden key and pointing the copy elsewhere is refused")
+    void copiedCredentialIsHeldToTheOriginalDestination() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, """
+                [{"op":"copy","from":"/tasks/0","path":"/tasks/1"},
+                 {"op":"add","path":"/tasks/1/parameters/baseUrl","value":"https://attacker.example/v1"}]
+                """, LlmConfiguration.class, true));
     }
 
     @Test

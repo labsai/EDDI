@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.patch;
 
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.secrets.sanitize.CredentialDestinations;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -188,8 +189,9 @@ public class ConfigJsonPatcher {
 
         String json = patched.toString();
         List<String> shifted = new ArrayList<>();
+        List<CredentialMask.Restored> restored = new ArrayList<>();
         if (mask != null) {
-            json = mask.restore(json, shifted);
+            json = mask.restore(json, shifted, restored);
         }
         T result;
         try {
@@ -200,7 +202,109 @@ public class ConfigJsonPatcher {
         if (!shifted.isEmpty()) {
             requireStillRedacted(result, type, shifted, skipped);
         }
+        if (!restored.isEmpty()) {
+            requireDestinationsUnchanged(current, result, mask, restored);
+        }
         return result;
+    }
+
+    /**
+     * A hidden credential the patch keeps must keep the destination it was stored
+     * next to.
+     * <p>
+     * Masking stops a caller from reading or relocating a credential, but nothing
+     * else stopped them changing the fields <em>around</em> it: an {@code add} of
+     * {@code /tasks/0/parameters/baseUrl} beside a literal {@code apiKey}, or a new
+     * {@code targetServerUrl} on an httpcalls config whose {@code Authorization}
+     * header is a literal, kept the administrator's key and paired it with the
+     * editor's endpoint — the next turn sent it there. So for every place a hidden
+     * literal was put back, each enclosing object is compared with the object that
+     * enclosed it in the stored document, by
+     * {@link CredentialDestinations#changedDestinationField}, the rule agent
+     * upgrade applies to the same situation. A vault reference is not hidden and so
+     * is not checked: where its secret may go is decided by the vault entry's
+     * {@code allowedHosts}.
+     * <p>
+     * The two documents are paired through the credential's token, not by index: an
+     * {@code add} earlier in an array moves the credential to another index, and
+     * comparing raw positions would compare it with a neighbour. A credential found
+     * at a different depth, or under an ancestor of a different kind, cannot be
+     * paired and is refused (fail closed).
+     */
+    private <T> void requireDestinationsUnchanged(T current, T result, CredentialMask mask, List<CredentialMask.Restored> restored) {
+        JsonNode before = mapper.valueToTree(current);
+        JsonNode after = mapper.valueToTree(result);
+        List<String> changed = new ArrayList<>();
+        for (CredentialMask.Restored occurrence : restored) {
+            CredentialMask.Hidden hidden = mask.hidden().get(occurrence.token());
+            String field = changedDestinationAround(before, hidden.pointer(), after, occurrence.pointer());
+            if (field != null) {
+                changed.add(field + " (beside the credential at " + occurrence.pointer() + ")");
+            }
+        }
+        if (!changed.isEmpty()) {
+            throw badRequest("The patch changes where a stored credential is sent: " + String.join(", ", changed)
+                    + ". Credentials are redacted for you, so you cannot point one at another endpoint, provider or host. "
+                    + "Replace or remove the credential in the same patch, or ask an eddi-admin to make this change.");
+        }
+    }
+
+    /**
+     * The pointer of the destination field that differs between an enclosing object
+     * of {@code fromPointer} in {@code before} and the matching enclosing object of
+     * {@code toPointer} in {@code after}, or {@code null} when every one sends to
+     * the same place. When the two cannot be paired, the credential's own pointer.
+     */
+    private static String changedDestinationAround(JsonNode before, String fromPointer, JsonNode after, String toPointer) {
+        List<String> from = segments(fromPointer);
+        List<String> to = segments(toPointer);
+        if (from.size() != to.size()) {
+            return toPointer;
+        }
+        // Nearest enclosing object first, up to the document root (depth 0).
+        for (int depth = from.size() - 1; depth >= 0; depth--) {
+            String beforePointer = join(from, depth);
+            String afterPointer = join(to, depth);
+            JsonNode beforeNode = before.at(beforePointer);
+            JsonNode afterNode = after.at(afterPointer);
+            if (beforeNode.isArray() && afterNode.isArray()) {
+                continue;
+            }
+            if (!beforeNode.isObject() || !afterNode.isObject()) {
+                return toPointer;
+            }
+            String key = CredentialDestinations.changedDestinationField(asMap(afterNode), asMap(beforeNode), value -> false);
+            if (key != null) {
+                return afterPointer + "/" + CredentialMask.escape(key);
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asMap(JsonNode object) {
+        return PLAIN.convertValue(object, Map.class);
+    }
+
+    /** The reference tokens of a JSON pointer, still escaped. */
+    private static List<String> segments(String pointer) {
+        List<String> segments = new ArrayList<>();
+        if (pointer == null || pointer.isEmpty()) {
+            return segments;
+        }
+        for (String segment : pointer.substring(1).split("/", -1)) {
+            segments.add(segment);
+        }
+        return segments;
+    }
+
+    /** The pointer made of the first {@code count} segments. */
+    private static String join(List<String> segments, int count) {
+        StringBuilder pointer = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            pointer.append('/').append(segments.get(i));
+        }
+        return pointer.toString();
     }
 
     /**
@@ -327,6 +431,10 @@ public class ConfigJsonPatcher {
         private record Hidden(String pointer, JsonNode value) {
         }
 
+        /** One place a token was put back as its credential. */
+        private record Restored(String token, String pointer) {
+        }
+
         static <T> CredentialMask of(ObjectMapper mapper, T current, Class<T> type, Set<String> readSkippedPaths) {
             JsonNode original = mapper.valueToTree(current);
             JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(current, type, readSkippedPaths));
@@ -382,7 +490,7 @@ public class ConfigJsonPatcher {
          * in a larger string is refused outright, as no redaction rule matches it
          * there.
          */
-        String restore(String patchedJson, List<String> shifted) {
+        String restore(String patchedJson, List<String> shifted, List<Restored> restored) {
             JsonNode tree;
             try {
                 tree = PLAIN.readTree(patchedJson);
@@ -390,7 +498,7 @@ public class ConfigJsonPatcher {
                 throw new IllegalStateException("The patched document could not be re-read", e);
             }
             List<String> relocated = new ArrayList<>();
-            restore(tree, "", relocated, shifted);
+            restore(tree, "", relocated, shifted, restored);
             if (!relocated.isEmpty()) {
                 throw badRequest(relocationMessage(relocated));
             }
@@ -401,31 +509,31 @@ public class ConfigJsonPatcher {
             }
         }
 
-        private void restore(JsonNode node, String pointer, List<String> relocated, List<String> shifted) {
+        private void restore(JsonNode node, String pointer, List<String> relocated, List<String> shifted, List<Restored> restored) {
             if (node instanceof ObjectNode object) {
                 for (Map.Entry<String, JsonNode> field : object.properties()) {
                     String childPointer = pointer + "/" + escape(field.getKey());
-                    JsonNode replacement = restoredLeaf(field.getValue(), childPointer, relocated, shifted);
+                    JsonNode replacement = restoredLeaf(field.getValue(), childPointer, relocated, shifted, restored);
                     if (replacement != null) {
                         field.setValue(replacement);
                     } else {
-                        restore(field.getValue(), childPointer, relocated, shifted);
+                        restore(field.getValue(), childPointer, relocated, shifted, restored);
                     }
                 }
             } else if (node instanceof ArrayNode array) {
                 for (int i = 0; i < array.size(); i++) {
                     String childPointer = pointer + "/" + i;
-                    JsonNode replacement = restoredLeaf(array.get(i), childPointer, relocated, shifted);
+                    JsonNode replacement = restoredLeaf(array.get(i), childPointer, relocated, shifted, restored);
                     if (replacement != null) {
                         array.set(i, replacement);
                     } else {
-                        restore(array.get(i), childPointer, relocated, shifted);
+                        restore(array.get(i), childPointer, relocated, shifted, restored);
                     }
                 }
             }
         }
 
-        private JsonNode restoredLeaf(JsonNode value, String pointer, List<String> relocated, List<String> shifted) {
+        private JsonNode restoredLeaf(JsonNode value, String pointer, List<String> relocated, List<String> shifted, List<Restored> restored) {
             if (!value.isTextual()) {
                 return null;
             }
@@ -435,6 +543,7 @@ public class ConfigJsonPatcher {
                 if (!original.pointer().equals(pointer)) {
                     shifted.add(pointer);
                 }
+                restored.add(new Restored(text, pointer));
                 return original.value();
             }
             for (String token : hidden.keySet()) {
