@@ -99,7 +99,7 @@ public final class TaskBidEngine {
         sb.append("The following tasks are open for assignment. As ").append(member.displayName())
                 .append(", bid ONLY on tasks you are genuinely well-suited to execute.\n\n");
         for (TaskItem task : tasks) {
-            sb.append("- \"").append(task.subject()).append("\": ").append(task.description()).append('\n');
+            sb.append("- \"").append(task.subject()).append("\":\n").append(PeerContentGuard.fenced(task.description())).append('\n');
         }
         sb.append(
                 """
@@ -108,7 +108,7 @@ public final class TaskBidEngine {
                         {"bids": [{"subject": "<exact task subject>", "confidence": 0.0-1.0, "estimatedComplexity": "XS|S|M|L", "rationale": "<one sentence>"}]}
 
                         Bid only where you add real capability — an inflated confidence wins you work you will fail at, on the record.""");
-        return sb.toString();
+        return PeerContentGuard.withQuotedNotice(sb.toString());
     }
 
     /**

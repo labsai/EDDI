@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
@@ -66,6 +67,8 @@ public class CreateSubAgentTool {
     private final String callerConversationId;
     /** The group discussion that conversation belongs to, or null. */
     private final String groupConversationId;
+    /** The live discussion slots are reserved on, or null outside a discussion. */
+    private final GroupConversation liveDiscussion;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -95,6 +98,30 @@ public class CreateSubAgentTool {
             Set<String> retainedAgentIds,
             String callerConversationId,
             String groupConversationId) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, null);
+    }
+
+    /**
+     * @param liveDiscussion
+     *            the running discussion this conversation is a member of, or
+     *            {@code null}. When present, every creation first reserves a slot
+     *            on it ({@link GroupConversation#tryReserveAgentCreation}), so
+     *            {@code maxCreatedAgentsPerDiscussion} holds across members whose
+     *            turns run in parallel — {@code createdAgentIds} alone is the total
+     *            as of this turn's dispatch
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            GroupConversation liveDiscussion) {
+        this.liveDiscussion = liveDiscussion;
         this.callerConversationId = callerConversationId;
         this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
@@ -104,6 +131,13 @@ public class CreateSubAgentTool {
         this.config = config != null ? config : new DynamicAgentConfig();
         this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new CopyOnWriteArrayList<>();
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : ConcurrentHashMap.newKeySet();
+    }
+
+    /** Gives back the discussion-wide slot a failed creation reserved. */
+    private void releaseReservation() {
+        if (liveDiscussion != null) {
+            liveDiscussion.releaseAgentCreation();
+        }
     }
 
     /**
@@ -312,11 +346,22 @@ public class CreateSubAgentTool {
                          // shared-key case this field exists for
             );
 
+            // --- Guardrail: a discussion-wide slot, claimed atomically ---
+            // The size check above reads this turn's dispatch-time snapshot, which
+            // parallel members all share; the reservation is what bounds the total.
+            if (liveDiscussion != null && !liveDiscussion.tryReserveAgentCreation(config.getMaxCreatedAgentsPerDiscussion())) {
+                return "⚠️ Maximum created agents (%d) reached for this discussion."
+                        .formatted(config.getMaxCreatedAgentsPerDiscussion());
+            }
             SetupResult result;
             try {
                 result = agentSetupService.setupAgent(request,
                         new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId));
+            } catch (RuntimeException e) {
+                releaseReservation();
+                throw e;
             } catch (AgentSetupException e) {
+                releaseReservation();
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.
                 if (config.isInheritParentModel() && inheritedApiKey == null) {
@@ -328,6 +373,9 @@ public class CreateSubAgentTool {
                 throw e;
             }
             String agentId = result.agentId();
+            if (liveDiscussion != null) {
+                liveDiscussion.commitAgentCreation(agentId);
+            }
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {
                 retainedAgentIds.add(agentId);

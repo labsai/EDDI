@@ -102,7 +102,7 @@ public final class AbstentionDetector {
      * expensive to leave on.
      */
     public static String buildDissentInput(String synthesis) {
-        return """
+        return PeerContentGuard.withQuotedNotice("""
                 The panel has produced this synthesis:
 
                 %s
@@ -111,6 +111,6 @@ public final class AbstentionDetector {
                 State a real, substantive disagreement if you have one — do not soften or \
                 withhold it for the sake of consensus.
                 If you have no material disagreement, reply with exactly PASS."""
-                .formatted(synthesis != null && !synthesis.isBlank() ? synthesis : "(no synthesis was produced)");
+                .formatted(synthesis != null && !synthesis.isBlank() ? PeerContentGuard.fenced(synthesis) : "(no synthesis was produced)"));
     }
 }

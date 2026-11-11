@@ -179,6 +179,51 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("parallel members share one discussion-wide cap, not a dispatch-time snapshot each")
+        void createSubAgent_parallelMembersShareTheDiscussionCap() throws Exception {
+            config.setMaxCreatedAgentsPerDiscussion(2);
+            var gc = new GroupConversation();
+            gc.setId("gc-7");
+            int[] next = {0};
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenAnswer(inv -> new SetupResult("created", "sub-" + (++next[0]), "p/x", "anthropic", "claude-sonnet-4-6", true,
+                            "ready", null, null, null, null, null, null));
+
+            // Three members dispatched in the same parallel wave: each was handed the
+            // same (empty) created-agent snapshot, so each local check passes.
+            List<String> replies = new ArrayList<>();
+            for (int member = 0; member < 3; member++) {
+                var memberTool = new CreateSubAgentTool(agentSetupService, conversationService, "parent-" + member, "user-1", config,
+                        new CopyOnWriteArrayList<>(), ConcurrentHashMap.newKeySet(), "conv-" + member, "gc-7", gc);
+                replies.add(memberTool.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, null));
+            }
+
+            verify(agentSetupService, times(2)).setupAgent(any(), any());
+            assertTrue(replies.get(2).contains("Maximum created agents"), replies.get(2));
+            assertEquals(List.of("sub-1", "sub-2"), gc.getCreatedAgentIds(), "a creation holds its slot at once, not at turn end");
+        }
+
+        @Test
+        @DisplayName("a failed creation gives its reserved slot back")
+        void createSubAgent_failedCreationReleasesTheSlot() throws Exception {
+            config.setMaxCreatedAgentsPerDiscussion(1);
+            var gc = new GroupConversation();
+            gc.setId("gc-7");
+            var memberTool = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-1", "gc-7", gc);
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenThrow(new AgentSetupService.AgentSetupException("boom"))
+                    .thenReturn(new SetupResult("created", "sub-1", "p/x", "anthropic", "claude-sonnet-4-6", true, "ready", null, null,
+                            null, null, null, null));
+
+            memberTool.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, null);
+            String second = memberTool.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, null);
+
+            assertTrue(second.contains("sub-1"), second);
+            assertTrue(gc.tryReserveAgentCreation(2), "one slot taken, one free");
+        }
+
+        @Test
         void createSubAgent_providerNotAllowed() {
             config.setAllowedProviders(List.of("openai"));
 

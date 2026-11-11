@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.engine.internal.groups.CreatedAgentRecruitGuard;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
@@ -303,7 +304,10 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId,
+                    groupConversationId != null && liveDiscussionRegistry != null
+                            ? liveDiscussionRegistry.getForMember(groupConversationId, callerConversationId).orElse(null)
+                            : null));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
@@ -371,7 +375,8 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             var roster = liveDiscussion.flatMap(this::configuredMemberIds);
             if (liveDiscussion.isPresent() && roster.isPresent()) {
                 tools.add(new RecruitAgentTool(liveDiscussionRegistry, groupConversationId, parentAgentId,
-                        dynamicConfig, deploymentStore, roster.get(), useCheck));
+                        dynamicConfig, deploymentStore, roster.get(), useCheck,
+                        agentStore != null ? id -> CreatedAgentRecruitGuard.isDynamicAgent(agentStore, id) : null));
                 LOGGER.debugf("[DYNAMIC] RecruitAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                 anyDynamicToolAdded = true;
             } else if (liveDiscussion.isPresent()) {

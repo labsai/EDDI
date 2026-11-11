@@ -1457,6 +1457,54 @@ public class GroupConversation {
         }
     }
 
+    /**
+     * Creations admitted by {@link #tryReserveAgentCreation} whose agent is not on
+     * {@link #createdAgentIds} yet. Guarded by {@link #dynamicTrackingMutex};
+     * runtime state only, like the mutex.
+     */
+    @JsonIgnore
+    private transient int pendingAgentCreations;
+
+    /**
+     * Claims one of the discussion's {@code maxCreatedAgentsPerDiscussion} slots,
+     * atomically. Members of a parallel phase each used to check the created-agent
+     * total they were handed when their turn was dispatched, so N members could
+     * each create up to the cap. Counted here: the created agents plus every
+     * creation in flight.
+     *
+     * @return {@code false} when the cap is reached
+     */
+    public boolean tryReserveAgentCreation(int cap) {
+        synchronized (dynamicTrackingMutex) {
+            if (createdAgentIds.size() + pendingAgentCreations >= cap) {
+                return false;
+            }
+            pendingAgentCreations++;
+            return true;
+        }
+    }
+
+    /**
+     * Turns a reservation into a created agent: the id goes on
+     * {@link #createdAgentIds} now, not when the creating member's turn ends, so it
+     * keeps its slot (and is cleaned up) even if that turn never completes.
+     */
+    public void commitAgentCreation(String agentId) {
+        synchronized (dynamicTrackingMutex) {
+            pendingAgentCreations = Math.max(0, pendingAgentCreations - 1);
+            if (agentId != null && !tornDownAgentIds.contains(agentId) && !createdAgentIds.contains(agentId)) {
+                createdAgentIds.add(agentId);
+            }
+        }
+    }
+
+    /** Gives back a reservation whose creation failed. */
+    public void releaseAgentCreation() {
+        synchronized (dynamicTrackingMutex) {
+            pendingAgentCreations = Math.max(0, pendingAgentCreations - 1);
+        }
+    }
+
     @JsonIgnore
     public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
         return dynamicAgentConfig;

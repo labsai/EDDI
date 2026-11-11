@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,6 +112,26 @@ final class PeerContentGuard {
             cut--;
         }
         return safe.substring(0, cut) + ENTRY_CUT_NOTE.formatted(safe.length() - cut);
+    }
+
+    /**
+     * {@code text} as a {@code ```} block with every fence inside it broken, for
+     * the engine's own prompts (verifier, executor, bidder, judge, facilitator,
+     * dissent, summarizer) that quote member-authored text. Not cut: those prompts
+     * quote a task result or a synthesis that the reader must see whole, and they
+     * have their own bounds where they need one.
+     */
+    static String fenced(String text) {
+        return FENCE + "\n" + (text == null ? "" : text.replace(FENCE, BROKEN_FENCE)) + "\n" + FENCE;
+    }
+
+    /**
+     * {@code prompt} opened by {@link DiscussionStylePresets#QUOTED_CONTENT_NOTICE}
+     * — what tells the reader that {@link #fenced} text is quoted, not
+     * instructions.
+     */
+    static String withQuotedNotice(String prompt) {
+        return DiscussionStylePresets.QUOTED_CONTENT_NOTICE + "\n\n" + prompt;
     }
 
     /**

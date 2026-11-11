@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.groups.model.TeamBudgetConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.groups.budget.InMemoryTeamBudgetStore;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetAudit;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetRefusedException;
@@ -265,6 +266,26 @@ class GroupConversationServiceTeamBudgetTest {
         var e = assertThrows(TeamBudgetRefusedException.class, () -> service.continueDiscussion("gc-existing", "more", null));
         assertEquals("exhausted", e.reason());
         assertThrows(TeamBudgetRefusedException.class, () -> service.followUpWithMember("gc-existing", AGENT_A, "why?"));
+    }
+
+    @Test
+    @DisplayName("a nested child discussion cannot be continued or followed up: it would spend outside the team budget")
+    void nestedChildCannotBeDrivenDirectly() throws Exception {
+        // The team budget is exhausted, and a child (depth 1) is neither admitted nor
+        // charged — driving it directly used to run member turns past the ceiling.
+        config(10.0, null, protocol(null, null));
+        budgetStore.addSpend(GROUP_ID, MONTH, 10.0, Instant.parse("2027-12-01T00:00:00Z"));
+        var child = new GroupConversation();
+        child.setId("gc-child");
+        child.setGroupId(GROUP_ID);
+        child.setDepth(1);
+        doReturn(child).when(conversationStore).read("gc-child");
+
+        var continued = assertThrows(GroupDiscussionException.class, () -> service.continueDiscussion("gc-child", "more", null));
+        var followedUp = assertThrows(GroupDiscussionException.class, () -> service.followUpWithMember("gc-child", AGENT_A, "why?"));
+
+        assertEquals(GroupConversationService.NESTED_CHILD_REFUSAL, continued.getMessage());
+        assertEquals(GroupConversationService.NESTED_CHILD_REFUSAL, followedUp.getMessage(), "refused as nested, before the budget gate");
     }
 
     @Test
