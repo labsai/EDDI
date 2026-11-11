@@ -42,8 +42,9 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
      * by every routed client. Programmatically built clients are never closed by
      * the factory's callers, so building one per {@link #get} would leave one more
      * behind per call. Sharing is safe: {@link LoopbackCallerAuthFilter} reads the
-     * caller's identity per request, not when the client is built. The map holds at
-     * most one entry per store interface and server.
+     * caller's identity per request, not when the client is built. Only
+     * {@link #get(Class)} uses it, whose base address is fixed, so the map holds at
+     * most two entries per store interface.
      */
     private final Map<String, CurrentVersionRouting.CurrentVersionEndpoint> currentVersionEndpoints = new ConcurrentHashMap<>();
 
@@ -114,8 +115,10 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
     public <T> T get(Class<T> clazz, String serverUrl) {
         T client = RestClientBuilder.newBuilder().baseUri(URI.create(serverUrl)).build(clazz);
         return CurrentVersionRouting.route(clazz, client, serverUrl,
-                storeUri -> currentVersionEndpoint(storeUri, false,
-                        uri -> RestClientBuilder.newBuilder().baseUri(uri).build(CurrentVersionRouting.CurrentVersionEndpoint.class)));
+                // Not cached: serverUrl is arbitrary, so a shared map would grow with
+                // every server ever named. The routed client builds its endpoint
+                // client lazily, once, and both are dropped together.
+                storeUri -> RestClientBuilder.newBuilder().baseUri(storeUri).build(CurrentVersionRouting.CurrentVersionEndpoint.class));
     }
 
     /**

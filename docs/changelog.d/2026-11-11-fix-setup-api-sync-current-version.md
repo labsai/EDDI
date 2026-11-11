@@ -27,7 +27,7 @@ that could not do without it.
 to the store's own `GET /{id}/currentversion` endpoint over HTTP, with the same loopback caller filter, and every
 other method goes to the client unchanged. The endpoint keeps its role check and the store's VIEW check, so
 nothing is authorized that was not before; one place fixes every caller, and a new caller cannot fall into it
-again. The `currentversion` client is built once per store address and shared, since callers never close the clients the factory hands out (the filter reads the caller per request, so sharing is safe). `redirectToLatestVersion` is not routed (a 303 a client would follow; no in-process caller uses it). The
+again. The `currentversion` client is built once per store address and shared, since callers never close the clients the factory hands out (the filter reads the caller per request, so sharing is safe); only loopback clients share it, since a cache keyed by arbitrary `serverUrl`s would be unbounded. `redirectToLatestVersion` is not routed (a 303 a client would follow; no in-process caller uses it). The
 wrapper is a `java.lang.reflect.Proxy`, which a future native image build has to register.
 
 **Files:** [`CurrentVersionRouting.java`](../../src/main/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRouting.java),
