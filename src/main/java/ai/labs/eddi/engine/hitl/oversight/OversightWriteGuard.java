@@ -36,7 +36,7 @@ public final class OversightWriteGuard {
     private static final Pattern OVERSIGHT_API = Pattern.compile("/hitl/(?:samples|autonomy|analytics/rebuild)(?:[/?#]|$)");
     /** The endpoints that record a human's decision on a HITL pause. */
     private static final Pattern DECISION_API = Pattern
-            .compile("/(?:agents/[^/?#]+/resume(?:/stream)?|groups/[^/?#]+/conversations/[^/?#]+/(?:approve(?:/stream)?|human-input))(?:[/?#]|$)");
+            .compile("/(?:agents/[^?#]+/resume(?:/stream)?|groups/[^?#]+/conversations/[^?#]+/(?:approve(?:/stream)?|human-input))(?:[/?#;]|$)");
     private static final String HITL_CONFIG_KEY = "hitlConfig";
     private static final String OVERSIGHT_KEY = "oversight";
 

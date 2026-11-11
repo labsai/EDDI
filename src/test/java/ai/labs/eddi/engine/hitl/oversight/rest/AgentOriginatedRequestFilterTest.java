@@ -37,7 +37,11 @@ class AgentOriginatedRequestFilterTest {
     @ParameterizedTest
     @CsvSource({"POST,agents/c2/resume", "POST,/agents/c2/resume/stream", "POST,agents/c2/resume/",
             "POST,groups/g1/conversations/gc1/approve", "POST,groups/g1/conversations/gc1/approve/stream",
-            "POST,groups/g1/conversations/gc1/human-input", "post,AGENTS/C2/RESUME"})
+            "POST,groups/g1/conversations/gc1/human-input", "post,AGENTS/C2/RESUME",
+            // spellings routing still accepts: matrix parameters, repeated slashes, an id
+            // whose %2F was decoded into a slash, a trailing slash
+            "POST,agents/c2/resume;v=1", "POST,agents//c2/resume", "POST,agents/a/b/resume", "POST,groups/g1/conversations/gc1/approve;x/",
+            "PATCH,hitl/samples;v=1/s1", "POST,//hitl/autonomy/a1/apply"})
     @DisplayName("a marked HITL decision is refused: an agent may not resume a pause as the approver it talks to")
     void decisionRefused(String method, String path) {
         assertTrue(AgentOriginatedRequestFilter.refused(method, path, "true"), path);

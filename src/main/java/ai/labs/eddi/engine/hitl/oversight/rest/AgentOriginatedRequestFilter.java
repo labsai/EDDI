@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.hitl.oversight.rest;
 
 import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
+import ai.labs.eddi.engine.hitl.oversight.AgentOriginatedRequests;
 import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -44,14 +45,14 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
     private static final Pattern GUARDED = Pattern.compile("^/?hitl/(?:samples|autonomy|analytics/rebuild)(?:/.*)?$");
     /** The endpoints that record a human's decision on a HITL pause. */
     private static final Pattern DECISIONS = Pattern
-            .compile("^/?(?:agents/[^/]+/resume(?:/stream)?|groups/[^/]+/conversations/[^/]+/(?:approve(?:/stream)?|human-input))/?$");
+            .compile("^/?(?:agents/.+/resume(?:/stream)?|groups/.+/conversations/.+/(?:approve(?:/stream)?|human-input))/?$");
 
     @Override
     public void filter(ContainerRequestContext request) {
         String path = request.getUriInfo().getPath();
         if (refused(request.getMethod(), path, request.getHeaderString(AgentCallMarker.HEADER))) {
             String message = isDecision(path)
-                    ? "This request was made by an agent's tool call; deciding a paused conversation is a human action"
+                    ? AgentOriginatedRequests.DECISION_REFUSAL
                     : "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions";
             request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED, message));
         }
@@ -59,13 +60,31 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
 
     /** Whether a request is refused. */
     static boolean refused(String method, String path, String marker) {
-        if (marker == null || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
+        if (!AgentOriginatedRequests.isMarked(marker) || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
             return false;
         }
-        return path != null && (GUARDED.matcher(path.toLowerCase(Locale.ROOT)).matches() || isDecision(path));
+        if (path == null) {
+            return false;
+        }
+        String canonical = canonical(path);
+        return GUARDED.matcher(canonical).matches() || DECISIONS.matcher(canonical).matches();
     }
 
     private static boolean isDecision(String path) {
-        return path != null && DECISIONS.matcher(path.toLowerCase(Locale.ROOT)).matches();
+        return path != null && DECISIONS.matcher(canonical(path)).matches();
+    }
+
+    /**
+     * The path as routing sees it, so no spelling slips past the patterns: lower
+     * case, matrix parameters ({@code resume;x=1}) dropped and repeated slashes
+     * collapsed. An identifier segment matches {@code .+}, so an id that decodes to
+     * contain a {@code /} ({@code %2F}) still ends in {@code /resume}. No
+     * {@code LegacyPathRewriteFilter} alias leads here: its rewrites cover the
+     * configuration stores and {@code /administration/{env}} only, and it is
+     * {@code @PreMatching}, so this post-matching filter reads the rewritten path
+     * anyway.
+     */
+    static String canonical(String path) {
+        return path.toLowerCase(Locale.ROOT).replaceAll(";[^/]*", "").replaceAll("/{2,}", "/");
     }
 }

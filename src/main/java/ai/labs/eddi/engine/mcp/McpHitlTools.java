@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
+import ai.labs.eddi.engine.hitl.oversight.AgentOriginatedRequests;
+import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
 import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
@@ -138,6 +140,28 @@ public class McpHitlTools {
         if (!mutationsEnabled) {
             return errorJson("HITL mutations are disabled over MCP", "DISABLED",
                     Map.of("property", "eddi.mcp.hitl.mutations.enabled"));
+        }
+        return null;
+    }
+
+    /**
+     * Reads the agent-call marker off the inbound {@code /mcp} request.
+     * Field-injected and null-tolerant, so directly constructed instances (unit
+     * tests) keep working; in the container it is always present.
+     */
+    @Inject
+    AgentOriginatedRequests agentOriginatedRequests;
+
+    /**
+     * An AGENT_ORIGINATED error JSON when the MCP request carrying this tool call
+     * was sent by an agent's own tool (an MCP server configured with
+     * {@code ${caller:token}} pointing at this deployment), else null. The REST
+     * filter refuses the same decisions; it never sees an MCP call, because these
+     * tools call the services in-process.
+     */
+    private String refusedIfAgentOriginated() {
+        if (AgentOriginatedRequests.currentRequestIsMarked(agentOriginatedRequests)) {
+            return errorJson(AgentOriginatedRequests.DECISION_REFUSAL, OversightErrors.AGENT_ORIGINATED, null);
         }
         return null;
     }
@@ -288,6 +312,9 @@ public class McpHitlTools {
                                               required = false) String toolDecisionsJson) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
+        if (disabled == null) {
+            disabled = refusedIfAgentOriginated();
+        }
         if (disabled != null) {
             return disabled;
         }
@@ -566,6 +593,9 @@ public class McpHitlTools {
                                              required = false) String taskDecisionsJson) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
+        if (disabled == null) {
+            disabled = refusedIfAgentOriginated();
+        }
         if (disabled != null) {
             return disabled;
         }
@@ -675,6 +705,9 @@ public class McpHitlTools {
                                                  required = false) String choice) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
+        if (disabled == null) {
+            disabled = refusedIfAgentOriginated();
+        }
         if (disabled != null) {
             return disabled;
         }

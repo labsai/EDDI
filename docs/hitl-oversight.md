@@ -243,7 +243,13 @@ Neither an agent nor a model can influence its own promotion:
   `/resume/stream`), `POST /groups/{groupId}/conversations/{id}/approve` (and `/approve/stream`) and
   `POST /groups/{groupId}/conversations/{id}/human-input` answer 403 `AGENT_ORIGINATED`. Without that, a
   prompt-injected agent chatting with an approver could resume *another* paused conversation as that approver, with
-  `${caller:token}`, and the decision would count as a verified human's evidence toward earned autonomy. (Until this
+  `${caller:token}`, and the decision would count as a verified human's evidence toward earned autonomy. The MCP
+  tools that decide a pause — `resume_conversation`, `approve_group_phase` and `submit_group_human_input` — refuse a
+  marked `/mcp` request the same way (`errorCode: AGENT_ORIGINATED`): they call the services in-process, so the REST
+  filter never sees them, and read the header off the inbound `/mcp` request instead. The MCP oversight tools are
+  reads only. Cancelling (`/cancel`, `cancel_conversation`, `cancel_group_discussion`) stops work and records no
+  decision, so it is not guarded. Paths are matched case-insensitively, without matrix parameters and with repeated
+  slashes collapsed; no legacy path alias leads to these endpoints. (Until this
   release only loopback, `eddi.self.base-url` and the self-hosts list were marked, and no decision endpoint read the
   marker.)
 - **The self-ungating guard** refuses an approved tool call that writes to those paths — the oversight API and the

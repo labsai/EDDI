@@ -100,7 +100,7 @@ class OversightSupportTest {
         void decisionPaths() {
             for (String uri : List.of("http://127.0.0.1:7070/agents/c2/resume", "/agents/c2/resume/stream", "/agents/c2/resume?x=1",
                     "/groups/g1/conversations/gc1/approve", "/groups/g1/conversations/gc1/approve/stream",
-                    "/groups/g1/conversations/gc1/human-input")) {
+                    "/groups/g1/conversations/gc1/human-input", "/agents/a/b/resume", "/agents/c2/resume;v=1")) {
                 assertEquals(OversightWriteGuard.DECISION_API_REASON, refusal(uri, null, null), uri);
             }
             assertNull(refusal("/agents/c2/approval-status", null, null));
