@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
@@ -294,12 +294,15 @@ class ToolLoopResumer {
             // APPROVED (top-level default or per-call) below.
             trace.add(Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId()));
 
-            // Truncated raw args can't be honestly executed (the approver never saw the
-            // full args and the raw bytes are incomplete). Validation already blocks
-            // amendments on these — approving yields an honest non-execution.
+            // Truncated args can't be honestly executed: either the raw bytes are
+            // incomplete, or the copy the approver was shown was cut to the display cap
+            // (ToolApprovalGateSupport#buildPendingBatch sets the flag for both).
+            // Validation
+            // already blocks amendments on these — approving yields an honest
+            // non-execution.
             if (c.isArgsTruncated()) {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the size an approver can be shown in full\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
                 emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
@@ -428,10 +431,13 @@ class ToolLoopResumer {
         // toolHitlEnabled
         // here keeps the resume path from re-arming an approval flow an operator
         // disabled.
+        // …and with the agent's earned-autonomy suspensions on top, exactly as
+        // LlmTask does (AutonomyOverlayService#resolveEffective): under mode=replace a
+        // task-level config replaces the overlaid agent carrier, so resolving alone
+        // would let a suspended pattern run ungated after the approval.
         ToolApprovalsConfig effectiveToolApprovals = null;
         if (toolHitlEnabled) {
-            effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
-                    memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
+            effectiveToolApprovals = AutonomyOverlayService.resolveEffective(orchestrator.autonomyOverlay, memory, task.getToolApprovals());
         }
         int llmTaskIndex = batch.getLlmTaskIndex();
 

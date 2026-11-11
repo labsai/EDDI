@@ -17,7 +17,6 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
-import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -494,9 +493,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // null (gate inert), byte-identical to the pre-HITL path.
         ToolApprovalsConfig effectiveToolApprovals = null;
         if (toolHitlEnabled) {
-            effectiveToolApprovals = TaskToolApprovalsResolver.resolve(
-                    memory.getAgentToolApprovalsConfig(), task.getToolApprovals());
-            effectiveToolApprovals = AutonomyOverlayService.applyTo(autonomyOverlay, memory, effectiveToolApprovals);
+            effectiveToolApprovals = AutonomyOverlayService.resolveEffective(autonomyOverlay, memory, task.getToolApprovals());
         }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);

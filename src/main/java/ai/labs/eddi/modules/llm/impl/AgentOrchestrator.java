@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
@@ -348,6 +349,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile GuardrailService guardrailService;
+
+    /**
+     * Puts an agent's suspended earned-autonomy categories on the gate of a
+     * <em>resumed</em> tool loop, as {@code LlmTask} does on the live one.
+     * Field-injected for the same reason as the fields above; null under direct
+     * construction, where no suspension is overlaid.
+     */
+    @Inject
+    volatile AutonomyOverlayService autonomyOverlay;
 
     /**
      * Hands the {@code toolCallGuardrails} engine to the tool loop, which is not a

@@ -130,7 +130,7 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
     "outcomeUnknown": []
   }
   ```
-  `arguments` is always the **redacted, capped** value (`argumentsRedacted`) — the raw arguments never appear in this response. `outcomeUnknown` lists callIds that have an `EXECUTING` journal entry — i.e. a prior approval crashed mid-execution and the outcome is genuinely unknown; it is empty in the common case.
+  `arguments` is always the **redacted, capped** value (`argumentsRedacted`) — the raw arguments never appear in this response. `argsTruncated: true` means the approver cannot be shown the call in full — its arguments exceeded the 32 KB display cap (or the 256 KB stored cap) — and such a call is **never executed**: approving it yields `NOT_EXECUTED`, and it cannot be amended. Only what was shown can run, so a model cannot pad a call past the cap to hide its decisive fields; the Slack and email cards append the same notice. `outcomeUnknown` lists callIds that have an `EXECUTING` journal entry — i.e. a prior approval crashed mid-execution and the outcome is genuinely unknown; it is empty in the common case.
 - **`RULE`** (a behavior-rule `PAUSE_CONVERSATION`, including legacy snapshots with no `hitlPauseType` recorded):
   ```json
   {"type": "RULE", "reason": "Account deletion requires manager sign-off", "actions": ["PAUSE_CONVERSATION", "notify_manager"]}

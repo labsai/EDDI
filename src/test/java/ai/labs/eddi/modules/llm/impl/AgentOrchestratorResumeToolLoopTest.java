@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IAgentStore;
@@ -13,6 +14,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
@@ -889,5 +891,59 @@ class AgentOrchestratorResumeToolLoopTest {
                 .map(m -> ((ToolExecutionResultMessage) m).text())
                 .anyMatch(t -> t.contains("NOT_EXECUTED"));
         assertTrue(notExecuted, "NOT_EXECUTED envelope must be appended for truncated approved call");
+    }
+
+    @Test
+    @DisplayName("resume: the agent's autonomy suspensions gate the continuation, as on the live path")
+    void suspensionOverlayAppliesToTheResumedLoop() throws Exception {
+        var task = twoToolTask(); // no task-level gate: only the suspension can gate calculate
+        var overlay = mock(AutonomyOverlayService.class);
+        when(overlay.apply(any(), any())).thenReturn(gateCalculate());
+        orchestrator.autonomyOverlay = overlay;
+
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        when(journalStore.tryClaim(anyString(), anyString(), eq("c1"), anyString(), anyString())).thenReturn(true);
+        when(calculatorTool.calculate(anyString())).thenReturn("42");
+
+        var next = ToolExecutionRequest.builder().id("c2").name("calculate").arguments("{\"expression\":\"9*9\"}").build();
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(next), text("done"));
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true));
+
+        assertEquals("c2", ex.getBatch().getCalls().get(0).getCallId(), "the suspended call must pause again, not run");
+        verify(calculatorTool, never()).calculate("9*9");
+    }
+
+    @Test
+    @DisplayName("Arguments past the approver's display cap: the pause is truncated and approval does not execute")
+    void argumentsBeyondTheDisplayCapAreNotExecutedOnApproval() throws Exception {
+        var task = twoToolTask();
+        // Benign first, ~40 KB of filler, the field that matters last — under the raw
+        // cap, so before the fix the full arguments ran although the approver saw 32
+        // KB.
+        String args = "{\"expression\":\"6*7\",\"pad\":\"" + "x".repeat(40_000) + "\",\"hidden\":\"1\"}";
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments(args).build();
+        var gr = new ToolApprovalGate.GateResult(List.of(r1), List.of(), Map.of("c1", "calculate"));
+        var built = orchestrator.buildPendingBatch(List.of(UserMessage.from("do the thing"), AiMessage.from(List.of(r1))), gr,
+                task, memory, 0, List.of(), new ArrayList<>(), 1, 0, Map.of("calculate", "builtin"), gateCalculate());
+        var call = built.getCalls().get(0);
+        assertTrue(call.isArgsTruncated());
+        var batch = batchWith(0, List.of(call), List.of(r1));
+
+        ChatModel chatModel = mock(ChatModel.class);
+        var captor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(captor.capture())).thenReturn(text("handled"));
+
+        orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+        assertTrue(captor.getValue().messages().stream()
+                .filter(m -> m instanceof ToolExecutionResultMessage)
+                .map(m -> ((ToolExecutionResultMessage) m).text())
+                .anyMatch(t -> t.contains("NOT_EXECUTED")));
     }
 }
