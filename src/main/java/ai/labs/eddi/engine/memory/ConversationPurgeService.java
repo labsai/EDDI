@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard.ErasureIncompleteException;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -61,6 +63,14 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<ISecretProvider> secretProvider;
+
+    /**
+     * The erasure guarantee for rows written asynchronously about the conversation
+     * (alert events): tombstone, drain barrier on every node, delete, verify.
+     * Field-injected; null when the service is built by hand.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -167,6 +177,21 @@ public class ConversationPurgeService {
             // gone.
             throw new ResourceStoreException("Could not end conversation " + conversationId
                     + " before deleting it; nothing was deleted. Retry once the conversation store accepts writes.", e);
+        }
+
+        // Before anything else is deleted: the conversation's tombstone, the drain
+        // barrier of the async writers on every node, and the delete and verification
+        // of their rows. If any of it fails nothing else is deleted, so the owner's
+        // retry of the same delete finishes it (the snapshot is what lets them).
+        if (erasureGuard != null) {
+            try {
+                erasureGuard.eraseConversation(conversationId);
+            } catch (ErasureIncompleteException e) {
+                LOGGER.errorf("GDPR: the asynchronously written data of conversation %s could not be erased with a guarantee: %s",
+                        sanitize(conversationId), sanitize(e.getMessage()));
+                throw new ResourceStoreException("Could not erase the asynchronously written data (alerts) of conversation " + conversationId
+                        + " with a guarantee: " + e.getMessage() + ". The conversation was not deleted. Retry the delete.", e);
+            }
         }
 
         // The snapshot holds the only references to the conversation's vault

@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -257,5 +258,33 @@ class ConversationPurgeServiceTest {
 
         assertDoesNotThrow(() -> service.purgeAgentTestConversation(CONVERSATION_ID, RUN_ID));
         verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+    }
+
+    @Test
+    @DisplayName("the async writers' rows are erased with a guarantee before anything else; a failure keeps the conversation for a retry")
+    void erasureGuardFailureKeepsTheConversation() throws Exception {
+        ErasureGuard guard = mock(ErasureGuard.class);
+        doThrow(new ErasureGuard.ErasureIncompleteException("1 of 2 node(s) did not confirm the drain")).when(guard)
+                .eraseConversation(CONVERSATION_ID);
+        service.erasureGuard = guard;
+
+        var failure = assertThrows(IResourceStore.ResourceStoreException.class, () -> service.purge(CONVERSATION_ID));
+
+        assertTrue(failure.getMessage().contains("did not confirm the drain"), failure.getMessage());
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        verify(descriptorStore, never()).deleteAllDescriptor(anyString());
+    }
+
+    @Test
+    @DisplayName("the guarded erasure runs before the snapshot is deleted")
+    void erasureGuardRunsFirst() throws Exception {
+        ErasureGuard guard = mock(ErasureGuard.class);
+        service.erasureGuard = guard;
+
+        service.purge(CONVERSATION_ID);
+
+        InOrder order = inOrder(guard, memoryStore);
+        order.verify(guard).eraseConversation(CONVERSATION_ID);
+        order.verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
 }

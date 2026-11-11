@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.gdpr;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -152,6 +153,15 @@ public class GdprComplianceService {
 
     @Inject
     IConversationCoordinator conversationCoordinator;
+
+    /**
+     * The erasure guarantee for rows written asynchronously (alert events, and any
+     * other {@code AsyncErasureWriter}): tombstones before the deletes, a drain
+     * barrier in the stop step, verification in the participants. Field-injected;
+     * null in tests built with {@code new}, which then run without it.
+     */
+    @Inject
+    ErasureGuard erasureGuard;
 
     /**
      * The keyed pseudonym for database logs, log lines and compliance records (L9).
@@ -402,8 +412,11 @@ public class GdprComplianceService {
      * <p>
      * Order of operations:
      * <ol>
+     * <li>Record the durable erasure tombstones of the user and their conversations
+     * ({@link ErasureGuard})</li>
      * <li>Signal the user's in-flight turns and group discussions on this node to
-     * stop (see {@link UserErasureParticipant})</li>
+     * stop (see {@link UserErasureParticipant}), then pass the drain barrier of the
+     * async writers — on this node and, in cluster mode, on every other one</li>
      * <li>Delete all persistent user memories</li>
      * <li>Delete all binary attachments for user conversations</li>
      * <li>Delete all HITL tool execution journal entries for user
@@ -443,6 +456,26 @@ public class GdprComplianceService {
         // request as fulfilled while the data is still there.
         var failedSteps = new ArrayList<String>();
 
+        // 00. Durable tombstones of the user and of each of their conversations,
+        // BEFORE anything below deletes or stops: an asynchronous writer whose work was
+        // queued before this point — on any node — refuses to write the row, or removes
+        // it again, once it sees them (ErasureGuard). Not best effort: a failure here
+        // is
+        // a failed step, because nothing then stops a late write from recreating data.
+        if (erasureGuard != null) {
+            List<String> tombstonedConversations = List.of();
+            try {
+                tombstonedConversations = conversationMemoryStore.getConversationIdsByUserId(userId);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
+            }
+            try {
+                erasureGuard.tombstoneUser(userId, tombstonedConversations);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "erasureTombstone", e, pseudonym);
+            }
+        }
+
         // 0a. From here on this node's audit ledger writes the user's pseudonym, not
         // their id. Work cancelled below can still flush audit entries while it
         // unwinds, and entries may already be queued; both would otherwise land after
@@ -467,6 +500,19 @@ public class GdprComplianceService {
                 recordFailure(failedSteps, participant.erasureStepName(), e, pseudonym);
             }
         }
+        // 0-drain. The drain barrier on this node: wait until the async writers
+        // finished
+        // the work they had queued before the tombstones existed. Work queued later is
+        // refused by the tombstones, so once this returns nothing can still write a
+        // guarded row of the user here. A writer that does not drain in time fails the
+        // step: its queued work could still land after the deletes below.
+        if (erasureGuard != null) {
+            List<String> undrained = erasureGuard.drainLocal();
+            if (!undrained.isEmpty()) {
+                recordFailure(failedSteps, "asyncWriteDrain",
+                        new IllegalStateException("async writer(s) " + undrained + " did not drain in time — retry the erasure"), pseudonym);
+            }
+        }
         // 0b. Cluster mode: the same stop on every other node, where the user's turns
         // and discussions may be running. The user travels as a hash. A node that does
         // not answer marks the step incomplete (its running work still cannot recreate
@@ -479,7 +525,10 @@ public class GdprComplianceService {
                 // so a node that had just joined or left made the step fail, or wait,
                 // spuriously.
                 int expectedPeers = clusterRpc.expectedPeers();
-                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, clusterStopRequest(userId), clusterStopTimeout, expectedPeers);
+                // Each node also drains its async writers before it answers (up to
+                // eddi.gdpr.drain-timeout), so the wait covers both.
+                Duration wait = erasureGuard == null ? clusterStopTimeout : clusterStopTimeout.plus(erasureGuard.drainTimeout());
+                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, clusterStopRequest(userId), wait, expectedPeers);
                 if (replies.size() < expectedPeers) {
                     // A node that did not answer may still be running the user's work and
                     // flush it (audit entries, memory) after the sweeps below. The cascade
@@ -497,6 +546,12 @@ public class GdprComplianceService {
                         // but reports the step incomplete rather than a clean erasure.
                         recordFailure(failedSteps, "clusterStop",
                                 new IllegalStateException("node " + reply.getKey() + ": " + reply.getValue().get("error")), pseudonym);
+                    } else if (erasureGuard != null && !Boolean.TRUE.equals(reply.getValue().get("drained"))) {
+                        // A node that stopped the work but did not confirm the drain barrier
+                        // (an older release, mid rolling upgrade) may still write a queued
+                        // guarded row after the deletes below.
+                        recordFailure(failedSteps, "clusterStop", new IllegalStateException(
+                                "node " + reply.getKey() + " did not confirm that its async writers drained — retry the erasure"), pseudonym);
                     }
                 }
                 LOGGER.infof("[GDPR] Cluster stop answered by node(s) %s [%s]", replies.keySet(), pseudonym);
