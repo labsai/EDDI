@@ -1669,9 +1669,13 @@ your tool schemas do not cover it, not as a routine first step:
   pause stays. Strict binding: hitlConfig.requirePlanHash true (agent or group)
   or eddi.hitl.plan-hash.strict=true (whole deployment) makes a human decision
   without planHash a 400 (MCP PLAN_HASH_REQUIRED); timeouts and other system:
-  decisions are exempt, pauses from before 6.8 are decided as before. Audit:
-  hitl.approval entries carry planHash and planBinding (MATCHED, NOT_PRESENTED,
-  SYSTEM, LEGACY_UNHASHED); the tasks a resume runs carry input.hitlPlanHash.
+  decisions are exempt, pauses from before 6.8 are decided as before. If the
+  hash could not be computed at pause time (WARN hitl.plan.unavailable),
+  approval-status shows planHash ""; under strict binding a human decision on
+  that pause is a 409 and it can only be cancelled or run into its timeout,
+  otherwise it is applied unbound. Audit: hitl.approval entries carry planHash
+  and planBinding (MATCHED, NOT_PRESENTED, SYSTEM, LEGACY_UNHASHED,
+  PLAN_HASH_UNAVAILABLE); the tasks a resume runs carry input.hitlPlanHash.
   Docs "hitl".
 - Approval card context: hitlConfig.approvalContext (agent, at most 8 blocks),
   toolApprovals.rules[].context (at most 4, call.* available) and a group's
