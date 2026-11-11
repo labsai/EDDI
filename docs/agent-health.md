@@ -551,6 +551,12 @@ both.
   `p = e / (1 + e)`, `e` the current period's exposure over the baseline's. A
   measure with no variance to test — a percentile from buckets, a cost or token
   average, the returning-user share — is never called significant.
+- **`tested`** says which kind a measure is: `true` for every measure with a test
+  (the rates, Apdex, the counts), `false` for `turnDurationP95`, `costPerSession`,
+  `costPerResolvedSession`, `tokensPerTurn`, `turnsPerSession`,
+  `guardrailTripRate`, `returningUserShare` and `outcomeCoverage`. It is a
+  property of the measure, derived from how it is computed, not of the period's
+  data — so a client can tell "no significant change" from "never tested".
 - **Exposure.** A period that ends today is not over: its exposure is its full
   days plus the part of today that has passed. A count measure's `baseline` is
   the previous period's count **scaled to that exposure**, so a window read at

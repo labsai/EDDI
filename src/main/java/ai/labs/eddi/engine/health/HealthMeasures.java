@@ -363,7 +363,44 @@ public final class HealthMeasures {
             hint = hint == null ? note : hint + ". " + note;
         }
         return new Measure(d.id(), label(d, current), d.kind(), d.critical(), d.unit(), now.value(), now.n(), now.interval(), baselineValue, delta,
-                significant, band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);
+                significant, TESTED.contains(d.id()), band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);
+    }
+
+    /**
+     * The measures that have a significance test at all — derived, not listed: each
+     * measure is built once over {@link #probe()}, a period in which every source
+     * has data and the outcome coverage is complete, and it counts as tested when
+     * that build carries a test ({@link Proportion}, {@link Mean}, {@link Count})
+     * rather than {@link NoTest}. So a measure is tested exactly when the way it is
+     * computed can ever be tested, whatever a given period holds.
+     */
+    static final Set<String> TESTED;
+
+    static {
+        PeriodData probe = probe();
+        Set<String> tested = new TreeSet<>();
+        for (String id : HealthDefaults.MEASURES.keySet()) {
+            if (!(stat0(id, probe).test() instanceof NoTest)) {
+                tested.add(id);
+            }
+        }
+        TESTED = Set.copyOf(tested);
+    }
+
+    /** A period in which every measure can be computed. */
+    static PeriodData probe() {
+        List<Long> buckets = new ArrayList<>();
+        for (int i = 0; i <= HealthTurnAggregator.DURATION_BOUNDS_MS.length; i++) {
+            buckets.add(10L);
+        }
+        Totals totals = new Totals(1000, 10, 20, 5, Map.of("TRANSIENT", 3L), Map.of("TURN_ERROR", 10L), 12.5, 50_000, 3, 900, 700, 150, buckets,
+                Set.of(4000L));
+        HealthUsage usage = new HealthUsage(200, 150, 1000, 120, 40);
+        RatingStats ratings = new RatingStats(60, 0.8, 50, 10);
+        OutcomeStats outcomes = OutcomeStats
+                .of(List.of(new HealthOutcomeCount(null, null, HealthOutcomes.RESOLVED, "agent_action", true, false, 100, 600),
+                        new HealthOutcomeCount(null, null, HealthOutcomes.ESCALATED, "agent_action", true, false, 50, 300)), 0.5);
+        return new PeriodData(totals, usage, ratings, 7.0, outcomes);
     }
 
     /**

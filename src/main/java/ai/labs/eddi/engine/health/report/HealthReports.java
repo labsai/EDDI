@@ -36,10 +36,26 @@ public final class HealthReports {
     public record BreakdownEntry(String key, String label, Double value, long n) {
     }
 
-    /** One measure of a section. */
+    /**
+     * One measure of a section.
+     *
+     * @param tested
+     *            whether this measure's kind has a significance test at all (rates,
+     *            Apdex, counts) — {@code false} for one that is never tested (a
+     *            percentile, a cost or token average, a ratio without variance), so
+     *            its {@code significant: false} says nothing about the change. A
+     *            property of the measure, not of the period's data
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Measure(String id, String label, String kind, boolean critical, String unit, Double value, long n, Interval interval,
-            Double baseline, Double delta, boolean significant, String band, Thresholds thresholds, List<BreakdownEntry> breakdown, String hint) {
+            Double baseline, Double delta, boolean significant, boolean tested, String band, Thresholds thresholds, List<BreakdownEntry> breakdown,
+            String hint) {
+
+        /** Without {@code tested} (false) — for tests and hand-built measures. */
+        public Measure(String id, String label, String kind, boolean critical, String unit, Double value, long n, Interval interval, Double baseline,
+                Double delta, boolean significant, String band, Thresholds thresholds, List<BreakdownEntry> breakdown, String hint) {
+            this(id, label, kind, critical, unit, value, n, interval, baseline, delta, significant, false, band, thresholds, breakdown, hint);
+        }
     }
 
     /** A section the caller may read, or {@code restricted} with no measures. */

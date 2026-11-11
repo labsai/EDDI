@@ -43,6 +43,9 @@ business owner without Manager access can read a **branded, read-only report** t
   unknown tokens; `no-store`, `no-referrer`, `noindex`; branded from the white-label settings; only the link's
   sections, no drill-down or ids. The permit rule `quarkus.http.auth.permission.health-report` opens `GET`/`HEAD` of
   `/health/reports/*` and nothing else. The UI renders `/manage/health-report/<token>`.
+- **`Measure.tested`**: every measure now says whether its kind has a significance test at all (rates, Apdex, counts)
+  — derived from how `HealthMeasures` builds it, not a hand list — so `significant: false` can be told apart from
+  "never tested".
 - **Portfolio batching**: `IHealthOutcomeStore.countsForAgents` (Mongo and Postgres) counts the outcomes of all listed
   agents per origin in one query, so the portfolio and the alerts judge effectiveness without a query per agent.
 - **GDPR**: `HealthAdminGdprParticipant` blanks the author of profiles and the creator of links.

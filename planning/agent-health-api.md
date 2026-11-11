@@ -352,6 +352,13 @@ shape above; the UI should know about them.
   `DEPLOYMENT` or `VERSION_FIRST_TURN` marker of the period), "… (−12 pp vs. the previous period)" (no marker), "Agent-caused
   failures 8 % (target ≤ 1 %)" (a band without a significant change). `measureId` is `null` only on a generic
   "Not enough data in this period".
+- **Deviation — `Measure.tested`** (boolean, every measure in REST and MCP output, placed after `significant`): `true`
+  when the measure's kind has a significance test at all (rates, Apdex, counts), `false` when it never does
+  (`turnDurationP95`, `costPerSession`, `costPerResolvedSession`, `tokensPerTurn`, `turnsPerSession`,
+  `guardrailTripRate`, `returningUserShare`, `outcomeCoverage`). A property of the measure, not of the period: derived from
+  how `HealthMeasures` builds each measure (built once over a period where every source has data; tested when that build
+  carries a test). `significant` keeps its meaning; with `tested: false` it is always `false` and says nothing. The UI
+  should prefer this over its own list.
 - **No index.** §1 has no field for the weighted 0–100 index; none is computed (plan decision 1).
 - **Portfolio (§4).** Real `status` and `topReason` (the first reason; **never a `markerId`** — markers are read per agent
   by the report). The status uses the same rules over the portfolio's period (default 7 days), so it can differ from a
