@@ -128,6 +128,19 @@ const WRITABLE_EXTENSION_STORES = WORKFLOW_EXTENSION_STORES;
 const PATCHABLE_EXTENSION_STORES = ["llmstore/llms", "apicallstore/apicalls", "mcpcallsstore/mcpcalls"] as const;
 
 /**
+ * The Agent Health reads (EDDI 6.7.0+), granted in {@link READ_ENDPOINTS} and
+ * named by the prompt's health section. Declared here, before the allow-list
+ * that spreads it.
+ */
+const HEALTH_READS = [
+  "GET /agents/{agentId}/usage",
+  "GET /agents/{agentId}/health",
+  "GET /agents/{agentId}/health/series",
+  "GET /agents/{agentId}/health/compare",
+  "GET /health/agents",
+] as const;
+
+/**
  * Read endpoints the operator is allowed to call.
  *
  * These are OpenAPI path templates copied verbatim from EDDI's spec.
@@ -414,6 +427,18 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /hitl/autonomy",
   "GET /hitl/autonomy/{agentId}/category",
   "GET /hitl/samples/pending-count",
+  // Agent Health (EDDI 6.7.0+): how much an agent is used, and how healthy it is
+  // over time — reliability split into agent-caused and platform failures, Apdex,
+  // cost, adoption, ratings where permitted — per version, with change markers,
+  // a version compare and the portfolio. Counts and rates only, no conversation
+  // content; VIEW on the agent is checked by the backend, and the quality
+  // section comes back restricted unless the caller may read ratings.
+  //
+  // Deliberately NOT granted: nothing else exists yet. Health profiles, report
+  // links and the sessions drill-down arrive in later phases and are decided
+  // when they do (a profile change re-bands every measure; the drill-down lists
+  // conversations).
+  ...HEALTH_READS,
 ] as const;
 
 /**
@@ -984,6 +1009,16 @@ const OVERSIGHT_READS = [
 export function grantsOversightReads(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return OVERSIGHT_READS.every((entry) => set.has(entry));
+}
+
+/**
+ * Whether the Agent Health reads are granted — usage, the report, its series,
+ * the version compare and the portfolio. The prompt's health section names all
+ * five, so it is shown only when every one is held.
+ */
+export function grantsHealthReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return HEALTH_READS.every((entry) => set.has(entry));
 }
 
 /** Whether an upload source's stored files can be listed. */

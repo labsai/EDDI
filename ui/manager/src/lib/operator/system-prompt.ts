@@ -21,6 +21,7 @@ import {
   grantsTeamLessonReads,
   grantsTeamBudgetReads,
   grantsOversightReads,
+  grantsHealthReads,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -711,6 +712,52 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
   \`canOpenTranscript\` says whether the conversation itself can be read.
 - You cannot mark ratings reviewed, write review notes or export them: triage
   is the admin's call on the Feedback page in the manager (/manage/feedback).`;
+
+/**
+ * Agent Health — gated on {@link grantsHealthReads}: every line names one of the
+ * five health reads, so the section is absent rather than wrong when they are
+ * not granted. Self-contained on purpose (many changes touch this file).
+ */
+const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, over time):
+- \`GET /agents/{agentId}/usage\` gives point-in-time counts (conversations,
+  active, distinct users). \`GET /agents/{agentId}/health\` gives the report
+  over \`period\` (7d, 30d default, 90d) or \`from\`/\`to\` (YYYY-MM-DD, at most
+  90 days), optionally one \`version\` and repeatable \`origin\`. Both need VIEW
+  on the agent (403 otherwise, 404 for an unknown agent).
+- Sections: reliability, effectiveness, quality, efficiency, adoption, business.
+  Each measure has \`value\` and its sample size \`n\`, an \`interval\` (95 %),
+  the previous period's \`baseline\`, \`delta\`, \`significant\` (a real change,
+  not noise) and a \`band\` (GREEN, AMBER, RED; GREY = too little data or no
+  threshold — read the \`hint\`). \`status\` is null and \`reasons\` empty
+  until health profiles exist; effectiveness measures are null until
+  conversation outcomes are recorded; say so instead of guessing. A
+  \`restricted\` quality section means the caller may not read ratings.
+- Reliability keeps two failure rates apart: \`agentFailureRate\` (failures the
+  agent is accountable for: pipeline errors, its own timeout, cost ceiling, bad
+  request, context too long, unknown model, auth or quota of its key) and
+  \`platformFailureRate\` (turns touched by provider trouble — TRANSIENT,
+  RATE_LIMITED, TIMEOUT — including attempts a retry, cascade or fallback
+  recovered). Their \`breakdown\` lists failed attempts per class.
+  \`apdex\` (T 4 s by default), \`turnDurationP95\` (approximate) and
+  \`fallbackRate\` complete it.
+- "Why is agent X red / worse?": read the report, name the measures whose band
+  is RED or AMBER or whose \`significant\` change went the wrong way, with value,
+  baseline and n. Then read \`/health/series\` for those measures (up to 6 per
+  call, one point per day; \`groupBy=version\` or \`origin\` splits them) and
+  look at its \`markers\` (deployments, first turn of a version, global
+  variable and snippet changes): a step change right after a marker points at
+  that change. If \`platformFailureRate\` rose with it, or
+  \`GET /health/agents\` lists a \`platformIncidents\` entry for those days
+  (one failure class hitting several agents at once), it is the provider, not
+  the agent. To compare versions use
+  \`/health/compare?from=7&to=8\` (the newer since its first turn, the older
+  over its last \`days\`, default 14); \`deltas\` say \`better\` and
+  \`significant\` per measure.
+- \`GET /health/agents\` lists every agent the caller may view, the ones
+  needing attention first, with sessions, \`sessionsDelta\` and key measures.
+- Numbers lag by up to one rollup interval (\`dataThrough\`). Daily rows reach
+  back two years; sessions, users and engagement only as far as the turn rows
+  (90 days). You cannot change thresholds; a health profile is the admin's.`;
 
 /**
  * Alerts — gated on {@link grantsAlertReads}: every line names one of the alert
@@ -2050,6 +2097,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     ...(grantsTeamLessonReads(endpoints) ? [BODY_TEAM_LESSONS] : []),
     ...(grantsTeamBudgetReads(endpoints) ? [BODY_TEAM_BUDGETS] : []),
     ...(grantsOversightReads(endpoints) ? [BODY_OVERSIGHT] : []),
+    ...(grantsHealthReads(endpoints) ? [BODY_HEALTH] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,
