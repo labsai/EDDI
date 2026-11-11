@@ -84,7 +84,7 @@ public class ScheduleConfiguration {
      *
      * @deprecated not read; do not build on it
      */
-    @Deprecated(since = "6.7.0")
+    @Deprecated(since = "6.8.0")
     private String tenantId;
 
     // -- Timing --
@@ -138,7 +138,7 @@ public class ScheduleConfiguration {
      *
      * @deprecated not read; do not build on it
      */
-    @Deprecated(since = "6.7.0")
+    @Deprecated(since = "6.8.0")
     private boolean allowSelfScheduling;
     // Whether a deserialized body carried allowSelfScheduling at all. A primitive
     // cannot say "absent", and a PUT from a client that does not know the field
