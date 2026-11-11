@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -282,7 +283,60 @@ class HealthTurnRecorderTest {
             InOrder order = inOrder(dirty, store);
             order.verify(dirty).markLateWrite(eq("agent-1"), any());
             order.verify(store).upsert(any());
-            verify(dirty, never()).markLateWrite(eq("agent-1"), eq(Set.of(firstDay)));
+            // Again after the write: a rollup in between may have cleared the pre-mark.
+            order.verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a late row's day reaches the dirty store after the write, even when a rollup cleared the pre-mark or the pre-mark failed")
+    @SuppressWarnings("unchecked")
+    void lateWriteMarkSurvivesARollupAndAFailedPreMark() {
+        LocalDate day = LocalDate.of(2026, 11, 10);
+        Instant captured = CLOCK.instant();
+        Clock late = Clock.fixed(captured.plus(Duration.ofMinutes(2)), ZoneOffset.UTC);
+        IHealthDirtyDayStore dirtyStore = mock(IHealthDirtyDayStore.class);
+        // Both attempts of the pre-mark fail (it falls back to memory); the store is
+        // back for the write.
+        doThrow(new HealthStoreException("down", null)).doThrow(new HealthStoreException("down", null)).doNothing().when(dirtyStore)
+                .mark(any(), any());
+        Instance<IHealthDirtyDayStore> dirtyInstance = mock(Instance.class);
+        when(dirtyInstance.get()).thenReturn(dirtyStore);
+        HealthDirtyDays dirty = new HealthDirtyDays(dirtyInstance, HealthSettings.defaults(), late);
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
+        AtomicReference<Instant> now = new AtomicReference<>(captured);
+        Clock moving = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
+            @Override
+            void write(HealthTurnFactory.Capture capture) {
+                now.set(late.instant());
+                super.write(capture);
+            }
+        };
+        try {
+            marking.record(memory(), null, null, null, false);
+            InOrder order = inOrder(store, dirtyStore);
+            order.verify(store, timeout(5_000)).upsert(any());
+            // Durable after the row exists: neither a rollup that cleared the pre-mark
+            // nor a stop that loses the in-memory fallback leaves the day unmarked.
+            order.verify(dirtyStore, timeout(5_000)).mark(eq("agent-1"), argThat(days -> days.contains(day)));
         } finally {
             marking.shutdown();
         }

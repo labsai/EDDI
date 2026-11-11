@@ -181,5 +181,12 @@ presets, status and reasons.
 - `HealthTurnRecorder.write` marks a late row's days (its capture day, and the stored days of the execution it
   replaces and the ones it discards, read before the write) in the dirty store before the row is written, not after.
   A node stopping between the two can no longer lose the mark; a mark whose row then fails to write only costs a
-  recompute. A day found only after the write is still marked at once. The remaining limit is the one deletion marks
-  have: both attempts of the mark's write fail and the node stops before the next flush.
+  recompute. After the write, every day of the row is marked at once again, pre-marked ones included: a rollup that
+  ran between the pre-mark and the write recomputed the day without the row and cleared its mark, and the second mark
+  gives it a new token. It is also a second durable attempt when the pre-mark could not reach the store. The remaining
+  limit is the one deletion marks have, now after four failed writes: the dirty store refuses both marks, twice each,
+  and the node stops before the next flush. The row is still written then rather than dropped. A row whose day is
+  never rolled up stays in the turn store, so the agent-day's next write repairs it; a dropped row could not be
+  recovered. Tests: `lateWriteMarksBeforeTheWrite` (pre-mark, write, re-mark in that order) and
+  `lateWriteMarkSurvivesARollupAndAFailedPreMark` (a real `HealthDirtyDays` whose store refuses the pre-mark: the
+  day still reaches the store after the row).

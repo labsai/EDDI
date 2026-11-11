@@ -210,7 +210,11 @@ They are recomputed, never incremented:
    time, which this scan may already be past, marks its days in the store
    **before** it is written, instead of on the five-second flush, so a node
    stopping between the write and the mark cannot lose it (a mark whose row then
-   fails to write only costs a recompute). Then it drains the
+   fails to write only costs a recompute), and again, at once, after the write:
+   a rollup that ran in between recomputed the day without the row, and the
+   second mark is another durable attempt if the first could not reach the
+   store. Only when all four writes (two before, two after) fail does the mark
+   wait in memory, as a deletion mark does. Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked
