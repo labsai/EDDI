@@ -229,7 +229,10 @@ public class McpHitlTools {
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             // The plan hash a decision passes back as planHash (HitlPlanHash).
-            summary.put("planHash", paused && snapshot.getHitlPlanHash() != null ? snapshot.getHitlPlanHash() : "");
+            // "" for none and for HitlPlanHash.UNAVAILABLE (not a plan a decision can
+            // name).
+            String planHash = paused ? HitlPlanHash.presentable(snapshot.getHitlPlanHash()) : null;
+            summary.put("planHash", planHash != null ? planHash : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");

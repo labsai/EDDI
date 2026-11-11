@@ -63,6 +63,28 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <td>refused: {@link PlanMismatch} — whatever the client hashed, it is not
  * this pause</td>
  * </tr>
+ * <tr>
+ * <td>{@link HitlPlanHash#UNAVAILABLE} (hashing failed at commit)</td>
+ * <td>carries a hash</td>
+ * <td>refused: {@link PlanMismatch} — no plan was ever hashed to match</td>
+ * </tr>
+ * <tr>
+ * <td>{@link HitlPlanHash#UNAVAILABLE}</td>
+ * <td>carries none, made by the system ({@code system:*})</td>
+ * <td>{@link Outcome#SYSTEM}, as for a hashed pause</td>
+ * </tr>
+ * <tr>
+ * <td>{@link HitlPlanHash#UNAVAILABLE}</td>
+ * <td>carries none, strict binding on</td>
+ * <td>refused: {@link PlanMismatch} — fail closed; no client can supply a
+ * binding, so retrying cannot help</td>
+ * </tr>
+ * <tr>
+ * <td>{@link HitlPlanHash#UNAVAILABLE}</td>
+ * <td>carries none, strict binding off</td>
+ * <td>{@link Outcome#PLAN_HASH_UNAVAILABLE}, logged at WARN — applied without
+ * plan binding</td>
+ * </tr>
  * </table>
  */
 public final class HitlPlanBinding {
@@ -81,7 +103,12 @@ public final class HitlPlanBinding {
         /** The pause has a plan hash; an automated decision carried none. */
         SYSTEM,
         /** The pause was committed before plan hashing existed. */
-        LEGACY_UNHASHED
+        LEGACY_UNHASHED,
+        /**
+         * The pause's plan hash could not be computed when it was committed
+         * ({@link HitlPlanHash#UNAVAILABLE}); applied without binding (non-strict).
+         */
+        PLAN_HASH_UNAVAILABLE
     }
 
     /**
@@ -115,7 +142,8 @@ public final class HitlPlanBinding {
      *            conversation id)
      * @param storedPlanHash
      *            the pause's stored plan hash; null for a pause committed before
-     *            plan hashing
+     *            plan hashing, {@link HitlPlanHash#UNAVAILABLE} for one whose hash
+     *            could not be computed
      * @param strict
      *            whether a human decision must carry the hash — asked only when
      *            that is the question (it may read configuration)
@@ -135,6 +163,9 @@ public final class HitlPlanBinding {
             LOGGER.infof("hitl.plan.legacy: deciding the pause of %s without plan binding — it was committed before plan hashing",
                     sanitize(subject));
             return Outcome.LEGACY_UNHASHED;
+        }
+        if (HitlPlanHash.isUnavailable(storedPlanHash)) {
+            return checkUnavailable(subject, decision, presented, strict);
         }
         if (presented) {
             if (!HitlPlanHash.matches(storedPlanHash, decision.getPlanHash())) {
@@ -157,14 +188,43 @@ public final class HitlPlanBinding {
     }
 
     /**
+     * A pause whose plan hash could not be computed at commit. Unlike a legacy
+     * pause it was committed by a version that binds plans, so strict binding fails
+     * closed on it: there is no plan a decision could be bound to.
+     */
+    private static Outcome checkUnavailable(String subject, HitlDecision decision, boolean presented, BooleanSupplier strict) {
+        if (presented) {
+            LOGGER.infof("Refusing a HITL decision for %s: it names a plan, but the pause's plan hash could not be computed",
+                    sanitize(subject));
+            throw new PlanMismatch("The decision names a plan hash, but the pending approval has none — re-read the "
+                    + "approval status and decide again.");
+        }
+        if (isSystem(decision)) {
+            return Outcome.SYSTEM;
+        }
+        if (strict.getAsBoolean()) {
+            LOGGER.warnf("hitl.plan.unavailable: refusing a decision for %s under strict plan binding — the pause's plan hash "
+                    + "could not be computed when it was committed", sanitize(subject));
+            throw new PlanMismatch("The pending approval could not be bound to a plan hash when it paused, and plan binding "
+                    + "is required — it cannot be decided; nothing was run. Cancel the conversation or contact an "
+                    + "administrator.");
+        }
+        LOGGER.warnf("hitl.plan.unavailable: deciding the pause of %s without plan binding — its plan hash could not be "
+                + "computed when it was committed (set %s=true to refuse such decisions)", sanitize(subject), STRICT_PROPERTY);
+        return Outcome.PLAN_HASH_UNAVAILABLE;
+    }
+
+    /**
      * Re-derives nothing itself: compares a stored plan hash with one re-derived
      * from the plan about to execute. A pause without a stored hash verifies
-     * trivially (legacy).
+     * trivially (legacy), and so does one marked {@link HitlPlanHash#UNAVAILABLE}:
+     * there is nothing to compare, and {@link #check} has already refused it under
+     * strict binding.
      *
      * @return whether the plan about to execute is the committed one
      */
     public static boolean verifies(String storedPlanHash, String rederived) {
-        if (storedPlanHash == null || storedPlanHash.isBlank()) {
+        if (storedPlanHash == null || storedPlanHash.isBlank() || HitlPlanHash.isUnavailable(storedPlanHash)) {
             return true;
         }
         return HitlPlanHash.matches(storedPlanHash, rederived);

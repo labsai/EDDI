@@ -438,6 +438,58 @@ class ConversationServicePlanHashTest {
         }
     }
 
+    @Nested
+    @DisplayName("a pause whose plan hash could not be computed (stored UNAVAILABLE)")
+    class Unavailable {
+
+        private ConversationMemorySnapshot unavailableToolPause() {
+            var snapshot = toolSnapshot("{\"amount\":250}");
+            snapshot.setHitlPlanHash(HitlPlanHash.UNAVAILABLE);
+            snapshot.getHitlPendingToolCalls().setPlanHash(HitlPlanHash.UNAVAILABLE);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("strict deployment: refused (409, fail closed), pause restored, nothing run")
+        void strictRefuses() throws Exception {
+            conversationService.planHashStrict = true;
+            doReturn(unavailableToolPause()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.PlanMismatchException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, approve(null), null));
+            assertRefusedAndRestored();
+        }
+
+        @Test
+        @DisplayName("strict agent (hitlConfig.requirePlanHash): refused, pause restored")
+        void strictAgentRefuses() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setRequirePlanHash(true);
+            agentConfig.setHitlConfig(hitl);
+            doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            doReturn(unavailableToolPause()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.PlanMismatchException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, approve(null), null));
+            assertRefusedAndRestored();
+        }
+
+        @Test
+        @DisplayName("non-strict: resumed, recorded as PLAN_HASH_UNAVAILABLE with the marker in the audit")
+        void nonStrictAccepts() throws Exception {
+            doReturn(unavailableToolPause()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            deployAgent();
+            var decision = approve(null);
+
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+            assertEquals(HitlPlanBinding.Outcome.PLAN_HASH_UNAVAILABLE.name(), decision.getPlanBinding());
+            assertEquals(HitlPlanHash.UNAVAILABLE, decision.getCommittedPlanHash());
+        }
+    }
+
     @Test
     @DisplayName("the pause commit stores the plan hash on the memory before the store")
     void pauseCommitStoresTheHash() {

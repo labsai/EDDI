@@ -103,6 +103,15 @@ public final class HitlPlanHash {
      * Hard cap on what a caller may send as a plan hash; anything longer is wrong.
      */
     public static final int MAX_LENGTH = 128;
+    /**
+     * Stored in place of a plan hash when one could not be computed as the pause
+     * was committed. It keeps such a pause apart from a legacy one (no hash at
+     * all): {@link HitlPlanBinding#check} refuses human decisions on it under
+     * strict binding instead of accepting them unbound. Never a valid hash (no
+     * {@link #VERSION_PREFIX}), never served as one ({@link #presentable}), and
+     * never {@link #matches matched}.
+     */
+    public static final String UNAVAILABLE = "unavailable";
 
     private static final Logger LOGGER = Logger.getLogger(HitlPlanHash.class);
 
@@ -144,10 +153,14 @@ public final class HitlPlanHash {
      * <p>
      * Call it after the turn's secret scrub has rewritten the batch and before the
      * memory is stored: the hash must cover exactly what the store keeps. Never
-     * throws — a pause whose hash cannot be computed is decided as before plan
-     * hashing, and says so in the log.
+     * throws, so a hashing bug cannot stop pauses from being committed: a pause
+     * whose hash cannot be computed stores {@link #UNAVAILABLE} instead (on the
+     * memory and, for a tool pause, on the batch) and says so in the log. Under
+     * strict binding such a pause refuses human decisions; otherwise it is decided
+     * without plan binding.
      *
-     * @return the stored plan hash, or null
+     * @return the stored plan hash, {@link #UNAVAILABLE}, or null when the memory
+     *         holds no pause
      */
     public static String commit(IConversationMemory memory) {
         if (memory == null) {
@@ -166,11 +179,37 @@ public final class HitlPlanHash {
             }
             return planHash;
         } catch (RuntimeException failed) {
-            LOGGER.warnf("Could not compute the plan hash for the pause of conversation %s: %s — it will be decided without plan "
-                    + "binding", sanitize(memory.getConversationId()), sanitize(failed.getMessage()));
-            memory.setHitlPlanHash(null);
-            return null;
+            LOGGER.warnf("hitl.plan.unavailable: could not compute the plan hash for the pause of conversation %s (%s) — "
+                    + "human decisions on it are refused under strict plan binding and applied without binding otherwise",
+                    sanitize(memory.getConversationId()), failed.getClass().getSimpleName());
+            markUnavailable(memory);
+            return UNAVAILABLE;
         }
+    }
+
+    private static void markUnavailable(IConversationMemory memory) {
+        memory.setHitlPlanHash(UNAVAILABLE);
+        try {
+            PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+            if (batch != null && "TOOL_CALL".equals(memory.getHitlPauseType())) {
+                batch.setPlanHash(UNAVAILABLE);
+            }
+        } catch (RuntimeException ignored) {
+            // the memory's marker is what a decision is checked against
+        }
+    }
+
+    /** Whether a stored plan hash is the {@link #UNAVAILABLE} marker. */
+    public static boolean isUnavailable(String storedPlanHash) {
+        return storedPlanHash != null && UNAVAILABLE.equals(storedPlanHash.trim());
+    }
+
+    /**
+     * The stored plan hash as a client may send it back: null for none and for the
+     * {@link #UNAVAILABLE} marker, which is not a plan a decision can name.
+     */
+    public static String presentable(String storedPlanHash) {
+        return storedPlanHash == null || storedPlanHash.isBlank() || isUnavailable(storedPlanHash) ? null : storedPlanHash;
     }
 
     /**
@@ -299,11 +338,12 @@ public final class HitlPlanHash {
     }
 
     /**
-     * Whether two plan hashes are the same, in constant time. Null or blank on
-     * either side is never a match.
+     * Whether two plan hashes are the same, in constant time. Null, blank or the
+     * {@link #UNAVAILABLE} marker on either side is never a match.
      */
     public static boolean matches(String expected, String presented) {
-        if (expected == null || presented == null || expected.isBlank() || presented.isBlank()) {
+        if (expected == null || presented == null || expected.isBlank() || presented.isBlank() || isUnavailable(expected)
+                || isUnavailable(presented)) {
             return false;
         }
         return MessageDigest.isEqual(expected.trim().getBytes(StandardCharsets.UTF_8),

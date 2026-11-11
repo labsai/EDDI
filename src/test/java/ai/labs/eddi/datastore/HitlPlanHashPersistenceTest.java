@@ -152,6 +152,23 @@ class HitlPlanHashPersistenceTest extends MongoTestBase {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("conversationStores")
+    @DisplayName("a pause whose hash could not be computed keeps its UNAVAILABLE marker — it does not load as a legacy pause")
+    void unavailableMarkerRoundTrip(String backend, Supplier<IConversationMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        var memory = toolPause();
+        memory.setHitlPlanHash(HitlPlanHash.UNAVAILABLE);
+        memory.getHitlPendingToolCalls().setPlanHash(HitlPlanHash.UNAVAILABLE);
+        String conversationId = store.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        var loaded = store.loadConversationMemorySnapshot(conversationId);
+        assertEquals(HitlPlanHash.UNAVAILABLE, loaded.getHitlPlanHash(), backend + ": the conversation's marker");
+        assertEquals(HitlPlanHash.UNAVAILABLE, loaded.getHitlPendingToolCalls().getPlanHash(), backend + ": the batch's marker");
+        assertEquals(HitlPlanHash.UNAVAILABLE, store.loadConversationMemoryTail(conversationId).snapshot().getHitlPlanHash(),
+                backend + ": the approval-status read keeps the marker");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("conversationStores")
     @DisplayName("a rule pause's hash survives the store and re-derives from the loaded actions")
     void rulePauseRoundTrip(String backend, Supplier<IConversationMemoryStore> factory) throws Exception {
         var store = factory.get();

@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
@@ -974,8 +975,10 @@ public class RestAgentEngine implements IRestAgentEngine {
             summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
             // The plan hash a decision passes back as HitlDecision.planHash, so it
             // applies only to exactly the plan shown here (HitlPlanHash). Empty for a
-            // pause committed before plan hashing.
-            summary.put("planHash", paused && snapshot.getHitlPlanHash() != null ? snapshot.getHitlPlanHash() : "");
+            // pause committed before plan hashing, and for one whose hash could not be
+            // computed (HitlPlanHash.UNAVAILABLE is not a plan a decision can name).
+            String planHash = paused ? HitlPlanHash.presentable(snapshot.getHitlPlanHash()) : null;
+            summary.put("planHash", planHash != null ? planHash : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");

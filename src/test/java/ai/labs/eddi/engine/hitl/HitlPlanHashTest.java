@@ -9,11 +9,20 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import de.undercouch.bson4jackson.BsonFactory;
+import de.undercouch.bson4jackson.BsonParser;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -276,6 +285,134 @@ class HitlPlanHashTest {
             var memory = new ConversationMemory("conv-1", "agent-1", 3, "user-1");
             assertNull(HitlPlanHash.commit(memory));
             assertNull(memory.getHitlPlanHash());
+        }
+    }
+
+    /** A tool pause whose plan cannot be hashed: reading its calls fails. */
+    static ConversationMemory unhashableToolPause() {
+        return unhashableToolPause("conv-1");
+    }
+
+    static ConversationMemory unhashableToolPause(String conversationId) {
+        var memory = new ConversationMemory(conversationId, "agent-1", 3, "user-1");
+        memory.setConversationState(ConversationState.AWAITING_HUMAN);
+        memory.setHitlPausedAt(Instant.ofEpochMilli(1000));
+        memory.setHitlPauseType("TOOL_CALL");
+        var broken = new PendingToolCallBatch() {
+            @Override
+            public List<PendingToolCall> getCalls() {
+                throw new IllegalStateException("secret-argument-value");
+            }
+        };
+        broken.setPauseEpoch("epoch-1");
+        memory.setHitlPendingToolCalls(broken);
+        return memory;
+    }
+
+    static HitlDecision humanDecision(String planHash) {
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+        decision.setDecidedBy("reviewer-1");
+        decision.setPlanHash(planHash);
+        return decision;
+    }
+
+    @Nested
+    @DisplayName("a pause whose plan hash could not be computed")
+    class Unavailable {
+
+        @Test
+        @DisplayName("commit stores the UNAVAILABLE marker on the memory and the batch, not null")
+        void commitMarksUnavailable() {
+            var memory = unhashableToolPause();
+
+            String committed = HitlPlanHash.commit(memory);
+
+            assertEquals(HitlPlanHash.UNAVAILABLE, committed);
+            assertEquals(HitlPlanHash.UNAVAILABLE, memory.getHitlPlanHash(), "distinct from a legacy pause's null");
+            assertEquals(HitlPlanHash.UNAVAILABLE, memory.getHitlPendingToolCalls().getPlanHash());
+        }
+
+        @Test
+        @DisplayName("strict binding refuses a human decision on it (fail closed), without leaking the failure")
+        void strictRefuses() {
+            var refused = assertThrows(HitlPlanBinding.PlanMismatch.class,
+                    () -> HitlPlanBinding.check("conv-1", humanDecision(null), HitlPlanHash.UNAVAILABLE, () -> true));
+            assertTrue(refused.getMessage().contains("could not be bound to a plan hash"), refused.getMessage());
+            assertFalse(refused.getMessage().contains("unavailable"), "the marker is not part of the client message");
+        }
+
+        @Test
+        @DisplayName("non-strict accepts it as PLAN_HASH_UNAVAILABLE — not LEGACY_UNHASHED")
+        void nonStrictAccepts() {
+            assertEquals(HitlPlanBinding.Outcome.PLAN_HASH_UNAVAILABLE,
+                    HitlPlanBinding.check("conv-1", humanDecision(null), HitlPlanHash.UNAVAILABLE, () -> false));
+        }
+
+        @Test
+        @DisplayName("a presented hash, even the marker itself, is refused; system decisions stay exempt")
+        void presentedAndSystem() {
+            assertThrows(HitlPlanBinding.PlanMismatch.class,
+                    () -> HitlPlanBinding.check("conv-1", humanDecision("v1:" + "0".repeat(64)), HitlPlanHash.UNAVAILABLE, () -> false));
+            assertThrows(HitlPlanBinding.PlanMismatch.class,
+                    () -> HitlPlanBinding.check("conv-1", humanDecision(HitlPlanHash.UNAVAILABLE), HitlPlanHash.UNAVAILABLE, () -> false));
+            var system = humanDecision(null);
+            system.setDecidedBy("system:timeout");
+            assertEquals(HitlPlanBinding.Outcome.SYSTEM, HitlPlanBinding.check("conv-1", system, HitlPlanHash.UNAVAILABLE, () -> true));
+        }
+
+        @Test
+        @DisplayName("a legacy pause (no hash at all) is unchanged: accepted even under strict binding")
+        void legacyUnchanged() {
+            assertEquals(HitlPlanBinding.Outcome.LEGACY_UNHASHED,
+                    HitlPlanBinding.check("conv-1", humanDecision(null), null, () -> true));
+            assertTrue(HitlPlanBinding.verifies(null, "v1:" + "0".repeat(64)));
+        }
+
+        @Test
+        @DisplayName("the marker is never served as a hash and never matches")
+        void neverServedNorMatched() {
+            assertNull(HitlPlanHash.presentable(HitlPlanHash.UNAVAILABLE));
+            assertNull(HitlPlanHash.presentable(null));
+            assertEquals("v1:abc", HitlPlanHash.presentable("v1:abc"));
+            assertFalse(HitlPlanHash.matches(HitlPlanHash.UNAVAILABLE, HitlPlanHash.UNAVAILABLE));
+            assertTrue(HitlPlanBinding.verifies(HitlPlanHash.UNAVAILABLE, "v1:" + "0".repeat(64)),
+                    "nothing to re-derive against; check() is the gate");
+        }
+
+        @Test
+        @DisplayName("the marker survives the snapshot conversion and both stores' serializers (MongoDB BSON, PostgreSQL JSON)")
+        void survivesPersistence() throws Exception {
+            // A stored id is an ObjectId (the BSON codec maps _id to one).
+            var memory = unhashableToolPause("65a1b2c3d4e5f60718293a4b");
+            HitlPlanHash.commit(memory);
+            // The conversion copies the batch's fields, which the broken test batch cannot
+            // provide; store the marker on a plain batch exactly as commit left it.
+            var batch = batch(call("c1", "t", "{\"a\":1}"));
+            batch.setPlanHash(memory.getHitlPendingToolCalls().getPlanHash());
+            memory.setHitlPendingToolCalls(batch);
+            ConversationMemorySnapshot snapshot = ConversationMemoryUtilities.convertConversationMemory(memory);
+            assertEquals(HitlPlanHash.UNAVAILABLE, snapshot.getHitlPlanHash());
+
+            BsonFactory bsonFactory = new BsonFactory();
+            bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
+            var bson = new ObjectMapper(bsonFactory);
+            bson.registerModule(new JavaTimeModule());
+            bson.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+            new SerializationCustomizer(false).customize(bson);
+            var json = new ObjectMapper();
+            json.registerModule(new JavaTimeModule());
+            SerializationCustomizer.configureObjectMapper(json, false);
+
+            for (ObjectMapper mapper : List.of(bson, json)) {
+                var loaded = mapper.readValue(mapper.writeValueAsBytes(snapshot), ConversationMemorySnapshot.class);
+                assertEquals(HitlPlanHash.UNAVAILABLE, loaded.getHitlPlanHash());
+                assertEquals(HitlPlanHash.UNAVAILABLE, loaded.getHitlPendingToolCalls().getPlanHash());
+                var resumed = ConversationMemoryUtilities.convertConversationMemorySnapshot(loaded);
+                assertEquals(HitlPlanHash.UNAVAILABLE, resumed.getHitlPlanHash(), "the resume sees the marker, not a legacy pause");
+                assertEquals(HitlPlanBinding.Outcome.PLAN_HASH_UNAVAILABLE,
+                        HitlPlanBinding.check("conv-1", humanDecision(null), resumed.getHitlPlanHash(), () -> false));
+            }
         }
     }
 
