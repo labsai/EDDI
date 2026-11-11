@@ -278,6 +278,28 @@ class RequestBodyLimitGuardTest {
     }
 
     @Test
+    @DisplayName("the public Slack webhooks are held to eddi.slack.max-body-bytes before their body is read")
+    void slackWebhooksHaveASmallLimit() {
+        RoutingContext events = request("POST", "/integrations/slack/events", 2 * MB);
+        RoutingContext interactive = request("POST", "/eddi/integrations/slack/interactive", 2 * MB);
+        RoutingContext small = request("POST", "/integrations/slack/events", 4096L);
+        RoutingContext other = request("POST", "/integrations/webhook/abc", 2 * MB);
+        RequestBodyLimitGuard rooted = guard();
+        rooted.rootPath = "/eddi";
+
+        guard().handle(events);
+        rooted.handle(interactive);
+        guard().handle(small);
+        guard().handle(other);
+
+        verify(events.response()).setStatusCode(413);
+        verify(events, never()).next();
+        verify(interactive.response()).setStatusCode(413);
+        verify(small).next();
+        verify(other).next();
+    }
+
+    @Test
     @DisplayName("leaves a request without a declared length to the global ceiling")
     void leavesChunkedRequestsAlone() {
         RoutingContext context = request("POST", "/agentstore/agents", null);

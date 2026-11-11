@@ -32,6 +32,13 @@ import java.util.regex.Pattern;
  * its body is read, unless it is an upload to a knowledge base's file source,
  * which keeps the global ceiling.
  *
+ * <p>
+ * The other way round, a few public endpoints have a limit far below the
+ * default: the Slack webhooks ({@code /integrations/slack/events},
+ * {@code /interactive}) are held to {@code eddi.slack.max-body-bytes} (1 MB),
+ * so an unauthenticated caller cannot have 25 MB buffered before its signature
+ * is even looked at.
+ *
  * <h2>The effective limit</h2>
  * <p>
  * {@code eddi.http.limits.default-max-body-size}, raised if need be to what an
@@ -83,6 +90,12 @@ public class RequestBodyLimitGuard {
      */
     static final Pattern LARGE_BODY_PATHS = Pattern.compile("^/ragstore/rags/[^/]+/sources/[^/]+/files/?$");
 
+    /** The Slack webhooks, held to {@code eddi.slack.max-body-bytes}. */
+    static final Pattern SLACK_WEBHOOK_PATHS = Pattern.compile("^/integrations/slack/(events|interactive)/?$");
+
+    @ConfigProperty(name = "eddi.slack.max-body-bytes", defaultValue = "1048576")
+    long slackMaxBodyBytes = 1_048_576L;
+
     private static final long MEGABYTE = 1024L * 1024;
 
     /** Room for the rest of a JSON message around a base64-encoded attachment. */
@@ -123,6 +136,13 @@ public class RequestBodyLimitGuard {
         }
         HttpServerRequest request = context.request();
         long declared = declaredLength(request.getHeader(HttpHeaders.CONTENT_LENGTH));
+        long small = smallLimit(context);
+        if (small > 0 && declared > small) {
+            // Unauthenticated webhooks whose real payloads are kilobytes: refused before
+            // a byte of the body is buffered (the endpoint caps what it reads as well).
+            refuse(context, 413, "The request body is larger than this endpoint accepts (" + small + " bytes).");
+            return;
+        }
         long limit = effectiveLimit();
         if (declared > limit) {
             refuse(context, 413, "The request body is larger than this endpoint accepts ("
@@ -198,6 +218,19 @@ public class RequestBodyLimitGuard {
 
     private static boolean isHttp1(HttpVersion version) {
         return version == HttpVersion.HTTP_1_0 || version == HttpVersion.HTTP_1_1;
+    }
+
+    /**
+     * The endpoint's own, smaller limit, or 0 when it has none. Only the Slack
+     * webhooks so far: public, reachable whether or not Slack is configured, and
+     * never sent more than a few kilobytes by Slack.
+     */
+    private long smallLimit(RoutingContext context) {
+        String path = relativeToRoot(context.normalizedPath());
+        if (path != null && SLACK_WEBHOOK_PATHS.matcher(path).matches()) {
+            return slackMaxBodyBytes > 0 ? slackMaxBodyBytes : 0;
+        }
+        return 0;
     }
 
     private boolean mayCarryLargeBody(RoutingContext context) {

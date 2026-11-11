@@ -10,12 +10,16 @@ import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
@@ -374,6 +378,86 @@ class RestSlackWebhookTest {
         private static final String FORM_BODY = "payload=%7B%22type%22%3A%22block_actions%22%7D"; // {"type":"block_actions"}
         private static final String DECODED = "{\"type\":\"block_actions\"}";
 
+        @BeforeEach
+        void pooledSignatureValid() {
+            when(signatureVerifier.isTimestampFresh("ts")).thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("owning-secret", "other-secret"));
+            when(signatureVerifier.verify(eq("ts"), any(), eq("sig"), any())).thenReturn(true);
+            when(signatureVerifier.verify(eq("ts"), any(), eq("bad-sig"), any())).thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("nothing is decoded or parsed before the body verifies against a configured secret")
+        void verifiesBeforeParsing() {
+            when(signatureVerifier.verify(eq("ts"), any(), eq("forged"), any())).thenReturn(false);
+
+            Response response = webhook.handleInteractive(FORM_BODY, "forged", "ts");
+
+            assertEquals(403, response.getStatus());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
+        }
+
+        @Test
+        @DisplayName("a stale timestamp is refused before any signature is computed or anything decoded")
+        void staleTimestampRefusedFirst() {
+            when(signatureVerifier.isTimestampFresh("old")).thenReturn(false);
+
+            Response response = webhook.handleInteractive(FORM_BODY, "sig", "old");
+
+            assertEquals(403, response.getStatus());
+            verify(signatureVerifier, never()).verify(any(), any(), any(), any());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+        }
+
+        @Test
+        @DisplayName("no Slack signing secret configured at all: 403 before anything is decoded")
+        void noSecretConfigured() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of());
+
+            Response response = webhook.handleInteractive(FORM_BODY, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+        }
+
+        @Test
+        @DisplayName("a body over eddi.slack.max-body-bytes is refused with 413, unread beyond the limit")
+        void bodyTooLarge() {
+            RestSlackWebhook small = new RestSlackWebhook(channelTargetRouter, signatureVerifier, eventHandler, interactivityHandler,
+                    objectMapper, 64);
+            byte[] body = ("payload=" + "a".repeat(10_000)).getBytes(StandardCharsets.UTF_8);
+            HttpHeaders unsized = mock(HttpHeaders.class);
+            when(unsized.getLength()).thenReturn(-1);
+
+            Response streamed = small.handleInteractive(new ByteArrayInputStream(body), unsized, "sig", "ts");
+            assertEquals(413, streamed.getStatus());
+
+            HttpHeaders declared = mock(HttpHeaders.class);
+            when(declared.getLength()).thenReturn(10_008);
+            InputStream untouched = mock(InputStream.class);
+            assertEquals(413, small.handleInteractive(untouched, declared, "sig", "ts").getStatus());
+            verifyNoInteractions(untouched);
+            assertEquals(413, small.handleEvents(new ByteArrayInputStream(body), unsized, "sig", "ts").getStatus());
+            verify(signatureVerifier, never()).verify(any(), any(), any(), any());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+        }
+
+        @Test
+        @DisplayName("a body within the limit read from the stream reaches the signature check")
+        void streamedBodyWithinLimit() {
+            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn("owning-secret");
+            when(signatureVerifier.verifyWithSecret("ts", FORM_BODY, "sig", "owning-secret")).thenReturn(true);
+            HttpHeaders headers = mock(HttpHeaders.class);
+            when(headers.getLength()).thenReturn(FORM_BODY.length());
+
+            Response response = webhook.handleInteractive(new ByteArrayInputStream(FORM_BODY.getBytes(StandardCharsets.UTF_8)), headers,
+                    "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(interactivityHandler).handlePayloadAsync(DECODED);
+        }
+
         @Test
         @DisplayName("returns 403 + does not verify/dispatch when decision cannot be bound to an integration")
         void rejectsUnbindableDecision() {
@@ -401,15 +485,12 @@ class RestSlackWebhookTest {
         }
 
         @Test
-        @DisplayName("returns 403 when signature header is absent")
+        @DisplayName("returns 403 when signature header is absent, before decoding anything")
         void rejectsAbsentSignature() {
-            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn("owning-secret");
-            when(signatureVerifier.verifyWithSecret(isNull(), eq(FORM_BODY), isNull(), eq("owning-secret")))
-                    .thenReturn(false);
-
             Response response = webhook.handleInteractive(FORM_BODY, null, null);
 
             assertEquals(403, response.getStatus());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
             verify(interactivityHandler, never()).handlePayloadAsync(any());
         }
 
