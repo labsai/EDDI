@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
+import ai.labs.eddi.engine.mail.SignedHeaders;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -338,6 +339,58 @@ class EmailInboundProcessorTest {
             assertTrue(users.getAllValues().get(1).startsWith("email-anon:"));
             assertNotEquals(users.getAllValues().get(0), users.getAllValues().get(1), "one-off ids");
             assertTrue(userConversations.mappings.isEmpty(), "an unauthenticated mail never maps a thread");
+        }
+
+        /** An aligned pass whose signature covers these headers only. */
+        private MailAuthentication passCovering(String digest, String... covered) {
+            return new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of(covered), List.of(), List.of(), digest));
+        }
+
+        @Test
+        @DisplayName("a signed mail delivered again under a new, unsigned Message-ID is refused as a replay")
+        void replayUnderNewMessageId() throws Exception {
+            verdict = passCovering("d1", "from", "subject", "date");
+            EmailTestMail original = EmailTestMail.mail();
+            EmailTestMail replay = EmailTestMail.mail().messageId("<fresh-id@attacker.example>");
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), original.polled(1), Instant.now()));
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), replay.polled(2), Instant.now()));
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals(State.REFUSED, row(replay).state());
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+        }
+
+        @Test
+        @DisplayName("the same mail processed again after a deferral finds its own signature marker and runs")
+        void ownMarkerAfterDeferral() throws Exception {
+            verdict = passCovering("d2", "from", "subject", "date");
+            var ctx = context(Map.of("dailyCostBudgetUsd", "1"));
+            Instant now = Instant.parse("2026-11-11T10:00:00Z");
+            stateStore.addSpend(INTEGRATION, "2026-11-11", 5.0, now);
+            EmailTestMail mail = EmailTestMail.mail();
+
+            assertEquals(Disposition.STOP, processor.process(ctx, mail.polled(1), now));
+            assertEquals(Disposition.SETTLED, processor.process(ctx, mail.polled(1), now.plus(Duration.ofDays(1))));
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("headers the signature does not cover neither route nor reach the agent")
+        void uncoveredHeadersIgnored() throws Exception {
+            verdict = passCovering("d3", "from", "date", "message-id");
+            String urgent = "0c0c0c0c0c0c0c0c0c0c0c0c";
+            var ctx = context(Map.of(), target("intake", AGENT), target("urgent", urgent, "urgent"));
+
+            processor.process(ctx, EmailTestMail.mail().subject("urgent").to("invoices+urgent@contoso.com").polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mailMap = (Map<String, Object>) inputs.get(0).getContext().get("mail").getValue();
+            assertEquals("", mailMap.get("subject"));
+            assertEquals(List.of(), mailMap.get("to"));
         }
     }
 

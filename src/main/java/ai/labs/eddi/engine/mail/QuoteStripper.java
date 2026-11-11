@@ -118,6 +118,9 @@ public final class QuoteStripper {
     /** How many lines after the From label Outlook's Sent/To lines may appear. */
     private static final int HEADER_BLOCK_WINDOW = 6;
 
+    /** Elements of an HTML document the HTML strip will copy at most. */
+    static final int MAX_HTML_ELEMENTS = 100_000;
+
     private QuoteStripper() {
     }
 
@@ -318,6 +321,11 @@ public final class QuoteStripper {
      */
     public static boolean stripHtml(Document doc) {
         if (doc.body() == null) {
+            return false;
+        }
+        if (doc.getAllElements().size() > MAX_HTML_ELEMENTS) {
+            // The removal works on a copy; a tree this large is not copied, and its
+            // history stays (the converter still runs its hidden-content pass).
             return false;
         }
         Document work = doc.clone();

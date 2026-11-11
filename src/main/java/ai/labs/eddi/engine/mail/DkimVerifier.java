@@ -27,11 +27,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * RFC 6376 DKIM verification on the raw RFC 5322 bytes of a message (email plan
@@ -126,9 +128,32 @@ public class DkimVerifier {
      *            why the message could not be read at all (then {@code results} is
      *            empty), or null
      */
-    public record Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure) {
+    public record Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure,
+            Map<String, List<String>> headers) {
         public Verification {
             results = results == null ? List.of() : List.copyOf(results);
+            headers = headers == null ? Map.of() : Map.copyOf(headers);
+        }
+
+        public Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure) {
+            this(results, signaturesFound, fromFieldCount, messageFailure, Map.of());
+        }
+
+        /**
+         * How many instances of {@code name} (lower-case) the top-level header block
+         * holds.
+         */
+        public int headerCount(String name) {
+            List<String> values = headers.get(name);
+            return values == null ? 0 : values.size();
+        }
+
+        /**
+         * The values of {@code name} (lower-case), top to bottom, unfolded, as
+         * ISO-8859-1 text of the raw bytes.
+         */
+        public List<String> headerValues(String name) {
+            return headers.getOrDefault(name, List.of());
         }
 
         /** No DKIM-Signature at all (and the message itself was readable). */
@@ -192,6 +217,18 @@ public class DkimVerifier {
      *            the instant the timestamps are judged at, or null for now
      */
     public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt) {
+        return verify(raw, budget, evaluatedAt, domain -> true);
+    }
+
+    /**
+     * Verifies every DKIM signature whose {@code d=} {@code mayAuthenticate}
+     * accepts; the others are {@link Outcome#SKIPPED}, with no DNS lookup.
+     *
+     * @param mayAuthenticate
+     *            whether a signing domain could authenticate the sender at all
+     *            (alignment with {@code From}, judged without DNS)
+     */
+    public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt, Predicate<String> mayAuthenticate) {
         long at = (evaluatedAt != null ? evaluatedAt : clock.instant()).getEpochSecond();
         if (raw == null || raw.length == 0) {
             return new Verification(List.of(), 0, 0, "the message is empty");
@@ -209,9 +246,32 @@ public class DkimVerifier {
         List<DkimResult> results = new ArrayList<>();
         Map<Canon, byte[]> bodyHashes = new EnumMap<>(Canon.class);
         for (int i = 0; i < signatures.size() && i < MAX_SIGNATURES; i++) {
-            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget, at));
+            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget, at, mayAuthenticate));
         }
-        return new Verification(results, signatures.size(), fromCount, null);
+        return new Verification(results, signatures.size(), fromCount, null, reportedHeaders(message));
+    }
+
+    /**
+     * The headers a caller weighs against the signatures' coverage: those whose
+     * unsigned instances would change what EDDI reads or does.
+     */
+    static final List<String> REPORTED_HEADERS = List.of("from", "to", "cc", "reply-to", "subject", "date", "message-id", "in-reply-to",
+            "references", "content-type", "content-transfer-encoding", "mime-version");
+
+    private static Map<String, List<String>> reportedHeaders(ParsedMessage message) {
+        Map<String, List<String>> headers = new HashMap<>();
+        for (String name : REPORTED_HEADERS) {
+            List<Integer> positions = message.indexes.get(name);
+            if (positions == null) {
+                continue;
+            }
+            List<String> values = new ArrayList<>(positions.size());
+            for (int position : positions) {
+                values.add(message.fields.get(position).value().replace("\r\n", ""));
+            }
+            headers.put(name, values);
+        }
+        return headers;
     }
 
     // ---------------------------------------------------------------------
@@ -219,7 +279,7 @@ public class DkimVerifier {
     // ---------------------------------------------------------------------
 
     private DkimResult verifyOne(ParsedMessage message, int fieldIndex, Map<Canon, byte[]> bodyHashes, MailDnsResolver.Budget budget,
-                                 long evaluatedAtSecond) {
+                                 long evaluatedAtSecond, Predicate<String> mayAuthenticate) {
         Field field = message.fields.get(fieldIndex);
         String value = field.value();
         if (value.length() > MAX_SIGNATURE_FIELD_LENGTH) {
@@ -308,6 +368,10 @@ public class DkimVerifier {
         if (claimedBodyHash == null || claimedBodyHash.length != 32) {
             return sig.fail("bh= is not a SHA-256 hash");
         }
+        if (!mayAuthenticate.test(domain)) {
+            return new DkimResult(domain, selector, algorithmText, Outcome.SKIPPED,
+                    "not checked: the signing domain cannot align with the From domain", signedHeaders, null, null);
+        }
 
         // The body first: local, and a tampered message then spends no lookup.
         byte[] bodyHash = bodyHashes.computeIfAbsent(canons[1], c -> bodyHash(message, c));
@@ -383,7 +447,9 @@ public class DkimVerifier {
         if (key.testing) {
             return new DkimResult(domain, selector, algorithmText, Outcome.TESTING, "the key is in testing mode (t=y)");
         }
-        return new DkimResult(domain, selector, algorithmText, Outcome.PASS, "verified");
+        String t = tags.value("t");
+        return new DkimResult(domain, selector, algorithmText, Outcome.PASS, "verified", signedHeaders, t == null ? null : timestamp(t),
+                HexFormat.of().formatHex(sha256().digest((domain + ";" + stripFws(tags.value("b"))).getBytes(StandardCharsets.ISO_8859_1))));
     }
 
     private record Sig(String domain, String selector, String algorithm) {

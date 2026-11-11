@@ -74,6 +74,12 @@ public class MailDnsResolver {
     private static final Duration DEFAULT_NEGATIVE_TTL = Duration.ofMinutes(1);
 
     /**
+     * How long a temporary failure is cached: shorter than a deferred mail's retry
+     * interval, so the retry asks again.
+     */
+    static final Duration TEMPFAIL_TTL = Duration.ofMinutes(2);
+
+    /**
      * Letters, digits, hyphen and underscore ({@code _dmarc}, {@code _domainkey}).
      */
     private static final Pattern LABEL = Pattern.compile("[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?");
@@ -254,14 +260,19 @@ public class MailDnsResolver {
         }
         TxtLookup lookup = interpret(answer);
         count(lookup.status(), false);
-        if (lookup.status() != Status.TEMPFAIL) {
-            Duration ttl = answer != null && answer.ttl() != null
+        Duration ttl;
+        if (lookup.status() == Status.TEMPFAIL) {
+            // Briefly: a name whose server times out would otherwise cost a full
+            // timeout for every signature and every mail that names it.
+            ttl = TEMPFAIL_TTL;
+        } else {
+            ttl = answer != null && answer.ttl() != null
                     ? answer.ttl()
                     : lookup.status() == Status.FOUND ? Duration.ZERO : DEFAULT_NEGATIVE_TTL;
-            long nanos = clampTtl(ttl).toNanos();
-            if (nanos > 0) {
-                cache.put(key, new Cached(lookup, nanos));
-            }
+        }
+        long nanos = clampTtl(ttl).toNanos();
+        if (nanos > 0) {
+            cache.put(key, new Cached(lookup, nanos));
         }
         return lookup;
     }

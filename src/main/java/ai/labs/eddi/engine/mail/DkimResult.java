@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mail;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -25,8 +26,21 @@ import java.util.Objects;
  *            the result
  * @param reason
  *            why, in a fixed sentence; {@code "verified"} for a pass
+ * @param signedHeaders
+ *            the {@code h=} names, lower-case, in order and with their
+ *            multiplicity (a name listed twice binds two instances, or the
+ *            absence of a second); empty unless the signature got as far as
+ *            reading them
+ * @param signedAt
+ *            the {@code t=} tag in epoch seconds, or null when absent
+ * @param signatureDigest
+ *            a SHA-256 (hex) of the {@code d=} and {@code b=} values: unique to
+ *            this one signing of this one message, so a replay of the same
+ *            signed mail is recognisable whatever unsigned header was changed;
+ *            null unless the signature passed
  */
-public record DkimResult(String domain, String selector, String algorithm, Outcome outcome, String reason) {
+public record DkimResult(String domain, String selector, String algorithm, Outcome outcome, String reason, List<String> signedHeaders,
+        Long signedAt, String signatureDigest) {
 
     /** The outcome of one signature. */
     public enum Outcome {
@@ -46,16 +60,43 @@ public record DkimResult(String domain, String selector, String algorithm, Outco
          * The signature verifies, but the key is flagged {@code t=y} (testing). RFC
          * 6376 §3.6.1: such mail must be treated as unsigned, so this is not a pass.
          */
-        TESTING
+        TESTING,
+        /**
+         * Not checked: its {@code d=} can never align with the {@code From} domain, so
+         * no outcome could authenticate the sender, and its key is not looked up — an
+         * attacker's domain must not be able to make EDDI query its DNS, or turn a mail
+         * into a day of retries with a key server that times out.
+         */
+        SKIPPED
     }
 
     public DkimResult {
         Objects.requireNonNull(outcome, "outcome");
         Objects.requireNonNull(reason, "reason");
+        signedHeaders = signedHeaders == null ? List.of() : List.copyOf(signedHeaders);
+    }
+
+    /** A result without the signature's details. */
+    public DkimResult(String domain, String selector, String algorithm, Outcome outcome, String reason) {
+        this(domain, selector, algorithm, outcome, reason, List.of(), null, null);
     }
 
     /** Whether this signature passed. */
     public boolean passed() {
         return outcome == Outcome.PASS;
+    }
+
+    /**
+     * How often {@code name} (lower-case) is listed in {@code h=}: that many
+     * instances, counted from the bottom, are covered.
+     */
+    public int timesSigned(String name) {
+        int count = 0;
+        for (String signed : signedHeaders) {
+            if (signed.equals(name)) {
+                count++;
+            }
+        }
+        return count;
     }
 }

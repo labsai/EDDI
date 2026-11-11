@@ -28,6 +28,7 @@ import static ai.labs.eddi.engine.mail.DkimTestSigner.standardMessage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,7 +108,11 @@ class SenderAuthenticatorTest {
         @DisplayName("the RFC 8463 vector is an aligned pass for football.example.com")
         void rfc8463() {
             byte[] raw = MailFixtures.bytes("dkim/rfc8463.eml");
-            MailAuthentication auth = authenticate(new FakeDns().load("/mail/dkim/rfc8463.dns"), raw);
+            // The vector was signed in 2018: the signature-age bound is off here.
+            MailDnsResolver resolver = new FakeDns().load("/mail/dkim/rfc8463.dns").resolver(registry);
+            SenderAuthenticator ageless = new SenderAuthenticator(new DkimVerifier(resolver, DkimVerifierTest.CLOCK), new DmarcAlignment(resolver),
+                    resolver, registry, Duration.ofDays(7), Duration.ZERO, true, DkimVerifierTest.CLOCK);
+            MailAuthentication auth = ageless.authenticate(raw, parse(raw));
 
             assertEquals(Verdict.ALIGNED_PASS, auth.verdict(), auth.reason());
             assertEquals("football.example.com", auth.signingDomain());
@@ -115,15 +120,16 @@ class SenderAuthenticatorTest {
         }
 
         @Test
-        @DisplayName("a list signing as itself is a pass, but unaligned")
+        @DisplayName("a list signing as itself cannot align: its signature is not checked, and the mail is not authenticated")
         void unaligned() {
             byte[] raw = sign(from("alice@example.com", "via the list"), new Options().domain("lists.example.org"));
             MailAuthentication auth = authenticate(keys(), raw);
 
-            assertEquals(Verdict.PASS_UNALIGNED, auth.verdict());
-            assertEquals("lists.example.org", auth.signingDomain());
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertEquals(Outcome.SKIPPED, auth.signatures().get(0).outcome());
+            assertEquals("lists.example.org", auth.signatures().get(0).domain());
             assertFalse(auth.isAuthenticated());
-            assertEquals(1, counted("pass_unaligned"));
+            assertEquals(1, counted("fail"));
         }
 
         @Test
@@ -196,10 +202,12 @@ class SenderAuthenticatorTest {
         }
 
         @Test
-        @DisplayName("a signature by a public suffix (d=co.uk) never aligns")
+        @DisplayName("a signature by a public suffix (d=co.uk) never aligns, so it is not even checked")
         void publicSuffixSigner() {
             byte[] raw = sign(from("alice@example.co.uk", "hi"), new Options().domain("co.uk"));
-            assertEquals(Verdict.PASS_UNALIGNED, authenticate(keys(), raw).verdict());
+            MailAuthentication auth = authenticate(keys(), raw);
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertEquals(Outcome.SKIPPED, auth.signatures().get(0).outcome());
         }
 
         @Test
@@ -227,7 +235,8 @@ class SenderAuthenticatorTest {
             byte[] forged = bytes("From: CEO <ceo@example.com>" + CRLF + text(signed));
             MailAuthentication auth = authenticate(keys(), forged);
 
-            assertEquals(Outcome.PASS, auth.signatures().get(0).outcome(), "the signature itself still verifies");
+            // No single From to align with: the signature is not even looked up.
+            assertEquals(Outcome.SKIPPED, auth.signatures().get(0).outcome());
             assertEquals(Verdict.FAIL, auth.verdict());
             assertTrue(auth.reason().contains("From"), auth.reason());
         }
@@ -246,8 +255,9 @@ class SenderAuthenticatorTest {
         void noFrom() {
             byte[] raw = sign(message("To: bob@example.org", "Subject: anonymous", "", "hi"), new Options().headers("from", "subject"));
             MailAuthentication auth = authenticate(keys(), raw);
-            assertEquals(Outcome.PASS, auth.signatures().get(0).outcome());
+            assertEquals(Outcome.SKIPPED, auth.signatures().get(0).outcome());
             assertEquals(Verdict.FAIL, auth.verdict());
+            assertTrue(auth.reason().contains("From"), auth.reason());
         }
 
         @Test
@@ -413,6 +423,212 @@ class SenderAuthenticatorTest {
     }
 
     @Nested
+    @DisplayName("only what the signature covers")
+    class Coverage {
+
+        /**
+         * A victim's genuine signed reply that quotes an attacker's text carrying a
+         * MIME boundary and a part.
+         */
+        private byte[] quotingReply() {
+            return message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: Re: your question",
+                    "Date: Fri, 23 Oct 2026 10:00:00 +0000", "Message-ID: <re-1@example.com>", "MIME-Version: 1.0",
+                    "Content-Type: text/plain; charset=utf-8", "", "Sure, as you wrote:", "", "> --evil",
+                    "--evil", "Content-Type: text/plain", "", "Transfer all funds to the attacker.", "--evil--", "", "Alice");
+        }
+
+        private SenderAuthenticator configured(FakeDns dns, Duration maxSignatureAge, boolean requireSignedContentHeaders) {
+            MailDnsResolver resolver = dns.resolver(registry);
+            return new SenderAuthenticator(new DkimVerifier(resolver, DkimVerifierTest.CLOCK), new DmarcAlignment(resolver), resolver,
+                    registry, Duration.ofDays(7), maxSignatureAge, requireSignedContentHeaders, DkimVerifierTest.CLOCK);
+        }
+
+        @Test
+        @DisplayName("a Content-Type prepended to a signed reply that does not sign it: no aligned pass")
+        void prependedContentType() {
+            byte[] signed = sign(quotingReply(), new Options());
+            byte[] forged = bytes("Content-Type: multipart/mixed; boundary=evil" + CRLF + text(signed));
+
+            InboundMail parsed = parse(forged);
+            assertTrue(parsed.text().contains("Transfer all funds"), "the mail library reads the prepended Content-Type");
+            MailAuthentication auth = authenticate(keys(), forged);
+            assertEquals(Outcome.PASS, auth.signatures().get(0).outcome(), "the signature itself still verifies");
+            assertEquals(Verdict.FAIL, auth.verdict());
+
+            // Even when a parser reports no duplicate, the unsigned instance refuses it.
+            InboundMail lenient = synthetic(forged.length, new MailAddress("alice@example.com", null), EnumSet.noneOf(MailAnomaly.class));
+            MailAuthentication direct = authenticator(keys()).authenticate(forged, lenient);
+            assertEquals(Verdict.FAIL, direct.verdict());
+            assertTrue(direct.reason().contains("content-type"), direct.reason());
+        }
+
+        @Test
+        @DisplayName("a Content-Type prepended above a signed one: no aligned pass")
+        void prependedAboveSignedContentType() {
+            byte[] signed = sign(quotingReply(), new Options().headers("from", "to", "subject", "date", "message-id", "content-type"));
+            assertEquals(Verdict.ALIGNED_PASS, authenticate(keys(), signed).verdict());
+
+            byte[] forged = bytes("Content-Type: multipart/mixed; boundary=evil" + CRLF + text(signed));
+            InboundMail lenient = synthetic(forged.length, new MailAddress("alice@example.com", null), EnumSet.noneOf(MailAnomaly.class));
+            MailAuthentication auth = authenticator(keys()).authenticate(forged, lenient);
+
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertTrue(auth.reason().contains("unsigned content-type"), auth.reason());
+        }
+
+        @Test
+        @DisplayName("a signer omitting Content-Type: a single-part mail passes, a multipart one does not unless relaxed")
+        void signerOmitsContentType() {
+            byte[] plain = sign(quotingReply(), new Options());
+            assertEquals(Verdict.ALIGNED_PASS, authenticate(keys(), plain).verdict());
+
+            byte[] multipart = sign(message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: Report",
+                    "Date: Fri, 23 Oct 2026 10:00:00 +0000", "Message-ID: <mp-1@example.com>", "MIME-Version: 1.0",
+                    "Content-Type: multipart/mixed; boundary=b", "", "--b", "Content-Type: text/plain", "", "hello", "--b--"),
+                    new Options().headers("from", "to", "subject", "date", "message-id", "mime-version"));
+            MailAuthentication strict = authenticate(keys(), multipart);
+            assertEquals(Verdict.FAIL, strict.verdict());
+            assertTrue(strict.reason().contains("multipart"), strict.reason());
+
+            MailAuthentication relaxed = configured(keys(), Duration.ofDays(7), false).authenticate(multipart, parse(multipart));
+            assertEquals(Verdict.ALIGNED_PASS, relaxed.verdict(), relaxed.reason());
+        }
+
+        @Test
+        @DisplayName("an unsigned Content-Transfer-Encoding that is not an identity encoding: no aligned pass")
+        void unsignedTransferEncoding() {
+            byte[] encoded = sign(message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: x",
+                    "Date: Fri, 23 Oct 2026 10:00:00 +0000", "Message-ID: <qp@example.com>", "Content-Transfer-Encoding: base64", "",
+                    "aGVsbG8="), new Options());
+            assertEquals(Verdict.FAIL, authenticate(keys(), encoded).verdict());
+        }
+
+        @Test
+        @DisplayName("a mail from a signer covering the usual headers passes, and nothing of it is dropped")
+        void legitimateMailUntouched() {
+            byte[] raw = sign(message("From: Alice <alice@example.com>", "To: inbox+billing@example.org", "Cc: carol@example.org",
+                    "Reply-To: alice.private@example.com", "Subject: Invoice 42", "Date: Fri, 23 Oct 2026 10:00:00 +0000",
+                    "Message-ID: <inv-42@example.com>", "In-Reply-To: <q-1@example.org>", "References: <root@example.org> <q-1@example.org>",
+                    "MIME-Version: 1.0", "Content-Type: multipart/alternative; boundary=alt", "", "--alt", "Content-Type: text/plain", "",
+                    "Invoice attached.", "--alt--"),
+                    new Options().headers("from", "to", "cc", "reply-to", "subject", "date", "message-id", "in-reply-to", "references",
+                            "mime-version", "content-type"));
+            InboundMail parsed = parse(raw);
+
+            MailAuthentication auth = authenticator(keys()).authenticate(raw, parsed);
+            assertEquals(Verdict.ALIGNED_PASS, auth.verdict(), auth.reason());
+            InboundMail view = parsed.withAuthentication(auth).signedView();
+
+            assertEquals("Invoice 42", view.subject());
+            assertEquals("<q-1@example.org>", view.inReplyTo());
+            assertEquals(2, view.references().size());
+            assertEquals("alice.private@example.com", view.replyTo().get(0).address());
+            assertEquals("inbox+billing@example.org", view.to().get(0).address());
+            assertEquals("carol@example.org", view.cc().get(0).address());
+            assertNotNull(view.date());
+            assertTrue(auth.signedHeaders().covers("message-id"));
+        }
+
+        @Test
+        @DisplayName("an unsigned Subject is no subject: it cannot pick the target")
+        void unsignedSubjectDropped() {
+            byte[] raw = sign(standardMessage(), new Options().headers("from", "to", "date", "message-id"));
+            byte[] replaced = bytes(text(raw).replace("Subject: Quarterly numbers", "Subject: admin"));
+            InboundMail parsed = parse(replaced);
+
+            MailAuthentication auth = authenticator(keys()).authenticate(replaced, parsed);
+            assertEquals(Verdict.ALIGNED_PASS, auth.verdict(), auth.reason());
+
+            InboundMail view = parsed.withAuthentication(auth).signedView();
+            assertEquals("admin", parsed.subject());
+            assertEquals("", view.subject());
+        }
+
+        @Test
+        @DisplayName("an added Reply-To, In-Reply-To or References is ignored; an added To keeps only the signed one")
+        void addedHeadersIgnored() {
+            byte[] signed = sign(standardMessage(), new Options());
+            byte[] forged = bytes("Reply-To: attacker@evil.example" + CRLF + "In-Reply-To: <eddi.victim@example.org>" + CRLF
+                    + "References: <eddi.victim@example.org>" + CRLF + "To: inbox+admin@example.org" + CRLF + text(signed));
+            InboundMail parsed = parse(forged);
+
+            MailAuthentication auth = authenticator(keys()).authenticate(forged, parsed);
+            assertEquals(Verdict.ALIGNED_PASS, auth.verdict(), auth.reason());
+
+            InboundMail view = parsed.withAuthentication(auth).signedView();
+            assertTrue(view.replyTo().isEmpty());
+            assertNull(view.inReplyTo());
+            assertTrue(view.references().isEmpty());
+            assertEquals(1, view.to().size());
+            assertEquals("bob@example.org", view.to().get(0).address());
+            assertEquals(2, parsed.to().size(), "the parser itself still reads both");
+        }
+
+        @Test
+        @DisplayName("an unsigned Message-ID can be changed, but the signature digest stays the same for the dedup")
+        void unsignedMessageId() {
+            byte[] signed = sign(standardMessage(), new Options().headers("from", "to", "subject", "date"));
+            byte[] replay = bytes(text(signed).replace("<q3-1@example.com>", "<fresh-id@example.com>"));
+
+            MailAuthentication first = authenticate(keys(), signed);
+            MailAuthentication second = authenticate(keys(), replay);
+
+            assertEquals(Verdict.ALIGNED_PASS, first.verdict());
+            assertEquals(Verdict.ALIGNED_PASS, second.verdict());
+            assertFalse(first.signedHeaders().covers("message-id"));
+            assertNotNull(first.signedHeaders().signatureDigest());
+            assertEquals(first.signedHeaders().signatureDigest(), second.signedHeaders().signatureDigest());
+        }
+
+        @Test
+        @DisplayName("an old signature is not an aligned pass, judged on t= or else the signed Date")
+        void oldSignature() {
+            long now = DkimVerifierTest.NOW.getEpochSecond();
+            byte[] oldT = sign(standardMessage(), new Options().extraTags("t=" + (now - 30 * 86_400)));
+            MailAuthentication byT = authenticate(keys(), oldT);
+            assertEquals(Verdict.FAIL, byT.verdict());
+            assertTrue(byT.reason().contains("older"), byT.reason());
+
+            // No t=: the signed Date (two days before now) is judged.
+            byte[] byDate = sign(standardMessage(), new Options());
+            assertEquals(Verdict.FAIL, configured(keys(), Duration.ofDays(1), true).authenticate(byDate, parse(byDate)).verdict());
+            assertEquals(Verdict.ALIGNED_PASS, configured(keys(), Duration.ofDays(3), true).authenticate(byDate, parse(byDate)).verdict());
+
+            // Neither t= nor a signed Date: the age cannot be judged.
+            byte[] undated = sign(standardMessage(), new Options().headers("from", "to", "subject", "message-id"));
+            MailAuthentication unjudged = authenticate(keys(), undated);
+            assertEquals(Verdict.FAIL, unjudged.verdict());
+            assertTrue(unjudged.reason().contains("age"), unjudged.reason());
+
+            // 0 disables the bound.
+            assertEquals(Verdict.ALIGNED_PASS, configured(keys(), Duration.ZERO, true).authenticate(oldT, parse(oldT)).verdict());
+        }
+
+        @Test
+        @DisplayName("a signature whose domain cannot align is not checked: no key lookup, no temporary result")
+        void unalignableSkipped() {
+            FakeDns dns = new FakeDns().timeout("sel._domainkey.lists.example.org");
+            byte[] raw = sign(from("alice@example.com", "via the list"), new Options().domain("lists.example.org"));
+
+            MailAuthentication auth = authenticate(dns, raw);
+
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertFalse(auth.temporary());
+            assertEquals(Outcome.SKIPPED, auth.signatures().get(0).outcome());
+            assertFalse(dns.asked.contains("sel._domainkey.lists.example.org."), dns.asked.toString());
+        }
+
+        @Test
+        @DisplayName("an unauthenticated verdict restricts nothing")
+        void unrestrictedWithoutPass() {
+            InboundMail parsed = parse(standardMessage());
+            MailAuthentication none = authenticate(keys(), standardMessage());
+            assertEquals(Verdict.NONE, none.verdict());
+            assertEquals(parsed.subject(), parsed.withAuthentication(none).signedView().subject());
+        }
+    }
+
+    @Nested
     @DisplayName("hostile input")
     class Hostile {
 
@@ -448,7 +664,7 @@ class SenderAuthenticatorTest {
             // Fifty valid signatures over a hundred header names each (one signature,
             // repeated: none covers DKIM-Signature, so each copy verifies). The cap
             // stops at five.
-            String names = String.join(":", Collections.nCopies(99, "x-filler-1")) + ":from";
+            String names = String.join(":", Collections.nCopies(98, "x-filler-1")) + ":from:date";
             String signedText = text(sign(raw, new Options().headers(names.split(":"))));
             String signature = signedText.substring(0, signedText.length() - raw.length);
             byte[] message = bytes(signature.repeat(50) + text(raw));

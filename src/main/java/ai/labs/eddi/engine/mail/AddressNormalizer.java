@@ -42,6 +42,9 @@ public final class AddressNormalizer {
     private static final int MAX_DOMAIN_LENGTH = 253;
     private static final int MAX_DISPLAY_NAME_LENGTH = 256;
 
+    /** Characters of a raw display name read at all, before decoding. */
+    static final int MAX_RAW_DISPLAY_NAME_LENGTH = MAX_DISPLAY_NAME_LENGTH * 8;
+
     /**
      * RFC 5322 atext, plus any non-ASCII code point (RFC 6532 UTF8-non-ascii).
      * Controls are excluded separately.
@@ -216,7 +219,10 @@ public final class AddressNormalizer {
         if (personal == null) {
             return null;
         }
-        String decoded = personal.contains("=?") ? EncodedWords.decode(personal) : personal;
+        // Capped before decoding, so the decoder's work is bounded: decoding never
+        // lengthens text, so nothing past this could survive the cap below.
+        String bounded = personal.length() > MAX_RAW_DISPLAY_NAME_LENGTH ? personal.substring(0, MAX_RAW_DISPLAY_NAME_LENGTH) : personal;
+        String decoded = bounded.contains("=?") ? EncodedWords.decode(bounded) : bounded;
         StringBuilder cleaned = new StringBuilder(Math.min(decoded.length(), MAX_DISPLAY_NAME_LENGTH));
         for (int i = 0; i < decoded.length() && cleaned.length() < MAX_DISPLAY_NAME_LENGTH; i++) {
             char c = decoded.charAt(i);

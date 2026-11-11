@@ -26,7 +26,8 @@ public enum MailAnomaly {
      */
     MULTIPLE_FROM,
     /**
-     * A Subject, Date, Message-ID, In-Reply-To or References header appears twice.
+     * A Subject, Date, Message-ID, In-Reply-To, References, Reply-To, Content-Type,
+     * Content-Transfer-Encoding or MIME-Version header appears twice.
      */
     DUPLICATE_SINGLETON_HEADER,
     /** An address in To, Cc or Reply-To was not a valid mailbox and was skipped. */
@@ -48,5 +49,10 @@ public enum MailAnomaly {
      * stricter stage could surface or refuse such a mail rather than act on it; it
      * is informational only today.
      */
-    ALTERNATIVES_DIVERGE
+    ALTERNATIVES_DIVERGE,
+    /**
+     * The message's HTML was longer than {@link MailLimits#maxHtmlCharacters()} and
+     * was cut before it was parsed.
+     */
+    HTML_TRUNCATED
 }

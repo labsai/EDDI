@@ -36,8 +36,13 @@ import java.util.Objects;
  * @param signatures
  *            every evaluated signature with its outcome, top to bottom (at most
  *            {@link DkimVerifier#MAX_SIGNATURES})
+ * @param signedHeaders
+ *            for an aligned pass, which headers the aligned signature covers
+ *            ({@link InboundMail#signedView()} reads only those);
+ *            {@link SignedHeaders#unrestricted()} otherwise
  */
-public record MailAuthentication(Verdict verdict, String signingDomain, String reason, boolean temporary, List<DkimResult> signatures) {
+public record MailAuthentication(Verdict verdict, String signingDomain, String reason, boolean temporary, List<DkimResult> signatures,
+        SignedHeaders signedHeaders) {
 
     /** The outcomes, as in the plan, plus the state before any check ran. */
     public enum Verdict {
@@ -61,6 +66,12 @@ public record MailAuthentication(Verdict verdict, String signingDomain, String r
     public MailAuthentication {
         Objects.requireNonNull(verdict, "verdict");
         signatures = signatures == null ? List.of() : List.copyOf(signatures);
+        signedHeaders = signedHeaders == null ? SignedHeaders.unrestricted() : signedHeaders;
+    }
+
+    /** A verdict that restricts no header. */
+    public MailAuthentication(Verdict verdict, String signingDomain, String reason, boolean temporary, List<DkimResult> signatures) {
+        this(verdict, signingDomain, reason, temporary, signatures, SignedHeaders.unrestricted());
     }
 
     /** A verdict without details. */

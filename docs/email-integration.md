@@ -173,7 +173,9 @@ conversation integration, which always keeps a thread in one conversation.
 Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
 nothing matching means the default target. `observeMode` targets are refused. A `GROUP` target starts a group
-discussion with the rendered input as its question (no attachments).
+discussion with the rendered input as its question (no attachments). For an authenticated mail only what its DKIM
+signature covers counts: an unsigned `Subject` routes nothing, and only the signed `To`/`Cc` instances carry a
+plus-tag ([Identity](#identity)).
 
 ## What the agent sees
 
@@ -229,6 +231,15 @@ no signed-in user can carry them.
 What an aligned pass proves is the **domain**: anyone who can send from `supplier.com` can write as any of its
 addresses. Forwarded and mailing-list mail often breaks DKIM and arrives unauthenticated. SPF is not evaluated (EDDI
 never sees the connecting IP). Details: [security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
+
+**A signature covers only some headers, and anyone holding a signed mail can deliver it again.** So for an
+authenticated mail EDDI reads only the headers its signature covers: an unsigned `Subject`, `In-Reply-To`,
+`References`, `Reply-To` or `Date` counts as absent, and only the signed `To`/`Cc` instances count — the mail then
+goes to the default target, starts a new conversation, and is answered at its `From`. A `Content-Type`,
+`Content-Transfer-Encoding` or `MIME-Version` the signature does not cover makes it unauthenticated
+(`eddi.email.dkim.require-signed-content-headers`), as does a signature older than seven days at delivery
+(`eddi.email.dkim.max-signature-age`). A copy of an already processed signed mail is refused as a duplicate, even
+under a new Message-ID when the Message-ID is unsigned.
 
 ## Threads
 

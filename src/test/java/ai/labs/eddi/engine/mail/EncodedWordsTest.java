@@ -9,10 +9,12 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EncodedWordsTest {
@@ -64,5 +66,35 @@ class EncodedWordsTest {
         assertEquals("Привет", known.text());
 
         assertEquals("", MailCharsets.decode(new byte[0], "utf-8").text());
+    }
+
+    @Test
+    @DisplayName("charset lookup by name and alias, any case, from a table built once")
+    void lookupTable() {
+        assertEquals(StandardCharsets.UTF_8, MailCharsets.lookup("UTF-8"));
+        assertEquals(StandardCharsets.UTF_8, MailCharsets.lookup(" utf8 "));
+        assertEquals(Charset.forName("windows-1252"), MailCharsets.lookup("CP1252"));
+        assertNull(MailCharsets.lookup("x-no-such-charset"));
+        assertNull(MailCharsets.lookup("not a ?legal* name"));
+        assertNull(MailCharsets.lookup(" "));
+    }
+
+    @Test
+    @DisplayName("thousands of words in thousands of distinct unknown charsets decode within a time budget")
+    void manyUnknownCharsets() {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 20_000; i++) {
+            text.append("=?x-unknown-").append(i).append("?Q?a?= x ");
+        }
+        String decoded = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> EncodedWords.decode(text.toString()));
+        assertTrue(decoded.startsWith("a x a x"), decoded.substring(0, 10));
+    }
+
+    @Test
+    @DisplayName("a display name is capped before its encoded words are decoded")
+    void displayNameCappedBeforeDecoding() {
+        String name = "=?x-unknown?Q?a?= ".repeat(50_000);
+        String cleaned = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> AddressNormalizer.cleanDisplayName(name));
+        assertTrue(cleaned.length() <= 256);
     }
 }

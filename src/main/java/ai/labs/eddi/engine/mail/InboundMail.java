@@ -123,6 +123,29 @@ public record InboundMail(String messageId, boolean syntheticMessageId, String i
     }
 
     /**
+     * This message as its authentication vouches for it: under an aligned pass,
+     * every header the aligned signature does not wholly cover is dropped — no
+     * subject, no {@code In-Reply-To}, {@code References} or {@code Reply-To}, no
+     * date — and {@code To} / {@code Cc} keep only their signed instances. What is
+     * left falls back to the safe default: the default target, a new conversation,
+     * a reply to the authenticated {@code From}. Without an aligned pass the
+     * message is returned as it is ({@link SignedHeaders#unrestricted()}). The
+     * Message-ID is kept, as the ledger's key; a caller deduplicating an
+     * authenticated mail whose Message-ID is unsigned uses
+     * {@link SignedHeaders#signatureDigest()} as well.
+     */
+    public InboundMail signedView() {
+        SignedHeaders signed = authentication.signedHeaders();
+        if (!signed.restricted()) {
+            return this;
+        }
+        return new InboundMail(messageId, syntheticMessageId, signed.covers("in-reply-to") ? inReplyTo : null,
+                signed.covers("references") ? references : List.of(), from, signed.covers("reply-to") ? replyTo : List.of(), signed.to(),
+                signed.cc(), signed.covers("subject") ? subject : "", signed.covers("date") ? date : null, text, bodySource, quotedHistoryRemoved,
+                textTruncated, attachments, loopSignals, deliveryReport, authentication, anomalies, rawSize);
+    }
+
+    /**
      * No subject, body, addresses or ids: this record ends up in log lines, and all
      * of those are personal data or attacker text.
      */
