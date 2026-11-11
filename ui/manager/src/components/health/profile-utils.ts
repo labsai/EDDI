@@ -91,6 +91,12 @@ export function localeDecimalSeparator(locale: string | undefined = activeLocale
   }
 }
 
+/** Digits grouped in threes by `sep` ("1,234,567"), or no group separator at all ("1234"). */
+function isGrouped(integer: string, sep: "." | ","): boolean {
+  if (!integer.includes(sep)) return true;
+  return (sep === "." ? /^[-+]?\d{1,3}(\.\d{3})+$/ : /^[-+]?\d{1,3}(,\d{3})+$/).test(integer);
+}
+
 /**
  * Reads a decimal a person typed, in either convention: "0.5", "0,5", "1,234.5"
  * and "1.234,5" all work. One separator followed by exactly three digits
@@ -107,14 +113,17 @@ export function parseDecimal(text: string, decimalSeparator: "." | "," = localeD
   const lastDot = t.lastIndexOf(".");
   let normalized = t;
   if (lastComma >= 0 && lastDot >= 0) {
-    // The later separator is the decimal one; the other groups thousands.
-    normalized = lastComma > lastDot ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+    // The later separator is the decimal one; the other groups thousands, in groups of three.
+    const decimal = lastComma > lastDot ? "," : ".";
+    const integer = t.slice(0, Math.max(lastComma, lastDot));
+    if (!isGrouped(integer, decimal === "," ? "." : ",")) return Number.NaN;
+    normalized = decimal === "," ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
   } else if (lastComma >= 0 || lastDot >= 0) {
     const sep = lastComma >= 0 ? "," : ".";
     const parts = t.split(sep);
     // Several: a group separator ("1,234,567", "1.234.567"), never a decimal one.
     const grouped = parts.length > 2 || (/^[-+]?[1-9]\d{0,2}$/.test(parts[0]!) && /^\d{3}$/.test(parts[1]!) && sep !== decimalSeparator);
-    if (parts.length > 2 && sep === "." && !/^[-+]?\d{1,3}(\.\d{3})+$/.test(t)) return Number.NaN;
+    if (parts.length > 2 && !isGrouped(t, sep)) return Number.NaN;
     normalized = grouped ? parts.join("") : t.replace(",", ".");
   }
   if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(normalized)) return Number.NaN;

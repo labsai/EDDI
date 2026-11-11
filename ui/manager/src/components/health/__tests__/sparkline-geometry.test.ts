@@ -25,6 +25,15 @@ describe("sparklineGeometry", () => {
     expect(g.markers[0]!.x).toBeGreaterThan(3);
   });
 
+  it("draws a day with data between two gaps as a dot, not an invisible move", () => {
+    const g = sparklineGeometry([pt("2026-11-01", 1), pt("2026-11-02", null), pt("2026-11-03", 2)]);
+    expect(g.filled).toBe(2);
+    // Two isolated days: each subpath is a move plus a zero-length segment the round cap draws.
+    expect(g.path.match(/M[\d.]+ [\d.]+h0/g)).toHaveLength(2);
+    // A connected run stays a line.
+    expect(sparklineGeometry([pt("2026-11-01", 1), pt("2026-11-02", 2)]).path).not.toContain("h0");
+  });
+
   it("copes with a flat series", () => {
     const g = sparklineGeometry([pt("2026-11-01", 5), pt("2026-11-02", 5)]);
     expect(g.path).not.toContain("NaN");

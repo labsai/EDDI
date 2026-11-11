@@ -7,7 +7,7 @@ export const SPARK_H = 36;
 const PAD = 3;
 
 export interface SparklineGeometry {
-  /** Path segments: a gap (null day) starts a new `M`. */
+  /** Path segments: a gap (null day) starts a new `M`; a day with data between two gaps is a zero-length `h0`, drawn as a dot by the round cap. */
   path: string;
   /** x of each marker that falls inside the series, by marker id. */
   markers: Array<{ id: string; x: number; label: string }>;
@@ -27,15 +27,14 @@ export function sparklineGeometry(points: SeriesPoint[], markers: HealthMarker[]
   const x = (i: number) => PAD + i * step;
   const y = (v: number) => SPARK_H - PAD - ((v - min) / span) * (SPARK_H - 2 * PAD);
 
+  const has = (p: SeriesPoint | undefined) => p !== undefined && p.value !== null && Number.isFinite(p.value);
   let path = "";
-  let pen = false;
   points.forEach((p, i) => {
-    if (p.value === null || !Number.isFinite(p.value)) {
-      pen = false;
-      return;
-    }
-    path += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`;
-    pen = true;
+    if (!has(p)) return;
+    const pen = has(points[i - 1]);
+    path += `${pen ? "L" : "M"}${x(i).toFixed(1)} ${y(p.value!).toFixed(1)}`;
+    // A subpath of a single move strokes nothing: give an isolated day a zero-length segment.
+    if (!pen && !has(points[i + 1])) path += "h0";
   });
 
   const dayIndex = new Map(points.map((p, i) => [p.day, i]));

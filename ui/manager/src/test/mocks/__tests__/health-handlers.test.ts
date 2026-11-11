@@ -20,6 +20,30 @@ describe("health handlers", () => {
     expect(points[points.length - 1]!.day).toBe(MOCK_TODAY);
   });
 
+  it("sends only the markers inside the requested period", async () => {
+    const week = await getHealthSeries(HEALTH_AGENTS.healthy, ["agentFailureRate"], { period: "7d" });
+    // 4 to 10 Nov: the deployment of 3 Nov and the October changes are outside.
+    expect(week.markers).toEqual([]);
+    const month = await getHealthSeries(HEALTH_AGENTS.healthy, ["agentFailureRate"], { period: "30d" });
+    expect(month.markers.map((m) => m.id).sort()).toEqual(["m-123", "m-124", "m-125"]);
+    for (const m of month.markers) expect(m.at.slice(0, 10) >= month.period.from && m.at.slice(0, 10) <= month.period.to).toBe(true);
+  });
+
+  it("answers the rating trend to a caller who may read ratings, and all-null points to one who may not", async () => {
+    const readable = await getHealthSeries(HEALTH_AGENTS.healthy, ["ratingScore"], {});
+    expect(readable.series[0]!.points.some((p) => p.value !== null)).toBe(true);
+    const restricted = await getHealthSeries(HEALTH_AGENTS.restricted, ["ratingScore"], {});
+    expect(restricted.series[0]!.points.every((p) => p.value === null)).toBe(true);
+    const noDaily = await getHealthSeries(HEALTH_AGENTS.healthy, ["costPerResolvedSession"], {});
+    expect(noDaily.series[0]!.points.every((p) => p.value === null)).toBe(true);
+  });
+
+  it("sends no status for an agent until H4, except in the H4 scenarios", async () => {
+    expect((await getAgentHealth(HEALTH_AGENTS.healthy, {})).status).toBeNull();
+    expect((await getAgentHealth("agent1", {})).status).toBeNull();
+    expect((await getAgentHealth(HEALTH_AGENTS.healthyH4, {})).status).toBe("HEALTHY");
+  });
+
   it("filters sessions by version before paging", async () => {
     const page = await getHealthSessions(HEALTH_AGENTS.healthy, { version: 7 });
     expect(page.items.map((r) => r.agentVersion)).toEqual([7]);

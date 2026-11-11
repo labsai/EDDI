@@ -51,7 +51,7 @@ describe("AgentHealthPanel", () => {
       expect(urls).toEqual([]);
 
       await userEvent.click(screen.getByTestId("agent-health-toggle"));
-      expect(await screen.findByTestId("health-status")).toBeInTheDocument();
+      expect(await screen.findByTestId("health-section-reliability")).toBeInTheDocument();
       expect(urls.some((u) => /\/agents\/[^/]+\/health(\?|$)/.test(u))).toBe(true);
     } finally {
       server.events.removeListener("request:start", listener);
@@ -67,10 +67,17 @@ describe("AgentHealthPanel", () => {
     expect(document.getElementById(bodyId)).not.toBeNull();
   });
 
-  it("shows a healthy agent: status, six sections, values in their units and the golden check", async () => {
-    renderPanel(HEALTH_AGENTS.healthy);
+  it("shows the status of a healthy agent once the backend sends one (H4)", async () => {
+    renderPanel(HEALTH_AGENTS.healthyH4);
     expect(await screen.findByTestId("health-status-ring")).toBeInTheDocument();
     expect(screen.getByTestId("health-status-label")).toBeInTheDocument();
+  });
+
+  it("shows a healthy agent: six sections, values in their units and the golden check", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    // H3: no status yet.
+    expect(await screen.findByTestId("health-section-reliability")).toBeInTheDocument();
+    expect(screen.queryByTestId("health-status-ring")).toBeNull();
     for (const id of ["reliability", "effectiveness", "quality", "efficiency", "adoption", "business"]) {
       expect(await screen.findByTestId(`health-section-${id}`)).toBeInTheDocument();
     }
@@ -262,7 +269,7 @@ describe("AgentHealthPanel", () => {
 
   it("hides the profile and report links from someone who cannot edit", async () => {
     renderPanel(HEALTH_AGENTS.healthy, { canEdit: false });
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     expect(screen.queryByTestId("health-open-profile")).toBeNull();
     expect(screen.queryByTestId("health-open-reports")).toBeNull();
     expect(screen.getByTestId("health-open-compare")).toBeInTheDocument();
@@ -272,7 +279,7 @@ describe("AgentHealthPanel", () => {
   it("offers no profile, report links or export against a backend that has none of them yet", async () => {
     delete mockFlag.__EDDI_MOCK_ACTIVE__;
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     expect(screen.getByTestId("health-open-compare")).toBeInTheDocument();
     expect(screen.queryByTestId("health-open-profile")).toBeNull();
     expect(screen.queryByTestId("health-open-reports")).toBeNull();
@@ -294,7 +301,7 @@ describe("AgentHealthPanel", () => {
       expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "false");
       await userEvent.click(screen.getByTestId("to-health"));
       expect(screen.getByTestId("agent-health-toggle")).toHaveAttribute("aria-expanded", "true");
-      expect(await screen.findByTestId("health-status")).toBeInTheDocument();
+      expect(await screen.findByTestId("health-section-reliability")).toBeInTheDocument();
       expect(scroll).toHaveBeenCalled();
     } finally {
       Element.prototype.scrollIntoView = original;
@@ -312,7 +319,7 @@ describe("AgentHealthPanel", () => {
 
   it("changes the period from the filter bar", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     expect(screen.getByTestId("health-period-30d")).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(screen.getByTestId("health-period-7d"));
     expect(screen.getByTestId("health-period-7d")).toHaveAttribute("aria-pressed", "true");
@@ -320,7 +327,7 @@ describe("AgentHealthPanel", () => {
 
   it("closes the origin list on an outside click and on Escape", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     const details = screen.getByTestId("health-origin-filter").closest("details")!;
     await userEvent.click(screen.getByTestId("health-origin-filter"));
     expect(details.open).toBe(true);
@@ -336,7 +343,7 @@ describe("AgentHealthPanel", () => {
 describe("version compare", () => {
   it("lists deltas with a verdict and keeps an insignificant change neutral", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-compare"));
     const rows = await screen.findAllByTestId("health-compare-row");
     const verdictOf = (id: number) => rows[id]!.getAttribute("data-verdict");
@@ -348,7 +355,7 @@ describe("version compare", () => {
 
   it("derives its defaults from the latest version when it arrives late, and keeps older below newer", async () => {
     const view = renderPanel(HEALTH_AGENTS.healthy, { latestVersion: 1 });
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     expect(screen.getByTestId("health-open-compare")).toBeDisabled();
     view.rerender(panel(HEALTH_AGENTS.healthy, { latestVersion: 8 }));
     await userEvent.click(screen.getByTestId("health-open-compare"));
@@ -371,7 +378,7 @@ describe("version compare", () => {
       }),
     );
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-compare"));
     await waitFor(() => expect(seen.some((u) => u.includes("days=14"))).toBe(true));
     await userEvent.selectOptions(screen.getByTestId("health-compare-days"), "30");
@@ -439,7 +446,7 @@ describe("session drill-down", () => {
 
 describe("health profile editor", () => {
   const openProfile = async () => {
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-profile"));
     await screen.findByTestId("health-threshold-resolutionRate-red");
   };
@@ -518,6 +525,19 @@ describe("health profile editor", () => {
     await userEvent.clear(budget);
     await userEvent.type(budget, "-");
     expect(budget).toHaveValue("-");
+    await userEvent.click(screen.getByTestId("health-profile-save"));
+    expect(await screen.findByTestId("health-profile-bad-number")).toBeInTheDocument();
+    expect(puts).toBe(0);
+  });
+
+  it("refuses to save a number too large to be finite, which would serialise as null", async () => {
+    let puts = 0;
+    server.use(http.put("*/agents/:agentId/health/profile", () => { puts += 1; return HttpResponse.json({}); }));
+    renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    const budget = screen.getByTestId("health-budget-costPerResolvedUsd");
+    // 400 digits: Number() reads it as Infinity.
+    fireEvent.change(budget, { target: { value: "9".repeat(400) } });
     await userEvent.click(screen.getByTestId("health-profile-save"));
     expect(await screen.findByTestId("health-profile-bad-number")).toBeInTheDocument();
     expect(puts).toBe(0);
@@ -634,7 +654,7 @@ describe("owner report links", () => {
 
   it("lets a creator who can read ratings include the quality section", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-reports"));
     expect(await screen.findByTestId("health-report-section-quality")).toBeEnabled();
     expect(screen.queryByTestId("health-report-quality-note")).toBeNull();
@@ -642,7 +662,7 @@ describe("owner report links", () => {
 
   it("shows the link once: it is gone when the dialog is reopened", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-reports"));
     await userEvent.click(await screen.findByTestId("health-report-create"));
     expect(await screen.findByTestId("health-report-created")).toHaveTextContent("https://eddi.example/health-report/token-rep-1");
@@ -655,7 +675,7 @@ describe("owner report links", () => {
 
   it("takes the created link off the screen once that link is revoked, and only then", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-reports"));
     await userEvent.click(await screen.findByTestId("health-report-create"));
     expect(await screen.findByTestId("health-report-created")).toBeInTheDocument();
@@ -679,7 +699,7 @@ describe("owner report links", () => {
       http.post("*/agents/:agentId/health/reports", () => HttpResponse.json({ id: "x", expiresAt: "2026-12-01T00:00:00Z", sections: ["reliability"] }, { status: 201 })),
     );
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-reports"));
     await userEvent.click(await screen.findByTestId("health-report-create"));
     expect(await screen.findByTestId("health-report-no-url")).toBeInTheDocument();
@@ -688,7 +708,7 @@ describe("owner report links", () => {
 
   it("asks before revoking, lists and revokes, and shows a failed revoke", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     await userEvent.click(screen.getByTestId("health-open-reports"));
     await userEvent.click(await screen.findByTestId("health-report-create"));
     const list = await screen.findByTestId("health-report-list");
@@ -715,7 +735,7 @@ describe("owner report links", () => {
 describe("export", () => {
   it("states visibly, not only in a tooltip, that the export ignores the version and origin filters", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
-    await screen.findByTestId("health-status");
+    await screen.findByTestId("health-section-reliability");
     const note = screen.getByTestId("health-export-note");
     expect(note).toBeVisible();
     expect(note).toHaveTextContent("not the version or origin filters");
@@ -742,7 +762,7 @@ describe("export", () => {
     api.setAuthToken("tok-123");
     try {
       renderPanel(HEALTH_AGENTS.healthy);
-      await screen.findByTestId("health-status");
+      await screen.findByTestId("health-section-reliability");
       await userEvent.click(screen.getByTestId("health-period-7d"));
       await userEvent.click(screen.getByTestId("health-export-csv"));
       await waitFor(() => expect(downloads).toHaveLength(1));

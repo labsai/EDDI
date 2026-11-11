@@ -133,6 +133,11 @@ describe("parseDecimal", () => {
     expect(parseDecimal("1.2.3")).toBeNaN();
   });
 
+  it.each(["1,2,3", "12,34,567", "1,2,3.5", "1.2,5", "1,23.5"])("rejects %s, whose groups are not of three digits", (text) => {
+    expect(parseDecimal(text, ".")).toBeNaN();
+    expect(parseDecimal(text, ",")).toBeNaN();
+  });
+
   it("converts percentages for ratio fields in both directions", () => {
     expect(fromInput("70", "ratio")).toBe(0.7);
     expect(fromInput("0,5", "usd")).toBe(0.5);

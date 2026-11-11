@@ -345,6 +345,8 @@ Not a contract: a record of what the UI does with the backend's precisions, so a
 - The Apdex label's `T = …` is parsed and put into the translated label.
 - The drill-down is not requested without EDIT (`canEdit` on the panel); a 403's `reason` picks the explanation.
   `outcome`/`evidence` `null` render "—"; `sessionNo` is only part of the row key.
-- Statuses stay hidden while `status` is `null` (until H4); the profile, presets, export and report-link calls run against
-  mocks until H4, H4b and H5 land.
+- Statuses stay hidden while `status` is `null` (until H4). The profile, presets, export and report-link controls are
+  offered only while the Manager's mock worker answers them: in a development build, when the backend is unreachable or
+  mocks are forced (`eddi-force-mocks`). Against a real backend, and in every production build, they are hidden until
+  H4, H4b and H5 land, so those calls are never made there (they would only answer 404).
 - `significant: false` can also mean too few sessions in either period, not only an untestable measure; the UI reads it as "not significant, or too little data" (never "normal variation", which would claim a test that may not have run) unless the measure is known untestable (by the optional `tested: false` flag, else by id).

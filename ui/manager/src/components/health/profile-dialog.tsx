@@ -16,14 +16,14 @@ export interface ProfileMeasureInfo {
 
 type SloKey = "agentTurnSuccess" | "apdexTMs" | "minTurnsForBurnAlert";
 
-/** A field holding text that is not a number blocks the save: NaN would serialise as null. */
+/** A field holding text that is not a finite number blocks the save: NaN and Infinity would serialise as null. */
 function hasInvalidNumber(p: HealthProfile): boolean {
   const nums = [
     ...Object.values(p.thresholds).flatMap((t) => [t.green, t.red]),
     ...Object.values(p.budgets),
     ...Object.values(p.slo),
   ];
-  return nums.some((n) => typeof n === "number" && Number.isNaN(n));
+  return nums.some((n) => typeof n === "number" && !Number.isFinite(n));
 }
 
 /** The profile editor: preset, critical measures, thresholds, cost budget, SLO and overrides, plus server-side violations shown inline at their path. Mounted only while the dialog is open so its draft always starts from the stored profile. */

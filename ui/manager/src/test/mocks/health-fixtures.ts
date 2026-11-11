@@ -15,14 +15,23 @@ import type {
  * Fixtures for the Agent Health mocks, shaped like planning/agent-health-api.md.
  * Each scenario is keyed by an agent id (see {@link HEALTH_AGENTS}); any other
  * id answers the healthy agent, so a page that links to "agent1" still works.
+ *
+ * The default is what the H3 backend sends: `status: null` for every agent (the
+ * status arrives with H4). Only the scenarios marked "H4" carry a status, to
+ * exercise the ring, the reasons and the portfolio badges ahead of that phase.
  */
 
 export const HEALTH_AGENTS = {
   healthy: "health-healthy",
+  /** H4: the healthy agent with the status the backend sends from H4 on. */
+  healthyH4: "health-healthy-h4",
+  /** H4: a status of NEEDS_ATTENTION with its reasons. */
   attention: "health-attention",
   noData: "health-nodata",
   restricted: "health-restricted",
+  /** No status, as every agent until H4 (the default); kept as a named scenario for the portfolio. */
   preH4: "health-preh4",
+  /** H4: a WATCH status for a resolution rate mostly assumed from silence. */
   silence: "health-silence",
   noReview: "health-noreview",
   forbidden: "health-forbidden",
@@ -150,7 +159,8 @@ const baseHealth = (agentId: string, agentName: string): AgentHealth => ({
   baseline: { from: "2026-09-12", to: "2026-10-11" },
   version: null,
   origins: ["api", "v1", "email"],
-  status: "HEALTHY",
+  // H3: no agent has a status until H4.
+  status: null,
   reasons: [],
   preset: "support",
   generatedAt: "2026-11-10T09:00:00Z",
@@ -192,8 +202,14 @@ export function healthFor(agentId: string): AgentHealth {
       h.checks = [{ id: "goldenSuite", label: "Golden conversations", state: "FAIL", at: "2026-10-20T12:00:00Z", stale: true, version: 7 }];
       return h;
     }
+    case HEALTH_AGENTS.healthyH4: {
+      const h = baseHealth(agentId, "Support");
+      h.status = "HEALTHY";
+      return h;
+    }
     case HEALTH_AGENTS.noData: {
       const h = baseHealth(agentId, "Brand New Agent");
+      // H4: the status that says why the measures are grey.
       h.status = "NOT_ENOUGH_DATA";
       const grey = (m: Measure): Measure => ({ ...m, value: null, n: 4, band: "GREY", interval: null, delta: null, baseline: null, significant: false, hint: "Fewer than 30 engaged sessions" });
       for (const id of ["reliability", "effectiveness", "efficiency"] as const) {

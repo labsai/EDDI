@@ -83,13 +83,18 @@ const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "t
   turnDurationP95: [3200, "ms"],
   costPerSession: [0.03, "usd"],
   sessions: [60, "count"],
+  ratingScore: [0.84, "score"],
 };
 
 /** The days of the requested `period` (7, 30 or 90; the contract's default is 30). */
 const periodDays = (url: URL): number => ({ "7d": 7, "30d": 30, "90d": 90 })[url.searchParams.get("period") ?? "30d"] ?? 30;
 
-/** Measures the backend answers with all-null points (no daily values yet, or a rating the caller may not read). */
-const ALL_NULL_SERIES = new Set(["costPerResolvedSession", "returningUserShare", "ratingScore"]);
+/** Measures without daily values yet: the backend answers them with all-null points. */
+const NO_DAILY_VALUES = new Set(["costPerResolvedSession", "returningUserShare"]);
+/** Rating measures: all-null points only for a caller who may not read ratings (the restricted scenario). */
+const RATING_MEASURES = new Set(["ratingScore", "ratingResponseRate", "replyThumbsUp"]);
+const allNullSeries = (agentId: string, measureId: string): boolean =>
+  NO_DAILY_VALUES.has(measureId) || (RATING_MEASURES.has(measureId) && agentId === HEALTH_AGENTS.restricted);
 
 /** Handlers for the operations the backend exposes (H2b, H3). They answer from fixtures. */
 export const healthHandlers = [
@@ -97,12 +102,15 @@ export const healthHandlers = [
     const url = new URL(request.url);
     const measures = url.searchParams.getAll("measure");
     const days = periodDays(url);
+    // The same range the summary reports for this period, one point per day of it.
+    const { period } = periodFor(days);
+    const agentId = String(params.agentId);
     return HttpResponse.json({
-      agentId: params.agentId,
-      // The same range the summary reports for this period, one point per day of it.
-      period: periodFor(days).period,
-      series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", days, ALL_NULL_SERIES.has(m))),
-      markers: MARKERS,
+      agentId,
+      period,
+      series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", days, allNullSeries(agentId, m))),
+      // Only the changes inside the period, as the backend sends them.
+      markers: MARKERS.filter((m) => m.at.slice(0, 10) >= period.from && m.at.slice(0, 10) <= period.to),
     });
   }),
 

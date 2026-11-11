@@ -146,7 +146,8 @@ export function useHealthPortfolio(period: HealthPeriod, sort: "attention" | "na
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: STALE_MS,
-    placeholderData: keepPreviousData,
+    // No placeholder: another status, period or sort shows the loading state,
+    // never the previous selection's agents under the new filters.
     retry: false,
   });
 }

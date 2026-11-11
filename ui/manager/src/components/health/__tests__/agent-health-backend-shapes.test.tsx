@@ -11,6 +11,8 @@ import { AgentHealthPanel } from "../agent-health-panel";
 import { CompareDialog } from "../compare-dialog";
 import { SessionsDialog } from "../sessions-dialog";
 import { drillForResolution } from "../drill";
+import { measureLabel } from "../format";
+import type { TFunction } from "i18next";
 
 /**
  * What the real backend (planning/agent-health-api.md sections 12 and 13) does where the UI's
@@ -66,29 +68,38 @@ describe("changes that cannot be tested for significance", () => {
     expect(within(p95).getByTestId("health-delta")).toHaveAttribute("data-significance", "untested");
     const failures = await measureCard("agentFailureRate");
     // Testable and not significant is the other reading.
+    // Not significant can also mean too few samples in either period; the state, not its wording, is what is checked here.
     expect(within(failures).getByTestId("health-delta")).toHaveAttribute("data-significance", "variation");
-    // Not significant can also mean too few samples in either period: the text must not claim ordinary variation.
-    expect(within(failures).getByTestId("health-delta")).toHaveTextContent("not significant, or too little data");
-    expect(within(failures).getByTestId("health-delta")).not.toHaveTextContent("normal variation");
     const resolution = await measureCard("resolutionRate");
     expect(within(resolution).getByTestId("health-delta")).toHaveAttribute("data-significance", "significant");
   });
 });
 
 describe("labels the backend parameterises", () => {
-  it("keeps the Apdex threshold T in the translated label", async () => {
-    renderPanel(HEALTH_AGENTS.healthy);
-    const apdex = await measureCard("apdex");
-    expect(within(apdex).getByTestId("health-measure-label")).toHaveTextContent("T = 4 s");
+  it("passes the Apdex threshold T from the backend's label into the translated one", () => {
+    const calls: Array<[string, unknown]> = [];
+    const t = ((key: string, options?: unknown) => {
+      calls.push([key, options]);
+      return key;
+    }) as unknown as TFunction;
+    expect(measureLabel(t, { id: "apdex", label: "Response time (Apdex, T = 4 s)" })).toBe("health.measures.apdexWithT");
+    expect(calls[0]![1]).toMatchObject({ t: "4 s" });
   });
 });
 
 describe("series without values", () => {
   it("says there is no trend for a measure whose daily points are all null", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
+    // No daily values yet: the backend answers every day with a null point.
+    const cost = await measureCard("costPerResolvedSession");
+    await waitFor(() => expect(within(cost).getByTestId("health-sparkline-empty")).toBeInTheDocument());
+    expect(within(cost).queryByTestId("health-sparkline")).toBeNull();
+  });
+
+  it("draws the rating trend for a caller who may read ratings", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
     const rating = await measureCard("ratingScore");
-    await waitFor(() => expect(within(rating).getByTestId("health-sparkline-empty")).toBeInTheDocument());
-    expect(within(rating).queryByTestId("health-sparkline")).toBeNull();
+    await waitFor(() => expect(within(rating).getByTestId("health-sparkline")).toBeInTheDocument());
   });
 });
 

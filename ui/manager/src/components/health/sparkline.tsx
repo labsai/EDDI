@@ -64,7 +64,7 @@ export function Sparkline({
           <title>{m.label}</title>
         </line>
       ))}
-      <path d={g.path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <path d={g.path} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
