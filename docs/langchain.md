@@ -1557,7 +1557,7 @@ In addition to built-in tools, your agent gets access to the EDDI HTTP calls con
 
 ### Configuration
 
-Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
+Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow (or its alias `eddi://ai.labs.apicalls`) is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
 
 ```json
 {

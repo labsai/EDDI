@@ -31,6 +31,14 @@ round.
 - Manager `extensions.ts`: both names are labelled "API Calls", and the canonical name sorts
   first. The `extensionTypes.httpcallsLegacy` key is removed from all 11 locales.
 
+### Behaviour change for existing agents
+
+An existing agent whose workflow types its API-call step `eddi://ai.labs.apicalls` now has those calls
+offered to the model as tools, because `enableHttpCallTools` defaults to `true`; before this change they
+ran in the pipeline but were never exposed. Set `enableHttpCallTools: false` in the agent's `langchain.json`
+(or remove the calls you do not want exposed from the step's httpcalls configuration) to keep the old behaviour. The upgrade
+guide ([Changes after 6.7.0](../upgrading-from-6.5.md#changes-after-670)) says the same.
+
 ### Tests
 
 `WorkflowTraversalTest` has a parameterised test that discovers a step typed with either
