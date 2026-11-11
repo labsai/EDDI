@@ -13,7 +13,11 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
+import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -23,6 +27,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -113,6 +118,53 @@ class ToolLoopResumer {
     }
 
     /**
+     * The stored trace entry for a call a human declined: the call's identity, the
+     * reviewer's own note for it when they gave one, and the arguments that were
+     * declined - redacted exactly as the {@code tool_call} step redacts them, so a
+     * receipt rebuilt after a reload can say what was refused.
+     */
+    static Map<String, Object> rejectedEntry(PendingToolCallBatch.PendingToolCall c, ToolCallDecision perCallDecision) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("type", "hitl_rejected");
+        entry.put("tool", c.getToolName());
+        entry.put("callId", c.getCallId());
+        String callNote = perCallDecision != null ? perCallDecision.getNote() : null;
+        if (callNote != null && !callNote.isBlank()) {
+            entry.put("note", SecretRedactionFilter.redact(callNote));
+        }
+        if (c.getArgumentsRaw() != null) {
+            entry.put("arguments", SecretRedactionFilter.redact(c.getArgumentsRaw()));
+        }
+        return entry;
+    }
+
+    /**
+     * Closes a gated call that was settled without the tool loop running it, for a
+     * client watching the resume. Status only.
+     */
+    private static void emitToolResult(IConversationMemory memory, LlmConfiguration.Task task, Map<String, String> toolCanonicalNames,
+                                       PendingToolCallBatch.PendingToolCall c, String status) {
+        ConversationEventSink sink = memory != null ? memory.getEventSink() : null;
+        if (sink == null) {
+            return;
+        }
+        try {
+            // A tool_result always follows its tool_call in the same stream. A call
+            // settled here never reached the loop's own announcement (any tool_call
+            // was on the stream of the turn that paused), so announce it first, with
+            // the display resolved exactly as the loop resolves it.
+            ToolDisplay display = task != null
+                    ? ToolDisplayResolver.resolve(task.getToolDisplay(), c.getToolName(),
+                            ToolNameResolver.canonical(c.getToolName(), toolCanonicalNames), c.getArgumentsRaw())
+                    : null;
+            sink.onToolCall(c.getToolName(), c.getCallId(), display);
+            sink.onToolResult(c.getToolName(), c.getCallId(), status, 0L);
+        } catch (RuntimeException e) {
+            LOGGER.debug("Event sink failed on tool_result; ignoring", e);
+        }
+    }
+
+    /**
      * The resume path itself. Reached through
      * {@code AgentOrchestrator#resumeToolLoop}, which supplies {@code setup} and
      * the JSON response-format policy so the continuation's requests match what the
@@ -165,6 +217,14 @@ class ToolLoopResumer {
         // Restore the active-spec surface. For LAZY, reactivate exactly the specs that
         // were active at pause time (activatedToolNames); otherwise the full set.
         List<ToolSpecification> activeSpecs = restoreActiveSpecs(setup, isLazy, batch.getActivatedToolNames());
+        if (isLazy) {
+            // Plus whatever this turn recorded after the batch was frozen (or before,
+            // for a batch that predates the record). The approved calls below run by
+            // name either way: every executor is registered whether or not its spec
+            // is active, and they never pass the not-activated refusal.
+            // restoreActiveSpecs returns a fresh mutable list for LAZY.
+            LazyToolCatalog.reactivate(memory, task, setup.builtInSpecs(), activeSpecs);
+        }
 
         // ── Step 1: reconstitute the transcript (primary) or fall back to rebuild ──
         List<ChatMessage> currentMessages = new ArrayList<>();
@@ -226,11 +286,13 @@ class ToolLoopResumer {
             if (verdict == HitlDecision.HitlVerdict.REJECTED) {
                 currentMessages
                         .add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note, decision.getDecidedBy())));
-                trace.add(Map.of("type", "hitl_rejected", "tool", c.getToolName(), "callId", c.getCallId()));
+                trace.add(rejectedEntry(c, cd));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_REJECTED);
                 continue;
             }
 
             // APPROVED (top-level default or per-call) below.
+            trace.add(Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId()));
 
             // Truncated raw args can't be honestly executed (the approver never saw the
             // full args and the raw bytes are incomplete). Validation already blocks
@@ -239,6 +301,7 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -251,6 +314,7 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
                 trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -267,6 +331,7 @@ class ToolLoopResumer {
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
                 trace.add(Map.of("type", "hitl_self_conversation", "tool", c.getToolName(), "callId", c.getCallId(),
                         "detail", selfTargeted));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -283,6 +348,22 @@ class ToolLoopResumer {
                         toJson(Map.of("status", "NOT_EXECUTED", "reason", selfUngating))));
                 trace.add(Map.of("type", "hitl_self_ungating", "tool", c.getToolName(), "callId", c.getCallId(),
                         "detail", selfUngating));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                continue;
+            }
+
+            // toolCallGuardrails, block-only: nothing is rewritten after approval, so a
+            // finding refuses the call. Before the claim, so a refusal consumes nothing
+            // and stays replayable; a call the journal already holds never runs again.
+            String guardrailRefusal = toolLoopRunner.toolCallGuardrails == null
+                    ? null
+                    : toolLoopRunner.toolCallGuardrails.screenApproved(task, memory, c.getToolName(), amended != null ? amended : c.getArgumentsRaw(),
+                            amended != null, toolSources, setup.toolEndpoints(), currentMessages, trace,
+                            toolLoopRunner.sideCallSpend(memory, conversationId, enableCostTracking,
+                                    () -> toolLoopRunner.toolCostDelta(conversationId, toolCostBefore)),
+                            () -> journalStore.find(conversationId, pauseEpoch, c.getCallId()).isPresent());
+            if (guardrailRefusal != null) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), guardrailRefusal));
                 continue;
             }
 
@@ -315,6 +396,7 @@ class ToolLoopResumer {
                     // Replay the stored result — NEVER re-execute (no checkpoint re-fire).
                     currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), prior.get().resultCapped()));
                     trace.add(Map.of("type", "hitl_replayed", "tool", c.getToolName(), "callId", c.getCallId()));
+                    emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_OK);
                     clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 } else {
                     // EXECUTING (crash inside the tool) — honest at-most-once outcome.
@@ -323,6 +405,7 @@ class ToolLoopResumer {
                                     + "it may or may not have taken effect — verify externally before retrying\"}"));
                     auditOutcomeUnknown(memory, c);
                     trace.add(Map.of("type", "hitl_outcome_unknown", "tool", c.getToolName(), "callId", c.getCallId()));
+                    emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_ERROR);
                     clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 }
             }
@@ -749,7 +832,7 @@ class ToolLoopResumer {
             ResolvedRequest current = resolution.resolve(rawArguments);
             if (current != null) {
                 return uriTargetsConversation(current.uri(), conversationId)
-                        || (envelope && uriTargetsConversation(rawArguments, conversationId))
+                        || (envelope && argumentsTargetConversation(rawArguments, conversationId))
                                 ? "the request targets the conversation the agent is running in"
                                 : null;
             }
@@ -760,9 +843,55 @@ class ToolLoopResumer {
                     + "falling back to its arguments for the self-conversation check.",
                     sanitize(toolName), e.getClass().getSimpleName());
         }
-        return uriTargetsConversation(rawArguments, conversationId)
+        return argumentsTargetConversation(rawArguments, conversationId)
                 ? "the request targets the conversation the agent is running in"
                 : null;
+    }
+
+    /**
+     * {@link #uriTargetsConversation} on raw tool arguments, and again on their
+     * JSON-decoded strings. The executor decodes the arguments before it uses them,
+     * so an id with a character written as a JSON escape (a backslash-u sequence)
+     * names the conversation the containment test on the raw text does not see.
+     * Arguments that do not parse are judged on the raw text alone, as before.
+     */
+    static boolean argumentsTargetConversation(String rawArguments, String conversationId) {
+        if (uriTargetsConversation(rawArguments, conversationId)) {
+            return true;
+        }
+        // Without a backslash there is no JSON escape, so decoding changes nothing.
+        if (rawArguments == null || rawArguments.indexOf(BACKSLASH) < 0) {
+            return false;
+        }
+        try {
+            StringBuilder decoded = new StringBuilder(rawArguments.length());
+            appendStrings(ENVELOPE_MAPPER.readTree(rawArguments), decoded);
+            return uriTargetsConversation(decoded.toString(), conversationId);
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
+    private static final char BACKSLASH = '\\';
+    private static final char LINE_BREAK = '\n';
+
+    /** Every field name and string value under {@code node}, one per line. */
+    private static void appendStrings(JsonNode node, StringBuilder out) {
+        if (node == null) {
+            return;
+        }
+        if (node.isTextual()) {
+            out.append(node.textValue()).append(LINE_BREAK);
+            return;
+        }
+        if (node.isObject()) {
+            node.properties().forEach(field -> {
+                out.append(field.getKey()).append(LINE_BREAK);
+                appendStrings(field.getValue(), out);
+            });
+        } else if (node.isArray()) {
+            node.forEach(element -> appendStrings(element, out));
+        }
     }
 
     /**

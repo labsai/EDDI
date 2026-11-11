@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs;
 import ai.labs.eddi.datastore.postgres.PostgresResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresTestBase;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -18,6 +19,8 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -133,5 +136,26 @@ class GroupWorkspaceStorePostgresContainerTest extends PostgresTestBase {
                 }
             }
         }
+    }
+
+    @Test
+    @DisplayName("handoff state (origins, inbox, tombstones) survives a store round trip")
+    void handoffState_roundTrips() throws Exception {
+        GroupWorkspace ws = store.readOrCreate(groupId);
+        var origin = new WorkspaceHandoffs.HandoffOrigin("h-1", WorkspaceHandoffs.SourceKind.GROUP, "src-group", 2, "gc-9", "member-1",
+                WorkspaceHandoffs.Trigger.DECISION, "VOTE@1", "art-1", "the vote", 2, List.of("agent:a", "group:src-group"), "dk-1",
+                Instant.parse("2026-11-02T10:00:00Z"), WorkspaceHandoffs.Intake.PENDING, null);
+        ws.getHandoffs().addInbox(new WorkspaceHandoffs.InboxItem("h-1", "Research ACME", "details", 7, origin));
+        ws.getHandoffs().putOrigin("task-1", origin.reviewed(WorkspaceHandoffs.Intake.APPROVED_EDITED, Instant.parse("2026-11-02T11:00:00Z")));
+        ws.getHandoffs().tombstone("dk-declined", Instant.parse("2026-11-01T10:00:00Z"));
+        assertTrue(store.casRevision(ws));
+
+        WorkspaceHandoffs back = store.find(groupId).getHandoffs();
+        assertEquals(1, back.inboxSize());
+        assertEquals(origin, back.findInbox("h-1").origin());
+        assertEquals(7, back.findInbox("h-1").priority());
+        assertEquals(WorkspaceHandoffs.Intake.APPROVED_EDITED, back.originOf("task-1").intake());
+        assertEquals(List.of("agent:a", "group:src-group"), back.originOf("task-1").lineage());
+        assertTrue(back.isDeclinedSince("dk-declined", Instant.parse("2026-10-01T00:00:00Z")));
     }
 }

@@ -172,8 +172,12 @@ public class EmailReplySender {
     private final int maxAttempts;
     private final Duration retryBackoff;
 
-    /** Rendered group replies this node may still retry, by row id. */
-    private final Map<String, Prepared> groupReplies = new ConcurrentHashMap<>();
+    /**
+     * What this node's group replies were built from, by row id, so a retry can
+     * choose the recipient and render the mail again under the current settings (a
+     * group conversation keeps no copy of the mail it answered).
+     */
+    private final Map<String, Request> groupReplies = new ConcurrentHashMap<>();
 
     @Inject
     public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
@@ -482,7 +486,7 @@ public class EmailReplySender {
             if (groupReplies.size() >= MAX_CACHED_GROUP_REPLIES) {
                 groupReplies.clear();
             }
-            groupReplies.put(row.id(), prepared);
+            groupReplies.put(row.id(), request);
         }
         try {
             executor.execute(() -> attempt(row, prepared));
@@ -583,12 +587,32 @@ public class EmailReplySender {
             return;
         }
         if (kind == ReplyKind.GROUP) {
-            Prepared cached = groupReplies.get(row.id());
-            if (cached == null) {
+            Request request = groupReplies.get(row.id());
+            if (request == null) {
                 failTerminal(row, settings, CONTENT_UNAVAILABLE, now);
                 return;
             }
-            attempt(row, new Prepared(settings, cached.mail()));
+            // What every other reply gets on a retry: the recipient is chosen again under
+            // the current settings (honorReplyTo switched off since, say), a reply whose
+            // recipient that changes or refuses is not sent, and the mail is rendered
+            // again - with the current address as its From, which the transport also
+            // uses for the envelope and the login - under the row's own Message-ID.
+            EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, request.inbound(),
+                    request.stepMail(), request.userId());
+            if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
+                terminal(row, State.SUPPRESSED, RECIPIENT_REFUSED + (decision.allowed() ? "recipient_changed" : decision.refusal()), "refused", now);
+                return;
+            }
+            RenderedMail rendered;
+            try {
+                String body = composer.body(settings, request.text(), request.stepMail());
+                rendered = composer.render(settings, row.recipient(), EmailReplyComposer.threadOf(request.stepMail(), request.inbound().messageId()),
+                        body, row.messageId());
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                failTerminal(row, settings, "RENDER: " + truncate(e.getMessage()), now);
+                return;
+            }
+            attempt(row, new Prepared(settings, rendered));
             return;
         }
         Optional<LedgerEntry> inbound = ledger.findById(ref[0]);

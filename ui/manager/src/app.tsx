@@ -60,6 +60,7 @@ const SecretsPage = lazyPage(() => import("@/pages/secrets"), "SecretsPage");
 const VariablesPage = lazyPage(() => import("@/pages/variables"), "VariablesPage");
 const AuditPage = lazyPage(() => import("@/pages/audit"), "AuditPage");
 const QuotasPage = lazyPage(() => import("@/pages/quotas"), "QuotasPage");
+const ModelPricesPage = lazyPage(() => import("@/pages/model-prices"), "ModelPricesPage");
 const WorkspacesPage = lazyPage(() => import("@/pages/workspaces"), "WorkspacesPage");
 const GdprPage = lazyPage(() => import("@/pages/gdpr"), "GdprPage");
 const BrandingPage = lazyPage(() => import("@/pages/branding"), "BrandingPage");
@@ -79,6 +80,7 @@ const LinkedAccountsPage = lazyPage(
 );
 const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "ChannelDetailPage");
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
+const OversightPage = lazyPage(() => import("@/pages/oversight"), "OversightPage");
 const FeedbackPage = lazyPage(() => import("@/pages/feedback"), "FeedbackPage");
 const AlertsPage = lazyPage(() => import("@/pages/alerts"), "AlertsPage");
 const HealthOverviewPage = lazyPage(() => import("@/pages/health-overview"), "HealthOverviewPage");
@@ -185,6 +187,7 @@ export function App() {
             <Route path="/manage/variables" element={<VariablesPage />} />
             <Route path="/manage/audit" element={<AuditPage />} />
             <Route path="/manage/quotas" element={<QuotasPage />} />
+            <Route path="/manage/model-prices" element={<ModelPricesPage />} />
             <Route path="/manage/workspaces" element={<WorkspacesPage />} />
             <Route path="/manage/gdpr" element={<GdprPage />} />
             <Route path="/manage/branding" element={<BrandingPage />} />
@@ -206,6 +209,7 @@ export function App() {
                 suggest otherwise to anyone reading the route table. */}
             <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
+            <Route path="/manage/oversight" element={<OversightPage />} />
             <Route path="/manage/feedback" element={<FeedbackPage />} />
             <Route path="/manage/alerts" element={<AlertsPage />} />
             <Route path="/manage/health" element={<HealthOverviewPage />} />

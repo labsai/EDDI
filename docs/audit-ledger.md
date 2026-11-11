@@ -3,7 +3,7 @@
 > **Status:** Available since v6.0.0
 > **EU AI Act:** Articles 12/19 — record-keeping and automatically generated logs
 
-The Audit Ledger provides a **write-once, append-only** trail of every lifecycle task execution. It captures what data each task read, what it produced, LLM-specific details (compiled prompts, model responses, token usage), tool calls, actions, costs, and timing — signed with HMAC-SHA256 for tamper detection. It also records every administrative REST action (see [Administrative actions](#administrative-actions)) and the GDPR operations.
+The Audit Ledger provides a **write-once, append-only** trail of every lifecycle task execution. It captures what data each task read, what it produced, LLM-specific details (compiled prompts, model responses, token usage), tool calls, actions, costs, and timing — signed with HMAC-SHA256 for tamper detection when a signing key is configured (off until one is). It also records every administrative REST action (see [Administrative actions](#administrative-actions)) and the GDPR operations.
 
 **What is not in it.** Reads are not recorded — neither REST `GET`s nor MCP reads. The MCP user-memory tools are not recorded. Conversation traffic is recorded per pipeline task, not per HTTP request.
 
@@ -27,8 +27,14 @@ Every time a conversation turn is processed, each lifecycle task (parser, behavi
 | `eddi.audit.erasure-mode`           | `redact` | What a GDPR erasure does to the user's rows: `redact` (pseudonymise the user id **and** replace the recorded content) or `pseudonymize` (the user id only — prompts, responses and tool calls are kept; only for a legal hold that requires the content). An unknown value means `redact` |
 | `eddi.audit.admin-actions.enabled`  | `true`  | Record administrative REST actions — see [Administrative actions](#administrative-actions) |
 | `EDDI_VAULT_MASTER_KEY`             | (none)  | Vault master key — also used to derive the HMAC signing key |
+| `eddi.audit.hmac-key` (`EDDI_AUDIT_HMAC_KEY`) | (none) | A signing secret for the ledger alone; rotating the vault master key never touches it. See [HMAC Integrity](#hmac-integrity) |
+| `eddi.audit.hmac-previous-keys`     | (none)  | Retired signing keys still accepted for verification |
+| `eddi.audit.agent-signing-enabled`  | `true`  | Sign each entry with the agent's own key (`agentSignature`) |
+| `eddi.audit.verify.recover-legacy`  | `true`  | Let verification reconstruct the timestamp precision of pre-v4 rows |
+| `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many rows one verification may try to recover |
+| `eddi.compliance.audit-signing-required` | `false` | `true` makes a missing signing key a startup failure |
 
-> **Note:** If `EDDI_VAULT_MASTER_KEY` is not set, audit entries are stored without HMAC integrity hashes. A warning is logged at startup.
+> **Note:** If neither `EDDI_VAULT_MASTER_KEY` nor `eddi.audit.hmac-key` is set, audit entries are stored without HMAC integrity hashes. The ledger logs an INFO line that signing is disabled, and the compliance startup checks log a warning (or refuse to start with `eddi.compliance.audit-signing-required=true`).
 
 ## Audit Entry Structure
 
@@ -55,6 +61,10 @@ Each audit entry captures:
 | `cost`           | double  | Monetary cost of this step                                 |
 | `timestamp`      | Instant | When the task completed                                    |
 | `hmac`           | String  | HMAC-SHA256 integrity hash                                 |
+| `agentSignature` | String  | Optional per-agent signature (null when agent signing is off) |
+| `sequence`       | long    | 0-based, gap-free position within the conversation; part of the signed payload |
+
+HITL oversight writes `hitl.sample.review`, `autonomy.promotion`, `autonomy.revert`, `autonomy.recommendation.dismissed`, `autonomy.demotion` and `autonomy.suspension.lifted` entries (`taskType: hitl`); approval analytics reads a projection of the `hitl.approval` entries, never the ledger itself — see [HITL Oversight](hitl-oversight.md#audit-ledger-entries).
 
 ### The ledger is the only copy of the prompt and the response
 
@@ -110,6 +120,10 @@ GET /auditstore/verify/{conversationId}?skip=0&limit=1000
 Recomputes every entry's HMAC and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
 
 A window that also holds unsequenced rows is no longer simply `UNAVAILABLE`: a hole between its sequenced rows still proves a deletion and is reported `BROKEN`; only a window without such a hole is `UNAVAILABLE`, since its start cannot be anchored. With signing on, a position counts as present only when its row is signed by a form that covers the sequence (v3 and later) — a v1/v2 row's sequence is not signed and could be rewritten to close a hole. What the chain still cannot show is the deletion of the **newest** entries of a conversation, or of its whole trail: nothing outside the trail records where it ended.
+
+**Per-entry verdicts:** `VALID` (HMAC matches); `VALID_RECOVERED` (a pre-v4 row that verified once its timestamp precision was reconstructed, as strong as `VALID`); `INVALID` (altered, or signed with another key); `UNSIGNED` (no HMAC, written while no key was configured); `SIGNING_DISABLED` (this deployment has no key, so nothing can be checked); `UNKNOWN_KEY` (names a recorded key the deployment no longer holds; treat as unverified).
+
+**Chain verdicts:** `INTACT` (gap-free), `BROKEN` (a missing sequence number not explained by the ledger's own drops), `INCOMPLETE` (every gap was recorded as never persisted), `UNAVAILABLE` (no sequence to check), `NOT_APPLICABLE` (agent-scoped sweeps).
 
 ### Verify an Agent's Integrity
 
@@ -197,7 +211,7 @@ List them with [`GET /auditstore/admin-actions`](#list-administrative-actions). 
 
 ### Keyed GDPR pseudonyms
 
-GDPR erasure replaces a user id in the ledger with a pseudonym. Up to v4 both the signature's identity token and the stored pseudonym were `gdpr-erased:<sha256(userId)>` — an unsalted hash, so anyone with a list of candidate ids could tell whose rows were erased. v5 rows use `gdpr-erased:k1:<HMAC(key, userId)>`, computed under a key derived from the signing key, which cannot be recomputed without it; erasure writes that form into the v5 rows each key signed. Rows written before v5 still receive the unkeyed form, because their signatures cover it — changing it would make them read as tampered. The database logs keep the unkeyed form as well (see the follow-up in the changelog).
+GDPR erasure replaces a user id in the ledger with a pseudonym. Up to v4 both the signature's identity token and the stored pseudonym were `gdpr-erased:<sha256(userId)>` — an unsalted hash, so anyone with a list of candidate ids could tell whose rows were erased. v5 rows use `gdpr-erased:k1:<HMAC(key, userId)>`, computed under a key derived from the signing key, which cannot be recomputed without it; erasure writes that form into the v5 rows each key signed. Rows written before v5 still receive the unkeyed form, because their signatures cover it — changing it would make them read as tampered. The database logs use a keyed form too (`gdpr-erased:k1:…`, or `gdpr-erased:s1:…` under a per-deployment salt); only legacy log rows and an erasure that cannot read the salt carry the unkeyed form.
 
 To verify entries have not been tampered with, use the verification endpoints above rather than recomputing digests by hand — verification has to pick the canonicalizer from the entry's own version tag.
 
@@ -279,7 +293,7 @@ discovering it at verify time.
 
 ## Secret Redaction
 
-All string values in audit entries pass through the `SecretRedactionFilter` before storage. The following patterns are redacted:
+All string values in audit entries pass through the `SecretRedactionFilter` before storage. Patterns redacted include (not an exhaustive list; the filter also covers further provider key formats, JWTs, Basic auth and connection strings):
 
 - OpenAI API keys (`sk-...`)
 - Anthropic API keys (`sk-ant-...`)
@@ -292,7 +306,7 @@ Redaction is applied recursively to nested maps and lists.
 
 ## Failure Handling
 
-If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.deadletter.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`.
+If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.<prefix>.dlq.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`.
 
 **Queue overflow has two outcomes, and only one of them is recoverable.** Both increment `eddi_audit_entries_dropped_total`, so the counter on its own does not say which happened:
 
@@ -305,9 +319,13 @@ The asymmetry is deliberate. A re-queued entry has already consumed its chain po
 
 > **A dropped submission is unrecoverable and invisible to chain verification.** `eddi_audit_entries_dropped_total` rising while `/auditstore/verify` still says `INTACT` is the only signal that audit evidence was lost. Alert on the counter; do not treat a clean verify as proof of completeness.
 
+> **A crash between a turn and the next flush loses that turn's audit entry, and with it the only copy of its compiled prompt and model response.** The ledger takes over the two LLM-detail keys once its queue has accepted the turn's entries, and the conversation is then stored without them; queue admission is not storage. Entries still queued when the process dies abruptly (the default window is `eddi.audit.flush-interval-seconds`, plus up to three retries of a failing batch) are lost. A graceful shutdown first tries to write them to the store and sends only what it cannot store to the dead-letter sink (that write can fail too, so it is an attempt, not a guarantee); a crash does neither. A refused or thrown submit is handled separately — the conversation keeps the keys. Shorten the flush interval if that window matters to you. Releasing the keys only after the store confirms the entries would close it and is tracked as follow-up work.
+>
+> **A turn that recorded a failed task keeps its prompt and response in the stored step.** A failed task's audit entry carries no LLM detail, so the ledger does not own what that task wrote and the conversation is not stripped of it.
+>
 > **The dead-letter record is the whole entry, and that makes the sink a personal-data location.** It carries the `userId`, the verbatim input and output, the LLM detail and tool calls, plus the entry's own timestamp, sequence, HMAC and agent signature — anything less is not replayable, and without the `sequence` an operator cannot prove which chain positions the ledger itself abandoned, so every self-inflicted gap reads as `BROKEN` rather than `INCOMPLETE`. Secret redaction has already been applied, but user content has not.
 >
-> The GDPR erasure cascade redacts the ledger and pseudonymizes the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.deadletter.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
+> The GDPR erasure cascade redacts the ledger and pseudonymizes the database logs; it does **not** touch `eddi.audit.dead-letter-path` or the `eddi.<prefix>.dlq.audit` subject. Give the sink the same access controls, encryption at rest and retention handling as the ledger, and include it in your Art. 17 procedure — see [The audit dead-letter sink holds personal data](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
 >
 > The image creates the default directory (`/opt/eddi/data`) and hands it to the runtime user, and the ledger reports at startup if the configured location is not writable — the sink's unavailability should be discovered before the incident that needs it, not from an error line nested inside the error line reporting the drop.
 

@@ -10,9 +10,11 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -25,6 +27,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.UsageMaps;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
@@ -419,7 +422,12 @@ class CascadingModelExecutor {
             LOGGER.debugf("Cascade strategy '%s' is not implemented; running sequentially", strategy);
         }
 
-        boolean useAgentMode = cascade.isEnableInAgentMode() && task.isAgentMode();
+        // answerMode "tool" answers through the reply tool, so every step needs the
+        // tool
+        // loop even when the task has no other tool (isAgentMode() is false then).
+        // enableInAgentMode does not gate it: a task with other tools and
+        // enableInAgentMode=false never reaches the cascade (LlmTask skips it).
+        boolean useAgentMode = (cascade.isEnableInAgentMode() && task.isAgentMode()) || AnswerTool.enabled(task);
         String effectiveStrategy = resolveEffectiveStrategy(cascade.getEvaluationStrategy(), convertToObject, useAgentMode, cascade);
         HeuristicConfig heuristicConfig = cascade.getHeuristic();
 
@@ -577,6 +585,8 @@ class CascadingModelExecutor {
             var stepExchange = new ToolExchangeRecorder(stepPrices);
 
             try {
+                // strict mode: a refused unpriced step fails like any other and escalates
+                UnpricedCallPolicy.require(stepPrices.override(), modelType, modelName, memory, cascade.getMaxCostPerRun() != null, "cascade_step");
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
                 // the confidence value — otherwise tokens could be sent for a step that then
                 // escalates. That is: the last step (always accepted), a null-threshold step
@@ -600,12 +610,12 @@ class CascadingModelExecutor {
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         stepPrices.inputPer1M(), stepPrices.outputPer1M(),
                         // the step's merged params, so a step-level responseSchema override applies
-                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId(), RescueOptions.of(task));
                 if (retryPolicy != null) {
                     // A re-ask of this step is checked with the earlier steps' cost as well.
                     retryPolicy = retryPolicy.withSpend(spend.plus(totals.runCostUsd()));
                 }
-                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null && !RescueOptions.of(task).wraps()
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
@@ -787,7 +797,7 @@ class CascadingModelExecutor {
 
                 if (stepTimedOut && bestSoFar != null) {
                     stepTrace.put("status", "timeout");
-                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName);
+                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName, memory, false);
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
@@ -868,7 +878,8 @@ class CascadingModelExecutor {
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName);
+                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName, memory,
+                        isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
                 increment("eddi.llm.cascade.escalations", "reason", "timeout");
@@ -947,7 +958,7 @@ class CascadingModelExecutor {
                 stepTrace.put("status", errorType);
                 stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, failure, modelName);
+                recordFailure(stepTrace, failure, modelName, memory, isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
@@ -1005,7 +1016,8 @@ class CascadingModelExecutor {
             ticket.release();
         } else {
             var detection = convertToObject
-                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId())
+                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId(),
+                            RescueOptions.of(task))
                     : null;
             if (detection != null) {
                 ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
@@ -1314,7 +1326,7 @@ class CascadingModelExecutor {
         // child of the eddi.pipeline.task span (ToolExecutionService does the same).
         var started = new AtomicBoolean();
         var unwound = new CountDownLatch(1);
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(RetryObserver.propagate(() -> {
             started.set(true);
             try {
                 if (useAgentMode) {
@@ -1328,7 +1340,7 @@ class CascadingModelExecutor {
             } finally {
                 unwound.countDown();
             }
-        })));
+        }))));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
@@ -1423,7 +1435,8 @@ class CascadingModelExecutor {
             tokenUsage = extractTokenUsage(responseMetadata);
         }
 
-        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                judgeRequest(originalMessages, task));
         return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata,
                 evalResult.judgeTokenUsage(), unresolved, reasks);
     }
@@ -1433,6 +1446,15 @@ class CascadingModelExecutor {
      * wrapper is never used here — {@code evaluationStrategy} has already been
      * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
      */
+    /**
+     * What a {@code judge_model} grades a step's answer against: the user's latest
+     * request as the step's model saw it, and the cascade's acceptance criterion.
+     */
+    private static ConfidenceEvaluator.JudgeRequest judgeRequest(List<ChatMessage> messages, LlmConfiguration.Task task) {
+        ModelCascadeConfig cascade = task != null ? task.getModelCascade() : null;
+        return ConfidenceEvaluator.JudgeRequest.of(messages, cascade != null ? cascade.getAcceptanceCriterion() : null);
+    }
+
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
@@ -1482,7 +1504,8 @@ class CascadingModelExecutor {
             }
             String responseText = agentResult.response();
             Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
-            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                    judgeRequest(originalMessages, task));
             return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata(),
                     evalResult.judgeTokenUsage(), unresolved, reasks);
         }
@@ -1734,11 +1757,7 @@ class CascadingModelExecutor {
         if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
             return;
         }
-        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
-            if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
-                runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
-            }
-        }
+        UsageMaps.merge(runTokenUsage, stepTokenUsage, AgentOrchestrator.TOKEN_USAGE_FIELDS);
     }
 
     /**
@@ -1780,7 +1799,12 @@ class CascadingModelExecutor {
      * class is counted as {@code eddi.llm.failure{class,model}}. The trace's
      * existing {@code status}/{@code error} fields are unchanged.
      */
-    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName) {
+    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName, IConversationMemory memory,
+                               boolean endsCascade) {
+        // Agent Health: escalated (or an earlier answer served) is recovered by the
+        // cascade; a failure that ends it is settled by the task (fallback or none).
+        LlmFailureRecords.record(memory != null ? memory.getCurrentStep() : null, failure.cls(), modelName,
+                endsCascade ? LlmFailureRecords.PENDING : HealthFailure.CASCADE);
         stepTrace.put("failureClass", failure.cls().name());
         if (failure.retryAfterMs() != null) {
             stepTrace.put("retryAfterMs", failure.retryAfterMs());

@@ -1,6 +1,6 @@
 # MCP Client — connecting EDDI to external MCP servers
 
-> EDDI is an MCP **server** (see [MCP Server](mcp-server.md), 80+ tools) *and* an
+> EDDI is an MCP **server** (see [MCP Server](mcp-server.md), 96 tools) *and* an
 > MCP **client**. This page is about the client half: pointing one of your agents
 > at somebody else's MCP server so its tools become the agent's tools.
 
@@ -80,6 +80,7 @@ The same configuration can carry a list of `mcpCalls`, which `McpCallsTask` runs
 | Field | Type | Default | Purpose |
 | --- | --- | --- | --- |
 | `name` | string | — | Name in logs; also the default `responseObjectName` prefix. |
+| `description` | string | — | Free-text description of what the call is for. |
 | `actions` | list | — | Behavior-rule actions that trigger the call (`"*"` matches any). |
 | `toolName` | string | — | The server tool to call. |
 | `toolArguments` | object | — | Arguments; string values are templates. |
@@ -214,10 +215,19 @@ outruns scrubbing.
 > transmitted in the clear, and EDDI will not warn you. Reserve `http://` for a
 > loopback server with no credential.
 
-Rotating a vault secret now evicts cached MCP clients immediately. Before that,
-the client cache was keyed on a hash of the *unresolved* reference and the
-credential was resolved once per client, so a rotated secret kept presenting the
-old value until restart.
+Rotating a vault secret evicts cached MCP clients immediately, so the next call presents the new value.
+
+### Network safety
+
+`mcpServerUrl` is an outbound URL chosen by the agent's author. SSRF validation of the
+resolved target is **opt-in**: `eddi.security.ssrf-protection.enabled` defaults to `false`,
+so unless you enable it an `mcpcalls` author can point an agent at internal hosts. The
+cloud instance-metadata endpoints are refused either way. See
+[security.md](security.md) and `eddi.security.ssrf-protection.*` in
+[configuration-reference.md](configuration-reference.md).
+
+Related properties: `eddi.mcp.tool-cache.ttl-ms` (default `300000`) and the
+tool-description and schema size limits listed in the configuration reference.
 
 ---
 
@@ -256,6 +266,10 @@ context. Three layers apply, none of which you configure to get:
 
 `directiveAction` is `warn`, `redact` (default) or `block`. An unrecognised value
 degrades to `warn` — a typo must not silently start blocking every tool result.
+
+This governs what comes **out** of a tool. What goes **in** — the arguments of a
+call, such as the body of a comment about to be posted — is screened by
+[`toolCallGuardrails`](tool-call-guardrails.md).
 
 `directiveAppliesToSources` narrows **directive handling only**. Provenance marking
 is never narrowed, deliberately: an unmarked result arriving in the same transcript

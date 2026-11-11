@@ -11,7 +11,12 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
+import ai.labs.eddi.modules.llm.impl.LlmTask;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -187,6 +192,13 @@ final class GuardrailModelClient {
             Map<String, String> modelParameters = modelParameters(context, call.ownParameters(), call.defaultTimeoutMs());
             ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters);
             providerTag = provider.trim();
+            // strict pricing mode: an unpriced guardrail call is "could not decide", so
+            // failMode applies
+            if (UnpricedCallPolicy.check(PriceOverride.of(price(context, PARAM_INPUT_PRICE), price(context, PARAM_OUTPUT_PRICE)), providerTag,
+                    LlmTask.resolveModelName(modelParameters, providerTag), null, false, "guardrail") != null) {
+                outcome = UnpricedCallPolicy.REASON;
+                throw new GuardrailUndecidedException(UnpricedCallPolicy.REASON, 0.0);
+            }
             ChatRequest.Builder request = ChatRequest.builder().messages(messages);
             ResponseFormat format = call.responseFormat() != null ? call.responseFormat().choose(providerTag, modelParameters) : null;
             if (format != null) {
@@ -196,7 +208,8 @@ final class GuardrailModelClient {
             // budget before it starts, like the task's own model call — for every
             // model-backed guardrail type. Refused, it is not made: "could not decide",
             // so failMode applies.
-            try (PaidCallGate.PaidCall paid = context.spend().begin(expectedCost(messages, context))) {
+            try (PaidCallGate.PaidCall paid = context.spend()
+                    .begin(expectedCost(messages, context, providerTag, LlmTask.resolveModelName(modelParameters, providerTag)))) {
                 if (!paid.admitted()) {
                     outcome = PaidCallGate.REASON_SPEND_REFUSED;
                     LOGGER.infof("%s of task '%s' skipped: %s", name, context.taskId(), paid.refusalReason());
@@ -260,12 +273,13 @@ final class GuardrailModelClient {
     /**
      * The template data every model-backed guardrail offers: {@code input} (the
      * user's message; in the output phase, the user message the model answered),
-     * {@code output} (the answer, output phase) and {@code context} (the turn's
-     * retrieved context, output phase, only with {@code includeRetrievedContext}).
+     * {@code output} (the answer, output phase; the screened argument, tool-call
+     * phase) and {@code context} (the turn's retrieved context, output phase, only
+     * with {@code includeRetrievedContext}).
      */
     static Map<String, Object> templateData(String text, GuardrailContext context) {
         String screened = text != null ? text : "";
-        boolean output = context.phase() == GuardrailPhase.OUTPUT;
+        boolean output = context.phase() != GuardrailPhase.INPUT;
         Map<String, Object> data = new HashMap<>();
         data.put("input", output ? lastUserText(context.messages()) : screened);
         data.put("output", output ? screened : "");
@@ -345,10 +359,8 @@ final class GuardrailModelClient {
         if (usage == null) {
             return 0.0;
         }
-        Map<String, Object> tokenUsage = new HashMap<>();
-        tokenUsage.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
-        tokenUsage.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
-        double cost = TokenPricing.cost(inputPrice, outputPrice, tokenUsage);
+        // the metered map, so cache tokens and the catalog price are seen
+        double cost = TokenPricing.cost(inputPrice, outputPrice, ToolContextBudget.tokenUsageMap(usage));
         return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
     }
 
@@ -359,7 +371,20 @@ final class GuardrailModelClient {
      * the guardrail is unpriced.
      */
     static double expectedCost(List<ChatMessage> messages, GuardrailContext context) {
+        return expectedCost(messages, context, null, null);
+    }
+
+    /**
+     * As {@link #expectedCost(List, GuardrailContext)}, falling back to the
+     * catalog's input price for {@code provider}/{@code modelName} when the
+     * guardrail names none, so the reservation matches what {@link #cost} later
+     * charges.
+     */
+    static double expectedCost(List<ChatMessage> messages, GuardrailContext context, String provider, String modelName) {
         Double inputPrice = price(context, PARAM_INPUT_PRICE);
+        if (inputPrice == null && provider != null && modelName != null) {
+            inputPrice = ModelPriceResolver.resolve(provider, modelName).map(e -> e.inputPricePer1M()).orElse(null);
+        }
         if (inputPrice == null || messages == null) {
             return 0.0;
         }

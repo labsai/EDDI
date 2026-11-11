@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.setup;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 import java.util.List;
 
@@ -134,7 +135,39 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          *
          * Admin input like grantReferencedSecrets: not exposed on any MCP tool.
          */
-        List<String> allowedHosts) {
+        List<String> allowedHosts,
+        /*
+         * Generate only: true returns what the setup would create — the apicalls
+         * configurations, the LLM configuration with its tool list, the workflow, the
+         * agent with its gate, unusableEndpoints and unmatchedEndpoints — and writes
+         * nothing: no store, no vault entry, no descriptor, no grant, no deploy. The
+         * configurations are built by the same code a real setup runs; only the writes
+         * are skipped, so a script can review, diff or store them. A plaintext apiKey
+         * or apiAuth is shown as AgentSetupService.DRY_RUN_VAULT_PLACEHOLDER, never
+         * echoed back. Null or false is a normal setup.
+         *
+         * Hidden from the OpenAPI schema so the Platform Operator's tool generated from
+         * setup-api does not carry it: a preview is harmless, but no addition of this
+         * kind is to become something the operator can call.
+         */
+        @Schema(hidden = true) Boolean dryRun) {
+
+    /** Every field but {@link #dryRun}, which stays off. */
+    public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
+            String apiBaseUrl, String apiAuth, String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy,
+            String environment, String llmBaseUrl, AgentConfiguration.HitlConfig hitlConfig, String mcpServerUrls, Integer maxToolIterations,
+            String vaultKeyName, String apiAuthHeader, Boolean grantReferencedSecrets, List<String> allowedHosts) {
+        this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
+                enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
+                grantReferencedSecrets, allowedHosts, null);
+    }
+
+    /** This request as a dry run. */
+    public CreateApiAgentRequest asDryRun() {
+        return new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
+                enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations,
+                vaultKeyName, apiAuthHeader, grantReferencedSecrets, allowedHosts, Boolean.TRUE);
+    }
 
     /** Every field but {@link #grantReferencedSecrets}, which stays off. */
     public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
@@ -143,7 +176,7 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
             String vaultKeyName, String apiAuthHeader) {
         this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
                 enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
-                null, null);
+                null, null, null);
     }
 
     /** Every field but {@link #allowedHosts}, which is derived. */
@@ -153,6 +186,6 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
             String vaultKeyName, String apiAuthHeader, Boolean grantReferencedSecrets) {
         this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
                 enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
-                grantReferencedSecrets, null);
+                grantReferencedSecrets, null, null);
     }
 }

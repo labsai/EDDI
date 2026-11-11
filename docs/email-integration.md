@@ -1,6 +1,6 @@
 # Email Integration
 
-> **Status**: New · **Since**: v6.6.0 · Plan: [`planning/email-channel-plan.md`](../planning/email-channel-plan.md) (Phases 2 and 3)
+> **Since**: v6.6.0
 
 An **email integration** connects a mailbox to an agent: EDDI polls the mailbox over IMAP and every new mail starts
 one agent turn, with the mail as the turn's input and its attachments as files. It is a channel integration with
@@ -354,7 +354,7 @@ inbound sweep re-creates it.
 `eddi_email_inbound_total{integration,transport,mode,outcome}` (`mode` is `trigger` or `conversation`; `outcome=bounce`
 for a delivery report that applied to a reply), `eddi_email_poll_duration_seconds{…,outcome}`,
 `eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}` (`requeued`, `lost`, `done`,
-`failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`.
+`failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`, `eddi_email_poll_marked_total{result}`, `eddi_email_dns_lookups_total` and the `eddi_email_ledger_pending` gauge (see [metrics.md](metrics.md) for the full list).
 Conversation mode adds `eddi_email_outbound_total{kind="reply",outcome}` (`sent`, `retry`, `failed`, `suppressed`,
 `throttled`, `refused`, `bounced`, `no_output`), `eddi_email_outbound_latency_seconds{kind="reply"}` and
 `eddi_email_suppressions_total{reason}`. Described in [metrics.md](metrics.md), charted in the Full Metrics dashboard's

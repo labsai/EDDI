@@ -11,9 +11,11 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -150,6 +152,47 @@ class HitlAccessGuardTest {
         when(ownershipValidator.isAdmin(identity)).thenReturn(true);
 
         assertNull(guard.requireConversationHitlAccess("c1"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private ConversationAccessGuard withTurnGuard() throws Exception {
+        ConversationDescriptor descriptor = mock(ConversationDescriptor.class);
+        when(descriptor.getUserId()).thenReturn("owner1");
+        when(descriptorStore.readDescriptor("c1", 0)).thenReturn(descriptor);
+        var turnGuard = mock(ConversationAccessGuard.class);
+        Instance<ConversationAccessGuard> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(turnGuard);
+        guard.conversationAccessGuardInstance = instance;
+        return turnGuard;
+    }
+
+    @Test
+    void requireConversationResumeAccess_owner_mustStillPassTheTurnCheck() throws Exception {
+        var turnGuard = withTurnGuard();
+        // The owner's share on the agent was revoked: the turn check refuses.
+        doThrow(new ForbiddenException("no use")).when(turnGuard).requireConversationTurnAccess("c1");
+
+        assertThrows(ForbiddenException.class, () -> guard.requireConversationResumeAccess("c1"));
+        verify(turnGuard).requireConversationTurnAccess("c1");
+    }
+
+    @Test
+    void requireConversationResumeAccess_approverDecidesByRole() throws Exception {
+        var turnGuard = withTurnGuard();
+        when(ownershipValidator.isApprover(identity)).thenReturn(true);
+
+        assertEquals("owner1", guard.requireConversationResumeAccess("c1"));
+        verify(turnGuard, never()).requireConversationTurnAccess(anyString());
+    }
+
+    @Test
+    void requireConversationResumeAccess_adminDecidesByRole() throws Exception {
+        var turnGuard = withTurnGuard();
+        when(ownershipValidator.isAdmin(identity)).thenReturn(true);
+
+        assertEquals("owner1", guard.requireConversationResumeAccess("c1"));
+        verify(turnGuard, never()).requireConversationTurnAccess(anyString());
     }
 
     // ---- group surface -----------------------------------------------------

@@ -68,7 +68,7 @@ To expose an **unauthenticated** instance on purpose — an isolated network
 only you can reach — set `EDDI_I_UNDERSTAND_PUBLIC=true` as well; the GCP
 provisioner's `--i-understand-public` does exactly that. Every API endpoint,
 the secrets vault and the MCP server are then open to whoever can reach the
-port, and EDDI's own `AuthStartupGuard` says so in its log every hour.
+port, and EDDI's own `AuthStartupGuard` says so in its log at startup.
 
 ### With Keycloak Authentication
 
@@ -82,7 +82,7 @@ This starts:
 
 - **Keycloak 26** on `127.0.0.1:8180` (admin console: `http://localhost:8180/admin`, login `admin` / `KC_BOOTSTRAP_ADMIN_PASSWORD` — `admin` unless you set it; the installers generate one into `.env`)
 - **`keycloak-guard`**, a one-shot check Keycloak waits for: it exits 1, so Keycloak never starts, when `KEYCLOAK_BIND` is not a loopback address while `KC_BOOTSTRAP_ADMIN_PASSWORD` is unset or `admin`. The loopback quick start needs no `.env`; to publish Keycloak on another interface, set `KC_BOOTSTRAP_ADMIN_PASSWORD` first (the installers and the GCP provisioner already do). Keycloak reads that password only when it first creates the master realm, so on an existing `keycloak-data` volume put the console's current admin password there
-- **`keycloak-admin-rotate`**, a one-shot step EDDI waits for: once Keycloak is healthy it tries the `admin` login, and if an existing volume still accepts it, sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` (the password goes to `kcadm` on stdin). The guard alone cannot see a stored password, so this is what makes a new `.env` value take effect on an old volume. If `KC_BOOTSTRAP_ADMIN_USERNAME` names another user, the original `admin` account is checked and rotated the same way. Once a login with the configured credentials succeeds it leaves a marker in the volume, and `keycloak-guard` serves an existing volume off loopback only after that marker exists: start an old volume once on loopback
+- **`keycloak-admin-rotate`**, a one-shot step EDDI waits for: once Keycloak is healthy it tries the `admin` login, and if an existing volume still accepts it, sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` (the password goes to `kcadm` on stdin). The guard alone cannot see a stored password, so this is what makes a new `.env` value take effect on an old volume. If `KC_BOOTSTRAP_ADMIN_USERNAME` names another user, the original `admin` account is checked and rotated the same way. Once a login with the configured credentials succeeds it leaves a marker in the volume, and `keycloak-guard` serves an existing volume off loopback only after that marker exists: start an old volume once on loopback. With a non-default `KC_BOOTSTRAP_ADMIN_PASSWORD` (a password of `admin` skips the check and the step succeeds), if that login fails (the admin password was changed in the console so `.env` no longer matches, or `KC_BOOTSTRAP_ADMIN_USERNAME` was renamed on an existing volume), the step exits 1 and EDDI does not start, on loopback too: put the console's password back in `.env`, restore the user name, or reset the `keycloak-data` volume.
 - **EDDI** on port `7070` with OIDC auth enabled
 - **MongoDB** for data storage
 
@@ -174,6 +174,16 @@ docker run --name eddi \
 | `EDDI_I_UNDERSTAND_PUBLIC` | `false`                                       | Acknowledges a deliberately unauthenticated, non-loopback `EDDI_BIND`; lifts the refusal above |
 
 Set configuration through environment variables like these rather than by overriding `JAVA_OPTS_APPEND`: the image sets `JAVA_OPTS_APPEND` itself, and a runtime value replaces it instead of adding to it.
+
+### Update check
+
+EDDI looks for a newer release once a day and puts a notification in the administrators' inbox (the bell in the Manager's top bar) when there is one. It is **on by default**: one anonymous request a day to `api.github.com/repos/labsai/EDDI/releases/latest`, the first a minute after boot, carrying nothing about your deployment.
+
+| Variable                    | Default | Description |
+| --------------------------- | ------- | ----------- |
+| `EDDI_UPDATE_CHECK_ENABLED` | `true`  | `false` switches the check off entirely — the first check after the first start included, because it is read before the database is touched. It wins over the Manager's switch, which then shows as locked. Compose passes it through from `.env`; the Helm chart sets it from `eddi.updateCheck.enabled` |
+
+Administrators can also turn it off on the Manager's **Updates** page; that is stored in the database, so it survives restarts and applies to every node. A white-labelled deployment that has not set `eddi.branding.show-update-check` neither checks nor notifies. `eddi.update-check.interval` (default `24h`) changes the cadence.
 
 ### AI Tools
 

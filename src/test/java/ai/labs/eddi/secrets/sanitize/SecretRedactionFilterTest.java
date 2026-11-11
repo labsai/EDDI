@@ -670,6 +670,79 @@ class SecretRedactionFilterTest {
         }
 
         @Test
+        void aQuotedCookieValueIsRedactedWithItsQuotesKept() {
+            assertEquals("Cookie: sid=\"<REDACTED>\"; theme=<REDACTED>", redactTwice("Cookie: sid=\"abc123session\"; theme=dark"));
+        }
+
+        @Test
+        void aJsonCarriersClosingQuoteIsNotReadAsAnOpeningOne() {
+            // Nothing to mask: the text must come back exactly as it went in
+            String text = "{\"h\":\"Cookie: sid=\",\"b\":\"c\"}";
+            assertEquals(text, redactTwice(text));
+        }
+
+        @Test
+        void aJsonKeysClosingQuoteIsNotReadAsAnOpeningOne() {
+            assertValidJson(redactTwice("{\"Cookie: a=\":\"v\"}"));
+        }
+
+        @Test
+        void anApostropheInsideAQuotedCookieValueIsRedactedWithTheRest() {
+            assertEquals("Cookie: sid=\"<REDACTED>\"; theme=<REDACTED>", redactTwice("Cookie: sid=\"abc'def123456\"; theme=dark"));
+        }
+
+        @Test
+        void aQuotedCookieValueInsideAJsonCarrierIsRedacted() {
+            String redacted = redactTwice("{\"h\":\"Cookie: sid=\\\"abc123session\\\"\"}");
+            assertEquals("{\"h\":\"Cookie: sid=\\\"<REDACTED>\\\"\"}", redacted);
+            assertValidJson(redacted);
+        }
+
+        @Test
+        void aSetCookieWhoseFirstPairIsNamedLikeAnAttributeIsStillACookie() {
+            assertEquals("Set-Cookie: Path=<REDACTED>; Secure", redactTwice("Set-Cookie: Path=abc123session; Secure"));
+            assertEquals("Set-Cookie: Domain=<REDACTED>; Path=/", redactTwice("Set-Cookie: Domain=abc123session; Path=/"));
+        }
+
+        @Test
+        void aSetCookieWhoseFirstPairIsExpiresIsStillACookie() {
+            assertEquals("Set-Cookie: Expires=<REDACTED>; HttpOnly", redactTwice("Set-Cookie: Expires=abc123session; HttpOnly"));
+        }
+
+        @Test
+        void aQuotedCookieValueThatStartsWithAColonIsRedacted() {
+            assertEquals("Set-Cookie: Path=\"<REDACTED>\"", redactTwice("Set-Cookie: Path=\":abc123session\""));
+            assertEquals("Cookie: sid=\"<REDACTED>\"", redactTwice("Cookie: sid=\":abc123session\""));
+        }
+
+        @Test
+        void aJsonKeyFollowedByAnObjectValueStaysValidJson() {
+            assertValidJson(redactTwice("{\"Cookie: a=\":{\"x\":\"v\"}}"));
+        }
+
+        @Test
+        void aQuotedSetCookieAttributeIsKept() {
+            assertEquals("Set-Cookie: a=<REDACTED>; Domain=\"example.com\"", redactTwice("Set-Cookie: a=b; Domain=\"example.com\""));
+        }
+
+        @Test
+        void aBareFlagDoesNotEndTheWalkWhateverTheHeaderKind() {
+            // "x_set-cookie" is matched as a Cookie header: the lookbehind refuses "set-"
+            // after "_"
+            assertEquals("x_set-cookie: sid=<REDACTED>; Secure, auth=<REDACTED>", redactTwice("x_set-cookie: sid=a; Secure, auth=xyz"));
+        }
+
+        @Test
+        void expiresInARequestHeaderIsACookieAndItsDateSpanIsMasked() {
+            assertEquals("Cookie: expires=<REDACTED>; sid=<REDACTED>", redactTwice("Cookie: expires=Wed, 21 Oct 2015; sid=abc123session"));
+        }
+
+        @Test
+        void cookieAttributeNamesAreCookiesInARequestHeader() {
+            assertEquals("Cookie: Path=<REDACTED>", redactTwice("Cookie: Path=abc123session"));
+        }
+
+        @Test
         void aJsonHeaderMapStaysJson() {
             String redacted = redactTwice("{\"Cookie\":\"sid=abc123; lang=en\",\"Accept\":\"*/*\"}");
             assertEquals("{\"Cookie\":\"sid=<REDACTED>; lang=<REDACTED>\",\"Accept\":\"*/*\"}", redacted);

@@ -1019,7 +1019,7 @@ public class GuardrailService {
      * The bean for this config in this phase, or null (with a one-time WARN) when
      * the type is unknown or does not run in the phase.
      */
-    private ContentGuardrail resolve(GuardrailConfig config, GuardrailPhase phase) {
+    ContentGuardrail resolve(GuardrailConfig config, GuardrailPhase phase) {
         if (config == null || config.getType() == null) {
             return null;
         }
@@ -1052,7 +1052,7 @@ public class GuardrailService {
      * reported that it could not decide — the reason to record and what the failed
      * attempt cost.
      */
-    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd, GuardrailVerdict partial) {
+    record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd, GuardrailVerdict partial) {
         boolean failed() {
             return verdict == null;
         }
@@ -1062,7 +1062,7 @@ public class GuardrailService {
      * Evaluates one guardrail without ever propagating its failure (logged); what a
      * failure does is {@link #failsClosed}'s decision.
      */
-    private Evaluation evaluate(ContentGuardrail guardrail, String text, GuardrailContext context) {
+    Evaluation evaluate(ContentGuardrail guardrail, String text, GuardrailContext context) {
         try {
             GuardrailVerdict verdict = guardrail.evaluate(text, context);
             if (verdict == null) {
@@ -1084,7 +1084,7 @@ public class GuardrailService {
         }
     }
 
-    private void emit(Consumer<GuardrailOutcome> onOutcome, GuardrailOutcome outcome) {
+    void emit(Consumer<GuardrailOutcome> onOutcome, GuardrailOutcome outcome) {
         if (meterRegistry != null) {
             meterRegistry.counter(METRIC_TRIGGERED, "phase", outcome.phase().label(), "type", outcome.type(), "action", outcome.action().label())
                     .increment();

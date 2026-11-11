@@ -5,6 +5,10 @@
 package ai.labs.eddi.engine.cluster.admin;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.internal.TurnIdempotencyService;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
@@ -48,6 +52,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,6 +72,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 @DisplayName("ClusterAdminService")
@@ -151,9 +158,27 @@ class ClusterAdminServiceTest {
     }
 
     private ClusterAdminService newService(ClusterConfig cfg) {
-        return new ClusterAdminService(cfg, activity, watcher, coordinator, leaseManager, rpc, instance(connections), instance(presence),
-                instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit, new SimpleMeterRegistry(),
-                shared, instance(null));
+        ClusterAdminService created = new ClusterAdminService(cfg, activity, watcher, coordinator, leaseManager, rpc, instance(connections),
+                instance(presence), instance(natsLeases), instance(eventBus), memoryStore, conversationService, deployments, audit,
+                new SimpleMeterRegistry(), shared, instance(null));
+        // a replay settles on the thread that delivers the turn's answer
+        created.replayCompletions = Runnable::run;
+        return created;
+    }
+
+    /**
+     * The conversation service answers every replayed turn at once, and the turn
+     * commits: the conversation's revision moves past the one read before.
+     */
+    private void replayedTurnsCommit() throws Exception {
+        AtomicLong revision = new AtomicLong(3);
+        when(memoryStore.getRevision(anyString())).thenAnswer(i -> revision.get());
+        doAnswer(i -> {
+            revision.incrementAndGet();
+            ConversationResponseHandler handler = i.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -337,6 +362,53 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("D6: consoles polling the lease page share one scan until a force-release on this node")
+        void leaseScanIsShared() throws Exception {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+                    new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
+            when(natsLeases.forceRelease("c.conv1", 10L))
+                    .thenReturn(new ForceRelease(ForceReleaseOutcome.RELEASED, new LeaseInfo("n2", "b2", 10, NOW), 10));
+
+            service.leases(null, false, 100);
+            service.leases("conv", true, 100);
+            service.leases(null, false, 10);
+            verify(natsLeases, times(1)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(memoryStore, times(1)).loadListingSummaries(anyCollection());
+
+            service.forceRelease("conv1", 10L, "admin-1");
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
+        @DisplayName("D6: a scan that runs while the force-release is in flight is not served afterwards")
+        void scanDuringForceReleaseIsDropped() {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+                    new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
+            when(natsLeases.forceRelease("c.conv1", 10L)).thenAnswer(inv -> {
+                service.leases(null, false, 100); // a console refresh racing the release
+                return new ForceRelease(ForceReleaseOutcome.RELEASED, new LeaseInfo("n2", "b2", 10, NOW), 10);
+            });
+
+            service.forceRelease("conv1", 10L, "admin-1");
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
+        @DisplayName("D6: a scan invalidated while it reads the bucket is returned but not cached")
+        void scanInvalidatedMidwayIsNotCached() {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenAnswer(inv -> {
+                service.invalidateLeaseScan();
+                return List.of(new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null));
+            });
+
+            assertEquals(1, service.leases(null, false, 100).leases().size());
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
         @DisplayName("a holder that came back with a new boot is RESTARTED")
         void restartedHolder() {
             when(natsLeases.snapshot(anyString(), anyInt()))
@@ -462,6 +534,7 @@ class ClusterAdminServiceTest {
             when(coordinator.getDeadLetter("gone")).thenReturn(Optional.empty());
             when(coordinator.getDeadLetter("busy")).thenReturn(Optional.of(entry("busy", "failed", "n1", turn("a1", "x"))));
             when(coordinator.getDeadLetter("down")).thenThrow(new ClusterUnavailableException("down"));
+            replayedTurnsCommit();
             doThrow(new IllegalStateException("conversation ended")).when(conversationService).say(eq("conv-busy"), any(), any(), any(),
                     any(), anyBoolean(), any());
 
@@ -478,6 +551,8 @@ class ClusterAdminServiceTest {
             verify(conversationService).say(eq("conv-ok"), any(), any(), any(), input.capture(), eq(false), any());
             assertEquals("hi", input.getValue().getInput());
             assertEquals("ok", input.getValue().getContext().get("replayOf").getValue());
+            assertEquals(ClusterAdminService.replayIdempotencyKey("ok"), input.getValue().getIdempotencyKey(),
+                    "every replay of one entry carries the same Idempotency-Key");
             verify(coordinator).replayDeadLetter("ok");
             verify(coordinator, never()).replayDeadLetter("busy");
 
@@ -501,9 +576,14 @@ class ClusterAdminServiceTest {
             });
             CountDownLatch inSay = new CountDownLatch(1);
             CountDownLatch release = new CountDownLatch(1);
+            AtomicLong revision = new AtomicLong(3);
+            when(memoryStore.getRevision("conv-7")).thenAnswer(i -> revision.get());
             doAnswer(i -> {
                 inSay.countDown();
                 release.await(5, TimeUnit.SECONDS);
+                revision.incrementAndGet();
+                ConversationResponseHandler handler = i.getArgument(6);
+                handler.onComplete(new SimpleConversationMemorySnapshot());
                 return null;
             }).when(conversationService).say(eq("conv-7"), any(), any(), any(), any(), anyBoolean(), any());
             ClusterAdminService other = newService(config);
@@ -528,11 +608,110 @@ class ClusterAdminServiceTest {
         @DisplayName("a rejected replay keeps the entry and releases the claim, so it can be replayed once the cause is fixed")
         void rejectedReplayCanBeRetried() throws Exception {
             when(coordinator.getDeadLetter("8")).thenReturn(Optional.of(entry("8", "failed", "n1", turn("a1", "x"))));
-            doThrow(new IllegalStateException("conversation ended")).doNothing().when(conversationService).say(eq("conv-8"), any(), any(),
-                    any(), any(), anyBoolean(), any());
+            replayedTurnsCommit();
+            doThrow(new IllegalStateException("conversation ended")).when(conversationService).say(eq("conv-8"), any(),
+                    any(), any(), any(), anyBoolean(), any());
             assertEquals("REJECTED", service.replayOne("8").outcome());
             verify(coordinator, never()).replayDeadLetter("8");
+            replayedTurnsCommit();
             assertEquals("REPLAYED", service.replayOne("8").outcome());
+            verify(coordinator).replayDeadLetter("8");
+        }
+
+        @Test
+        @DisplayName("A7: a replayed turn that does not commit (skipped, refused, timed out) keeps the entry and frees it for another replay")
+        void uncommittedReplayKeepsTheEntry() throws Exception {
+            when(coordinator.getDeadLetter("9")).thenReturn(Optional.of(entry("9", "failed", "n1", turn("a1", "x"))));
+            when(memoryStore.getRevision("conv-9")).thenReturn(3L);
+            doAnswer(i -> {
+                // queued, then skipped: e.g. the lease never came, or the node drained
+                ConversationResponseHandler handler = i.getArgument(6);
+                handler.onSkipped(new SimpleConversationMemorySnapshot());
+                return null;
+            }).when(conversationService).say(eq("conv-9"), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertEquals("REPLAYED", service.replayOne("9").outcome(), "the turn was submitted");
+            verify(coordinator, never()).replayDeadLetter("9");
+            // the claim was dropped: the entry can be replayed again
+            assertEquals("REPLAYED", service.replayOne("9").outcome());
+        }
+
+        @Test
+        @DisplayName("A7: while a replayed turn has not answered yet, the entry stays claimed")
+        void pendingReplayHoldsTheClaim() throws Exception {
+            when(coordinator.getDeadLetter("10")).thenReturn(Optional.of(entry("10", "failed", "n1", turn("a1", "x"))));
+            // the turn is queued and has not answered
+            assertEquals("REPLAYED", service.replayOne("10").outcome());
+            assertEquals("IN_PROGRESS", service.replayOne("10").outcome(), "a second replay must not run it again meanwhile");
+            verify(coordinator, never()).replayDeadLetter("10");
+        }
+
+        @Test
+        @DisplayName("A7: a pending replay renews its shared claim, which would otherwise expire before the turn answers")
+        void pendingReplayRenewsItsClaim() throws Exception {
+            service.replayClaimRenewMillis = 50;
+            when(coordinator.getDeadLetter("11")).thenReturn(Optional.of(entry("11", "failed", "n1", turn("a1", "x"))));
+            assertEquals("REPLAYED", service.replayOne("11").outcome());
+            var kv = shared.bucket(ClusterAdminService.ADMIN_BUCKET);
+            long first = kv.get("replay.11").orElseThrow().revision();
+            long deadline = System.currentTimeMillis() + 3000;
+            while (kv.get("replay.11").orElseThrow().revision() == first && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(kv.get("replay.11").orElseThrow().revision() > first, "the claim was renewed while the turn ran");
+        }
+
+        @Test
+        @DisplayName("A7: a replay that settles late does not release a claim a later replay took meanwhile")
+        void lateSettlementKeepsALaterClaim() throws Exception {
+            AtomicReference<ConversationResponseHandler> handler = new AtomicReference<>();
+            when(coordinator.getDeadLetter("12")).thenReturn(Optional.of(entry("12", "failed", "n1", turn("a1", "x"))));
+            when(memoryStore.getRevision("conv-12")).thenReturn(3L);
+            doAnswer(i -> {
+                handler.set(i.getArgument(6));
+                return null;
+            }).when(conversationService).say(eq("conv-12"), any(), any(), any(), any(), anyBoolean(), any());
+            assertEquals("REPLAYED", service.replayOne("12").outcome());
+            var kv = shared.bucket(ClusterAdminService.ADMIN_BUCKET);
+            // the first claim is gone and another administrator claimed the entry
+            kv.delete("replay.12");
+            kv.create("replay.12", "other".getBytes(StandardCharsets.UTF_8));
+
+            handler.get().onSkipped(new SimpleConversationMemorySnapshot());
+
+            assertEquals("other", new String(kv.get("replay.12").orElseThrow().value(), StandardCharsets.UTF_8),
+                    "the late settlement must leave the later replay's claim alone");
+        }
+
+        @Test
+        @DisplayName("A7: with idempotency on, a replay skipped as the duplicate of a committed turn deletes the entry")
+        void skippedDuplicateOfACommittedTurnDeletesTheEntry() throws Exception {
+            TurnIdempotencyService idempotency = mock(TurnIdempotencyService.class);
+            when(idempotency.isEnabled()).thenReturn(true);
+            ConversationMemorySnapshot stored = new ConversationMemorySnapshot();
+            when(memoryStore.loadConversationMemorySnapshot("conv-13")).thenReturn(stored);
+            when(idempotency.isRecordedIn(stored, ClusterAdminService.replayIdempotencyKey("13"))).thenReturn(true);
+            service.turnIdempotency = idempotency;
+            when(coordinator.getDeadLetter("13")).thenReturn(Optional.of(entry("13", "failed", "n1", turn("a1", "x"))));
+            doAnswer(i -> {
+                // another node committed this replay's key first: this one is answered as a
+                // skip
+                ConversationResponseHandler h = i.getArgument(6);
+                h.onSkipped(new SimpleConversationMemorySnapshot());
+                return null;
+            }).when(conversationService).say(eq("conv-13"), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertEquals("REPLAYED", service.replayOne("13").outcome());
+            verify(coordinator).replayDeadLetter("13");
+        }
+
+        @Test
+        @DisplayName("A7: the Idempotency-Key of a replay is printable and bounded, whatever the entry id")
+        void replayKeyIsBounded() {
+            String key = ClusterAdminService.replayIdempotencyKey("x".repeat(200));
+            assertTrue(key.length() <= TurnIdempotencyService.MAX_KEY_LENGTH);
+            assertEquals(key, ClusterAdminService.replayIdempotencyKey("x".repeat(200)));
+            assertEquals("dead-letter-replay:42", ClusterAdminService.replayIdempotencyKey("42"));
         }
 
         @Test
@@ -667,6 +846,54 @@ class ClusterAdminServiceTest {
             } catch (ClusterAdminService.ActionRefusedException e) {
                 return e.code();
             }
+        }
+
+        private void putAdminKey(String key) {
+            shared.bucket(ClusterAdminService.ADMIN_BUCKET).put(key, "x".getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Test
+        @DisplayName("C4: a drain request received over RPC without an open drain decision is refused and audited")
+        void forgedDrainWithoutGateIsRefused() {
+            Map<String, Object> reply = service.onDrainRequest(Map.of("drain", true));
+            assertNotNull(reply.get("error"));
+            verify(natsLeases, never()).setDraining(true);
+            ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(audit).submit(entry.capture());
+            assertEquals(List.of("node.drain.refused"), entry.getValue().actions());
+            verify(activity).record(eq("admin.node.drain.refused"), eq(ClusterActivityLog.WARNING), anyMap(), any());
+        }
+
+        @Test
+        @DisplayName("C4: a forged broadcast that wrote every drain key drains no node: each one is the last")
+        void forgedBroadcastDrainsNoNode() {
+            putAdminKey(ClusterAdminService.DRAIN_GATE);
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n2");
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n3");
+            Map<String, Object> reply = service.onDrainRequest(Map.of("drain", true));
+            assertTrue(String.valueOf(reply.get("error")).contains("last node"), String.valueOf(reply));
+            verify(natsLeases, never()).setDraining(true);
+        }
+
+        @Test
+        @DisplayName("C4: a drain decided by an administrator (gate held, key written, others serving) is applied and audited here too")
+        void legitimateDrainIsAppliedAndAudited() {
+            putAdminKey(ClusterAdminService.DRAIN_GATE);
+            putAdminKey(ClusterAdminService.DRAIN_PREFIX + "n1");
+            assertEquals(Map.of("draining", true), service.onDrainRequest(Map.of("drain", true)));
+            verify(natsLeases).setDraining(true);
+            ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(audit).submit(entry.capture());
+            assertEquals(List.of("node.drain.applied"), entry.getValue().actions());
+            assertEquals(ClusterAdminService.RPC_ACTOR, entry.getValue().userId());
+        }
+
+        @Test
+        @DisplayName("C4: an undrain request needs no guard: it only puts a node back into service")
+        void undrainOverRpcIsApplied() {
+            assertEquals(Map.of("draining", false), service.onDrainRequest(Map.of("drain", false)));
+            verify(natsLeases).setDraining(false);
         }
 
         @Test

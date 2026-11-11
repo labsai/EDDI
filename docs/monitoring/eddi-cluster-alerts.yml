@@ -1,9 +1,21 @@
 # Prometheus alerting rules for EDDI cluster mode (eddi.messaging.type=nats).
 #
 # Load it with `rule_files:` in your prometheus.yml. It is not wired into the
-# bundled docker-compose.monitoring.yml stack. Every series here exists only in
-# cluster mode, except the dead-letter gauge, which both coordinators register.
+# bundled docker-compose.monitoring.yml stack. The Helm chart ships it in its
+# PrometheusRule (prometheusRule.enabled=true) whenever eddi.messagingType=nats,
+# from helm/eddi/files/eddi-cluster-alerts.yml — a copy written by
+# `python scripts/sync-monitoring-assets.py`; DeploymentManifestsTest fails when
+# the two drift.
+#
+# Every series in the eddi-cluster group exists only in cluster mode, except the
+# dead-letter gauge, which both coordinators register. The eddi-cluster-nats group
+# reads the NATS server's own metrics from prometheus-nats-exporter
+# (-varz -jsz=all), which the chart runs next to its in-chart NATS when
+# nats.metrics.enabled=true; with an external NATS, scrape your own exporter.
 # What each alert means and what to do about it: docs/clustering.md (runbook).
+#
+# Validate with: promtool check rules docs/monitoring/eddi-cluster-alerts.yml
+#            and promtool test rules docs/monitoring/eddi-cluster-alerts.test.yml
 groups:
   - name: eddi-cluster
     rules:
@@ -18,6 +30,61 @@ groups:
             The node has been running degraded for 5 minutes: turns run under a
             node-local lock only, replay-protected envelopes are refused and rate
             limits are local. Check the NATS cluster and the network path to it.
+
+      - alert: EddiClusterNatsMisconfigured
+        expr: max by (instance) (eddi_cluster_nats_misconfigured) == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "EDDI node {{ $labels.instance }} cannot authenticate to NATS or complete TLS"
+          description: >-
+            The NATS connection fails for a reason retrying cannot heal: rejected
+            credentials, an authorization violation, an untrusted or mismatched
+            server certificate, or client options that could not be built. The
+            node reports not-ready. Its log names the cause at ERROR; check
+            rotated credentials and the CA and host names of the NATS certificate.
+
+      - alert: EddiClusterNatsErrors
+        expr: sum by (instance, cause) (increase(eddi_cluster_nats_errors_total{cause=~"auth|tls|config|permission|slow_consumer"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "NATS {{ $labels.cause }} errors on {{ $labels.instance }}"
+          description: >-
+            The node's NATS client reported {{ $labels.cause }} errors in the last
+            10 minutes. A permission error means a subject the node needs is not
+            allowed for its NATS user; a slow consumer means NATS dropped messages
+            to this node (events or lease notifications), which it then recovers
+            by resync or polling.
+
+      - alert: EddiClusterMemberLost
+        # The baseline is the member count that held for 10 minutes at a time, so
+        # the surge pod of a rolling update (3 -> 4 -> 3, maxSurge 1) does not
+        # raise it and the rollout does not look like a lost node.
+        expr: max(eddi_cluster_members) < max_over_time(min_over_time(max(eddi_cluster_members)[10m:1m])[15m:1m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The EDDI cluster has fewer members than 15 minutes ago"
+          description: >-
+            A node stopped writing its presence record (crash, eviction, network
+            partition, or a scale-in). Its conversation leases were taken over
+            after their TTL; check EddiClusterLeaseTakeovers and the lost node's
+            last log lines. Expected for a while after an intended scale-in.
+
+      - alert: EddiClusterLeaseTakeovers
+        expr: sum(increase(eddi_cluster_lease_takeover_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Conversation leases were taken over from another node"
+          description: >-
+            A node took a conversation whose lease another node held when it
+            expired or was force-released: that node crashed, stalled (GC pause,
+            CPU starvation) or lost NATS. Frequent takeovers without a node loss
+            mean renewals are not reaching NATS in time.
 
       - alert: EddiClusterFenceRejected
         expr: increase(eddi_cluster_fence_rejected_total[10m]) > 0
@@ -41,6 +108,19 @@ groups:
             Callers received 409 + Retry-After because another turn of the same
             conversation held the lease past eddi.cluster.lease.acquire-timeout.
 
+      - alert: EddiClusterEventOutboxBacklog
+        expr: max by (instance) (eddi_cluster_events_outbox) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EDDI node {{ $labels.instance }} cannot publish its cluster events"
+          description: >-
+            More than 5000 cache-invalidation and deployment events are waiting to
+            be published. At eddi.cluster.events.outbox-size (10000) the outbox
+            overflows and every node is told to resync (flush its caches) on
+            reconnect. Check the node's NATS connection and the EVENTS stream.
+
       - alert: EddiDeadLetters
         expr: max(eddi_coordinator_dead_letters) > 0
         for: 10m
@@ -51,3 +131,70 @@ groups:
           description: >-
             GET /administration/coordinator/dead-letters lists them; replay or
             discard each (docs/coordinator-admin.md).
+
+      - alert: EddiClusterNodeDuplicate
+        expr: max by (instance) (eddi_cluster_node_duplicate) == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Another live JVM uses the node id of {{ $labels.instance }}"
+          description: >-
+            Two nodes with one eddi.cluster.node-id break lease mutual exclusion
+            and RPC routing. The node that detected it reports not-ready and stops
+            announcing itself. Give every replica a unique node id (the pod name).
+
+      - alert: EddiClusterSigningRejected
+        expr: sum by (instance, kind, reason) (increase(eddi_cluster_signing_rejected_total[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cluster messages were refused by signature checks on {{ $labels.instance }}"
+          description: >-
+            A {{ $labels.kind }} message was refused ({{ $labels.reason }}): someone
+            publishes on NATS without the cluster signing key, a node runs with
+            another key, or clocks are skewed past eddi.cluster.signing.max-age.
+            Never routine — check which client holds the NATS credentials.
+
+  - name: eddi-cluster-nats
+    rules:
+      - alert: EddiNatsJetStreamStorageHigh
+        expr: max by (server_id) (gnatsd_varz_jetstream_stats_storage / gnatsd_varz_jetstream_config_max_storage) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "NATS server {{ $labels.server_id }} has used over 80% of its JetStream storage"
+          description: >-
+            When JetStream storage is full, lease creates fail and every node runs
+            degraded. Agent exports in the ARCHIVES object store are the usual
+            growth; raise nats.storage.size or lower eddi.cluster.archives.max-bytes.
+
+      - alert: EddiDeadLetterStreamFull
+        expr: >-
+          max by (stream_name) (
+            jetstream_stream_total_bytes{stream_name=~".+_DEAD_LETTERS"}
+            / on (server_id, account, stream_name) (jetstream_stream_limit_bytes{stream_name=~".+_DEAD_LETTERS"} > 0)
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-letter stream {{ $labels.stream_name }} is over 80% full"
+          description: >-
+            When it is full, new dead letters are refused by the stream and fall
+            back to the node-local ring (lost on restart), and audit entries to the
+            JSONL file. Replay or discard dead letters, or raise
+            eddi.coordinator.dead-letter.max-bytes.
+
+      - alert: EddiNatsSlowConsumers
+        expr: max by (server_id) (increase(gnatsd_varz_slow_consumers[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "NATS server {{ $labels.server_id }} dropped messages to a slow consumer"
+          description: >-
+            A client did not read its messages fast enough and NATS cut it off or
+            skipped messages. For EDDI nodes compare eddi_cluster_nats_errors_total
+            with cause slow_consumer: an overloaded node misses events and lease
+            notifications.

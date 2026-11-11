@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -28,6 +30,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffService;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -39,6 +42,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -290,11 +294,35 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile IAgentGroupStore agentGroupStore;
 
     /**
+     * Cross-team handoff. Null in tests that build the orchestrator by hand, which
+     * {@code TeamHandoffToolsProvider} reads as "no handoff tool".
+     */
+    @Inject
+    volatile TeamHandoffService teamHandoffService;
+
+    /**
      * I17's store, field-injected for the same reason as the two above.
      * {@code ArtifactToolsProvider} treats null as "no artifact tools".
      */
     @Inject
     volatile ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * The agent-operations tools (team scorecard, budget proposal, follow-up
+     * booking). A CDI bean of its own because it needs a handful of services no
+     * other provider does; null under direct construction, where the tools are
+     * simply absent.
+     */
+    @Inject
+    volatile AgentOpsToolsProvider agentOpsToolsProvider;
+
+    /**
+     * The sampled audit, told about every allowed tool call. Field-injected for the
+     * same reason as the stores above; null under direct construction, where no
+     * call is sampled.
+     */
+    @Inject
+    volatile SampledAuditRecorder sampledAuditRecorder;
 
     /**
      * M-A1: the USE check {@code recruit_agent} applies on behalf of the
@@ -320,6 +348,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile GuardrailService guardrailService;
+
+    /**
+     * Hands the {@code toolCallGuardrails} engine to the tool loop, which is not a
+     * CDI bean; an initializer rather than a constructor parameter for the same
+     * reason as the fields above. Never called under direct construction, where the
+     * loop runs without argument guardrails as before.
+     */
+    @Inject
+    void setToolCallGuardrails(ToolCallGuardrails toolCallGuardrails) {
+        toolLoopRunner.toolCallGuardrails = toolCallGuardrails;
+    }
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -455,6 +494,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.mcpToolsProvider = new McpToolsProvider(agentStore, workflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
+        this.toolLoopRunner.setAllowedCallObserver(AllowedToolCallObserver.deferred(() -> sampledAuditRecorder));
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
@@ -616,12 +656,21 @@ class AgentOrchestrator implements IAgentOrchestrator {
     public ExecutionResult reaskFinalAnswer(ChatModel chatModel, List<ChatMessage> transcript, Integer maxOutputTokens,
                                             LlmConfiguration.Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy)
             throws LifecycleException {
-        List<ToolSpecification> specs = buildToolSetup(task, memory).toolSpecs();
+        ToolSetup setup = buildToolSetup(task, memory);
+        List<ToolSpecification> specs = setup.toolSpecs();
+        String answerToolName = setup.answerToolName();
         ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(transcript);
         if (!specs.isEmpty()) {
             requestBuilder.toolSpecifications(specs);
         }
-        if (jsonPolicy != null) {
+        if (answerToolName != null) {
+            // answerMode "tool": the re-ask is answered through the reply tool too, so
+            // no response format; the forced call where the provider has one.
+            var toolChoice = AnswerTool.toolChoice(task, jsonPolicy != null ? jsonPolicy.provider() : null);
+            if (toolChoice != null) {
+                requestBuilder.toolChoice(toolChoice);
+            }
+        } else if (jsonPolicy != null) {
             var responseFormat = jsonPolicy.resolve(!specs.isEmpty());
             if (responseFormat != null) {
                 requestBuilder.responseFormat(responseFormat);
@@ -635,7 +684,16 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // A tool request is never executed here (that is the point): an answer that
         // asks for one is simply an unusable reply.
         AiMessage answer = response.aiMessage();
-        String text = answer != null && !answer.hasToolExecutionRequests() && answer.text() != null ? answer.text() : "";
+        // ... except the reply tool of answerMode "tool", which is not executed
+        // either: its arguments are the answer.
+        var extraction = AnswerTool.extract(answer, answerToolName);
+        String text;
+        if (extraction.answered()) {
+            text = extraction.answerText();
+            AnswerTool.count(AnswerTool.OUTCOME_REPLY);
+        } else {
+            text = answer != null && !answer.hasToolExecutionRequests() && answer.text() != null ? answer.text() : "";
+        }
         Map<String, Object> metadata = new HashMap<>();
         if (response.metadata() != null && response.metadata().tokenUsage() != null) {
             metadata.put("tokenUsage", tokenUsageMap(response.metadata().tokenUsage()));
@@ -713,8 +771,12 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * @param toolSources
      *            dispatch name → provenance tag for gate qualified matching
      * @param builtInSpecs
-     *            built-in specs only (copy taken before external merge — LAZY needs
-     *            it to activate discovered built-ins)
+     *            the specs LAZY keeps behind {@code discover_tools} and activates
+     *            from: by default the built-in specs (copy taken before external
+     *            merge); with {@code lazySources} naming http/mcp/a2a, every
+     *            lazily-managed spec of those sources too (see
+     *            {@link LazyToolCatalog#complete}). A call to one of them that is
+     *            not active is refused, not run
      * @param toolCanonicalNames
      *            dispatch name → configuration slug, for built-ins only. Lets the
      *            executor boundary price a call and pick its cache TTL under the
@@ -727,11 +789,28 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            spec actually survived collision resolution, so a builtin that won
      *            a collision can never be pinned against the losing http tool's
      *            request
+     * @param answerTool
+     *            the terminal reply tool of {@code answerMode: "tool"} (also
+     *            present in {@code toolSpecs}, with no executor), or null when the
+     *            task answers in text
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
             Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
-            Map<String, ToolRequestResolver> toolRequestResolvers) {
+            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+
+        /** A setup without a reply tool. */
+        ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+                Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+                Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+                Map<String, ToolRequestResolver> toolRequestResolvers) {
+            this(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers, null);
+        }
+
+        /** The reply tool's name, or null when the task answers in text. */
+        String answerToolName() {
+            return answerTool != null ? answerTool.name() : null;
+        }
     }
 
     /**
@@ -752,10 +831,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // from ContextualToolsProvider. Every one is a provider now, so a single
         // failing source costs the turn only its own tools.
         var contextual = contextualToolsProvider();
-        merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
+        var phaseOne = new ArrayList<ToolSourceProvider>(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
                 new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
+                new TeamHandoffToolsProvider(liveDiscussionRegistry, agentGroupStore, teamHandoffService),
                 new ArtifactToolsProvider(liveDiscussionRegistry, agentGroupStore, sharedArtifactStore),
-                new AttachmentToolsProvider(contextual)), ctx);
+                new AttachmentToolsProvider(contextual)));
+        if (agentOpsToolsProvider != null) {
+            phaseOne.add(agentOpsToolsProvider);
+        }
+        merger.addAll(phaseOne, ctx);
 
         // LAZY registers every built-in's executor but shows the model only
         // discover_tools until it asks. The meta-tool advertises the specs phase 1
@@ -773,8 +857,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // different request shape and a different cost, from a refactor billed as a
         // pure move.
         Boolean builtInsEnabled = task.getEnableBuiltInTools();
-        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
-                && builtInsEnabled != null && builtInsEnabled) {
+        // lazySources naming http/mcp/a2a: the meta-tool's catalog is only known
+        // once phase 2 has merged, so the name is reserved here (a remote tool still
+        // cannot take it) and LazyToolCatalog.complete fills it in. Without such a
+        // source this is the unchanged built-in-only path below.
+        boolean externalLazy = LazyToolCatalog.externalLazy(task);
+        boolean lazyBuiltins = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY
+                && builtInsEnabled != null && builtInsEnabled
+                && LazyToolCatalog.lazySources(task).contains(LazyToolCatalog.SOURCE_BUILTIN);
+        Set<String> phaseOneNames = new HashSet<>();
+        if (externalLazy) {
+            merger.specsSoFar().forEach(spec -> phaseOneNames.add(spec.name()));
+            merger.addContribution("builtin", LazyToolCatalog.placeholder());
+        } else if (lazyBuiltins) {
             merger.addContribution("builtin", discoverToolsContribution(merger.specsSoFar(), task));
         }
 
@@ -787,9 +882,66 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
-        return new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
+        if (externalLazy) {
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+        }
+        var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
                 assembled.toolEndpoints(), assembled.toolRequestResolvers());
+        return withAnswerTool(setup, task);
+    }
+
+    /**
+     * Adds the terminal reply tool of {@code answerMode: "tool"} to an assembled
+     * setup — last, after every source, so no source can displace it. A tool that a
+     * source contributed under the same name (one discovered only at runtime, e.g.
+     * from an MCP server; save-time validation refuses every name it can see) is
+     * dropped with a WARN: the reply tool's name ends the turn, so it may mean
+     * nothing else. The reply tool gets no executor, so nothing can run it.
+     */
+    static ToolSetup withAnswerTool(ToolSetup setup, LlmConfiguration.Task task) {
+        ToolSpecification answerTool = AnswerTool.specFor(task);
+        if (answerTool == null) {
+            return setup;
+        }
+        String name = answerTool.name();
+        List<ToolSpecification> specs = new ArrayList<>();
+        boolean collided = false;
+        for (ToolSpecification spec : setup.toolSpecs()) {
+            if (name.equals(spec.name())) {
+                collided = true;
+            } else {
+                specs.add(spec);
+            }
+        }
+        boolean onlyTool = specs.isEmpty();
+        specs.add(answerTool);
+        Map<String, ToolExecutor> executors = copyOf(setup.toolExecutors());
+        Map<String, String> sources = copyOf(setup.toolSources());
+        Map<String, String> canonicalNames = copyOf(setup.toolCanonicalNames());
+        Map<String, String> endpoints = copyOf(setup.toolEndpoints());
+        Map<String, ToolRequestResolver> resolvers = copyOf(setup.toolRequestResolvers());
+        List<ToolSpecification> builtIns = setup.builtInSpecs() != null ? new ArrayList<>(setup.builtInSpecs()) : new ArrayList<>();
+        if (collided) {
+            LOGGER.warnf("LLM task '%s': a %s tool is named '%s', the name of the answerMode reply tool; that tool is not offered to "
+                    + "the model. Rename it at its source or set answerToolName.", sanitize(String.valueOf(task.getId())),
+                    sanitize(String.valueOf(sources.get(name))), sanitize(name));
+            AnswerTool.count(AnswerTool.OUTCOME_COLLISION);
+            builtIns.removeIf(spec -> name.equals(spec.name()));
+        }
+        executors.remove(name);
+        sources.remove(name);
+        canonicalNames.remove(name);
+        endpoints.remove(name);
+        resolvers.remove(name);
+        if (onlyTool) {
+            AnswerTool.noteOnlyTool(task);
+        }
+        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool);
+    }
+
+    private static <V> Map<String, V> copyOf(Map<String, V> map) {
+        return map != null ? new HashMap<>(map) : new HashMap<>();
     }
 
     /**
@@ -1039,15 +1191,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /**
-     * The turn's {@link ToolAssemblyContext}, built once and shared by every
-     * provider so they all read one consistent snapshot.
-     * <p>
-     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
-     * each provider: it can come from a group-injected context variable, and two
-     * providers resolving it independently could disagree if the step data changed
-     * between reads.
-     */
-    /**
      * What an approved tool call of this conversation must not write to: the acting
      * agent, its workflows and their extension resources, resolved from the stores
      * now (L13). See {@link ActingAgentResources}.
@@ -1056,6 +1199,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return ActingAgentResources.resolve(agentStore, workflowStore, resourceClientLibrary, memory.getAgentId(), memory.getAgentVersion());
     }
 
+    /**
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
+     * <p>
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
+     */
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
         return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
                 DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),

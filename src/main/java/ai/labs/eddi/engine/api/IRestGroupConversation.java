@@ -282,11 +282,20 @@ public interface IRestGroupConversation {
 
     /**
      * Request body for {@link #submitHumanInput}: which HUMAN member is speaking,
-     * and what they said.
+     * and what they said. A tie-break ({@code pendingKind: TIE_BREAK}) answers with
+     * {@code choice} — exactly one of the tied options — and may add
+     * {@code content} as a rationale; every other kind requires {@code content}.
+     * The service enforces the per-kind rule with the same 400.
      */
     record HumanInputRequest(
             @NotBlank(message = "'memberId' must not be blank") String memberId,
-            @NotBlank(message = "'content' must not be blank") String content) {
+            String content,
+            String choice) {
+
+        /** A speaking turn: no {@code choice}. */
+        public HumanInputRequest(String memberId, String content) {
+            this(memberId, content, null);
+        }
     }
 
     @GET

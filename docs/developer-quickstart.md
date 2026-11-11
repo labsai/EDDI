@@ -50,7 +50,7 @@ same rule set or output set can be reused across workflows and agents.
 - **Java 25** (the version in `pom.xml` is authoritative)
 - **Maven** — not needed separately; the repo ships the `./mvnw` wrapper
   (`.\mvnw.cmd` on Windows)
-- **MongoDB 7** (or PostgreSQL — see [Architecture](architecture.md))
+- **MongoDB 6.0+** (or PostgreSQL — see [Architecture](architecture.md))
 - **Docker** — optional for running from source, required for the quick start
   below
 
@@ -330,12 +330,14 @@ Step order is execution order. The available step types:
 | `eddi://ai.labs.apicalls`  | Outbound HTTP calls            | `config.uri` → API calls |
 | `eddi://ai.labs.mcpcalls`  | MCP tool calls                 | `config.uri` → MCP calls |
 | `eddi://ai.labs.llm`       | LLM interaction                | `config.uri` → LLM config |
+| `eddi://ai.labs.rag`       | Binds a knowledge base (retrieval runs inside the LLM task) | optional, see [RAG](rag.md) |
 | `eddi://ai.labs.output`    | Actions → user-visible output  | `config.uri` → output set |
 | `eddi://ai.labs.templating`| Resolves `{…}` in the output   | none                     |
 
-> **Add `eddi://ai.labs.templating` last** whenever an output or system prompt
-> contains `{properties.x}`-style placeholders. Without it the expressions are
-> never resolved. It is harmless when there is nothing to resolve, so the
+> **Add `eddi://ai.labs.templating` after the output step** whenever output texts
+> or quick replies contain `{properties.x}`-style placeholders. Without it the
+> expressions are never resolved. System prompts need no such step; the LLM task
+> renders its own. It is harmless when there is nothing to resolve, so the
 > examples keep it.
 >
 > `eddi://ai.labs.behavior` and `eddi://ai.labs.httpcalls` are accepted as
@@ -451,7 +453,7 @@ curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
 ```
 
 `conversationSteps` carries the step's public entries (`input:initial`,
-`actions`, `output:*`); add `?returnDetailed=true` to get every key, which is
+`actions`, `output:*`); add `?returnDetailed=true` to get the other pipeline keys (audit, trace and error keys are withheld, values redacted), which is
 what you want when debugging. The [REST API reference](rest-api-reference.md)
 covers the other conversation endpoints.
 

@@ -4,7 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.configs.shared.FailureClass;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -334,6 +338,22 @@ class StreamingLegacyChatExecutor {
     private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
                                     ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts,
                                     JsonResponseFormatPolicy jsonPolicy) {
+        // This loop retries on its own rather than through executeWithRetry, so it
+        // reports its retries to Agent Health itself: they recovered when an attempt
+        // produced an answer, and not when the loop ends in a failure or an empty
+        // timed-out response.
+        try (var modelCall = RetryObserver.modelCall(); var observed = RetryObserver.loop()) {
+            StreamingResult result = executeAttempts(streamingModel, messages, eventSink, task, salvagePartialOnError, maxAttempts, jsonPolicy);
+            if (!Boolean.TRUE.equals(result.metadata().get("streamingTimeout")) || result.response() != null && !result.response().isEmpty()) {
+                observed.succeeded();
+            }
+            return result;
+        }
+    }
+
+    private StreamingResult executeAttempts(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                                            ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError,
+                                            int maxAttempts, JsonResponseFormatPolicy jsonPolicy) {
 
         ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
 
@@ -508,6 +528,7 @@ class StreamingLegacyChatExecutor {
                     long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
                     if (slept >= 0) {
                         totalBackoffMs += slept;
+                        RetryObserver.retrying(FailureClass.TIMEOUT);
                         LOGGER.warnf("Streaming timed out with empty response, retrying (attempt %d/%d)", attempt, maxAttempts);
                         continue;
                     }
@@ -535,6 +556,7 @@ class StreamingLegacyChatExecutor {
                     long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
                     if (slept >= 0) {
                         totalBackoffMs += slept;
+                        RetryObserver.retrying(LlmFailureClassifier.classify(errorRef.get()).cls());
                         LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
                                 attempt, maxAttempts, errorRef.get().getMessage());
                         continue;
@@ -604,10 +626,7 @@ class StreamingLegacyChatExecutor {
                 }
             }
             if (meta.tokenUsage() != null) {
-                var usage = meta.tokenUsage();
-                metadata.put("tokenUsage", Map.of("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0, "outputTokens",
-                        usage.outputTokenCount() != null ? usage.outputTokenCount() : 0, "totalTokens",
-                        usage.totalTokenCount() != null ? usage.totalTokenCount() : 0));
+                metadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(meta.tokenUsage()));
             }
         }
         return metadata;

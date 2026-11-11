@@ -5,10 +5,16 @@ themselves are stored per tenant and are editable at runtime through the admin A
 not need a restart to raise one tenant's ceiling.
 
 The deployment-wide defaults that seed a new tenant live in
-[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. A tenant row
-is created from those defaults the first time the tenant is seen; editing the properties afterwards
-does not rewrite rows that already exist, and a mismatch between a stored row and the configured
-default is reported in a startup WARN.
+[configuration-reference.md](configuration-reference.md) under `eddi.tenant.quota.*`. Only the
+**default tenant** (`eddi.tenant.default-id`) gets a row created from those defaults, once, on the
+first start against an empty database; editing the properties afterwards does not rewrite a row that
+already exists, and a mismatch between a stored row and the configured default is reported in a
+startup WARN. **Any other tenant has no row and is treated as unlimited (unmetered)** until an
+administrator creates one with `PUT /administration/quotas/{tenantId}`.
+
+Quotas are **off by default**: `eddi.tenant.quota.enabled=false`, and that value seeds the default
+tenant's per-tenant `enabled` flag. Nothing is enforced for a tenant until its row has
+`enabled: true`.
 
 ## What is metered
 
@@ -42,7 +48,9 @@ start of the month.
   running sends no further re-ask, cascade escalation or guardrail reprompt, and a `classifier`
   guardrail does not call its model (reason `spend_refused`); tool calls are
   refused with an error result; and Dream stops consolidating. Nothing already running is cut
-  short, so the turn that crosses the limit finishes and the total can end a little above it.
+  short, so the turn that crosses the limit finishes and the total can end a little above it —
+  unless you turn on the [hard ceiling](#hard-ceiling-cost-reservation-opt-in), which refuses the
+  call that would cross the limit instead.
 
 A turn that crosses the limit is never failed over it, and neither is a turn whose cost could not
 be recorded because the quota store was down — the spend already happened. Its cost is not lost:
@@ -59,24 +67,35 @@ outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts
 
-There is no built-in provider price table. A model call is metered only when its configuration
-carries `inputPricePer1M` / `outputPricePer1M` (on the LLM task, a cascade step, a cascade judge, or
-the Dream config). An unpriced model meters **$0** in token cost, so its model calls alone never
-reach the budget — but the priced tools a turn calls are charged to the same counter and can.
-Set prices on every model you want the budget to bound — see [LLM Configuration](langchain.md).
+A model call is metered at its price — the config's `inputPricePer1M` / `outputPricePer1M`
+(LLM task, cascade step, cascade judge, guardrail, group summary, Dream), completed by the
+deployment's [price catalog](model-pricing.md). EDDI ships no active prices: with an empty
+catalog, a model with no price on its config meters **$0** in token cost, so its calls alone
+never reach the budget — but the priced tools a turn calls are charged to the same counter and
+can. Price every model you want the budget to bound, in the config or the catalog; unpriced
+calls are reported at deploy time, per step and as `eddi.llm.calls.unpriced`, and the opt-in
+[strict mode](model-pricing.md#strict-mode) refuses them while a budget applies. Anthropic and
+Bedrock cache tokens and Gemini thinking tokens are counted — see
+[What the providers report](model-pricing.md#what-the-providers-report).
+
+Group transcript window summaries and stance summaries are charged to the tenant too, and are
+skipped (plain truncation, an extracted stance) once the budget is spent. If the quota store is
+unreadable when one is charged, the amount is carried to the next group system charge on that node
+and its spend event is withheld until the tenant counter takes it; a carried amount is held in memory,
+so a node that restarts before the store recovers loses it.
 
 These calls are **not** metered today, priced or not:
 
 | Call | Why |
 |---|---|
-| Group transcript window summaries and stance summaries | Group-level calls outside any member conversation |
 | Embeddings (RAG retrieval, knowledge-base ingestion) | Embedding calls are not priced anywhere |
 | A turn stopped by **lease loss** in cluster mode | Nothing of the turn is stored; the node that took the conversation over runs it again and meters that run |
 
 A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
 metered again. A turn whose model phase **failed** is metered for what it spent before the failure
 (the answered tool-loop rounds, the tools that ran, the cascade steps that were tried); the rolling
-summary and `toolResponseLimits` summarization are metered at the task's prices.
+summary and `toolResponseLimits` summarization are metered at the task's prices when they run on
+the task's own model, and at the catalog price of their own model otherwise.
 
 To bound one conversation rather than the whole tenant, set the agent-level
 `maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost
@@ -103,6 +122,89 @@ still refuse (the model call serves its fallback answer, the tool call gets an e
 under `reason: tenant_check_error`, counted on `eddi_llm_spend_refused_total{reason="tenant_check_error"}`
 and **not** on `eddi_tenant_quota_unavailable_total`. It is logged at ERROR, with the stack trace
 at most once a minute.
+
+## Hard ceiling: cost reservation (opt-in)
+
+By default the budget is charged **after** each settled turn, so the turn that crosses the limit
+finishes and the month can end above it — and several conversations running at the same moment (on
+one node or on many) all read the same remaining budget and can all pass. With a small monthly
+budget that overshoot is the whole margin. The reservation mode closes it:
+
+```properties
+eddi.tenant.quota.cost-reservation.enabled=true
+```
+
+It is **off unless you set it**; with it off, nothing in this section applies and no extra store
+operation runs. It applies to a tenant whose quota is `enabled` with a `maxMonthlyCostUsd` of `0` or
+more (`-1` has nothing to hold against).
+
+**How it works.** Before a call that costs money, EDDI *reserves its maximum cost* against the
+tenant's monthly counter, in one atomic store operation: the call is granted only if
+`cost so far + everything already reserved + this call's maximum <= limit`. Two nodes asking for the
+last dollar cannot both get it. When the reservation does not fit, the call is **refused** — an LLM
+task serves its fallback answer (`llm:spend_refused:<taskId>`, reason `tenant_budget`), a tool call
+gets an error result — and nothing is spent.
+
+| Call | Reserved | When |
+|---|---|---|
+| An LLM task's model phase | prompt tokens x input price + the model's output-token cap x output price, for every round the phase can run (an agent-mode task: `1 + maxToolIterations` rounds, each later round carrying up to `maxToolContextTokens` of tool output — the default cap when that is `0` or less, which switches the loop's own cap off; a cascade: every step) | Once, before the first model request; a tool loop resumed after human approval reserves the rounds it has left |
+| A priced tool call (`toolPricing`, or a built-in's default price) | The tool's price | Right before the tool runs |
+
+The prompt is sized from the messages about to be sent at three characters per token, which errs
+high. A model without a price (in the config or the [catalog](model-pricing.md)) reserves $0, exactly
+as it meters $0 — only priced spend is bounded. A model with no output-token cap of its own is sized
+with `eddi.tenant.quota.cost-reservation.default-max-output-tokens` (default `4096`); set
+`maxTokens` on the model and the reservation shrinks with it.
+
+**Settling.** A reservation is *not* released when the call ends: the actual cost is charged to the
+counter only when the turn settles, and releasing earlier would leave that spend counted nowhere.
+So: when each LLM task finishes, its hold is **shrunk to the actual cost** (the difference goes back
+at once); when the turn settles, the actual cost is **charged first** and then every hold of the turn
+is released — the money is always counted as spent before it stops being counted as held. A turn
+that pauses for human approval releases its holds at the pause and takes new ones on resume.
+
+**Fails closed.** If the quota store cannot answer, the reservation is refused (reason
+`tenant_accounting_unavailable`, counted on `eddi_tenant_quota_unavailable_total{type="cost"}`), the
+same way the read-only gate refuses. A hold that is never released — the node died mid-turn — does
+not pin the budget forever: the held total is dropped once **no hold has been added to it** for
+`eddi.tenant.quota.cost-reservation.ttl` (default `PT10M`; set it above your longest turn), so every
+hold in it is older than the TTL. Holds share one bookkeeping total per tenant, and on a busy tenant
+overlapping turns keep that total above zero far longer than any single turn; expiring it by the age
+of its first hold would discard the holds of calls still running. The flip side: a dead node's
+unreleased hold on a tenant with continuous traffic stays counted until the tenant has a quiet spell
+of one TTL, or until every live hold is released. That errs on the safe side, as does a failed
+release, which also just waits out the TTL. The `reservedUsd` that the usage snapshot and the
+Manager's Quotas page report is the stored total, so it can include such a dead hold until the next
+reservation drops it.
+
+The ceiling is only as tight as the estimate: a model hold is sized from the prompt at three
+characters per token and the model's output cap (see above), not from a guaranteed maximum, so a
+call whose real prompt tokenizes worse than that estimate can cost more than it held.
+
+**What is *not* reserved.** The mode bounds the model phase of each LLM task and priced tool calls.
+The smaller paid side calls — a same-model re-ask, a cascade judge, a guardrail classifier, a rolling
+summary, group transcript summaries, Dream — still go through the ordinary read-only gate and are
+charged at settle, so they can add a little on top of the reservation; the reserved amount of the
+task they belong to normally already covers them. Embeddings are not priced. The limit is therefore a
+hard ceiling for the calls that carry the cost, not a bit-exact one.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `eddi.tenant.quota.cost-reservation.enabled` | `false` | Turn the mode on |
+| `eddi.tenant.quota.cost-reservation.ttl` | `PT10M` | How long an unreleased hold may pin the budget |
+| `eddi.tenant.quota.cost-reservation.default-max-output-tokens` | `4096` | Output cap assumed for a model that sets none |
+
+**Operating it.** The price of the guarantee is that near the limit the budget is held back by what
+running turns *might* spend: with $3 left and a turn that can cost $2.50, a second turn that can cost
+$1 is refused until the first settles. Keep `maxTokens` and `maxToolIterations` realistic. Metrics:
+`eddi_tenant_cost_reservation_total{outcome}` (`reserved`, `refused`, `unavailable`, `release_failed`)
+and `eddi_tenant_cost_reservation_usd_total{direction}` (`held`, `released`) — see
+[Metrics](metrics.md). A rise in `refused` while `eddi_tenant_usage_cost_total` is still well below
+the limit means holds are bigger than real turns: lower the output caps or the tool-loop depth.
+
+Storage: the held total lives on the same per-tenant usage record as the month's cost (MongoDB:
+`reservedUsd` / `reservedSince` on `tenant_usage`; PostgreSQL: the same columns, added to an
+existing table on first start), updated with a single conditional write on both backends.
 
 ## Admin API
 
@@ -148,8 +250,9 @@ curl -X PUT "http://localhost:7070/administration/quotas/acme" \
   }'
 ```
 
-The write takes effect immediately: the service caches quotas but drops the tenant's entry on
-every write, so the next check reads the new row.
+The write takes effect immediately on the node that took it: the service caches quotas but drops
+the tenant's entry on every write, so the next check there reads the new row. Other cluster nodes
+pick it up within the 5-second cache TTL.
 
 ### Usage shape
 
@@ -177,6 +280,10 @@ A tenant quota is shared by everyone in the tenant. To cap what **one user** may
 within a time window — "100 content improvements per user per day", across conversations and nodes — use
 the agent designer's [`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas), which is configured
 per LLM task and counted per subject. The two stack: a call must pass both.
+
+To give each **team** (a group) its own monthly share of the tenant's budget, use a group's
+[`teamBudget`](team-budgets.md). Both apply: a team stops at its own cap or when the tenant's runs
+out, whichever comes first.
 
 ## See also
 

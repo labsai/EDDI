@@ -13,7 +13,6 @@ import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Expands {@code ${vars:…}} then {@code ${vault:…}} inside one credential
@@ -41,12 +40,12 @@ import java.util.regex.Pattern;
 public class CredentialReferenceResolver {
 
     /**
-     * A reference that survived resolution — meaning the key or variable behind it
-     * does not exist. Every form is checked, not just the vault one: a
-     * {@code ${vars:}} that did not resolve fails identically and just as
+     * The openers of a reference that survived resolution — meaning the key or
+     * variable behind it does not exist. Every form is checked, not just the vault
+     * one: a {@code ${vars:}} that did not resolve fails identically and just as
      * expensively.
      */
-    private static final Pattern UNRESOLVED_REFERENCE = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]*}");
+    private static final List<String> UNRESOLVED_OPENERS = List.of("${vault:", "${eddivault:", "${vars:");
 
     private final SecretResolver secretResolver;
     private final GlobalVariableResolver globalVariableResolver;
@@ -130,7 +129,7 @@ public class CredentialReferenceResolver {
                     "The " + what + " for connection '" + connectionName + "' resolved to an empty value. Check that the referenced vault key "
                             + "or global variable exists.");
         }
-        if (UNRESOLVED_REFERENCE.matcher(resolved).find()) {
+        if (hasUnresolvedReference(resolved)) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' has a reference that did not resolve. The vault key or global "
                             + "variable is missing, or the vault is inactive. Refusing rather than sending the literal text, which the "
@@ -175,6 +174,27 @@ public class CredentialReferenceResolver {
      */
     public String resolveRequiredFor(String template, String destination, String connectionName, String what) {
         return resolveRequired(template, connectionName, what, destination == null ? null : URI.create(destination));
+    }
+
+    /**
+     * What {@code find()} of <code>\$\{(vault|eddivault|vars):[^}]*}</code>
+     * answers, in linear time. The body class excludes only the closing brace, so
+     * an opener is a match exactly when a closing brace follows it anywhere — that
+     * is, when it starts before the LAST one. The regex instead rescanned the rest
+     * of the decrypted value at every unterminated opener.
+     */
+    static boolean hasUnresolvedReference(String value) {
+        int lastClose = value.lastIndexOf('}');
+        if (lastClose < 0) {
+            return false;
+        }
+        for (String opener : UNRESOLVED_OPENERS) {
+            int at = value.indexOf(opener);
+            if (at >= 0 && at + opener.length() <= lastClose) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void requireDestinationAllowed(String expanded, URI destination, String connectionName, String what) {

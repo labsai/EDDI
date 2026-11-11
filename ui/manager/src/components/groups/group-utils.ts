@@ -63,7 +63,9 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
   // be followed by the title or the closing paren (the next character would be one the run accepts), so
   // giving characters back only retried hopeless matches, which cost ~750 ms on 100k characters of "](".
   /\]\((?=([^)\s]{0,2048}))\1(?:\s+"[^"]{0,512}")?\)/g,
-  /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
+  // Markdown autolink. The body stops at the next `<` and is bounded: a candidate that never closes
+  // used to run to the end of the text and was retried from every later `<` (quadratic).
+  /<[a-zA-Z][a-zA-Z0-9+.-]{0,31}:[^<>\s]{0,2048}>/g,
   /\bhttps?:\/\/[^\s)]+/g, // bare URL
 ];
 
@@ -700,6 +702,35 @@ function validateStructuredArray(arr: unknown): StructuredItem[] | null {
   return arr as StructuredItem[];
 }
 
+/**
+ * Escapes raw newline, carriage return and tab characters inside JSON string
+ * literals, in ONE forward pass that tracks string and escape state. (A global
+ * regex for "a quoted string" retried from every escaped quote of an
+ * unterminated string, which was quadratic.) An unterminated string is escaped
+ * to the end, where JSON.parse rejects it as before.
+ */
+function escapeControlCharsInStrings(json: string): string {
+  const out: string[] = [];
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i] as string;
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out.push(ch);
+    } else if (ch === "\\") {
+      out.push(ch, json[i + 1] ?? "");
+      i++;
+    } else if (ch === '"') {
+      inString = false;
+      out.push(ch);
+    } else if (ch === "\n") out.push("\\n");
+    else if (ch === "\r") out.push("\\r");
+    else if (ch === "\t") out.push("\\t");
+    else out.push(ch);
+  }
+  return out.join("");
+}
+
 /** Extract a JSON array substring from content (first `[` to last `]`). */
 function extractJsonArray(content: string): string | null {
   const start = content.indexOf("[");
@@ -736,11 +767,7 @@ export function parseStructuredItems(
   } catch { /* continue to the repair below */ }
 
   try {
-    const repaired = jsonStr.replace(
-      /"(?:[^"\\]|\\.)*"/g,
-      (match) => match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"),
-    );
-    return validateStructuredArray(JSON.parse(repaired));
+    return validateStructuredArray(JSON.parse(escapeControlCharsInStrings(jsonStr)));
   } catch {
     return null;
   }

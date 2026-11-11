@@ -179,13 +179,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             snapshot.setHistoryRevision(expectedRevision + 1);
             Long loadedFence = snapshot.getFence();
             snapshot.setFence(snapshot.effectiveFence());
-            var result = conversationCollectionObject.replaceOne(
-                    withFence(fullReplaceFilter(conversationId, expectedRevision, snapshot), snapshot.getFenceToken()), snapshot);
             // No upsert on purpose: a missing document means the conversation was
             // deleted while the turn was running (GDPR erasure, retention sweep).
             // Ignoring matchedCount discarded the turn's memory silently and still
             // returned a normal response to the caller — surface the conflict instead.
-            if (result.getMatchedCount() == 0) {
+            if (!replaceKeepingFence(fullReplaceFilter(conversationId, expectedRevision, snapshot), snapshot)) {
                 // Restore the revision so the caller's snapshot still describes the
                 // document it was derived from — a retry must re-present the revision
                 // it actually loaded, not the one this attempt failed to create.
@@ -209,7 +207,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState) {
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState)
+            throws IResourceStore.ResourceStoreException {
         String conversationId = snapshot.getConversationId();
         if (conversationId == null || expectedState == null) {
             // A conditional store only makes sense against an existing document with a
@@ -220,9 +219,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             return false;
         }
         long expectedRevision = snapshot.getRevision();
-        var filter = withFence(Filters.and(
+        var filter = Filters.and(
                 revisionFilter(conversationId, expectedRevision),
-                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name())), snapshot.getFenceToken());
+                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name()));
         // Atomic compare-and-store on BOTH arbiters: replaces the whole document
         // (including its new state) only while the persisted state still equals
         // expectedState AND nothing has written the document since this snapshot was
@@ -236,15 +235,99 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         snapshot.setRevision(expectedRevision + 1);
         snapshot.setHistoryRevision(expectedRevision + 1);
         snapshot.setFence(snapshot.effectiveFence());
-        var result = conversationCollectionObject.replaceOne(filter, snapshot);
-        if (result.getMatchedCount() == 0) {
+        if (!replaceKeepingFence(filter, snapshot)) {
             snapshot.setRevision(expectedRevision);
             snapshot.setHistoryRevision(loadedHistoryRevision);
             snapshot.setFence(loadedFence);
+            // A6: a miss caused by the fence is not "a concurrent writer moved the
+            // state" — another node holds the conversation now, and this write must be
+            // dead-lettered like any other fenced write, not silently discarded.
+            throwIfFenced(conversationId, snapshot.getFenceToken());
             return false;
         }
         snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
         return true;
+    }
+
+    /**
+     * How often a full-document write re-tries after it missed only because a newer
+     * lease holder raised {@code _fence} since the document was loaded.
+     */
+    private static final int MAX_FENCE_ADOPTIONS = 3;
+
+    /**
+     * Replaces the document under {@code filter} without ever moving its
+     * {@code _fence} backwards (A4).
+     * <p>
+     * {@code replaceOne} writes the snapshot's {@code _fence} verbatim, which is
+     * the value loaded with the document (raised to the write's own token, if it
+     * has one). A raise by a newer lease holder does not move {@code _rev}, so an
+     * unfenced writer — a degraded-mode turn, a schedule carrying properties, an
+     * undo outside the coordinator — that loaded before the raise used to pass the
+     * revision guard and put the old fence back, after which the stale holder the
+     * raise had shut out could write again. So the filter also requires that the
+     * stored fence is not above the one being written; on a miss caused by exactly
+     * that, the write adopts the stored fence and tries again — a {@code $max} in
+     * two steps, which {@code replaceOne} cannot express in one. Only an unfenced
+     * write can miss this way: a fenced one writes at least its own token, and a
+     * higher stored fence refuses it through {@link #withFence} anyway.
+     *
+     * @return whether the document was replaced; {@code false} leaves the reason to
+     *         the caller (the snapshot then carries the fence of the last attempt)
+     */
+    private boolean replaceKeepingFence(Bson filter, ConversationMemorySnapshot snapshot) {
+        Long fenceToken = snapshot.getFenceToken();
+        for (int attempt = 0;; attempt++) {
+            var result = conversationCollectionObject.replaceOne(
+                    Filters.and(withFence(filter, fenceToken), fenceNotAbove(snapshot.getFence())), snapshot);
+            if (result.getMatchedCount() > 0) {
+                return true;
+            }
+            if (fenceToken != null || attempt >= MAX_FENCE_ADOPTIONS) {
+                return false;
+            }
+            Long storedFence = storedFence(snapshot.getConversationId());
+            if (storedFence == null || (snapshot.getFence() != null && storedFence <= snapshot.getFence())) {
+                // Not the fence: the revision, the state or the document itself.
+                return false;
+            }
+            snapshot.setFence(storedFence);
+        }
+    }
+
+    /**
+     * The document's {@code _fence} is absent or not above {@code written}, so
+     * writing {@code written} does not lower it.
+     */
+    static Bson fenceNotAbove(Long written) {
+        if (written == null) {
+            return Filters.or(Filters.exists(KEY_FENCE, false), Filters.eq(KEY_FENCE, null));
+        }
+        return Filters.or(Filters.exists(KEY_FENCE, false), Filters.eq(KEY_FENCE, null), Filters.lte(KEY_FENCE, written));
+    }
+
+    /**
+     * The stored {@code _fence}, or {@code null} when absent or the document is
+     * gone.
+     */
+    private Long storedFence(String conversationId) {
+        Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(KEY_FENCE, 1)).first();
+        return stored != null && stored.get(KEY_FENCE) instanceof Number fence ? fence.longValue() : null;
+    }
+
+    /**
+     * Throws {@link ConversationFencedException} when a write carrying
+     * {@code fenceToken} missed because a newer lease holder raised the fence.
+     */
+    private void throwIfFenced(String conversationId, Long fenceToken) throws ConversationFencedException {
+        if (fenceToken == null) {
+            return;
+        }
+        Long storedFence = storedFence(conversationId);
+        if (storedFence != null && storedFence > fenceToken) {
+            throw new ConversationFencedException(conversationId, fenceToken, storedFence);
+        }
     }
 
     /**
@@ -1141,6 +1224,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
+        var filter = withFence(Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name())), fence);
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
+        return conversationCollectionDocument.updateOne(filter, update).getMatchedCount() > 0;
+    }
+
+    @Override
     public List<String> findConversationIdsByState(ConversationState state) {
         List<String> ids = new ArrayList<>();
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))
@@ -1247,7 +1342,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
         // would linger on an ended or cancelled conversation document.
         for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
-                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext",
                 "hitlPauseType", "hitlPendingToolCalls")) {
             unset.append(field, "");
         }

@@ -116,12 +116,15 @@ period and evidence source.
 
 ### 4.2 Denominators: origin and engagement
 
-Every turn row and outcome carries an **origin**: `chat-ui`, `manager`, `v1-stateful`, `v1-stateless`,
-`email`, `slack`, `webhook`, `schedule`, `a2a`, `group-member`, `api` (aligned with the rating store's
-`channel`). A conversation counts as **engaged** only with ≥ 1 user turn after the agent's first output
-(the Intercom "involved" idea); greeting-only and empty sessions are counted but excluded from
-effectiveness denominators. Interactive origins feed effectiveness; `v1-stateless`, `schedule`,
-`webhook`, `a2a`, `group-member` feed the `task` view by default (designer can include them).
+Every turn row and outcome carries an **origin**, classified per turn as settled in H0 (§9):
+`api`, `v1`, `mcp`, `email`, `slack`, `webhook`, `schedule`, `a2a`, `group-member`, `delegated`,
+`agent-test`. The Chat UI and the Manager both record `api`, and both `/v1` modes record `v1`. Neither
+pair can be told apart server-side until a client hint exists. A conversation counts as **engaged** only
+with ≥ 1 user turn after the agent's first output (the Intercom "involved" idea). Greeting-only and empty
+sessions are counted but excluded from effectiveness denominators. By default, `api`, `v1`, `mcp`,
+`email` and `slack` feed effectiveness, while `schedule`, `webhook`, `a2a`, `group-member` and
+`delegated` feed the `task` view (the designer can include them). `agent-test` is always excluded unless
+asked for explicitly.
 
 ### 4.3 Measures — scored, informational, checks
 
@@ -162,8 +165,10 @@ Sources, highest precedence first; each outcome row records its source (Langfuse
    default, `assumeResolvedOnSilence: false` turns it off per agent); anything else → `ENDED_QUIETLY`.
 
 The two assumed sources stay **distinguishable everywhere** (decision 3): the resolution measure is
-always shown split — *confirmed* (external event, explicit action) · *agent closed* · *silence* — so an
-owner sees at a glance how much of a 70 % resolution rate rests on users simply going quiet. Status
+always shown split in four parts — *confirmed* (external event, explicit agent action) · *self-reported*
+(`report_conversation_outcome`, the LLM grading itself — weak, never counted as confirmed) · *agent
+closed* · *silence* — so an owner sees at a glance how much of a 70 % resolution rate rests on users
+simply going quiet or on the model's own word. Status
 rules may weight them differently (default: `silence` counts, but a resolution rate resting more than
 half on `silence` is flagged as a reason — "mostly assumed from silence").
 5. **Judged** (H6, sampled).
@@ -268,13 +273,20 @@ outcome evaluation are `ScheduleFireExecutor` system jobs with CAS claims (like 
 | `healthdirty` | `(agentId, day)` | days to re-roll |
 | `healthprofiles` | agentId | §4.5 |
 
-**Write semantics.** The turn row is written by **replace-upsert** of the step's totals, not `$inc`.
-`executionId` is generated when a turn starts and kept on the step, so a HITL resume (same step,
-settled again) replaces its own row, while a say-after-undo at the same `stepIndex` gets a new
-execution id (the undone execution's row is marked discarded, matching `audit:discarded_cost`).
-Replace is idempotent across retries and late completions; the watchdog's abandoned-but-running turns
-can only overwrite their own row. Asynchronous on its own bounded executor; drops counted
-(`eddi_health_dropped_total`). Not billing-grade — quotas and ceilings stay authoritative.
+**Write semantics** (as settled in H0, §9). The turn row is keyed by `(conversationId, executionId)` and
+written by a **guarded replace** of the step's totals, not `$inc`.
+- `executionId` is stamped on the step at the **end** of its first execution and kept from then on. A
+  HITL resume or a rerun (the same step, settled again) therefore replaces its own row. A say after an
+  undo runs on a new step and gets a new id, and the undone executions are marked discarded, matching
+  `audit:discarded_cost`.
+- `day` and the first timestamp stay as first recorded.
+- A write older than the stored row's `updatedAt` is ignored.
+- `discarded` is sticky.
+- An **abandoned or cancelled** turn (watchdog timeout, client cancel) is insert-only. It never replaces
+  an existing row and never applies discards.
+
+The write runs asynchronously on its own bounded executor, and drops are counted
+(`eddi_health_dropped_total`). Health is not billing-grade: quotas and ceilings stay authoritative.
 
 **Rollups.** Every writer (turn, outcome, event, mapping change) enqueues `(agentId, day)` in
 `healthdirty`; the rollup job drains it and recomputes those days from turn and outcome rows. A
@@ -368,8 +380,20 @@ H2a blocks everything after it. H3 and H2b can run in parallel once H2a lands.
 | 7 | Should health act? | **Alerts only**; no automatic rollback or pausing until the H6 gate exists |
 | 8 | Report for non-Manager owners | **H4b**, right after status exists |
 
-Still open (to settle in H0): the exact origin list and engagement rule, the `executionId` mechanics,
-and whether `DeploymentInfo` carries timestamps for change markers.
+### H0 decisions (settled 2026-11-10 from the code, before H2a)
+
+| Item | Decision | Evidence |
+| --- | --- | --- |
+| **`executionId`** | A random UUID under the internal step key `health:execution_id`, written by `Conversation` at the **end** of a step's first execution (the `finally` of `init` and `runStep`, beside `recordAgentVersion`) and only when absent. A HITL resume (`Conversation.resume`) and a rerun continue the same step and keep it, so their row replaces the paused/first one; a say after an undo runs on a new step and gets a new id. Written at the end, not the start, because detailed snapshots are read by position (`MemoryKeys.AGENT_VERSION` Javadoc). A step that finished an execution before H2a (it has `agent:version` but no id) uses `legacy-<stepIndex>`; a step a watchdog-abandoned turn has not stamped yet gets a fresh random id at capture time, so repeated timeouts at one step are separate rows | `ConversationMemory.startNextStep()` / `undoLastStep()` / `redoLastStep()`; `Conversation.resume` re-enters the current step; `ConversationStep.storeData` keeps the slot of an existing key |
+| **Discarding undone executions** | Before `startNextStep()` clears the redo cache, `Conversation` collects the execution ids of the steps in it and stores them on the new step as `health:discarded_executions` (end of step, ≤ 100 ids). The recorder marks those rows `discarded` after writing the new one. Spend stays consistent with `conversationCost`: Σ `costUsd` over **all** rows = Σ (`costUsd` + `discardedCostUsd`) over the non-discarded rows | The same point where `audit:discarded_cost` arises (`ConversationMemory.startNextStep()`) |
+| **Internal keys** | `health:*` keys are not in the simple snapshot (only `input:initial`, `actions*`, `output*`, `quickReplies*` pass `convertSimpleConversationMemory`); they show in `returnDetailed=true`, which is acceptable — they hold ids and failure classes, no content | `ConversationMemoryUtilities` |
+| **Which turns** | Every turn through `ConversationStepRunner.reportTurnOutcome` (say, rerun, HITL resume, clean or not, including `AWAITING_HUMAN`) **plus** the `CONVERSATION_START` turn, which runs inline in `ConversationService.startConversation` and never reached that hook. A start turn that throws stores no conversation and is not recorded. A watchdog-abandoned turn is recorded once, at the timeout, with what its live step held then | `ConversationStepRunner.waitForExecutionFinishOrTimeout`, `ConversationService.startConversation` |
+| **Origin** | Classified **per turn** from data the turn stored — the conversation's `userId` and the step's own `context:*` keys — first match wins: `agent-test` (`agent-test:` user) · `group-member` (reserved `groupConversationId`) · `delegated` (reserved `delegationDepth`; `converse_with_agent` / sub-agents) · `schedule` (`schedule` / `scheduleMaxCostPerFire` context, or the scheduler placeholder user) · `a2a` (`a2aTaskId`, `a2a:` user) · `email` (`email:` / `email-anon:` user, `emailIntegration`) · `slack` (`slack:` user, `slack` context) · `webhook` (`webhook:` user, `webhookIntegration`) · `v1` (`channel=openai`, or a `channelIntent` starting `channel:openai:`) · `mcp` (`mcp` context) · else `api`. Rejected: a value stored once at start. Every start path passes a context the integration chose (A2A and MCP pass none, a `new`-strategy schedule passes none without an allowance), so "set once at start" could not tell them apart without changing nine call sites and their tests; per-turn classification over stored data is deterministic and recomputable. Consequences: a `new`-strategy schedule conversation's start turn is `api` and its fire turns `schedule` — **a conversation's origin (H3) is its first non-`api` row**; `chat-ui` vs `manager` and `v1-stateless` vs `v1-stateful` are not distinguishable server-side today (both UIs use the same REST API; the stateless bridge passes the same `channelIntent`) and are `api` / `v1` until a client hint exists. Only `group-member` and `delegated` rest on reserved (client-stripped) keys; the others can be imitated by a client, which can only mislabel its own conversation | `ClientContextGuard.RESERVED_KEYS`; start contexts in `OpenAiConversationBridge`, `EmailInboundProcessor`, `WebhookEventHandler`, `ScheduleFireExecutor`, `MemberTurnExecutor`, `SlackEventHandler`, `A2ATaskHandler`, `McpConversationTools`; user-id prefixes `EmailUserIdentity`, `SlackUserIdentity`, `WebhookEventHandler.USER_PREFIX`, `AgentTestConversations` |
+| **Engagement** | Each row carries `userInput` (the step's `input:initial` is non-blank and the turn is not a self-continuation — no `context:selfContinuation`) and `agentOutput` (the step rendered output text). A conversation (session in H3) is **engaged** iff some non-discarded row has `userInput` and a `stepIndex` greater than the smallest `stepIndex` of a row with `agentOutput`. A greeting followed by one user turn is engaged; a start with no greeting followed by one question and its answer is not (no user turn *after* the first output) | Turn rows alone suffice; no conversation read |
+| **Change markers** | `DeploymentInfo` has **no timestamps**: Mongo's row stores `lastModified` of the last status write only (overwritten, not history), Postgres stores none; `DeploymentEvent` is in-process and carries no time. So H2b must **add** an append-only marker store, written on deploy `READY` (`RestAgentAdministration` / `DeploymentListener`) and on global-variable writes (`GlobalVariable` has no timestamp either). Usable as-is: agent and snippet **versions** carry `createdOn` / `lastModifiedOn` in their `ResourceDescriptor`; a conversation's version switch is on its step (`agent:switch`), and turn rows record `agentVersion` and `previousAgentVersion`, so "first turn on version N" is derivable from the facts | `DeploymentInfo`, `MongoDeploymentStorage.setDeploymentInfo`, `PostgresDeploymentStorage`, `ResourceDescriptor`, `GlobalVariable` |
+| **Recovered LLM failures** | Recorded under `health:llm_failures` as `{class, model, recovery}` with recovery `retry` (a same-model retry followed, from `RetryConfiguration`), `cascade` (escalated, or an earlier step's answer served), `fallback` (`onError: fallback`) or `none` (the failure ended the model phase). Same-model retries reach the step through a thread-bound observer, because the retry loop has no memory, and only inside the task's own model calls (`AgentExecutionHelper`), so judge, summarisation, truncation and MCP retries are not attributed to the model. A cascade that ends in a failure settles all its entries to that failure's outcome. The streaming path's own retry is not recorded | `CascadingModelExecutor`, `RetryConfiguration.executeWithRetry`, `LlmTask` model-phase `catch` |
+| **Write rules (review, 2026-11-10)** | Row identity `(conversationId, executionId)`; `day`/`timestamp` first-recorded; newest `updatedAt` wins; `discarded` sticky, with a marker when the discard arrives first; an unsettled turn (abandoned wait, cancelled, interrupted, deadline) is insert-only and discards nothing | Review of H2a: day drift on a resume across midnight, cross-node reordering, a cancelled say after an undo |
+| **Duration** | Measured by the hook, from the start of its wait for the turn to the outcome; for the start turn, the whole `startConversation`. A resumed turn's row holds the resumed segment only (the human's wait excluded) | No step-level duration key exists; per-task `durationMs` lives only in the audit collector |
 
 ## 10. Deliberately not proposed
 

@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -61,6 +62,14 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<ISecretProvider> secretProvider;
+
+    /**
+     * Agent Health turn rows of the conversation, deleted with it (best effort —
+     * they hold no content and expire on their own). Field-injected like
+     * {@link #secretProvider}; null when the service is built by hand.
+     */
+    @Inject
+    Instance<IHealthTurnStore> healthTurnStore;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -188,7 +197,27 @@ public class ConversationPurgeService {
         }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
+        deleteHealthTurns(conversationId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
+    }
+
+    /**
+     * Deletes the conversation's Agent Health turn rows. Best effort, after the
+     * conversation is gone: the rows carry ids and counts, not content, are erased
+     * by user id on a GDPR erasure and expire with
+     * {@code eddi.health.facts-retention} — a failure here is not worth keeping a
+     * conversation its owner deleted.
+     */
+    void deleteHealthTurns(String conversationId) {
+        if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
+            return;
+        }
+        try {
+            healthTurnStore.get().deleteByConversationId(conversationId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
+                    sanitize(conversationId), sanitize(e.getMessage()));
+        }
     }
 
     /**

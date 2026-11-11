@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -27,6 +28,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.Test;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import java.net.URI;
 import java.util.Date;
 
 import java.util.List;
@@ -93,6 +96,22 @@ class RestAgentAdministrationTest {
     @Nested
     @DisplayName("deployAgent")
     class DeployAgent {
+
+        @Test
+        @DisplayName("a legacy Slack connector's groupId needs the deployer's USE on that group")
+        @SuppressWarnings("removal")
+        void legacyConnectorGroupNeedsUse() throws Exception {
+            var connector = new AgentConfiguration.ChannelConnector();
+            connector.setType(URI.create("slack"));
+            connector.setConfig(Map.of("channelId", "C1", "groupId", "foreign-group"));
+            var config = new AgentConfiguration();
+            config.setChannels(List.of(connector));
+            when(agentStore.read("agent-1", 1)).thenReturn(config);
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("foreign-group", "group");
+
+            assertThrows(ForbiddenException.class, () -> restAgentAdmin.deployAgent(Deployment.Environment.production, "agent-1", 1, true, false));
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
 
         @Test
         @DisplayName("should return 202 Accepted when not waiting")
@@ -175,18 +194,16 @@ class RestAgentAdministrationTest {
         }
 
         @Test
-        @DisplayName("a store outage does not masquerade as a missing agent")
-        void storeOutageStillDeploys() throws Exception {
+        @DisplayName("a store outage does not masquerade as a missing agent, and is not deployed unchecked: 503, not 404")
+        void storeOutageIsRetryableNotMissing() throws Exception {
             when(agentStore.read("agent-1", 1))
                     .thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
-            when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(null);
-            when(runtime.submitCallable(any(Callable.class), any()))
-                    .thenReturn(CompletableFuture.completedFuture(null));
 
-            Response response = restAgentAdmin.deployAgent(
-                    Deployment.Environment.test, "agent-1", 1, true, false);
-
-            assertEquals(202, response.getStatus());
+            // The legacy channel-group check cannot read the configuration, so it fails
+            // closed - as a retryable 503, never as the 404 of a missing agent.
+            assertThrows(ServiceUnavailableException.class, () -> restAgentAdmin.deployAgent(
+                    Deployment.Environment.test, "agent-1", 1, true, false));
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
         }
     }
 

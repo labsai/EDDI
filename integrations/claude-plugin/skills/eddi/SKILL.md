@@ -50,7 +50,7 @@ What your account can do depends on its EDDI role:
 | `eddi-user` | Find and talk to agents, group discussions, own conversations and memories, docs; decide pauses in its own conversations |
 | `eddi-viewer` | The same reading and talking, but no approval decisions; plus the audit trail of its own conversations |
 | `eddi-approver` | Decide approvals in anyone's conversations (`list_pending_approvals`, `resume_conversation`, …) and read docs |
-| `eddi-editor`, `eddi-admin` | All of the above plus authoring — see the `eddi-admin` skill |
+| `eddi-editor`, `eddi-admin` | All of the above except the audit trail (`read_audit_trail` needs `eddi-viewer`, or `eddi-admin`), plus authoring — see the `eddi-admin` skill |
 
 ## Find the right agent
 
@@ -130,6 +130,12 @@ decides.
    `approve_group_phase`) with `verdict` `APPROVED` or `REJECTED`, and **always pass the
    `pauseId` you read**, so the decision cannot land on a different request that paused
    since. A `PAUSE_CHANGED` error means exactly that — read the status again and ask again.
+   When the user wants to approve **with changes**: `resume_conversation` takes
+   `editedAnswer` (the final answer of a rule pause, when `pauseDetails.editableAnswer` is
+   present) and `toolDecisionsJson` (a verdict per call, optionally with amended arguments);
+   `approve_group_phase` takes `taskDecisionsJson` (a verdict per task, optionally with an edited result) and
+   `editedAnswer` for a synthesis. Send only text the user wrote or approved word for word,
+   and pass a `reasonCode` only when rejecting, editing or amending, and only a code the user supplies or the status response exposes; omit it on a plain approval.
 4. `cancel_conversation` / `cancel_group_discussion` stop it instead — also only on the
    user's word.
 

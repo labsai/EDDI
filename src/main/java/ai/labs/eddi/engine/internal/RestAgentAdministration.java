@@ -48,6 +48,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.concurrent.atomic.AtomicReference;
@@ -154,6 +155,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // catch(Exception) there rethrows as InternalServerErrorException, which
         // would turn this 404 into a 500.
         requireAgentExists(agentId, version);
+        // Same placement, for the 403.
+        requireUseOnLegacyChannelGroups(agentId, version);
 
         // MUST sit before the try below: the catch(Exception) there rethrows as
         // InternalServerErrorException, which would turn the mapper's 429 into a 500.
@@ -227,6 +230,38 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * A legacy Slack connector on the agent ({@code channels[].config.groupId})
+     * becomes a standing route into that group once the agent is deployed:
+     * {@code ChannelTargetRouter} serves it to anyone who can message the channel.
+     * The channel API refuses a group target its author may not USE; this applies
+     * the same rule to the legacy form, against the person deploying. Fail-closed:
+     * a configuration that cannot be read here cannot be checked, so the deploy is
+     * refused (503) rather than let through unchecked - unlike
+     * {@link #requireAgentExists}, which only guards against a false 404.
+     */
+    @SuppressWarnings("removal")
+    private void requireUseOnLegacyChannelGroups(String agentId, Integer version) {
+        AgentConfiguration config;
+        try {
+            config = agentStore.read(agentId, version);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            log.warnf("Could not read Agent %s v%s to check its legacy channel groups - deployment refused: %s", sanitize(agentId), version,
+                    e.getMessage());
+            throw new ServiceUnavailableException("The agent's configuration could not be read to check its channel groups. Try again.");
+        }
+        if (config == null || config.getChannels() == null) {
+            return;
+        }
+        for (AgentConfiguration.ChannelConnector connector : config.getChannels()) {
+            String groupId = connector == null || connector.getConfig() == null ? null : connector.getConfig().get("groupId");
+            if (groupId != null && !groupId.isBlank()) {
+                // As stored: it is the id the router routes to.
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            }
         }
     }
 
@@ -475,6 +510,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             if (refusal != null) {
                 return refusal;
             }
+        } else if (version < 1) {
+            // Versions start at 1. The loop below decrements an int, so at
+            // Integer.MIN_VALUE `current--` wrapped to MAX_VALUE and the single-version
+            // call never ended.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(String.format("Version %d does not exist; agent versions start at 1", version))
+                    .type(MediaType.TEXT_PLAIN).build();
         }
         final int highestUndeployed = version;
         final int lowestUndeployed = thisAndAllPrevious ? 1 : version;

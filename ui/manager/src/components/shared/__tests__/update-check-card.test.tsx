@@ -5,9 +5,19 @@ import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { UpdateCheckCard } from "@/components/shared/update-check-card";
 import { UpdateBanner } from "@/components/layout/update-banner";
-import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
+
+const SWITCH_URL = "*/administration/update-check";
+
+/** The server's switch, as the backend reports it. On by default, like the real thing. */
+function updateCheckSwitch(settings: { enabled: boolean; lockedByConfig?: boolean; uiEnabled?: boolean }) {
+  server.use(
+    http.get(SWITCH_URL, () =>
+      HttpResponse.json({ lockedByConfig: false, uiEnabled: settings.enabled, ...settings }),
+    ),
+  );
+}
 
 /** Count outbound hits so "nothing is sent by default" can be asserted, not assumed. */
 function countCalls(url: string, response: () => Response) {
@@ -32,7 +42,8 @@ const release = (version: string, body = "## Highlights\n\n- Mock release note o
 
 
 describe("UpdateCheckCard", () => {
-  it("checks nothing until asked", async () => {
+  it("checks nothing until asked, once the server's switch is off", async () => {
+    updateCheckSwitch({ enabled: false });
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
     renderWithProviders(<UpdateCheckCard />);
 
@@ -44,10 +55,11 @@ describe("UpdateCheckCard", () => {
     expect(github).not.toHaveBeenCalled();
   });
 
-  it("sends nothing off-origin on mount, with both surfaces up and default storage", async () => {
-    // The whole promise of the feature in one assertion: a fresh browser with
-    // no stored preference, both the banner and the card mounted, and not one
-    // byte leaves for a third-party host until a human asks.
+  it("sends nothing off-origin on mount while the switch is off, with both surfaces up", async () => {
+    // The opt-out in one assertion: with the switch off (by an administrator or
+    // by EDDI_UPDATE_CHECK_ENABLED=false), both the banner and the card mounted,
+    // not one byte leaves for a third-party host until a human asks.
+    updateCheckSwitch({ enabled: false });
     const offOrigin: string[] = [];
     server.events.on("request:start", ({ request }) => {
       const { host } = new URL(request.url);
@@ -67,7 +79,6 @@ describe("UpdateCheckCard", () => {
     });
 
     expect(offOrigin).toEqual([]);
-    expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBeNull();
     server.events.removeAllListeners();
   });
 
@@ -383,26 +394,37 @@ describe("UpdateCheckCard", () => {
     expect(screen.queryByText(/Could not reach api\.github\.com/)).not.toBeInTheDocument();
   });
 
-  it("starts with the automatic check off", async () => {
+  it("starts with the automatic check on, with no opt-in", async () => {
+    const github = countCalls(LATEST_URL, () => release("9.9.9"));
     renderWithProviders(<UpdateCheckCard />);
-    expect(await screen.findByTestId("update-auto-check")).not.toBeChecked();
-    expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBeNull();
+
+    await waitFor(async () => expect(await screen.findByTestId("update-auto-check")).toBeChecked());
+    await waitFor(() => expect(github).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("EDDI 9.9.9 is available")).toBeInTheDocument();
   });
 
-  it("persists the automatic check preference and checks immediately when enabled", async () => {
+  it("ticking the box stores the switch on the server and checks immediately", async () => {
+    updateCheckSwitch({ enabled: false });
+    const bodies: unknown[] = [];
+    server.use(
+      http.put(SWITCH_URL, async ({ request }) => {
+        const body = (await request.json()) as { enabled: boolean };
+        bodies.push(body);
+        return HttpResponse.json({ enabled: body.enabled, lockedByConfig: false, uiEnabled: body.enabled });
+      }),
+    );
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
     const user = userEvent.setup();
     renderWithProviders(<UpdateCheckCard />);
 
     await user.click(await screen.findByTestId("update-auto-check"));
 
-    expect(screen.getByTestId("update-auto-check")).toBeChecked();
-    expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBe("true");
+    await waitFor(() => expect(screen.getByTestId("update-auto-check")).toBeChecked());
+    expect(bodies).toEqual([{ enabled: true }]);
     await waitFor(() => expect(github).toHaveBeenCalledTimes(1));
   });
 
-  it("checks once when the preference is already on, not once per render", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+  it("checks once when the switch is already on, not once per render", async () => {
     const github = countCalls(LATEST_URL, () => release("9.9.9"));
     const { rerender } = renderWithProviders(<UpdateCheckCard />);
 
@@ -412,8 +434,15 @@ describe("UpdateCheckCard", () => {
     await waitFor(() => expect(github).toHaveBeenCalledTimes(1));
   });
 
-  it("turning the preference off stops later automatic checks", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+  it("unticking the box stores the switch off on the server", async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.put(SWITCH_URL, async ({ request }) => {
+        const body = (await request.json()) as { enabled: boolean };
+        bodies.push(body);
+        return HttpResponse.json({ enabled: body.enabled, lockedByConfig: false, uiEnabled: body.enabled });
+      }),
+    );
     const user = userEvent.setup();
     renderWithProviders(<UpdateCheckCard />);
 
@@ -421,8 +450,24 @@ describe("UpdateCheckCard", () => {
     await waitFor(() => expect(checkbox).toBeChecked());
 
     await user.click(checkbox);
+
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    expect(bodies).toEqual([{ enabled: false }]);
+  });
+
+  it("EDDI_UPDATE_CHECK_ENABLED=false locks the box off and contacts GitHub never", async () => {
+    updateCheckSwitch({ enabled: false, lockedByConfig: true, uiEnabled: true });
+    const github = countCalls(LATEST_URL, () => release("9.9.9"));
+    renderWithProviders(<UpdateCheckCard />);
+
+    const checkbox = await screen.findByTestId("update-auto-check");
+    expect(await screen.findByTestId("update-auto-check-locked")).toHaveTextContent("EDDI_UPDATE_CHECK_ENABLED=false");
+    expect(checkbox).toBeDisabled();
     expect(checkbox).not.toBeChecked();
-    expect(localStorage.getItem(AUTO_UPDATE_CHECK_KEY)).toBe("false");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(github).not.toHaveBeenCalled();
   });
 
   it("links to both hosts before a check, and narrows to the exact release and tag after", async () => {
