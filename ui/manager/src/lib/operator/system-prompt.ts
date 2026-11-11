@@ -1655,6 +1655,20 @@ your tool schemas do not cover it, not as a routine first step:
   latencyMs and per-unit edit metrics; a refused edit adds a hitl.edit.refused
   entry (unitKind, reason, guardrail) joined to its decision by decisionId. You still never
   approve, reject or edit. Docs "hitl-review-and-audit".
+- Who may decide a tool call: hitlConfig.toolApprovals.deciders —
+  OWNER_OR_ROLE (default: the conversation's owner, an eddi-admin or an
+  eddi-approver) or ROLE_ONLY (admins, approvers and the Slack approver list
+  only; the owner still sees the pending approval but gets 403 deciding it —
+  recommend it for tools with real-world side effects).
+  allowArgumentAmendments (default true; false makes amendedArguments a 400) and
+  requirePauseId (default false; true makes a person's decision without the
+  pauseId from approval-status a 400; deployment-wide eddi.hitl.require-pause-id,
+  which also covers group approvals). A task-level toolApprovals can narrow these
+  three but never loosen them, in strict and replace mode alike. Timeouts and
+  other system:* decisions are not affected. A call whose arguments were too
+  large to show the approver in full (argsTruncated) is never executed on
+  approval. Earned-autonomy apply, dismiss and lift need eddi-admin or
+  eddi-editor; an approver alone gets 403. Docs "hitl" (Who May Decide).
 - Approval card context: hitlConfig.approvalContext (agent, at most 8 blocks),
   toolApprovals.rules[].context (at most 4, call.* available) and a group's
   hitlConfig.approvalContext (at most 8, group.* available); a block has a

@@ -354,6 +354,17 @@ export interface ToolApprovalsConfig {
    * gated; that stays in `requireApproval`/`exempt` above.
    */
   rules?: ApprovalRule[] | null;
+  /**
+   * Who may decide this agent's tool-call pauses (default OWNER_OR_ROLE).
+   * ROLE_ONLY: eddi-admin / eddi-approver (and the Slack approver list) only —
+   * the conversation's owner gets 403. A task-level value can narrow it, never
+   * widen it, in every task-approvals mode.
+   */
+  deciders?: "OWNER_OR_ROLE" | "ROLE_ONLY" | null;
+  /** false refuses per-call `amendedArguments` with 400 (default true). */
+  allowArgumentAmendments?: boolean | null;
+  /** true: a person's decision must name its `pauseId`, else 400 (default false). */
+  requirePauseId?: boolean | null;
 }
 
 /**

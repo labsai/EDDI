@@ -189,5 +189,26 @@ describe("OversightPage", () => {
       fireEvent.click(lift);
       await waitFor(() => expect(screen.queryByTestId(`oversight-category-card-${LOOKUP_CATEGORY}`)).toBeNull());
     });
+
+    it("an approver sees the cards but is not offered apply, dismiss or lift (the backend refuses them)", async () => {
+      render(
+        <MemoryRouter initialEntries={["/manage/oversight?tab=autonomy"]}>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+              <AuthContext.Provider value={{ ...editorAuth, roles: ["eddi-approver"] }}>
+                <Routes>
+                  <Route path="/manage/oversight" element={<OversightPage />} />
+                </Routes>
+              </AuthContext.Provider>
+            </ThemeProvider>
+          </QueryClientProvider>
+        </MemoryRouter>,
+      );
+      const card = await screen.findByTestId(`oversight-category-card-${LOOKUP_CATEGORY}`);
+      expect(within(card).queryByTestId(`oversight-category-card-${LOOKUP_CATEGORY}-lift`)).toBeNull();
+      const notes = screen.getByTestId(`oversight-category-card-${NOTES_CATEGORY}`);
+      expect(within(notes).queryByTestId(`oversight-category-card-${NOTES_CATEGORY}-apply`)).toBeNull();
+      expect(within(notes).queryByTestId(`oversight-category-card-${NOTES_CATEGORY}-dismiss`)).toBeNull();
+    });
   });
 });

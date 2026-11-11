@@ -43,8 +43,8 @@ replay and self-continuation.
   decisions (`system:timeout`, `system:group`) and Slack's approver lists are untouched.
 - `requirePauseId` is checked on the snapshot the resume runs on, after the state CAS, and restores the
   pause on refusal (as a pause mismatch does) — no extra load on the common resume path.
-- The continuation re-check leaves an owner the directory has no record of alone, mirroring
-  `creatorUseCheck` for schedules without an access snapshot.
+- The continuation re-check leaves an owner the directory has no record of alone, and a chain without a
+  `bookedByAdmin` marker, mirroring `creatorUseCheck` for schedules without an access snapshot.
 
 **Docs:** [HITL](../hitl.md#who-may-decide), [HITL Oversight](../hitl-oversight.md),
 [Configuration reference](../configuration-reference.md), [Long Jobs](../long-jobs.md),
@@ -58,9 +58,30 @@ replay and self-continuation.
 [`ClusterAdminService.java`](../../src/main/java/ai/labs/eddi/engine/cluster/admin/ClusterAdminService.java),
 [`ContinuationFireHandler.java`](../../src/main/java/ai/labs/eddi/engine/continuation/ContinuationFireHandler.java)
 
+### Review follow-ups
+
+- **Decision restrictions survive `task-approvals.mode=replace`.** `deciders`, `allowArgumentAmendments`
+  and `requirePauseId` are exempt from replace semantics: the stricter of agent and task wins in both
+  modes, so a task-level config can never loosen an agent-level `ROLE_ONLY`.
+- **Every decision route checked for `ROLE_ONLY`:** REST `/resume` and `/resume/stream` and MCP
+  `resume_conversation` share `HitlAccessGuard`; Slack decides only for its approver list; email
+  carries no decision; a group member's gated call is auto-rejected (`system:group`) and never reaches
+  the group approve endpoints; timeout and no-progress decisions are untouched.
+- **Administrators' long jobs keep running.** The continuation schedule records `bookedByAdmin` from the
+  live caller (an admin in their own conversation) and hands it from link to link through the turn;
+  the fire-time `USE` re-check treats it like a schedule's `creatorAdmin`. A chain booked before the
+  marker existed carries none and is not re-checked.
+- `ClusterAdminService` uses the injected `CallerIdentityContext` instead of a private instance.
+- The Slack/email approval card says when a call's arguments are longer than the card shows and points
+  to the full view (Manager approval inbox, `approval-status`).
+- Manager: `ToolApprovalsConfig` gains the three fields (the editor already preserves them — it commits
+  partial updates that both parents spread over the current value); the Oversight page no longer offers
+  apply, dismiss and lift to a caller without `eddi-admin` / `eddi-editor`. Platform Operator prompt
+  documents the decision fields (revision bump).
+
 ### Still open
 
-- The Slack/email card shows only the first 300 characters of each call's arguments while its buttons
-  approve the whole call (the ellipsis is visible). The Manager's Oversight page still offers apply /
-  lift to approvers, who now get 403. The Manager's tool-approvals editor does not offer the three new
-  fields yet.
+- The Slack card's one-click Approve still decides a call whose arguments are longer than the card shows
+  (now stated on the card). Refusing it there needs the card to know about the full view's state and
+  is left for a follow-up. The Manager's tool-approvals form does not offer the three fields as
+  inputs yet (they are preserved, not editable there).
