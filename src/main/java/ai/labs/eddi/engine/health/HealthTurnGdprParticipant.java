@@ -6,12 +6,13 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.gdpr.UserDataExport;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
-import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,16 +43,22 @@ import java.util.Set;
  * {@link #MAX_EXPORTED_TURNS} the section is marked
  * {@link UserDataExport#SECTION_TRUNCATED}. Daily aggregates hold no personal
  * data and are not part of either; the days of the erased rows are marked
- * dirty, so the rollup recomputes them without the user.
+ * dirty, so the rollup recomputes them without the user. The days come with the
+ * delete ({@link IHealthTurnStore#deleteByUserIdReturningDays}); when they
+ * cannot be read the delete still runs, and every retained day of the user's
+ * agents is re-rolled instead — the agents noted at step 0
+ * ({@link HealthErasureFence#agentsOf}), else those of any conversation of the
+ * user still in the conversation store. When neither is known nothing can be
+ * re-rolled: a WARN, and the daily rows keep the user's counts until
+ * {@code eddi.health.daily-retention}. That is not reported as a failed step —
+ * the rows, the only personal data, are gone, and a failed step would hold back
+ * the participants that run last.
  */
 @ApplicationScoped
 public class HealthTurnGdprParticipant implements IGdprParticipant {
 
     /** An export carries at most this many rows. */
     static final int MAX_EXPORTED_TURNS = 10_000;
-
-    /** The most (agent, day) pairs of an erased user re-rolled. */
-    static final int MAX_ERASED_DAYS = 10_000;
 
     private final IHealthTurnStore store;
 
@@ -62,6 +69,14 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
      */
     @Inject
     Instance<HealthDirtyDays> dirtyDays;
+
+    /** The agents noted at the erasure's step 0. Field-injected, null-checked. */
+    @Inject
+    Instance<HealthErasureFence> fence;
+
+    /** The live fallback for the user's agents. Field-injected, null-checked. */
+    @Inject
+    Instance<IConversationMemoryStore> conversations;
 
     @Inject
     public HealthTurnGdprParticipant(IHealthTurnStore store) {
@@ -78,17 +93,32 @@ public class HealthTurnGdprParticipant implements IGdprParticipant {
         if (userId == null || userId.isBlank()) {
             return 0L;
         }
-        Map<String, Set<LocalDate>> days = Map.of();
-        try {
-            days = store.agentDaysOfUser(userId, MAX_ERASED_DAYS);
-        } catch (RuntimeException e) {
-            // The erasure itself must not depend on it.
-        }
-        long deleted = store.deleteByUserId(userId);
+        HealthDeletedRows deleted = store.deleteByUserIdReturningDays(userId);
         if (dirtyDays != null && dirtyDays.isResolvable()) {
-            dirtyDays.get().markDeleted(days);
+            dirtyDays.get().markErasedRows(deleted.daysKnown() ? Set.of() : agentsOf(userId), deleted);
         }
-        return deleted;
+        return deleted.deleted();
+    }
+
+    /**
+     * The erased user's agents when the deleted rows' days are unknown: noted at
+     * step 0, else read now from the conversation store (best effort).
+     */
+    private Set<String> agentsOf(String userId) {
+        if (fence != null && fence.isResolvable()) {
+            Set<String> noted = fence.get().agentsOf(userId);
+            if (!noted.isEmpty()) {
+                return noted;
+            }
+        }
+        if (conversations != null && conversations.isResolvable()) {
+            try {
+                return HealthErasureFence.agentsOfConversations(conversations.get(), userId);
+            } catch (Exception e) {
+                // Nothing else to try; markErasedRows warns.
+            }
+        }
+        return Set.of();
     }
 
     @Override

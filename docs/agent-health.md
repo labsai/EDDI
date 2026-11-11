@@ -177,7 +177,10 @@ They are recomputed, never incremented:
    delete still goes ahead and **every retained day** of the conversation's
    agent is marked instead, with a WARN — the agent comes from the
    conversation (purge), the row (the recorder's clean-up) or the sweep's
-   candidate read. These marks are written to the store at once, not on the
+   candidate read. An erasure deletes the user's rows the same way; its
+   fallback is the agents of the user's conversations, noted at the erasure's
+   first step while those conversations still exist (see [GDPR](#gdpr)).
+   These marks are written to the store at once, not on the
    five-second flush, because the self-heal cannot find a deleted row; a failed
    write is retried once. **Residual:** when both attempts fail (a WARN names
    the agent), the mark waits in memory for the next flush, and if the node
@@ -447,7 +450,17 @@ Turn rows are personal data about a user's use of an agent:
 
 - **Erasure** (`DELETE /admin/gdpr/{userId}`) deletes every row of the user — the
   participant `agentHealthTurns`. Group member conversations are owned by the
-  discussion's user and are covered by the same erasure.
+  discussion's user and are covered by the same erasure. The delete returns the
+  (agent, day)s of the deleted rows, and those days are re-rolled without the
+  user. If the days cannot be read, the rows are deleted all the same and every
+  retained day of the user's agents is re-rolled instead. Those agents come from
+  the conversation store: noted at the erasure's first step (the
+  `agentHealthErasureFence` step reads them before the cascade deletes the
+  conversations; a failed read never fails that step), else read again when the
+  participant runs. If no agent is known either, a WARN is logged and the daily
+  rows keep the user's counts until `eddi.health.daily-retention`. This is not
+  reported as a failed step: the rows (the only personal data) are gone, and a
+  failed step would hold back the participants that run last.
 - **Export** includes the user's rows (newest first, at most 10,000) under
   `agentHealthTurns.turns`.
 - **Deleting a conversation** deletes its rows (best effort — a failure is

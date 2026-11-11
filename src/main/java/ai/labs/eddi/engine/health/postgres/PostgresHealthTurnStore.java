@@ -163,6 +163,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
     /** The delete and the days of what it deleted, in one statement. */
     static final String DELETE_CONVERSATION_RETURNING = "DELETE FROM health_turns WHERE conversation_id = ? RETURNING agent_id, day";
+    static final String DELETE_USER_RETURNING = "DELETE FROM health_turns WHERE user_id = ? RETURNING agent_id, day";
     static final String DELETE_OLDER = "DELETE FROM health_turns WHERE day < ? OR (day IS NULL AND discarded_at_ms < ?)";
 
     /** Rows fetched per round trip while a rollup streams an agent-day. */
@@ -579,10 +580,19 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
 
     @Override
     public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+        return deleteReturning(DELETE_CONVERSATION_RETURNING, conversationId, "Could not delete a conversation's health turns");
+    }
+
+    @Override
+    public HealthDeletedRows deleteByUserIdReturningDays(String userId) {
+        return deleteReturning(DELETE_USER_RETURNING, userId, "Could not delete a user's health turns");
+    }
+
+    /** One {@code DELETE ... RETURNING agent_id, day}: the rows and their days. */
+    private HealthDeletedRows deleteReturning(String sql, String key, String failure) {
         ensureSchema();
-        try (Connection connection = dataSourceInstance.get().getConnection();
-                PreparedStatement statement = connection.prepareStatement(DELETE_CONVERSATION_RETURNING)) {
-            statement.setString(1, conversationId);
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, key);
             long deleted = 0;
             Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
             try (ResultSet r = statement.executeQuery()) {
@@ -597,7 +607,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             }
             return new HealthDeletedRows(deleted, days);
         } catch (SQLException e) {
-            throw new HealthStoreException("Could not delete a conversation's health turns", e);
+            throw new HealthStoreException(failure, e);
         }
     }
 

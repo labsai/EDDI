@@ -508,6 +508,11 @@ class HealthTurnRetentionTest {
         }
 
         @Override
+        public HealthDeletedRows deleteByUserIdReturningDays(String userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
             return new HealthDeletedRows(deleteByConversationId(conversationId), Map.of());
         }

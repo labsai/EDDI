@@ -150,19 +150,35 @@ public class HealthDirtyDays {
      * WARN, and the daily rows keep the counts until their own retention.
      */
     public void markDeletedRows(String conversationId, Collection<String> agentIds, HealthDeletedRows deleted) {
+        markDeletedRows("conversation " + sanitize(conversationId), agentIds, deleted, true);
+    }
+
+    /**
+     * As {@link #markDeletedRows(String, Collection, HealthDeletedRows)}, for the
+     * rows of a GDPR erasure; the user is not named in the log.
+     *
+     * @return {@code false} when neither the days nor an agent were known, so
+     *         nothing could be marked (logged as a WARN)
+     */
+    public boolean markErasedRows(Collection<String> agentIds, HealthDeletedRows deleted) {
+        return markDeletedRows("an erased user", agentIds, deleted, false);
+    }
+
+    private boolean markDeletedRows(String whose, Collection<String> agentIds, HealthDeletedRows deleted, boolean conversation) {
         if (deleted != null && deleted.daysKnown()) {
             markDeleted(deleted.agentDays());
-            return;
+            return true;
         }
         List<String> agents = agentIds == null ? List.of() : agentIds.stream().filter(a -> a != null && !a.isBlank()).distinct().toList();
         if (agents.isEmpty()) {
-            LOGGER.warnf("The days of the deleted Agent Health rows of conversation %s are unknown and so is its agent: its daily rows "
-                    + "keep the deleted counts until eddi.health.daily-retention", sanitize(conversationId));
-            return;
+            LOGGER.warnf("The days of the deleted Agent Health rows of %s are unknown and so %s: the daily rows keep the deleted counts "
+                    + "until eddi.health.daily-retention", whose, conversation ? "is its agent" : "are the agents");
+            return false;
         }
-        LOGGER.warnf("The days of the deleted Agent Health rows of conversation %s could not be read; re-rolling every retained day of "
-                + "agent(s) %s instead", sanitize(conversationId), sanitize(String.join(", ", agents)));
+        LOGGER.warnf("The days of the deleted Agent Health rows of %s could not be read; re-rolling every retained day of agent(s) %s "
+                + "instead", whose, sanitize(String.join(", ", agents)));
         agents.forEach(this::markRetained);
+        return true;
     }
 
     /**

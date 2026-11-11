@@ -161,6 +161,12 @@ public interface IHealthTurnStore {
      */
     void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer);
 
+    /**
+     * As {@link #deleteConversationReturningDays}, for every row of a user — the
+     * GDPR erasure. The delete never depends on reading the days.
+     */
+    HealthDeletedRows deleteByUserIdReturningDays(String userId);
+
     /** A user's rows, newest first, at most {@code limit} — for GDPR export. */
     List<HealthTurn> findByUserId(String userId, int limit);
 

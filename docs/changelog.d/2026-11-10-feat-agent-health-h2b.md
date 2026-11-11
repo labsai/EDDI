@@ -116,3 +116,17 @@ presets, status and reasons.
 - Deletion marks retry the write once before falling back to the in-memory queue, and WARN when they do. The residual
   (both attempts fail, then the node stops before the next successful flush) is documented: those days keep the deleted
   counts until re-rolled for another reason or `eddi.health.daily-retention`.
+
+## 🐛 fix(health): a GDPR erasure re-rolls the user's days even when they cannot be read (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteByUserIdReturningDays` deletes a user's rows and returns their (agent, day)s
+  (PostgreSQL `DELETE ... WHERE user_id = ? RETURNING agent_id, day`; MongoDB reads the pairs, then `deleteMany`, and
+  returns `null` days if that read fails). `HealthTurnGdprParticipant.erase` uses it instead of a separate lookup.
+- Unknown days: every retained day of the user's agents is re-rolled (`HealthDirtyDays.markErasedRows`). The agents
+  come from the conversation store. `HealthErasureFence` notes them at step 0, before the cascade deletes the
+  conversations; this is best effort and never fails the step, and the noted agents expire with the fence. If nothing
+  was noted, the participant reads the conversation store again.
+- Nothing known: a WARN, and the daily rows keep the counts until `eddi.health.daily-retention`. This is not a failed
+  step, which would hold back the participants that run last although the personal data is gone.

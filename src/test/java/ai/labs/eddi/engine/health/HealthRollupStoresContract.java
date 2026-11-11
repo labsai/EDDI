@@ -291,6 +291,24 @@ public interface HealthRollupStoresContract {
     }
 
     @Test
+    @DisplayName("a user's delete answers the (agent, day)s of every row it deleted, across conversations")
+    default void deleteUserReturningDays() {
+        turns().upsert(turn("c1", 0, "e0", "alice", DAY, 1, "api", true, true, false));
+        turns().upsert(turn("c2", 0, "e0", "alice", DAY.minusDays(2), 1, "api", true, true, false));
+        turns().upsert(turn("c3", 0, "e0", "bob", DAY, 1, "api", true, true, false));
+
+        HealthDeletedRows deleted = turns().deleteByUserIdReturningDays("alice");
+        assertEquals(2L, deleted.deleted());
+        assertEquals(Map.of("agent", Set.of(DAY, DAY.minusDays(2))), deleted.agentDays());
+        assertTrue(turns().agentDaysOfUser("alice", 100).isEmpty());
+        assertEquals(Map.of("agent", Set.of(DAY)), turns().agentDaysOfUser("bob", 100));
+
+        HealthDeletedRows none = turns().deleteByUserIdReturningDays("nobody");
+        assertEquals(0L, none.deleted());
+        assertTrue(none.daysKnown());
+    }
+
+    @Test
     @DisplayName("daysOf answers the stored (first-recorded) day of the executions, skipping unknown ones and markers")
     default void daysOf() {
         turns().upsert(turn("c1", 0, "e0", "alice", DAY.minusDays(1), 1, "api", false, true, false));

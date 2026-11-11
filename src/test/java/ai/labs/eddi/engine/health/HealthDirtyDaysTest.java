@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import java.util.Arrays;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -172,6 +173,18 @@ class HealthDirtyDaysTest {
 
         dirty.markDeletedRows("conv", List.of("b"), null);
         verify(store).mark(eq("b"), any());
+    }
+
+    @Test
+    @DisplayName("erased rows: known days, else the agents' retained days, else nothing (false, logged)")
+    void erasedRows() {
+        assertTrue(dirty.markErasedRows(Set.of(), new HealthDeletedRows(1L, Map.of("a", Set.of(TODAY)))));
+        verify(store).mark("a", Set.of(TODAY));
+        assertTrue(dirty.markErasedRows(Set.of("b"), new HealthDeletedRows(1L, null)));
+        verify(store).mark(eq("b"), any());
+        assertFalse(dirty.markErasedRows(Set.of(), new HealthDeletedRows(1L, null)));
+        assertFalse(dirty.markErasedRows(null, null));
+        verify(store, times(2)).mark(any(), any());
     }
 
     @Test

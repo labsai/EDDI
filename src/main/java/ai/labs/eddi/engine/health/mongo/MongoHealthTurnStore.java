@@ -465,13 +465,27 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
         // MongoDB has no delete that returns the deleted documents in bulk: read the
         // pairs first, then delete — and delete even when the read fails.
-        Map<String, Set<LocalDate>> days;
-        try {
-            days = agentDays(eq(FIELD_CONVERSATION, conversationId), Integer.MAX_VALUE);
-        } catch (RuntimeException e) {
-            days = null;
-        }
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_CONVERSATION, conversationId));
         return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+    }
+
+    @Override
+    public HealthDeletedRows deleteByUserIdReturningDays(String userId) {
+        // Read first, then delete; the days are null when the read fails.
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_USER, userId));
+        return new HealthDeletedRows(deleteByUserId(userId), days);
+    }
+
+    /**
+     * The (agent, day)s of the matching rows, or {@code null} when they cannot be
+     * read.
+     */
+    private Map<String, Set<LocalDate>> daysOrNull(Bson filter) {
+        try {
+            return agentDays(filter, Integer.MAX_VALUE);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     @Override
