@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.internal.TaskListParser.ParsedTask;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -538,15 +539,24 @@ class TaskListParserTest {
         String spacedItem = "- " + "a" + pad + "b\n";
         String bulk = ("- x" + " ".repeat(200) + "y\n").repeat(400);
 
-        long start = System.nanoTime();
-        var first = TaskListParser.parse(unclosedAssignment, MEMBERS);
-        var second = TaskListParser.parse(spacedItem, MEMBERS);
-        var third = TaskListParser.parse(bulk + " ".repeat(200_000), MEMBERS);
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        // Generous for any loaded CI runner: the former patterns grew ~N^3.4 —
+        // 1.5 s for 200 spaces — so 5,000 spaces would take hours.
+        List<List<ParsedTask>> results = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> List.of(
+                TaskListParser.parse(unclosedAssignment, MEMBERS),
+                TaskListParser.parse(spacedItem, MEMBERS),
+                TaskListParser.parse(bulk + " ".repeat(200_000), MEMBERS)));
 
-        assertTrue(elapsedMs < 1_000, "parsing took " + elapsedMs + " ms");
+        var first = results.get(0);
+        assertEquals(1, first.size());
+        assertEquals("Task (assigned to" + pad + "x", first.getFirst().subject(), "the item is still read, whole");
         assertNull(first.getFirst().assignedTo(), "an unclosed assignment is not an assignment");
+        var second = results.get(1);
+        assertEquals(1, second.size());
         assertEquals("a" + pad + "b", second.getFirst().subject());
+        assertEquals("a" + pad + "b", second.getFirst().description());
+        var third = results.get(2);
         assertEquals(400, third.size());
+        assertTrue(third.stream().allMatch(t -> t.subject().equals("x" + " ".repeat(200) + "y")), "every bulk item parses alike");
+        assertEquals(399, third.getLast().priority(), "items keep their order");
     }
 }

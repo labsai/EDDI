@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -202,21 +203,23 @@ class VoteTallyEngineTest {
         var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,
                 TiePolicy.NO_DECISION);
 
-        long start = System.nanoTime();
-        List<String> short800 = VoteTallyEngine.synthesisOptions("Option A: x" + pad800 + "y");
-        List<String> long4000 = VoteTallyEngine.synthesisOptions("Option A: x" + pad4000 + "y");
-        List<String> repeated = VoteTallyEngine.resolveOptions(config, List.of(new TranscriptEntry("mod", "Mod", manyLines, 0,
-                "S", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null)));
-        VoteTallyEngine.synthesisOptions(blankRun);
-        VoteTallyEngine.synthesisOptions("Option A:" + " ".repeat(99_000));
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        // A bound generous enough for any loaded CI runner: the former pattern took
+        // ~2 s for ONE 800-space line (so ~200 s for the 100 below) and did not finish
+        // the 4,000-space line in 500 s. Any finite bound proves the fix.
+        List<List<String>> results = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> List.of(
+                VoteTallyEngine.synthesisOptions("Option A: x" + pad800 + "y"),
+                VoteTallyEngine.synthesisOptions("Option A: x" + pad4000 + "y"),
+                VoteTallyEngine.resolveOptions(config, List.of(new TranscriptEntry("mod", "Mod", manyLines, 0,
+                        "S", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null))),
+                VoteTallyEngine.synthesisOptions(blankRun),
+                VoteTallyEngine.synthesisOptions("Option A:" + " ".repeat(99_000))));
 
-        // Generous for a loaded CI machine: the former pattern took ~2 s for the
-        // 800-space line alone and did not finish the 4,000-space one in 500 s.
-        assertTrue(elapsedMs < 2_000, "option parsing took " + elapsedMs + " ms");
-        assertEquals(List.of("x" + pad800 + "y"), short800, "a line within the length cap still parses");
-        assertTrue(long4000.isEmpty(), "a line over the length cap is prose, not an option");
-        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, repeated.size(), "options are capped per synthesis");
+        assertEquals(List.of("x" + pad800 + "y"), results.get(0), "a line within the length cap still parses");
+        assertEquals(List.of(), results.get(1), "a line over the length cap is prose, not an option");
+        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, results.get(2).size(), "options are capped per synthesis");
+        assertTrue(results.get(2).stream().allMatch(("x" + pad800 + "y")::equals), "each capped option is the line's text");
+        assertEquals(List.of(), results.get(3), "the only option line is over the length cap");
+        assertEquals(List.of(), results.get(4), "a label followed only by an over-long run of spaces has no text");
     }
 
     // =================================================================
