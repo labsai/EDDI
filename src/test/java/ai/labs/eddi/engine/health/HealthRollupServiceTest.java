@@ -123,7 +123,7 @@ class HealthRollupServiceTest {
         assertEquals(1, result.pending());
         verify(dirty, never()).clear(any());
         assertEquals(1.0, registry.counter("eddi.health.rollup.failures").count());
-        assertEquals(600.0, registry.get("eddi.health.rollup.lag").gauge().value());
+        assertEquals(600.0, registry.get("eddi.health.rollup.lag.seconds").gauge().value());
     }
 
     @Test

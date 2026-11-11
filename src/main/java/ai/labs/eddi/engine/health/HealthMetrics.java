@@ -30,9 +30,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * days recomputed and daily rows written;</li>
  * <li>{@code eddi.health.rollup.failures} — agent days whose rollup failed
  * (retried next pass);</li>
- * <li>{@code eddi.health.rollup.pending} / {@code eddi.health.rollup.lag} —
- * gauges, as the last pass left them: agent days still waiting, and the age in
- * seconds of the oldest of them.</li>
+ * <li>{@code eddi.health.rollup.pending} /
+ * {@code eddi.health.rollup.lag.seconds} — gauges, as the last pass left them:
+ * agent days still waiting, and the age in seconds of the oldest of them.</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -54,7 +54,7 @@ public class HealthMetrics {
     static final String ROLLUP_ROWS = "eddi.health.rollup.rows";
     static final String ROLLUP_FAILURES = "eddi.health.rollup.failures";
     static final String ROLLUP_PENDING = "eddi.health.rollup.pending";
-    static final String ROLLUP_LAG = "eddi.health.rollup.lag";
+    static final String ROLLUP_LAG = "eddi.health.rollup.lag.seconds";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -79,7 +79,7 @@ public class HealthMetrics {
         this.rollupFailures = Counter.builder(ROLLUP_FAILURES).description("Agent days whose health rollup failed").register(registry);
         Gauge.builder(ROLLUP_PENDING, rollupPending, AtomicLong::get).description("Agent days waiting for the health rollup")
                 .register(registry);
-        Gauge.builder(ROLLUP_LAG, rollupLagSeconds, AtomicLong::get).baseUnit("seconds")
+        Gauge.builder(ROLLUP_LAG, rollupLagSeconds, AtomicLong::get)
                 .description("Age of the oldest agent day waiting for the health rollup").register(registry);
     }
 
