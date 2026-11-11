@@ -267,6 +267,30 @@ public interface HealthRollupStoresContract {
     }
 
     @Test
+    @DisplayName("self-heal finds the day of an old row discarded since the watermark, by the time it was first discarded")
+    default void selfHealFindsDiscards() {
+        LocalDate old = DAY.minusDays(5);
+        turns().upsert(turn("c9", 0, "old", "alice", old, 1, "api", true, true, false));
+        // The undo is captured on DAY; the old row's updatedAt stays on its own day.
+        turns().markDiscarded(turn("c9", 0, "new", "alice", DAY, 1, "api", true, true, false), List.of("old"));
+
+        Instant dayStart = DAY.atStartOfDay(ZoneOffset.UTC).toInstant();
+        Map<String, Set<LocalDate>> found = new HashMap<>();
+        turns().forEachAgentDayUpdatedSince(dayStart, dayStart.plusSeconds(86_400), 100,
+                (agent, day) -> found.computeIfAbsent(agent, k -> new TreeSet<>()).add(day));
+        assertEquals(Map.of("agent", Set.of(old)), found);
+
+        // A second discard of the same row does not move the time it was discarded.
+        turns().markDiscarded(turn("c9", 0, "newer", "alice", DAY.plusDays(2), 1, "api", true, true, false), List.of("old"));
+        Map<String, Set<LocalDate>> later = new HashMap<>();
+        turns().forEachAgentDayUpdatedSince(dayStart.plusSeconds(86_400), dayStart.plusSeconds(3 * 86_400), 100,
+                (agent, day) -> later.computeIfAbsent(agent, k -> new TreeSet<>()).add(day));
+        assertTrue(later.isEmpty(), later.toString());
+        // The row's write-ordering time is untouched.
+        assertEquals(old.atStartOfDay(ZoneOffset.UTC).toInstant(), turns().findByConversation("c9", 10).get(0).updatedAt());
+    }
+
+    @Test
     @DisplayName("a conversation delete answers the (agent, day)s of what it deleted; the candidate read carries the agent")
     default void deleteReturningDays() {
         turns().upsert(turn("c1", 0, "e0", "alice", DAY, 1, "api", true, true, false));
@@ -283,7 +307,11 @@ public interface HealthRollupStoresContract {
         assertTrue(deleted.daysKnown());
         assertEquals(Map.of("agent", Set.of(DAY, DAY.minusDays(1))), deleted.agentDays());
         assertTrue(turns().agentDaysOfConversation("c1").isEmpty());
-        assertEquals(Map.of("agent", Set.of(DAY)), turns().agentDaysOfConversation("c2"));
+
+        // With readable days the if-known delete deletes, like the returning one.
+        HealthDeletedRows second = turns().deleteConversationIfDaysKnown("c2");
+        assertEquals(1L, second.deleted());
+        assertEquals(Map.of("agent", Set.of(DAY)), second.agentDays());
 
         HealthDeletedRows none = turns().deleteConversationReturningDays("nope");
         assertEquals(0L, none.deleted());

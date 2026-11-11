@@ -233,14 +233,28 @@ public class ConversationPurgeService {
     /**
      * As above. The daily rows of the deleted rows' days are re-rolled; when the
      * store cannot answer those days, every retained day of {@code agentId} is (see
-     * {@code HealthDirtyDays.markDeletedRows}). Neither ever blocks the delete.
+     * {@code HealthDirtyDays.markDeletedRows}). When the agent is unknown too (its
+     * lookup failed), nothing could be re-rolled, so the rows are <b>kept</b> and
+     * left to the orphan sweep, which reads the agent from the rows themselves and
+     * deletes them then — if they were captured within
+     * {@code eddi.health.orphan-sweep-window}; otherwise they expire with
+     * {@code eddi.health.facts-retention}. None of this ever blocks the
+     * conversation's own delete.
      */
     void deleteHealthTurns(String conversationId, String agentId) {
         if (healthTurnStore == null || !healthTurnStore.isResolvable()) {
             return;
         }
         try {
-            HealthDeletedRows deleted = healthTurnStore.get().deleteConversationReturningDays(conversationId);
+            IHealthTurnStore turns = healthTurnStore.get();
+            HealthDeletedRows deleted = agentId == null
+                    ? turns.deleteConversationIfDaysKnown(conversationId)
+                    : turns.deleteConversationReturningDays(conversationId);
+            if (deleted == null) {
+                LOGGER.warnf("Neither the agent nor the days of the Agent Health rows of deleted conversation %s could be read; the rows "
+                        + "are kept for the orphan sweep, which deletes them with their agent known", sanitize(conversationId));
+                return;
+            }
             if (healthDirtyDays != null && healthDirtyDays.isResolvable()) {
                 healthDirtyDays.get().markDeletedRows(conversationId, agentId == null ? List.of() : List.of(agentId), deleted);
             }

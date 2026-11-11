@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,20 +77,41 @@ class ConversationPurgeServiceHealthTest {
     }
 
     @Test
-    @DisplayName("an unreadable agent never stops the purge; the rows are deleted without the fallback agent")
+    @DisplayName("an unreadable agent never stops the purge; the rows go only when their days are known")
     void agentLookupIsBestEffort() throws Exception {
         IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
         when(memoryStore.getConversationState("conv")).thenReturn(ConversationState.READY);
         when(memoryStore.loadListingSummaries(any())).thenThrow(new IllegalStateException("down"));
         IHealthTurnStore healthStore = mock(IHealthTurnStore.class);
+        HealthDeletedRows deleted = new HealthDeletedRows(2L, Map.of("agent", Set.of(LocalDate.of(2026, 11, 10))));
+        when(healthStore.deleteConversationIfDaysKnown("conv")).thenReturn(deleted);
         ConversationPurgeService service = service(memoryStore, healthStore);
         HealthDirtyDays dirty = dirtyDays(service);
 
         service.purge("conv");
 
         verify(memoryStore).deleteConversationMemorySnapshot("conv");
-        verify(healthStore).deleteConversationReturningDays("conv");
-        verify(dirty).markDeletedRows("conv", List.of(), null);
+        verify(healthStore).deleteConversationIfDaysKnown("conv");
+        verify(healthStore, never()).deleteConversationReturningDays(any());
+        verify(dirty).markDeletedRows("conv", List.of(), deleted);
+    }
+
+    @Test
+    @DisplayName("neither agent nor days known: the rows are kept for the orphan sweep and nothing is marked")
+    void bothUnknownKeepsRows() throws Exception {
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memoryStore.getConversationState("conv")).thenReturn(ConversationState.READY);
+        when(memoryStore.loadListingSummaries(any())).thenThrow(new IllegalStateException("down"));
+        IHealthTurnStore healthStore = mock(IHealthTurnStore.class);
+        when(healthStore.deleteConversationIfDaysKnown("conv")).thenReturn(null);
+        ConversationPurgeService service = service(memoryStore, healthStore);
+        HealthDirtyDays dirty = dirtyDays(service);
+
+        assertDoesNotThrow(() -> service.purge("conv"));
+
+        verify(memoryStore).deleteConversationMemorySnapshot("conv");
+        verify(healthStore, never()).deleteConversationReturningDays(any());
+        verify(dirty, never()).markDeletedRows(any(), any(), any());
     }
 
     @Test
@@ -105,6 +127,7 @@ class ConversationPurgeServiceHealthTest {
         service.deleteHealthTurns("conv", "agent");
         verify(dirty).markDeletedRows("conv", List.of("agent"), known);
 
+        when(healthStore.deleteConversationIfDaysKnown("conv")).thenReturn(known);
         service.deleteHealthTurns("conv");
         verify(dirty).markDeletedRows("conv", List.of(), known);
     }

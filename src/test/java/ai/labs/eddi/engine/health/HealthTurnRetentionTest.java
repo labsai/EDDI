@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -377,6 +378,50 @@ class HealthTurnRetentionTest {
         }
     }
 
+    /**
+     * A purge that could read neither the agent nor the days keeps the rows; the
+     * next orphan sweep deletes them with the agent its candidate read names, and
+     * re-rolls that agent's retained days.
+     */
+    @Nested
+    @DisplayName("rows a purge had to keep")
+    class KeptByThePurge {
+
+        @Test
+        @DisplayName("are removed by the next orphan sweep, which marks the agent's retained days dirty")
+        @SuppressWarnings("unchecked")
+        void sweepRemovesAndMarks() throws Exception {
+            InMemoryHealthTurnStore store = new InMemoryHealthTurnStore();
+            store.upsert(new HealthTurn("conv-1", 0, "e0", "agent-1", 1, null, "user-1", "api", LocalDate.of(2026, 11, 9),
+                    Instant.parse("2026-11-09T12:00:00Z"), Instant.parse("2026-11-09T12:00:00Z"), 0.1, null, 1L, 1L, 2L, 10L, null, false,
+                    List.of(), false, 0, 0, 0, 0, true, true, false, List.of(), false));
+            store.failDayReads = true;
+
+            // The purge: the agent lookup failed, and so does the day read — nothing is
+            // deleted.
+            assertEquals(null, store.deleteConversationIfDaysKnown("conv-1"));
+            assertEquals(1, store.rows("conv-1"));
+
+            IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+            when(conversations.loadListingSummaries(any())).thenReturn(Map.of());
+            IHealthDirtyDayStore dirtyStore = mock(IHealthDirtyDayStore.class);
+            Instance<IHealthDirtyDayStore> dirtyStoreInstance = mock(Instance.class);
+            when(dirtyStoreInstance.get()).thenReturn(dirtyStore);
+            HealthDirtyDays dirty = new HealthDirtyDays(dirtyStoreInstance, HealthSettings.defaults(), CLOCK);
+            Instance<HealthDirtyDays> dirtyInstance = mock(Instance.class);
+            when(dirtyInstance.isResolvable()).thenReturn(true);
+            when(dirtyInstance.get()).thenReturn(dirty);
+            HealthTurnRetention retention = retention(store, conversations, HealthSettings.defaults(), CLOCK);
+            retention.dirtyDays = dirtyInstance;
+
+            assertEquals(1L, retention.removeOrphans());
+            assertEquals(0, store.rows("conv-1"));
+            ArgumentCaptor<Collection<LocalDate>> days = ArgumentCaptor.forClass(Collection.class);
+            verify(dirtyStore).mark(eq("agent-1"), days.capture());
+            assertEquals(91, days.getValue().size(), "today and the 90 retained days before it");
+        }
+    }
+
     private static void assertTrueEventually(BooleanSupplier condition) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!condition.getAsBoolean()) {
@@ -432,6 +477,8 @@ class HealthTurnRetentionTest {
         private final CountDownLatch release = new CountDownLatch(1);
         private final AtomicInteger failDeletes = new AtomicInteger();
         private volatile boolean hold;
+        /** The day reads fail (a MongoDB delete then cannot tell the days). */
+        private volatile boolean failDayReads;
 
         void holdWrites() {
             hold = true;
@@ -514,7 +561,13 @@ class HealthTurnRetentionTest {
 
         @Override
         public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
-            return new HealthDeletedRows(deleteByConversationId(conversationId), Map.of());
+            Map<String, Set<LocalDate>> days = failDayReads ? null : Map.of();
+            return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+        }
+
+        @Override
+        public HealthDeletedRows deleteConversationIfDaysKnown(String conversationId) {
+            return failDayReads ? null : deleteConversationReturningDays(conversationId);
         }
 
         @Override

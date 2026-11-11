@@ -55,15 +55,18 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <em>deleted</em> row, which is why deletions are marked at once
  * ({@link #markDeleted}), with one retry.
  * <p>
- * <b>Residual loss.</b> Only when both attempts of that write fail is a
- * deletion's mark held in memory for the next flush (with a WARN naming the
+ * <b>The one remaining loss.</b> Only when both attempts of that write fail is
+ * a deletion's mark held in memory for the next flush (with a WARN naming the
  * agent). If the node then stops before a flush succeeds, the mark is lost: the
  * daily rows of those days keep the deleted rows' counts until the day is
  * re-rolled for another reason (a later turn of the agent on that day, a
  * {@link #markRange}) or the row ages out at
  * {@code eddi.health.daily-retention}. When a delete cannot tell which days its
  * rows were on, every retained day of the conversation's agent is marked
- * instead ({@link #markDeletedRows}).
+ * instead ({@link #markDeletedRows}). A purge that knows neither the days nor
+ * the agent does not delete, and leaves the rows to the orphan sweep, which
+ * knows the agent. Days older than the turn-row retention cannot be recomputed
+ * at all.
  */
 @ApplicationScoped
 public class HealthDirtyDays {

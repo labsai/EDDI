@@ -230,10 +230,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
             Date now = date(replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now());
             List<WriteModel<Document>> writes = new ArrayList<>();
             for (String executionId : new LinkedHashSet<>(executionIds)) {
-                writes.add(new UpdateOneModel<>(eq("_id", id(replacing.conversationId(), executionId)),
-                        Updates.combine(Updates.set(FIELD_DISCARDED, true), Updates.setOnInsert(FIELD_CONVERSATION, replacing.conversationId()),
-                                Updates.setOnInsert(FIELD_EXECUTION, executionId), Updates.setOnInsert(FIELD_AGENT, replacing.agentId()),
-                                Updates.setOnInsert(FIELD_USER, replacing.userId()), Updates.setOnInsert(FIELD_DISCARDED_AT, now)),
+                writes.add(new UpdateOneModel<>(eq("_id", id(replacing.conversationId(), executionId)), discardPipeline(replacing, executionId, now),
                         new UpdateOptions().upsert(true)));
             }
             turns.bulkWrite(writes);
@@ -241,6 +238,28 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         } catch (MongoException e) {
             throw new HealthStoreException("Could not mark health turns discarded", e);
         }
+    }
+
+    /**
+     * Marks a row discarded, or inserts a marker. {@code discardedAt} is when the
+     * row first became discarded — set once, so the rollup's self-heal finds the
+     * day of an existing row discarded since its last pass; {@code updatedAt}, the
+     * write-ordering guard, is left alone. The other fields are set only on insert.
+     */
+    static List<Bson> discardPipeline(HealthTurn replacing, String executionId, Date now) {
+        Document set = new Document();
+        set.put(FIELD_DISCARDED_AT, new Document("$cond", List.of(new Document("$eq", List.of("$" + FIELD_DISCARDED, true)),
+                new Document("$ifNull", List.of("$" + FIELD_DISCARDED_AT, literal(now))), literal(now))));
+        set.put(FIELD_DISCARDED, literal(true));
+        set.put(FIELD_CONVERSATION, ifNull(FIELD_CONVERSATION, replacing.conversationId()));
+        set.put(FIELD_EXECUTION, ifNull(FIELD_EXECUTION, executionId));
+        set.put(FIELD_AGENT, ifNull(FIELD_AGENT, replacing.agentId()));
+        set.put(FIELD_USER, ifNull(FIELD_USER, replacing.userId()));
+        return List.of(new Document("$set", set));
+    }
+
+    private static Document ifNull(String field, Object value) {
+        return new Document("$ifNull", Arrays.asList("$" + field, literal(value)));
     }
 
     @Override
@@ -438,8 +457,11 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
 
     @Override
     public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
-        List<Bson> pipeline = List.of(
-                Aggregates.match(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until)), ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
+        // Rows written, or discarded, in the window: a discard leaves updatedAt as it
+        // was.
+        Bson inWindow = or(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until))),
+                and(gte(FIELD_DISCARDED_AT, date(since)), lt(FIELD_DISCARDED_AT, date(until))));
+        List<Bson> pipeline = List.of(Aggregates.match(and(inWindow, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
         try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
             while (cursor.hasNext()) {
@@ -466,6 +488,15 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         // MongoDB has no delete that returns the deleted documents in bulk: read the
         // pairs first, then delete — and delete even when the read fails.
         Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_CONVERSATION, conversationId));
+        return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationIfDaysKnown(String conversationId) {
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_CONVERSATION, conversationId));
+        if (days == null) {
+            return null; // kept for the orphan sweep
+        }
         return new HealthDeletedRows(deleteByConversationId(conversationId), days);
     }
 

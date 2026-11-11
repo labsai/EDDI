@@ -177,22 +177,31 @@ They are recomputed, never incremented:
    delete still goes ahead and **every retained day** of the conversation's
    agent is marked instead, with a WARN — the agent comes from the
    conversation (purge), the row (the recorder's clean-up) or the sweep's
-   candidate read. An erasure deletes the user's rows the same way; its
-   fallback is the agents of the user's conversations, noted at the erasure's
-   first step while those conversations still exist (see [GDPR](#gdpr)).
-   These marks are written to the store at once, not on the
-   five-second flush, because the self-heal cannot find a deleted row; a failed
-   write is retried once. **Residual:** when both attempts fail (a WARN names
-   the agent), the mark waits in memory for the next flush, and if the node
-   stops before a flush succeeds it is lost. The daily rows of those days then
+   candidate read. A purge that can read neither the agent nor the days
+   (MongoDB only, since PostgreSQL returns the days with the delete) **keeps** the
+   rows, with a WARN. The next orphan sweep then deletes them and marks their
+   agent's days, because its candidate read names the agent. Kept rows
+   captured within `eddi.health.orphan-sweep-window` are removed by that sweep;
+   older ones expire with `eddi.health.facts-retention`. An erasure deletes the
+   user's rows the same way; its fallback is the agents of the user's
+   conversations, noted at the erasure's first step while those conversations
+   still exist (see [GDPR](#gdpr)). Daily rows older than
+   `eddi.health.facts-retention` cannot be recomputed at all (see below).
+   These marks are written to the store at once, not on the five-second flush,
+   because the self-heal cannot find a deleted row; a failed write is retried
+   once. **The one remaining limit:** when both attempts fail (a WARN names the
+   agent), the mark waits in memory for the next flush. If the node stops
+   before a flush succeeds, the mark is lost, and the daily rows of those days
    keep the deleted rows' counts until the day is re-rolled for another reason
    (such as a later write of the agent on that day) or reaches
    `eddi.health.daily-retention`.
 2. The `health-rollup` system schedule (a heartbeat, every
    `eddi.health.rollup-interval`, default 5 minutes; created at startup, run by
    one node at a time under the schedule store's claim) first **self-heals** —
-   it re-marks dirty the (agent, day) pairs of turn rows written since its last
-   pass (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
+   it re-marks dirty the (agent, day) pairs of turn rows written, or discarded
+   by an undo, since its last pass. A discard leaves the row's write time
+   alone, so the time a row was first discarded is stored with it for this
+   (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
    minute behind the clock, at most 10,000 pairs a pass) — and then drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
@@ -220,7 +229,11 @@ has waited for the rollup longer than one rollup interval, else today: a day
 marked a moment ago is waiting for the next pass, not behind. **Today's numbers
 may lag by up to one rollup interval.** Daily rows are kept
 `eddi.health.daily-retention` (730 days) and hold no personal data (no user or
-conversation id); an erasure removes a user's counts from them at the next pass.
+conversation id); an erasure removes a user's counts from them at the next pass,
+for days within `eddi.health.facts-retention` (90 days). **Older daily rows
+cannot be recomputed**, because their turn rows are already gone. An erased
+user's, or a deleted conversation's, contribution to those counts stays until
+`eddi.health.daily-retention` removes the rows.
 
 The views cache what they read from the stores for `eddi.health.cache-ttl`
 (60 s; 0 switches it off), keyed by the full query and per agent, never per
@@ -460,7 +473,11 @@ Turn rows are personal data about a user's use of an agent:
   participant runs. If no agent is known either, a WARN is logged and the daily
   rows keep the user's counts until `eddi.health.daily-retention`. This is not
   reported as a failed step: the rows (the only personal data) are gone, and a
-  failed step would hold back the participants that run last.
+  failed step would hold back the participants that run last. Only days within
+  `eddi.health.facts-retention` (90 days) can be re-rolled. On older days the
+  user's contribution to the daily counts stays until
+  `eddi.health.daily-retention` (730 days) removes those rows, which hold no
+  user id or content.
 - **Export** includes the user's rows (newest first, at most 10,000) under
   `agentHealthTurns.turns`.
 - **Deleting a conversation** deletes its rows (best effort — a failure is

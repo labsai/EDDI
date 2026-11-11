@@ -210,7 +210,9 @@ principal, not a user: erasing or exporting it is refused with 400.
     until `eddi.health.facts-retention` removes it. On the erasing node, step 0 also notes the
     agents of the user's conversations (best effort, never a failed step). Should the days of the
     deleted rows be unreadable, those agents' daily aggregates are recomputed in full (they hold no
-    personal data). The export
+    personal data). Daily aggregates older than `eddi.health.facts-retention` (90 days) cannot be
+    recomputed. The user's contribution to their counts stays until `eddi.health.daily-retention`
+    (730 days) removes them; they hold no user id or content. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 

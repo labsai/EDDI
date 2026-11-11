@@ -124,10 +124,12 @@ public interface IHealthTurnStore {
                                                            Collection<String> interactive, Collection<String> origins);
 
     /**
-     * Streams the distinct (agent, day) pairs of the rows written in
-     * [{@code since}, {@code until}) — at most {@code limit} — to {@code consumer}.
-     * What the rollup's self-heal pass re-marks dirty, so a dirty mark lost on a
-     * node (a hard kill before its flush) never leaves a day stale.
+     * Streams the distinct (agent, day) pairs of the rows written, or first
+     * discarded, in [{@code since}, {@code until}) — at most {@code limit} — to
+     * {@code consumer}. A discard keeps the row's write time (the write-ordering
+     * guard), so the time it was first discarded is stored separately and matched
+     * here. What the rollup's self-heal pass re-marks dirty, so a dirty mark lost
+     * on a node (a hard kill before its flush) never leaves a day stale.
      */
     void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer);
 
@@ -151,6 +153,15 @@ public interface IHealthTurnStore {
      * and the rows are deleted all the same.
      */
     HealthDeletedRows deleteConversationReturningDays(String conversationId);
+
+    /**
+     * As {@link #deleteConversationReturningDays}, but deletes nothing — and
+     * answers {@code null} — when the days cannot be read: for a caller that does
+     * not know the conversation's agent either, so nothing could be re-rolled. The
+     * rows are then left to the orphan sweep, whose candidate read names the agent.
+     * On PostgreSQL the days come with the delete, so this never keeps anything.
+     */
+    HealthDeletedRows deleteConversationIfDaysKnown(String conversationId);
 
     /**
      * As {@link #forEachConversationUpdatedSince}, with the agent id each

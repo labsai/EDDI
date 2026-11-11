@@ -113,13 +113,16 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     /**
      * Rollups and drill-down read an agent's days; erasure finds rows by user;
      * retention deletes by day and markers by their time; the orphan sweep finds
-     * recently written rows by {@code updated_at_ms} (and markers by their time).
+     * recently written rows by {@code updated_at_ms} (and markers by their time);
+     * the rollup's self-heal finds rows written or discarded since its last pass.
      * Rows by conversation use the primary key.
      */
     static final String[] CREATE_INDEXES = {"CREATE INDEX IF NOT EXISTS idx_health_turns_agent_day ON health_turns (agent_id, day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_user ON health_turns (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_day ON health_turns (day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_rows ON health_turns (discarded_at_ms) WHERE day IS NOT NULL "
+                    + "AND discarded_at_ms IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
 
     /** The columns a row write binds, in bind order. */
@@ -147,7 +150,11 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     static final String INSERT_IF_ABSENT = INSERT + "ON CONFLICT (conversation_id, execution_id) DO NOTHING";
 
     static final String MARK_DISCARDED = "INSERT INTO health_turns (conversation_id, execution_id, agent_id, user_id, discarded, discarded_at_ms) "
-            + "VALUES (?, ?, ?, ?, TRUE, ?) ON CONFLICT (conversation_id, execution_id) DO UPDATE SET discarded = TRUE";
+            + "VALUES (?, ?, ?, ?, TRUE, ?) ON CONFLICT (conversation_id, execution_id) DO UPDATE SET discarded = TRUE, "
+            // When the discard happened, set once — the self-heal finds an existing row's
+            // day by it; updated_at_ms stays the write-ordering guard.
+            + "discarded_at_ms = CASE WHEN health_turns.discarded THEN COALESCE(health_turns.discarded_at_ms, EXCLUDED.discarded_at_ms) "
+            + "ELSE EXCLUDED.discarded_at_ms END";
 
     private static final String SELECT = "SELECT " + WRITTEN.stream().map(c -> "failures".equals(c) ? "failures::text AS failures" : c)
             .collect(Collectors.joining(", ")) + " FROM health_turns ";
@@ -432,8 +439,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             + "MAX(CASE WHEN day < ? THEN 1 ELSE 0 END) AS a_before FROM health_turns WHERE agent_id = ANY(?) AND day >= ? AND day <= ? "
             + "AND recorded_at_ms IS NOT NULL AND NOT discarded AND origin = ANY(?) GROUP BY agent_id, conversation_id) c GROUP BY agent_id";
 
-    static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE updated_at_ms >= ? AND updated_at_ms < ? "
-            + "AND day IS NOT NULL AND agent_id IS NOT NULL LIMIT ?";
+    /**
+     * Rows written, or discarded, in the window: a discard leaves updated_at_ms as
+     * it was.
+     */
+    static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE ((updated_at_ms >= ? AND updated_at_ms < ?) "
+            + "OR (discarded_at_ms >= ? AND discarded_at_ms < ?)) AND day IS NOT NULL AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_USER = "SELECT DISTINCT agent_id, day FROM health_turns WHERE user_id = ? AND day IS NOT NULL "
             + "AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_CONVERSATION = "SELECT DISTINCT agent_id, day FROM health_turns WHERE conversation_id = ? "
@@ -554,7 +565,9 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 PreparedStatement statement = connection.prepareStatement(AGENT_DAYS_UPDATED_SINCE)) {
             statement.setLong(1, since.toEpochMilli());
             statement.setLong(2, until.toEpochMilli());
-            statement.setInt(3, Math.max(1, limit));
+            statement.setLong(3, since.toEpochMilli());
+            statement.setLong(4, until.toEpochMilli());
+            statement.setInt(5, Math.max(1, limit));
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
                     consumer.accept(r.getString(1), r.getObject(2, LocalDate.class));
@@ -581,6 +594,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     @Override
     public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
         return deleteReturning(DELETE_CONVERSATION_RETURNING, conversationId, "Could not delete a conversation's health turns");
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationIfDaysKnown(String conversationId) {
+        // One statement: the days are known whenever the delete succeeds.
+        return deleteConversationReturningDays(conversationId);
     }
 
     @Override

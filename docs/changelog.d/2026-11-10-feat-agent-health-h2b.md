@@ -130,3 +130,30 @@ presets, status and reasons.
   was noted, the participant reads the conversation store again.
 - Nothing known: a WARN, and the daily rows keep the counts until `eddi.health.daily-retention`. This is not a failed
   step, which would hold back the participants that run last although the personal data is gone.
+
+## 🐛 fix(health): self-heal finds discards of old rows; the re-roll limit of old daily rows is stated (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- An undo that discards an existing row from an earlier day now sets that row's discard time once, when it flips
+  (`discardedAt` / `discarded_at_ms`, the field markers already use). `updatedAt`, the write-ordering guard, is
+  untouched. The self-heal read (`forEachAgentDayUpdatedSince`) matches rows written **or** discarded in its window,
+  so a lost in-memory dirty mark for that day is recovered. PostgreSQL has a new partial index
+  `idx_health_turns_discarded_rows` (`discarded_at_ms` where `day IS NOT NULL`); the column already existed. MongoDB
+  sets the field with a pipeline update and uses its existing sparse index.
+- Docs (`agent-health.md`, `gdpr-compliance.md`): daily rows older than `eddi.health.facts-retention` can no longer
+  be recomputed, so an erased user's or deleted conversation's contribution stays in those aggregates until
+  `eddi.health.daily-retention`. Those rows hold no user id or content.
+
+## 🐛 fix(health): a purge that knows neither agent nor days keeps the rows for the orphan sweep (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteConversationIfDaysKnown` deletes nothing, and returns `null`, when the days cannot be read.
+  That happens only on MongoDB; PostgreSQL's `DELETE ... RETURNING` always has them.
+  `ConversationPurgeService.deleteHealthTurns` uses it when the conversation's agent lookup failed. Without either,
+  the rows are kept with a WARN. The next orphan sweep, whose candidate read names the agent, deletes them and
+  re-rolls that agent's retained days. Kept rows outside `eddi.health.orphan-sweep-window` expire with
+  `eddi.health.facts-retention`.
+- Docs and the `HealthDirtyDays` comment now name the in-memory retry window as the one remaining limit: both writes
+  of a deletion mark fail, then the node stops before the next successful flush.

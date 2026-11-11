@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.health.mongo;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.mongodb.MongoClientSettings;
@@ -26,17 +27,20 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -157,6 +161,21 @@ class MongoHealthTurnStoreTest {
     }
 
     @Test
+    @DisplayName("a discard sets discardedAt once, when the row flips, and never touches updatedAt")
+    void discardPipeline() {
+        Date now = new Date(1_000L);
+        Document set = (Document) ((Document) MongoHealthTurnStore.discardPipeline(turn(false), "a", now).get(0)).get("$set");
+        assertFalse(set.containsKey(MongoHealthTurnStore.FIELD_UPDATED));
+        Document discardedAt = (Document) set.get(MongoHealthTurnStore.FIELD_DISCARDED_AT);
+        List<?> branches = (List<?>) discardedAt.get("$cond");
+        assertEquals(new Document("$eq", List.of("$" + MongoHealthTurnStore.FIELD_DISCARDED, true)), branches.get(0));
+        assertEquals(new Document("$ifNull", List.of("$" + MongoHealthTurnStore.FIELD_DISCARDED_AT, new Document("$literal", now))),
+                branches.get(1));
+        assertEquals(new Document("$literal", now), branches.get(2));
+        assertEquals(new Document("$literal", true), set.get(MongoHealthTurnStore.FIELD_DISCARDED));
+    }
+
+    @Test
     @DisplayName("the day range is an inclusive string range on the agent")
     void dayRange() {
         String rendered = render(MongoHealthTurnStore.agentDayRange("agent", LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 10))).toJson();
@@ -184,6 +203,21 @@ class MongoHealthTurnStoreTest {
         verify(collection, times(3)).deleteMany(filters.capture());
         assertEquals("user", render(filters.getAllValues().get(0)).getString("userId").getValue());
         assertEquals("conv", render(filters.getAllValues().get(1)).getString("conversationId").getValue());
+    }
+
+    @Test
+    @DisplayName("unreadable days: the returning delete still deletes (days null); the if-known delete keeps the rows")
+    void unreadableDays() {
+        when(collection.aggregate(anyList())).thenThrow(new MongoException("down"));
+        when(collection.deleteMany(any(Bson.class))).thenReturn(DeleteResult.acknowledged(2));
+
+        assertNull(store.deleteConversationIfDaysKnown("conv"));
+        verify(collection, never()).deleteMany(any(Bson.class));
+
+        HealthDeletedRows deleted = store.deleteConversationReturningDays("conv");
+        assertEquals(2L, deleted.deleted());
+        assertFalse(deleted.daysKnown());
+        assertFalse(store.deleteByUserIdReturningDays("user").daysKnown());
     }
 
     @Test
