@@ -218,7 +218,7 @@ public class HealthTurnRecorder {
             if (dirtyDays != null && turn.agentId() != null && writtenLate(turn)) {
                 // Marked before the row exists: a node stopping between the write and its
                 // mark cannot lose the mark, and a mark whose write then fails only costs a
-                // recompute. The marks after the write are then on the debounced flush.
+                // recompute. The days are marked at once again after the write (markDirty).
                 premarked = daysBeforeWrite(turns, turn, capture);
                 dirtyDays.markLateWrite(turn.agentId(), premarked);
             }
@@ -325,9 +325,12 @@ public class HealthTurnRecorder {
     }
 
     /**
-     * Notes the row's days for the next flush. A late row's days were marked in the
-     * store before it was written ({@code premarked}); a day found only now — its
-     * read before the write failed — is marked at once as well.
+     * Notes the row's days for the next flush. A late row's days ({@code premarked}
+     * non-null: marked in the store before the write) are marked at once again, all
+     * of them: a rollup that ran between the pre-mark and the write recomputed the
+     * day without the row and cleared the mark, and this mark gives the day a new
+     * token now that the row exists. It is also a second durable attempt when the
+     * pre-mark could not reach the store.
      */
     private void markDirty(HealthTurn turn, Set<LocalDate> days, Set<LocalDate> premarked) {
         if (dirtyDays == null || turn.agentId() == null) {
@@ -336,12 +339,8 @@ public class HealthTurnRecorder {
         if (premarked == null) {
             // Not late: the self-heal still covers this row should the mark be lost.
             dirtyDays.note(turn.agentId(), days);
-            return;
-        }
-        Set<LocalDate> unmarked = new HashSet<>(days);
-        unmarked.removeAll(premarked);
-        if (!unmarked.isEmpty()) {
-            dirtyDays.markLateWrite(turn.agentId(), unmarked);
+        } else if (!days.isEmpty()) {
+            dirtyDays.markLateWrite(turn.agentId(), days);
         }
     }
 
