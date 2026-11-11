@@ -168,6 +168,17 @@ describe("measures the backend never tests for significance", () => {
     expect(isUntestable({ id: "turnDurationP95" })).toBe(true);
     expect(isUntestable({ id: "costPerSession" })).toBe(true);
     expect(isUntestable({ id: "agentFailureRate" })).toBe(false);
+    expect(isUntestable({ id: "costPerResolvedSession" })).toBe(true);
+  });
+
+  it("prefers the backend's explicit tested flag over the id list", () => {
+    expect(isUntestable({ id: "agentFailureRate", tested: false })).toBe(true);
+    expect(isUntestable({ id: "costPerSession", tested: true })).toBe(false);
+  });
+
+  it("is not withheld-for-coverage when no session is behind any part", () => {
+    const parts = ["confirmed", "selfReported", "agentClosed", "silence"].map((key) => ({ key, label: key, value: null, n: 0 }));
+    expect(resolutionSplit({ value: null, breakdown: parts })).toBeNull();
   });
 });
 

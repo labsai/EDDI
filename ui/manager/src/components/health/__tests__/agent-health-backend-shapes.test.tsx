@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
+import { MeasureCard } from "../measure-card";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
@@ -155,6 +156,20 @@ describe("sessions rows", () => {
   });
 });
 
+describe("resolution split without sessions", () => {
+  it("falls back to the missing state and the measure's own hint when every part has n = 0", async () => {
+    const zero = ["confirmed", "selfReported", "agentClosed", "silence"].map((key) => ({ key, label: key, value: null, n: 0 }));
+    renderWithProviders(
+      <MeasureCard
+        measure={{ id: "resolutionRate", label: "Resolution", kind: "SCORED", unit: "ratio", value: null, n: 0, band: "GREY", significant: false, breakdown: zero, hint: "Outcomes are not available yet" }}
+      />,
+    );
+    expect(screen.getByTestId("resolution-split-missing")).toBeInTheDocument();
+    expect(screen.queryByTestId("resolution-split-withheld")).toBeNull();
+    expect(screen.getByTestId("health-hint")).toHaveTextContent("not available");
+  });
+});
+
 describe("outcome suggestions", () => {
   it("shows a dash for an action that matched no heuristic instead of failing", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
@@ -181,5 +196,26 @@ describe("version compare", () => {
     renderWithProviders(<CompareDialog open onClose={() => {}} agentId="a1" latestVersion={8} />);
     expect(await screen.findAllByTestId("health-compare-no-turns")).toHaveLength(2);
     expect(screen.getByTestId("health-compare-table")).toBeInTheDocument();
+  });
+
+  it("does not claim a side has no turns when its only sections are restricted, or when another section has values", async () => {
+    server.use(
+      http.get("*/agents/:agentId/health/compare", () => {
+        const restricted = { quality: { restricted: true, measures: [] } };
+        const valued = {
+          quality: { restricted: true, measures: [] },
+          reliability: { restricted: false, measures: [{ id: "apdex", label: "Apdex", kind: "SCORED", unit: "score", value: 0.9, n: 9, band: "GREEN", significant: false }] },
+        };
+        return HttpResponse.json({
+          agentId: "a1",
+          from: { version: 6, window: { from: "2026-10-01", to: "2026-10-14" }, sections: restricted },
+          to: { version: 8, window: { from: "2026-10-15", to: "2026-11-10" }, sections: valued },
+          deltas: [],
+        });
+      }),
+    );
+    renderWithProviders(<CompareDialog open onClose={() => {}} agentId="a1" latestVersion={8} />);
+    await screen.findByTestId("health-compare-table");
+    expect(screen.queryByTestId("health-compare-no-turns")).toBeNull();
   });
 });

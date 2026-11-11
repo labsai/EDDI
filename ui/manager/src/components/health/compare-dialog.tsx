@@ -22,8 +22,10 @@ function indexMeasures(...sides: Array<AgentHealth["sections"]>): Map<string, Me
 }
 
 /** True when at least one measure of the sections has a value. */
-function hasValues(sections: AgentHealth["sections"]): boolean {
-  return Object.values(sections).some((section) => section?.measures?.some((m) => m.value !== null && m.value !== undefined));
+function hasNoValues(sections: AgentHealth["sections"]): boolean {
+  // Restricted sections hide their measures: they say nothing about turns.
+  const open = Object.values(sections).filter((s) => s && !s.restricted);
+  return open.length > 0 && !open.some((s) => s!.measures?.some((m) => m.value !== null && m.value !== undefined));
 }
 
 /** The per-measure comparison of two versions: both values, the delta and a verdict. Verdicts are neutral unless the backend marks the change significant and directional (see `compareVerdict`). */
@@ -169,7 +171,7 @@ export function CompareDialog({
             </p>
             {[compare.data.from, compare.data.to].map(
               (side) =>
-                !hasValues(side.sections) && (
+                hasNoValues(side.sections) && (
                   // A version without turns in its window answers with empty values, not an error.
                   <p key={side.version} className="text-sm text-muted-foreground" data-testid="health-compare-no-turns">
                     {t("health.compare.noTurns", { version: side.version, defaultValue: "v{{version}} has no turns in its window, so it has no values." })}

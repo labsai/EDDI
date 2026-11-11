@@ -236,7 +236,10 @@ export function resolutionSplit(measure: Pick<Measure, "breakdown"> & Partial<Pi
   const parts = raw.map((p) => ({ ...p, share: total > 0 ? p.value / total : 0 }));
   const silenceShare = parts.find((p) => p.key === "silence")?.share ?? 0;
   // A null rate with null parts is a withheld rate, not a rate of zero.
-  const withheld = (measure.value === null || measure.value === undefined) && breakdown.every((b) => b.value === null || b.value === undefined);
+  const nullRate = (measure.value === null || measure.value === undefined) && breakdown.every((b) => b.value === null || b.value === undefined);
+  // Withheld for low coverage only when sessions were counted; with every n at 0 there is nothing behind the dash (outcomes unavailable).
+  if (nullRate && raw.every((p) => p.n === 0)) return null;
+  const withheld = nullRate;
   return { parts, total, silenceShare, mostlySilence: total > 0 && silenceShare > SILENCE_WARN_SHARE, withheld };
 }
 
@@ -265,10 +268,12 @@ export function measureLabel(t: TFunction, m: Pick<Measure, "id" | "label">): st
  * Measures with no variance to test: their `significant` is always false, which means "not
  * tested", not "within normal variation" (planning/agent-health-api.md section 12).
  */
-const UNTESTABLE = new Set(["turnDurationP95", "costPerSession", "tokensPerTurn", "turnsPerSession", "guardrailTripRate", "returningUserShare", "outcomeCoverage"]);
+const UNTESTABLE = new Set(["turnDurationP95", "costPerSession", "costPerResolvedSession", "tokensPerTurn", "turnsPerSession", "guardrailTripRate", "returningUserShare", "outcomeCoverage"]);
 
 /** True when the backend never tests this measure's change for significance. */
-export const isUntestable = (m: Pick<Measure, "id">): boolean => UNTESTABLE.has(m.id);
+/** An explicit `tested` flag from the backend wins (`tested === false` is untestable); without one the id list decides. */
+export const isUntestable = (m: Pick<Measure, "id"> & Partial<Pick<Measure, "tested">>): boolean =>
+  typeof m.tested === "boolean" ? !m.tested : UNTESTABLE.has(m.id);
 
 const SECTION_TITLE: Record<string, string> = {
   reliability: "Reliability",

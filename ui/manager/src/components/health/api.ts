@@ -39,6 +39,8 @@ export interface Measure {
   baseline?: number | null;
   delta?: number | null;
   significant?: boolean;
+  /** Whether the change is tested for significance at all (H4); `false` means never tested. Absent on older backends. */
+  tested?: boolean;
   band: Band;
   thresholds?: Thresholds | null;
   breakdown?: BreakdownEntry[] | null;
