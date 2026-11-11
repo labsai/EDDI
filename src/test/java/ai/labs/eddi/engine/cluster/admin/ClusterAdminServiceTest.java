@@ -165,6 +165,7 @@ class ClusterAdminServiceTest {
                 new SimpleMeterRegistry(), shared, instance(null));
         // a replay settles on the thread that delivers the turn's answer
         created.replayCompletions = Runnable::run;
+        created.callerIdentityContext = new CallerIdentityContext(null, null);
         return created;
     }
 

@@ -1207,10 +1207,12 @@ public class ClusterAdminService implements ClusterStartable {
     }
 
     /**
-     * Binds no caller; stateless over {@code CallerIdentityContext}'s static
-     * thread-locals, so a private instance is the same context CDI injects.
+     * Binds the replayed turn's (absent) caller — see
+     * {@link #dispatchWithoutCaller}. Field-injected like {@link #turnIdempotency};
+     * tests set it.
      */
-    private static final CallerIdentityContext NO_CALLER = new CallerIdentityContext(null, null);
+    @Inject
+    CallerIdentityContext callerIdentityContext;
 
     /**
      * Submits a replayed turn with <b>no caller identity</b>, and waits for the
@@ -1229,7 +1231,7 @@ public class ClusterAdminService implements ClusterStartable {
      * the conversation's stored owner, never the caller.
      */
     void dispatchWithoutCaller(ReplayDispatch dispatch) throws Exception {
-        FutureTask<Void> task = new FutureTask<>(NO_CALLER.withIdentity(null, () -> {
+        FutureTask<Void> task = new FutureTask<>(callerIdentityContext.withIdentity(null, () -> {
             dispatch.run();
             return null;
         }));
