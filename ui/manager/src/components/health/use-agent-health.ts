@@ -111,6 +111,10 @@ export function useHealthSeries(agentId: string, measures: readonly string[], qu
   return { byMeasure, markers: [...markers.values()], isLoading: results.some((r) => r.isLoading) };
 }
 
+/**
+ * Compares two versions of an agent. Disabled until both versions are chosen and `from < to`
+ * (the contract compares an older with a newer version); `null` is mapped to -1 only to keep the key stable.
+ */
 export function useHealthCompare(agentId: string, from: number | null, to: number | null, days?: number) {
   return useQuery({
     queryKey: healthKeys.compare(agentId, from ?? -1, to ?? -1, days),
@@ -133,14 +137,17 @@ export function useHealthPortfolio(period: HealthPeriod, sort: "attention" | "na
   });
 }
 
+/** The agent's health profile; disabled while `enabled` is false (the dialog is closed). */
 export function useHealthProfile(agentId: string, enabled = true) {
   return useQuery({ queryKey: healthKeys.profile(agentId), queryFn: () => getHealthProfile(agentId), enabled, retry: false });
 }
 
+/** The preset list. Presets are static, so they are cached ten times longer than health data. */
 export function useHealthPresets(enabled = true) {
   return useQuery({ queryKey: healthKeys.presets(), queryFn: getHealthPresets, enabled, staleTime: 10 * STALE_MS, retry: false });
 }
 
+/** Saves a profile and invalidates every health query of the agent on success, since bands and status derive from it. */
 export function useSaveHealthProfile(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -150,6 +157,7 @@ export function useSaveHealthProfile(agentId: string) {
   });
 }
 
+/** Deletes the stored profile (back to the preset defaults) and invalidates the agent's health queries. */
 export function useResetHealthProfile(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -171,14 +179,17 @@ export function useHealthSessions(agentId: string, filter: SessionsFilter, curso
   });
 }
 
+/** Suggested outcome mappings for the agent; fetched only while `enabled` (the dialog is open). */
 export function useOutcomeSuggestions(agentId: string, enabled = true) {
   return useQuery({ queryKey: healthKeys.suggestions(agentId), queryFn: () => getOutcomeSuggestions(agentId), enabled, retry: false });
 }
 
+/** The agent's report links; fetched only while `enabled`. */
 export function useReportLinks(agentId: string, enabled = true) {
   return useQuery({ queryKey: healthKeys.reports(agentId), queryFn: () => listReportLinks(agentId), enabled, retry: false });
 }
 
+/** Creates a report link and refreshes the list. The new link's `url` is only in the mutation result. */
 export function useCreateReportLink(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -187,6 +198,7 @@ export function useCreateReportLink(agentId: string) {
   });
 }
 
+/** Revokes a report link by id and refreshes the list. */
 export function useRevokeReportLink(agentId: string) {
   const qc = useQueryClient();
   return useMutation({

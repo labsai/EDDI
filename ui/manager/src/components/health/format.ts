@@ -18,6 +18,7 @@ import {
 
 // One locale for every number and date here: the app's language, via the same
 // helper the cost formatter uses, so a figure and its neighbour never disagree.
+/** Formats a number with the app's active locale (see the note above). */
 function number(value: number, opts: Intl.NumberFormatOptions): string {
   return new Intl.NumberFormat(activeLocale(), opts).format(value);
 }
@@ -146,6 +147,7 @@ export interface BandMeta {
 // a white-label brand does not recolour them.
 const GOOD_TEXT = "text-emerald-700 dark:text-emerald-400";
 
+/** Display metadata per band: label key, fallback text and Tailwind classes. */
 export const BAND_META: Record<Band, BandMeta> = {
   GREEN: { key: "green", fallback: "On target", classes: `border-emerald-500/40 bg-emerald-500/10 ${GOOD_TEXT}`, text: GOOD_TEXT, border: "border-emerald-500" },
   AMBER: { key: "amber", fallback: "Watch", classes: "border-warning/40 bg-warning/10 text-warning", text: "text-warning", border: "border-warning" },
@@ -160,6 +162,7 @@ export const TONE_CLASS = { better: GOOD_TEXT, worse: "text-destructive", neutra
 export const selectClass =
   "h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+/** Display metadata for a band. A missing or unrecognised band falls back to GREY ("not rated"), so a band the backend adds later still renders. */
 export function bandMeta(band: Band | string | undefined): BandMeta {
   return BAND_META[(band as Band) ?? "GREY"] ?? BAND_META.GREY;
 }
@@ -172,6 +175,7 @@ export interface StatusMeta {
   rank: number;
 }
 
+/** Display metadata per overall status, reusing the band colours. `rank` orders agents for the attention sort (3 = most urgent). */
 export const STATUS_META: Record<HealthStatus, StatusMeta> = {
   NEEDS_ATTENTION: { key: "needsAttention", fallback: "Needs attention", classes: BAND_META.RED.classes, rank: 3 },
   WATCH: { key: "watch", fallback: "Watch", classes: BAND_META.AMBER.classes, rank: 2 },
@@ -243,6 +247,7 @@ export function sectionTitle(t: TFunction, id: string): string {
   return t(`health.sections.${id}`, SECTION_TITLE[id] ?? id);
 }
 
+/** The i18n key and English fallback for a status; a null or unknown status is shown as "not enough data". */
 export function statusLabelKey(status: HealthStatus): [key: string, fallback: string] {
   const meta = STATUS_META[status] ?? STATUS_META.NOT_ENOUGH_DATA;
   return [`health.status.${meta.key}`, meta.fallback];

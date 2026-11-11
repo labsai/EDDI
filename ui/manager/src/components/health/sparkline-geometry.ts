@@ -1,6 +1,8 @@
 import type { HealthMarker, SeriesPoint } from "./api";
 
+/** Width of the sparkline viewBox, in SVG units. */
 export const SPARK_W = 160;
+/** Height of the sparkline viewBox, in SVG units. */
 export const SPARK_H = 36;
 const PAD = 3;
 

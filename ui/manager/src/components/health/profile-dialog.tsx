@@ -26,6 +26,7 @@ function hasInvalidNumber(p: HealthProfile): boolean {
   return nums.some((n) => typeof n === "number" && Number.isNaN(n));
 }
 
+/** The profile editor: preset, critical measures, thresholds, cost budget, SLO and overrides, plus server-side violations shown inline at their path. Mounted only while the dialog is open so its draft always starts from the stored profile. */
 function ProfileForm({
   agentId,
   initial,
@@ -57,6 +58,7 @@ function ProfileForm({
   const general = unmatchedViolations(violations, draft);
   const addable = catalog.ids.filter((id) => !(id in draft.thresholds));
 
+  /** Saves the draft. Unparseable numbers block the save client-side; otherwise a 400 from the server fills `violations` instead of closing the dialog. */
   const submit = () => {
     setViolations([]);
     if (hasInvalidNumber(draft)) {
@@ -73,9 +75,12 @@ function ProfileForm({
     });
   };
 
+  /** Flips the critical flag of a measure in the draft. */
   const toggleCritical = (id: string) =>
     setDraft({ ...draft, critical: draft.critical.includes(id) ? draft.critical.filter((c) => c !== id) : [...draft.critical, id] });
+  /** Sets one SLO field in the draft; `undefined` clears it. */
   const setSlo = (key: SloKey, v: number | undefined) => setDraft((d) => ({ ...d, slo: { ...d.slo, [key]: v } }));
+  /** Sets the cost-per-resolved-session budget (USD) in the draft; `undefined` removes the key rather than storing it. */
   const setBudget = (v: number | undefined) =>
     setDraft((d) => {
       const budgets = { ...d.budgets };

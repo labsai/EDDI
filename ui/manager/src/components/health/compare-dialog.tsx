@@ -10,6 +10,7 @@ import { TONE_CLASS, compareVerdict, formatDays, formatDelta, formatMeasureValue
 const COMPARE_DAYS = [7, 14, 30] as const;
 const DEFAULT_DAYS = 14;
 
+/** Indexes the measures of the given section sets by id. The first side given wins when an id appears on several, so passing the newer version first shows its label, unit and thresholds. */
 function indexMeasures(...sides: Array<AgentHealth["sections"]>): Map<string, Measure> {
   const out = new Map<string, Measure>();
   for (const sections of sides) {
@@ -20,6 +21,7 @@ function indexMeasures(...sides: Array<AgentHealth["sections"]>): Map<string, Me
   return out;
 }
 
+/** The per-measure comparison of two versions: both values, the delta and a verdict. Verdicts are neutral unless the backend marks the change significant and directional (see `compareVerdict`). */
 export function CompareTable({ data }: { data: HealthCompare }) {
   const { t } = useTranslation();
   const measures = useMemo(() => indexMeasures(data.to.sections, data.from.sections), [data]);

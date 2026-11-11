@@ -20,6 +20,7 @@ import { StatusRing } from "./status-ring";
 
 const OPEN_KEY = "eddi.manager.agentHealthOpen";
 
+/** Reads the remembered open/closed state of the panel from localStorage (`1` = open). Falls back to `defaultOpen` when nothing is stored or storage is blocked (private mode, disabled cookies). */
 function readOpen(defaultOpen: boolean): boolean {
   try {
     const v = window.localStorage.getItem(OPEN_KEY);
@@ -29,6 +30,7 @@ function readOpen(defaultOpen: boolean): boolean {
   }
 }
 
+/** Remembers the panel's open/closed state. A blocked or full storage is ignored: the preference is a convenience, not data. */
 function writeOpen(open: boolean) {
   try {
     window.localStorage.setItem(OPEN_KEY, open ? "1" : "0");
@@ -90,6 +92,7 @@ export function AgentHealthPanel({
     return { units, labels };
   }, [data, t]);
 
+  /** Flips the panel and persists the choice. Nothing is fetched while it is collapsed. */
   const toggle = () => {
     writeOpen(!open);
     setOpen(!open);

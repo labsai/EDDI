@@ -6,6 +6,7 @@ import { Button, cn } from "./deps";
 import { measureLabel as labelOf, sectionTitle } from "./format";
 import { fromInput, inputClass, toInput, violationsAt } from "./profile-utils";
 
+/** Server-side violations at `path` (or beneath it) as an alert list under a field. Renders nothing when there are none. */
 export function Violations({ violations, path }: { violations: ProfileViolation[]; path: string }) {
   const own = violationsAt(violations, path);
   if (own.length === 0) return null;
@@ -58,6 +59,7 @@ export function NumberField({
   );
 }
 
+/** One editable green/red row per measure in the profile's thresholds, in the measure's own unit (ratios as percentages). Violations show beneath the row they belong to. */
 export function ThresholdRows({
   profile,
   onChange,
@@ -73,6 +75,7 @@ export function ThresholdRows({
 }) {
   const { t } = useTranslation();
   const ids = Object.keys(profile.thresholds);
+  /** Sets one side of a measure's threshold, keeping the other. `undefined` clears that side. */
   const set = (id: string, side: "green" | "red", v: number | undefined) => {
     const next = { ...profile.thresholds[id], [side]: v };
     onChange({ ...profile, thresholds: { ...profile.thresholds, [id]: next } });
@@ -131,6 +134,7 @@ export function OverrideRows({
   violations: ProfileViolation[];
 }) {
   const { t } = useTranslation();
+  /** Applies a partial change to the override at index `i`. */
   const patch = (i: number, p: Partial<ProfileOverride>) => onChange(overrides.map((o, j) => (j === i ? { ...o, ...p } : o)));
   return (
     <div className="space-y-2">
@@ -198,6 +202,7 @@ export function OverrideRows({
   );
 }
 
+/** A labelled form field with the violations at `path` shown beneath it. */
 export function Field({ label, children, violations, path }: { label: string; children: ReactNode; violations: ProfileViolation[]; path: string }) {
   return (
     <div>

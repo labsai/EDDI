@@ -213,6 +213,12 @@ export interface HealthQuery {
   origins?: readonly string[];
 }
 
+/**
+ * Builds a query string from name/value pairs. Null, undefined and empty-string values are
+ * dropped (an unset filter is not sent); repeated names are appended, which is how multi-value
+ * filters such as `origin` and `status` are encoded. Returns `` (empty) when nothing is left,
+ * otherwise the string with a leading `?`.
+ */
 function qs(params: Array<[string, string | number | null | undefined]>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of params) if (v !== undefined && v !== null && v !== "") sp.append(k, String(v));
@@ -220,12 +226,21 @@ function qs(params: Array<[string, string | number | null | undefined]>): string
   return text ? `?${text}` : "";
 }
 
+/**
+ * The query parameters shared by the health endpoints: `period`, `version` and one `origin`
+ * entry per selected origin. Unset values are dropped later by {@link qs}.
+ */
 function baseParams(q: HealthQuery): Array<[string, string | number | null | undefined]> {
   return [["period", q.period], ["version", q.version], ...(q.origins ?? []).map((o): [string, string] => ["origin", o])];
 }
 
+/** Base path of one agent's health resource; the agent id is path-segment encoded. */
 const health = (agentId: string) => `/agents/${seg(agentId)}/health`;
 
+/**
+ * Path builders for every endpoint of the contract (planning/agent-health-api.md), relative
+ * to the API client's base URL. Each one only formats the path and query, it performs no request.
+ */
 export const healthPaths = {
   health: (agentId: string, q: HealthQuery = {}) => `${health(agentId)}${qs(baseParams(q))}`,
   series: (agentId: string, measures: readonly string[], q: HealthQuery = {}, groupBy?: "none" | "version" | "origin") =>
@@ -252,25 +267,47 @@ export const healthPaths = {
 
 // ── Calls ─────────────────────────────────────────────────────────
 
+/** GET the agent's health summary (contract section 1) for the period, version and origin filter in `q`. */
 export const getAgentHealth = (agentId: string, q: HealthQuery = {}) => api.get<AgentHealth>(healthPaths.health(agentId, q));
+/**
+ * GET daily series for the given measure ids (at most six per call, see `MAX_SERIES_MEASURES`),
+ * optionally grouped by version or origin, plus the change markers of the period.
+ */
 export const getHealthSeries = (agentId: string, measures: readonly string[], q: HealthQuery = {}, groupBy?: "none" | "version" | "origin") =>
   api.get<HealthSeriesResponse>(healthPaths.series(agentId, measures, q, groupBy));
+/** GET a side-by-side comparison of two agent versions over `days` days each (contract compare section). */
 export const getHealthCompare = (agentId: string, from: number, to: number, days?: number) =>
   api.get<HealthCompare>(healthPaths.compare(agentId, from, to, days));
+/** GET one page of the cross-agent portfolio; follow `nextCursor` for the next page. */
 export const getPortfolio = (o: Parameters<typeof healthPaths.portfolio>[0] = {}) => api.get<Portfolio>(healthPaths.portfolio(o));
+/** GET the agent's health profile; `stored: false` means the preset defaults are in effect. */
 export const getHealthProfile = (agentId: string) => api.get<HealthProfile>(healthPaths.profile(agentId));
+/** PUT a profile. A 400 carries per-path violations, readable with {@link profileViolations}. */
 export const putHealthProfile = (agentId: string, profile: HealthProfile) => api.put<HealthProfile>(healthPaths.profile(agentId), profile);
+/** DELETE the stored profile, reverting the agent to its preset defaults. */
 export const deleteHealthProfile = (agentId: string) => api.delete<void>(healthPaths.profile(agentId));
+/** GET the built-in presets a profile can start from. */
 export const getHealthPresets = () => api.get<HealthPreset[]>(healthPaths.presets());
+/**
+ * GET one page of the sessions behind the numbers (the drill-down). Refused with 403 when review
+ * is disabled; see {@link drillDownDenial}.
+ */
 export const getHealthSessions = (agentId: string, q: Parameters<typeof healthPaths.sessions>[1]) =>
   api.get<HealthSessionsPage>(healthPaths.sessions(agentId, q));
+/** GET suggested action-to-outcome mappings derived from how sessions ended. */
 export const getOutcomeSuggestions = (agentId: string) =>
   api.get<{ items: OutcomeSuggestion[] }>(healthPaths.suggestions(agentId));
+/** POST a new shareable report link. The answer is the only time the link's `url` (token) is returned. */
 export const createReportLink = (agentId: string, body: { expiresInDays: number; sections: string[] }) =>
   api.post<ReportLink>(healthPaths.reports(agentId), body);
+/**
+ * GET the agent's report links, accepting either a bare array or an `{ items }` envelope and
+ * always returning an array (an absent `items` becomes empty).
+ */
 export const listReportLinks = (agentId: string) => api.get<ReportLink[] | { items: ReportLink[] }>(healthPaths.reports(agentId)).then(
   (r) => (Array.isArray(r) ? r : r.items ?? []),
 );
+/** DELETE a report link by id, invalidating its token. */
 export const revokeReportLink = (agentId: string, id: string) => api.delete<void>(healthPaths.report(agentId, id));
 
 /**

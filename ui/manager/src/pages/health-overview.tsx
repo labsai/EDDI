@@ -17,6 +17,7 @@ const SORT_LABEL: Record<PortfolioSort, [string, string]> = {
   traffic: ["health.overview.sortTraffic", "Traffic"],
 };
 
+/** One agent of the portfolio: name (links to its Health panel), status, sessions with their change, top reason and key measures. Flags a platform incident so a fault outside the agent is not read as the agent's. */
 function Row({ item }: { item: PortfolioItem }) {
   const { t } = useTranslation();
   return (
@@ -71,6 +72,7 @@ export function HealthOverviewPage() {
   const [sort, setSort] = useState<PortfolioSort>("attention");
   const [status, setStatus] = useState<HealthStatus[]>([]);
   const portfolio = useHealthPortfolio(period, sort, status);
+  /** Adds or removes a status from the filter; none selected shows every agent. */
   const toggleStatus = (s: HealthStatus) => setStatus((cur) => (cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]));
   const select = selectClass;
   const pages = portfolio.data?.pages ?? [];

@@ -12,6 +12,7 @@ import { Button, getErrorMessage } from "./deps";
 export function ExportButtons({ agentId, period, disabled }: { agentId: string; period: HealthPeriod; disabled?: boolean }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<"json" | "csv" | null>(null);
+  /** Downloads the daily export in `format`. `busy` disables both buttons meanwhile; a failure is shown as a toast and re-enables them. */
   const run = async (format: "json" | "csv") => {
     setBusy(format);
     try {

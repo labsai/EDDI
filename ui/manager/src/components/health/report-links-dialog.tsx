@@ -21,7 +21,9 @@ function ReportsBody({ agentId, canReadQuality }: { agentId: string; canReadQual
   const [created, setCreated] = useState<{ url: string | null } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
+  /** Adds or removes a section from the set the new link will show. */
   const toggle = (s: string) => setSections((cur) => (cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]));
+  /** Copies a link to the clipboard, reporting success or failure as a toast (the clipboard API can be unavailable or denied). */
   const copy = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);

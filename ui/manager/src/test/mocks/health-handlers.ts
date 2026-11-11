@@ -25,6 +25,7 @@ const PRESETS: HealthPreset[] = [
   { id: "task", label: "Task", critical: ["agentFailureRate"], thresholds: {} },
 ];
 
+/** The profile an agent has before one is stored: `stored: false` and the `support` preset values. */
 const defaultProfile = (agentId: string): HealthProfile => ({
   agentId,
   stored: false,
@@ -40,6 +41,7 @@ let profiles = new Map<string, HealthProfile>();
 let reports = new Map<string, Array<ReportLink>>();
 let reportSeq = 0;
 
+/** Clears the in-memory profiles and report links; call it between tests so state never leaks. */
 export function resetHealthMockState() {
   profiles = new Map();
   reports = new Map();
@@ -73,6 +75,7 @@ const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "t
   sessions: [60, "count"],
 };
 
+/** MSW handlers for the Agent Health contract (planning/agent-health-api.md). Profiles and report links are kept in memory for the test run; the rest answer from fixtures. */
 export const healthHandlers = [
   http.get("*/agents/:agentId/health/series", ({ request, params }) => {
     const url = new URL(request.url);

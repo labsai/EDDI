@@ -47,6 +47,7 @@ export function StatusBadge({ status, className }: { status: HealthStatus; class
   );
 }
 
+/** The icon of an overall status, decorative (`aria-hidden`: the label next to it carries the meaning). An unknown status gets the dashed circle of "not enough data". */
 export function StatusIcon({ status, className }: { status: HealthStatus; className?: string }) {
   const Icon = STATUS_ICON[status] ?? CircleDashed;
   return <Icon className={className} aria-hidden="true" />;

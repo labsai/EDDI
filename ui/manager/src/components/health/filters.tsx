@@ -23,6 +23,7 @@ export function HealthFilters({
   const { t } = useTranslation();
   const versionId = useId();
   const originsRef = useRef<HTMLDetailsElement>(null);
+  /** Adds the origin to the selection, or removes it when already selected. An empty selection means all origins. */
   const toggleOrigin = (origin: string) =>
     onChange({
       ...value,
@@ -31,6 +32,7 @@ export function HealthFilters({
 
   // The origin list is a popover: it closes on a click elsewhere and on Escape.
   useEffect(() => {
+    /** Closes the origins popover on a click outside it or on Escape (returning focus to its summary, so keyboard users are not dropped). */
     const close = (e: Event) => {
       const el = originsRef.current;
       if (!el?.open) return;

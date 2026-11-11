@@ -17,6 +17,7 @@ import {
 import { ResolutionSplit } from "./resolution-split";
 import { Sparkline } from "./sparkline";
 
+/** The change against the previous period: sign, size (percentage points for ratios), a better/worse word when the measure has a direction, and whether the change is significant. Renders nothing without a value or a delta. */
 function Delta({ measure }: { measure: Measure }) {
   const { t } = useTranslation();
   // A change against nothing is no change: with no value there is no delta to show.
@@ -41,6 +42,7 @@ function Delta({ measure }: { measure: Measure }) {
   );
 }
 
+/** The green and red thresholds as a sentence whose wording depends on whether higher or lower is better. Renders nothing for a measure without thresholds (informational). */
 function Thresholds({ measure }: { measure: Measure }) {
   const { t } = useTranslation();
   const th = measure.thresholds;

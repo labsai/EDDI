@@ -45,6 +45,10 @@ const BY_RESOLUTION: Record<ResolutionKey, DrillFilter> = {
   },
 };
 
+/**
+ * The sessions filter behind one slice of the resolution split: which outcomes and which
+ * evidence sources make up that slice. Unlike {@link drillForMeasure} every key has a filter.
+ */
 export function drillForResolution(key: ResolutionKey): DrillFilter {
   return BY_RESOLUTION[key];
 }
