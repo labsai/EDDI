@@ -26,6 +26,8 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
@@ -362,6 +364,24 @@ class AttachmentForwarderTest {
             assertEquals(2, enhanced.contents().size());
             assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
             verifyNoInteractions(httpClient); // URL not downloaded
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"http://169.254.169.254/latest/meta-data/photo.png", "file:///etc/passwd", "http://127.0.0.1:7070/x.png",
+                "ftp://example.com/photo.png"})
+        void imageUrlFastPathIsValidatedLikeTheDownload(String url) {
+            // The provider-fetch fast path handed any URL to ImageContent.from, while the
+            // download path refuses these: the same check now runs on both.
+            Attachment att = urlImage();
+            att.setUrl(url);
+            mockAttachments(att);
+            List<ChatMessage> messages = messages(UserMessage.from("Describe"));
+
+            forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertTrue(enhanced.contents().stream().noneMatch(c -> c instanceof ImageContent), url + " must not be forwarded");
+            verifyNoInteractions(httpClient);
         }
 
         @Test
