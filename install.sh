@@ -2616,6 +2616,102 @@ _set_kv() {
   cat "$tmp" > "$file"
   rm -f "$tmp"
 }
+# ── Release verification (what `eddi update` shares with the installer) ──
+# Same rules as load_release_checksums / verify_download in install.sh: a file
+# fetched at a release tag is compared with that release's SHA256SUMS, and the
+# list's cosign signature is verified when cosign is installed — the certificate
+# must name the EDDI release workflow at THIS tag. A moved tag or a swapped
+# compose file (which runs with the vault key and the database credentials) is
+# refused, not installed. Keep FIRST_SIGNED_RELEASE in step with install.sh.
+RELEASE_SIGNER_IDENTITY_PREFIX="https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+FIRST_SIGNED_RELEASE="6.6.0"
+RELEASE_SIGNER_ISSUER="https://token.actions.githubusercontent.com"
+RELEASE_CHECKSUMS=""
+_sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+_release_is_signed() {
+  local a b c x y z
+  IFS=. read -r a b c <<<"${1%%-*}"
+  IFS=. read -r x y z <<<"$FIRST_SIGNED_RELEASE"
+  (( a > x || (a == x && (b > y || (b == y && c >= z))) ))
+}
+_is_release_tag() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; }
+# _load_release_checksums: fetches and (with cosign) verifies the SHA256SUMS of
+# EDDI_BRANCH into RELEASE_CHECKSUMS. Exits when a release that must carry a
+# signed list does not, or when the signature does not verify.
+_load_release_checksums() {
+  RELEASE_CHECKSUMS=""
+  if ! _is_release_tag "$EDDI_BRANCH"; then
+    echo "WARNING: '${EDDI_BRANCH}' is not a release: there are no checksums to verify its files against (TLS only)." >&2
+    return 0
+  fi
+  if ! _sha256_of /dev/null >/dev/null 2>&1; then
+    echo "WARNING: neither sha256sum nor shasum is installed; downloaded files are not checksum-verified." >&2
+    return 0
+  fi
+  local sums bundle
+  sums=$(mktemp "${TMPDIR:-/tmp}/eddi-sums.XXXXXX")
+  if curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS" -o "$sums" 2>/dev/null \
+      && [[ -s "$sums" ]]; then
+    if command -v cosign >/dev/null 2>&1; then
+      bundle=$(mktemp "${TMPDIR:-/tmp}/eddi-sums-bundle.XXXXXX")
+      if ! curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS.sigstore.json" -o "$bundle" 2>/dev/null \
+          || [[ ! -s "$bundle" ]]; then
+        rm -f "$bundle"
+        if _release_is_signed "$EDDI_BRANCH"; then
+          rm -f "$sums"
+          echo "Release ${EDDI_BRANCH} should carry SHA256SUMS.sigstore.json but it could not be fetched. Nothing was changed; retry later." >&2
+          exit 1
+        fi
+        echo "WARNING: release ${EDDI_BRANCH} predates signed checksums; its SHA256SUMS is used unsigned." >&2
+      elif cosign verify-blob --bundle "$bundle" \
+          --certificate-identity "${RELEASE_SIGNER_IDENTITY_PREFIX}${EDDI_BRANCH}" \
+          --certificate-oidc-issuer "$RELEASE_SIGNER_ISSUER" \
+          "$sums" >/dev/null 2>&1; then
+        rm -f "$bundle"
+        echo "SHA256SUMS signature verified for release ${EDDI_BRANCH}."
+      else
+        rm -f "$bundle" "$sums"
+        echo "The SHA256SUMS of release ${EDDI_BRANCH} is not signed by the EDDI release workflow at that tag (cosign verify-blob failed). Nothing was changed; retry later, and report it if it persists." >&2
+        exit 1
+      fi
+    else
+      echo "WARNING: cosign is not installed; the SHA256SUMS of release ${EDDI_BRANCH} is used without checking its signature." >&2
+    fi
+    RELEASE_CHECKSUMS="$sums"
+  else
+    rm -f "$sums"
+    if _release_is_signed "$EDDI_BRANCH"; then
+      echo "Release ${EDDI_BRANCH} should publish SHA256SUMS but it could not be fetched. Nothing was changed; retry later." >&2
+      exit 1
+    fi
+    echo "WARNING: release ${EDDI_BRANCH} publishes no SHA256SUMS; downloaded files are verified by TLS only." >&2
+  fi
+}
+# _verify_download <repository path> <file>: 0 when the file matches the release's
+# list (or there is nothing to check against), 1 on a mismatch.
+_verify_download() {
+  local rel="$1" file="$2" expected actual
+  [[ -n "$RELEASE_CHECKSUMS" ]] || return 0
+  expected=$(awk -v f="$rel" '$2 == f || $2 == "*" f { print $1; exit }' "$RELEASE_CHECKSUMS")
+  if [[ -z "$expected" ]]; then
+    echo "WARNING: ${rel} is not listed in the SHA256SUMS of release ${EDDI_BRANCH}; not verified." >&2
+    return 0
+  fi
+  actual=$(_sha256_of "$file") || return 0
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Checksum mismatch for ${rel} from release ${EDDI_BRANCH} (expected ${expected}, got ${actual}). It was not installed." >&2
+    return 1
+  fi
+  return 0
+}
 EDDI_BRANCH_FROM_ENV="${EDDI_BRANCH:-}"
 EDDI_BRANCH_SOURCE=$(_cfg EDDI_BRANCH_SOURCE || true)
 EDDI_BRANCH="${EDDI_BRANCH:-$(_cfg EDDI_BRANCH || true)}"
@@ -2717,6 +2813,18 @@ case "${1:-help}" in
       EDDI_BRANCH="$LATEST_TAG"
       EDDI_BRANCH_SOURCE="latest-release"
     else
+      # An install that tracks releases must not slide onto `main` because one
+      # API call failed: `main` has no SHA256SUMS, so its compose files (which run
+      # with the vault key and the database credentials) would be unverified, and
+      # they can be newer than the image. Refuse; an operator who wants `main`
+      # says so: EDDI_BRANCH=main eddi update
+      if [[ "$EDDI_BRANCH_SOURCE" == "version" || "$EDDI_BRANCH_SOURCE" == "latest-release" ]] \
+          || _is_release_tag "$EDDI_BRANCH"; then
+        echo "Could not look up the newest EDDI release, and this install is pinned to a release (${EDDI_BRANCH})." >&2
+        echo "Not falling back to 'main': its compose files are not checksum-verified. Nothing was changed." >&2
+        echo "Retry later, or name the release: eddi update <version>. To use main on purpose: EDDI_BRANCH=main eddi update" >&2
+        exit 1
+      fi
       EDDI_BRANCH="main"
       EDDI_BRANCH_SOURCE="fallback-main"
       echo "WARNING: could not look up the newest EDDI release; refreshing compose files from 'main'," >&2
@@ -2732,20 +2840,34 @@ case "${1:-help}" in
     _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
     echo "Compose files from: ${EDDI_BRANCH} (${EDDI_BRANCH_SOURCE})"
 
+    # Same checks as a fresh install: the list is fetched (and, with cosign,
+    # its signature verified) before anything is downloaded, every file is
+    # compared with it, and nothing is moved into place until ALL of them passed.
+    _load_release_checksums
+
     echo "Refreshing compose files from GitHub..."
+    staged=()
     for f in "${COMPOSE_FILE_LIST[@]}"; do
       local_name=$(basename "$f")
       download_url="${COMPOSE_BASE_URL}/${local_name}"
       tmp_file="${f}.tmp"
-      echo -n "  Updating ${local_name}... "
+      echo -n "  Fetching ${local_name}... "
       if curl -fsSL "${download_url}" -o "$tmp_file" 2>/dev/null && [[ -s "$tmp_file" ]]; then
-        mv -f "$tmp_file" "$f"
+        if ! _verify_download "$local_name" "$tmp_file"; then
+          echo "❌"
+          rm -f "$tmp_file"
+          for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+          echo "Aborting: nothing was changed." >&2
+          exit 1
+        fi
+        staged+=("$f")
         echo "✅"
       else
         rm -f "$tmp_file"
         echo "⚠️  (keeping existing file)"
       fi
     done
+    for s in ${staged[@]+"${staged[@]}"}; do mv -f "${s}.tmp" "$s"; done
 
     # An install from before docker-compose.postgres-only.yml required
     # POSTGRES_PASSWORD has none in .env, and its data volume was initialised with
@@ -2803,6 +2925,12 @@ case "${1:-help}" in
         tmp_asset="${target}.tmp"
         echo -n "  Updating ${asset}... "
         if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
+          if ! _verify_download "$asset" "$tmp_asset"; then
+            echo "❌"
+            rm -f "$tmp_asset"
+            echo "Aborting before restart: the running stack was left untouched." >&2
+            exit 1
+          fi
           mv -f "$tmp_asset" "$target"
           echo "✅"
         elif [[ -f "$target" ]]; then

@@ -402,6 +402,26 @@ function Test-PortOwnedByProject([int]$Port) {
     }
 }
 
+# $true when Docker (the trusted source) reports a RUNNING container of THIS
+# installation's compose project for $Service publishing $Port. The installer sends
+# stored admin passwords to a local port; checking the daemon first means a different
+# local process squatting on a stopped service's port is not handed them, nor is a
+# same-named service of another compose project. Answers $false when the daemon
+# cannot be asked: the credentials are then withheld, not guessed at. Same contract
+# as compose_service_running in install.sh.
+function Test-ComposeServiceRunning([string]$Service, [int]$Port) {
+    try {
+        $project = Get-ComposeProjectName
+        # The name reaches cmd.exe below; Compose itself only accepts this alphabet.
+        if ($project -notmatch '^[a-z0-9][a-z0-9_-]*$' -or $Service -notmatch '^[a-z0-9_-]+$' -or $Port -le 0) { return $false }
+        $ids = cmd /c "docker ps -q --filter label=com.docker.compose.project=$project --filter label=com.docker.compose.service=$Service --filter publish=$Port --filter status=running 2>nul"
+        return -not [string]::IsNullOrWhiteSpace(($ids | Out-String))
+    }
+    catch {
+        return $false
+    }
+}
+
 # Resolve one host port that the selected compose files publish. The wizard used
 # to look at EDDI's own 7070/7443 and nothing else, so every other published
 # port -- MongoDB 27017, Keycloak 8180, Grafana 3000, Prometheus 9090, Jaeger --
@@ -1122,6 +1142,11 @@ function Get-ComposeFiles {
 
     # Save config for CLI wrapper (vault key NOT stored here -- it's in .env only)
     $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
+    # Both sensitive files exist owner-only BEFORE a byte is written (as install.sh
+    # does with `install -m 600`): written under the default umask and chmod-ed
+    # afterwards, the vault master key sat world/group-readable on a multi-user
+    # Linux or macOS host for the length of the run.
+    Initialize-SensitiveFile $configPath
     @"
 COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
@@ -1144,6 +1169,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 EDDI_VERSION=$EddiVersion
 "@
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
+    Initialize-SensitiveFile $envPath
     $envContent | Set-Content -Path $envPath
 
     # Host ports for the containers the selected compose files publish. Only the
@@ -1189,6 +1215,24 @@ EDDI_VERSION=$EddiVersion
     foreach ($securePath in @($envPath, $configPath)) {
         Protect-SensitiveFile $securePath
     }
+}
+
+# Creates (or empties) a file that is owner-only from the start, so a secret
+# written to it afterwards is never readable by anyone else, not even briefly.
+# pwsh on Linux/macOS: `install -m 600`, falling back to create + chmod 600 while
+# the file is still empty. Windows: the file is created empty, then its ACL is
+# restricted exactly as Protect-SensitiveFile does.
+function Initialize-SensitiveFile([string]$SecurePath) {
+    if (-not $IsWindows -and $null -ne $IsWindows) {
+        & install -m 600 /dev/null $SecurePath 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+            & chmod 600 $SecurePath 2>$null
+        }
+        return
+    }
+    [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+    Protect-SensitiveFile $SecurePath
 }
 
 # Owner-only access to a file holding secrets. On Windows: drop the broad
@@ -1337,6 +1381,10 @@ function Wait-ForReady {
 # when it first creates the master realm — so it is tried next and, when it
 # works, rotated to KC_BOOTSTRAP_ADMIN_PASSWORD so .env tells the truth.
 function Connect-KeycloakAdmin([string]$KcBase) {
+    if (-not (Test-ComposeServiceRunning "keycloak" ([uri]$KcBase).Port)) {
+        Write-Warn "No running keycloak container found -- not sending Keycloak admin credentials to $KcBase."
+        return $null
+    }
     $tokenUri = "$KcBase/realms/master/protocol/openid-connect/token"
     $user = if ($KeycloakAdminUser) { $KeycloakAdminUser } else { "admin" }
     try {
@@ -1375,7 +1423,10 @@ function Set-FirstLoginPassword {
     param()
     if (-not $WithAuth) { return }
     if (-not $PSCmdlet.ShouldProcess("Keycloak realm eddi", "Set first-login passwords")) { return }
-    $kcBase = "http://localhost:$KeycloakPort"
+    # 127.0.0.1, the address the ports are published on, not "localhost": that name
+    # can resolve to ::1 first, where a listener of another local user would hold
+    # the same port number.
+    $kcBase = "http://127.0.0.1:$KeycloakPort"
     $token = Connect-KeycloakAdmin $kcBase
     if (-not $token) {
         if ($KcAdminPasswordGenerated) {
@@ -1479,13 +1530,14 @@ function Repair-RunningStack {
         else {
             if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-StackPassword }
             $script:KcAdminRotated = $false
-            $kcBase = "http://localhost:$($script:KeycloakPort)"
+            $kcBase = "http://127.0.0.1:$($script:KeycloakPort)"
             Connect-KeycloakAdmin $kcBase | Out-Null
             # Record the password only once Keycloak demonstrably accepts it: a
             # legacy admin/admin login whose rotation failed must not leave a
             # value in .env that nothing answers to.
             $accepted = $false
             try {
+                if (-not (Test-ComposeServiceRunning "keycloak" ([uri]$kcBase).Port)) { throw "no running keycloak container" }
                 $probe = @{ client_id = "admin-cli"; grant_type = "password"; username = $script:KeycloakAdminUser; password = $script:KeycloakAdminSecret }
                 $accepted = [bool](Invoke-RestMethod -Method Post -Uri "$kcBase/realms/master/protocol/openid-connect/token" -Body $probe -TimeoutSec 10 -ErrorAction Stop).access_token
             } catch {
@@ -1549,7 +1601,11 @@ function Update-LegacyGrafanaLogin {
     param()
     if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
     if (-not $PSCmdlet.ShouldProcess("Grafana", "Replace the legacy admin/admin login")) { return }
-    $gBase = "http://localhost:$GrafanaPort"
+    $gBase = "http://127.0.0.1:$GrafanaPort"
+    if (-not (Test-ComposeServiceRunning "grafana" ([uri]$gBase).Port)) {
+        Write-Warn "No running grafana container found -- not sending Grafana credentials to $gBase."
+        return
+    }
     $legacyAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$(Get-GrafanaAdminUser):admin")) }
     try {
         Invoke-RestMethod -Uri "$gBase/api/user" -Headers $legacyAuth -TimeoutSec 10 -ErrorAction Stop | Out-Null
@@ -1598,7 +1654,11 @@ function Confirm-GrafanaLogin {
     param()
     if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
     if (-not $PSCmdlet.ShouldProcess("Grafana", "Confirm the admin login in .env")) { return }
-    $gBase = "http://localhost:$GrafanaPort"
+    $gBase = "http://127.0.0.1:$GrafanaPort"
+    if (-not (Test-ComposeServiceRunning "grafana" ([uri]$gBase).Port)) {
+        Write-Warn "No running grafana container found -- not sending Grafana credentials to $gBase."
+        return
+    }
     $up = $false
     for ($waited = 0; $waited -le 60; $waited += 2) {
         try {
@@ -1673,8 +1733,7 @@ function Write-Success {
         if ($toFile -and ($FirstLogins | Where-Object { $_.Secret })) {
             # Replaced, not appended to: an earlier run's one-time password is
             # used up or superseded.
-            Set-Content -Path $secretsFile -Value $null
-            Protect-SensitiveFile $secretsFile
+            Initialize-SensitiveFile $secretsFile
         }
         foreach ($entry in $FirstLogins) {
             if (-not $entry.Secret) {
@@ -1884,6 +1943,20 @@ if defined LATEST_TAG (
     set "EDDI_BRANCH=!LATEST_TAG!"
     set "CFG_SOURCE=latest-release"
 ) else (
+    rem An install that tracks releases must not slide onto main because one API call
+    rem failed: main has no SHA256SUMS, so its compose files, which run with the vault
+    rem key and the database credentials, would be unverified. Refuse instead.
+    rem An operator who wants main on purpose says so: set EDDI_BRANCH=main
+    set "PINNED="
+    if /i "!CFG_SOURCE!"=="version" set "PINNED=1"
+    if /i "!CFG_SOURCE!"=="latest-release" set "PINNED=1"
+    if "!EDDI_BRANCH:~0,1!" GEQ "0" if "!EDDI_BRANCH:~0,1!" LEQ "9" set "PINNED=1"
+    if defined PINNED (
+        echo Could not look up the newest EDDI release, and this install is pinned to release !EDDI_BRANCH!.
+        echo Not falling back to main: its compose files are not checksum-verified. Nothing was changed.
+        echo Retry later, or run: set EDDI_BRANCH=main ^& eddi update
+        exit /b 1
+    )
     set "EDDI_BRANCH=main"
     set "CFG_SOURCE=fallback-main"
     echo Warning: could not look up the newest EDDI release; refreshing compose files from main,
@@ -1901,15 +1974,18 @@ del "%CONFIG_FILE%.tmp" >nul 2>nul
 :update_ref_done
 echo Compose files from: !EDDI_BRANCH!
 echo Refreshing compose files from GitHub...
-for %%F in (%COMPOSE_FILES%) do (
-    for %%N in (%%~nxF) do (
-        echo   Updating %%N...
-        curl -fsSL "%COMPOSE_BASE_URL%/%%N" -o "%%F.tmp" 2>nul && move /y "%%F.tmp" "%%F" >nul 2>nul || (
-            del "%%F.tmp" 2>nul
-            echo   Warning: could not update %%N, keeping existing file
-        )
-    )
+rem The files are checked against the SHA256SUMS of the release, and the list's cosign
+rem signature when cosign is installed, exactly as install.ps1 does for a fresh install:
+rem eddi-fetch.ps1 (written next to this file) does the download and the check, and
+rem moves nothing into place unless every file passed.
+if not exist "%EDDI_DIR%\eddi-fetch.ps1" (
+    echo eddi-fetch.ps1 is missing from %EDDI_DIR%: re-run install.ps1 to restore it. Nothing was changed.
+    exit /b 1
 )
+set "FETCH_ITEMS="
+for %%F in (%COMPOSE_FILES%) do set FETCH_ITEMS=!FETCH_ITEMS! "%%~nxF|%%~fF"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" !FETCH_ITEMS!
+if errorlevel 1 goto update_refused
 
 rem An install from before docker-compose.postgres-only.yml required POSTGRES_PASSWORD
 rem has none in .env, and its data volume was initialised with the old hardcoded
@@ -1932,7 +2008,6 @@ rem Docker creates a directory at the missing mount path, which either silently
 rem drops the dashboard or fails the mount outright depending on the grafana-data
 rem volume's contents. (No backticks in this here-string: PowerShell would eat
 rem them as escape characters.)
-set "MISSING_ASSETS="
 set "MON_COMPOSE="
 for %%F in (%COMPOSE_FILES%) do (
     if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
@@ -1941,9 +2016,16 @@ if defined MON_COMPOSE (
     echo.
     echo Refreshing monitoring assets...
     for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
-    for %%A in ($monAssets) do call :refresh_asset "%%A"
+    set "FETCH_ITEMS="
+    for %%A in ($monAssets) do (
+        set "REL=%%A"
+        set "RELWIN=!REL:/=\!"
+        set FETCH_ITEMS=!FETCH_ITEMS! "%%A|!MON_DIR!!RELWIN!"
+    )
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" -Assets !FETCH_ITEMS!
+    if "!errorlevel!"=="3" goto update_assets_missing
+    if errorlevel 1 goto update_refused
 )
-if defined MISSING_ASSETS goto update_assets_missing
 
 echo.
 echo Pulling latest images...
@@ -1979,40 +2061,20 @@ exit /b 0
 echo Invalid EDDI_BRANCH: !EDDI_BRANCH!
 exit /b 1
 
-:refresh_asset
-set "REL=%~1"
-set "RELWIN=!REL:/=\!"
-set "TGT=!MON_DIR!!RELWIN!"
-for %%X in ("!TGT!") do set "TGTDIR=%%~dpX"
-if not exist "!TGTDIR!" mkdir "!TGTDIR!" >nul 2>nul
-rem rmdir, not del: what is in the way is most likely a DIRECTORY left behind by an
-rem earlier failed mount, and del cannot remove one.
-if exist "!TGT!\" rmdir /s /q "!TGT!" >nul 2>nul
-curl -fsSL "%COMPOSE_BASE_URL%/!REL!" -o "!TGT!.tmp" 2>nul
-set "ASSET_OK="
-if exist "!TGT!.tmp" for %%S in ("!TGT!.tmp") do if %%~zS GTR 0 set "ASSET_OK=1"
-if defined ASSET_OK (
-    move /y "!TGT!.tmp" "!TGT!" >nul 2>nul
-    echo   Updating !REL!... ok
-) else (
-    del "!TGT!.tmp" 2>nul
-    if exist "!TGT!" (
-        echo   Updating !REL!... warning: keeping existing file
-    ) else (
-        echo   Updating !REL!... FAILED
-        set "MISSING_ASSETS=!MISSING_ASSETS! !REL!"
-    )
-)
-goto :eof
-
 :update_assets_missing
 echo.
-echo Aborting before restart. These files are bind-mounted by
-echo docker-compose.monitoring.yml but are not on disk and could not be downloaded:
-for %%A in (!MISSING_ASSETS!) do echo   - %%A
+echo Aborting before restart. The files listed above are bind-mounted by
+echo docker-compose.monitoring.yml but are not on disk and could not be downloaded.
 echo Starting now would leave Grafana unable to mount them, so the running stack
 echo has been left untouched. Re-run once GitHub is reachable, or re-run the
 echo install script.
+exit /b 1
+
+:update_refused
+echo.
+echo Update refused: a downloaded file failed verification against the release checksums,
+echo or the checksums could not be verified, see above. Nothing was moved into place and
+echo the running stack was left untouched. Retry later; if it persists, report it.
 exit /b 1
 
 :cmd_uninstall
@@ -2050,6 +2112,92 @@ echo   uninstall   Remove EDDI and all data
 goto :eof
 "@
     $cliContent | Set-Content -Path $cliPath -Encoding ASCII
+
+    # `eddi update` downloads and verifies through this script rather than through
+    # curl: it reuses the installer's own functions (the text of the three below is
+    # copied in, so the check cannot drift from the fresh-install one) and so
+    # compares every file with the cosign-verified SHA256SUMS of the release.
+    # Exit codes: 0 done, 2 refused (a mismatch or an unverifiable list), 3 a
+    # monitoring asset that is not on disk could not be downloaded.
+    $fetchPath = Join-Path -Path $EddiDir -ChildPath "eddi-fetch.ps1"
+    $fetchHead = @'
+# Written by install.ps1 -- used by `eddi update`. Do not edit.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$Ref,
+    [Parameter(Mandatory)][string]$BaseUrl,
+    [switch]$Assets,
+    [Parameter(ValueFromRemainingArguments)][string[]]$Item
+)
+$ErrorActionPreference = 'Stop'
+$EddiBranch = $Ref
+$script:ReleaseChecksums = $null
+$script:ReleaseChecksumsLoaded = $false
+$script:ReleaseSignerIdentityPrefix = "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+$script:FirstSignedRelease = [version]"6.6.0"
+$script:ReleaseSignerIssuer = "https://token.actions.githubusercontent.com"
+function Write-Warn($msg) { Write-Warning -Message $msg }
+function Write-Fail($msg) { [Console]::Error.WriteLine($msg); throw $msg }
+'@
+    $fetchMain = @'
+
+$staged = @()
+$missing = @()
+try {
+    Initialize-ReleaseChecksums
+    foreach ($entry in $Item) {
+        $rel, $target = $entry -split '\|', 2
+        if (-not $rel -or -not $target) { continue }
+        if ($Assets) {
+            # What is in the way is most likely a DIRECTORY left behind by an earlier
+            # failed mount; Docker made it where the file should be.
+            if (Test-Path -LiteralPath $target -PathType Container) { Remove-Item -LiteralPath $target -Recurse -Force }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+        }
+        $temporary = "$target.download"
+        $downloaded = $false
+        try {
+            Invoke-WebRequest -Uri "$BaseUrl/$rel" -OutFile $temporary -UseBasicParsing -ErrorAction Stop
+            $downloaded = (Test-Path -LiteralPath $temporary) -and ((Get-Item -LiteralPath $temporary).Length -gt 0)
+        }
+        catch { $downloaded = $false }
+        if ($downloaded) {
+            Confirm-DownloadChecksum -RelativePath $rel -Path $temporary
+            $staged += , @($temporary, $target, $rel)
+        }
+        else {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $target -PathType Leaf) {
+                Write-Host "  $rel : could not be downloaded, keeping the existing file"
+            }
+            elseif ($Assets) {
+                Write-Host "  $rel : FAILED, not on disk and could not be downloaded"
+                $missing += $rel
+            }
+            else {
+                Write-Host "  $rel : could not be downloaded, keeping the existing file"
+            }
+        }
+    }
+    foreach ($s in $staged) {
+        Move-Item -LiteralPath $s[0] -Destination $s[1] -Force
+        Write-Host "  Updated $($s[2])"
+    }
+    $staged = @()
+}
+catch {
+    exit 2
+}
+finally {
+    foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
+}
+if ($missing.Count -gt 0) { exit 3 }
+exit 0
+'@
+    $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum') | ForEach-Object {
+            "function $_ {" + [Environment]::NewLine + (Get-Command -Name $_ -CommandType Function).ScriptBlock.ToString() + [Environment]::NewLine + "}"
+        }) -join ([Environment]::NewLine + [Environment]::NewLine)
+    ($fetchHead, $fetchFunctions, $fetchMain) -join ([Environment]::NewLine + [Environment]::NewLine) | Set-Content -Path $fetchPath -Encoding UTF8
 
     # Add to user PATH if not already there (use exact boundary match).
     # SetEnvironmentVariable is a .NET call, so -WhatIf does not cover it the way
