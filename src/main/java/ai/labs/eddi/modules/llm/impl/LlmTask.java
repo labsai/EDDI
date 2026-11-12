@@ -1476,22 +1476,27 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * {@code -1} (unlimited) and {@code 0} keep their meaning. A bad value used to
      * reach {@code Integer.parseInt} unguarded, so a typo in the config failed
      * every turn of the agent with a {@code NumberFormatException}.
+     * <p>
+     * The WARN names the kind of problem and the value's length, never the value:
+     * it is the rendered template, so it can carry conversation or user data.
      */
     static int resolveLogSizeLimit(String rawValue, int fallback, IConversationMemory memory) {
         if (rawValue == null || rawValue.isBlank()) {
             return fallback;
         }
         String value = rawValue.trim();
+        String problem;
         try {
             int parsed = Integer.parseInt(value);
             if (parsed >= -1) {
                 return parsed;
             }
+            problem = "below -1";
         } catch (NumberFormatException notAnInteger) {
-            // falls through to the warning below
+            problem = "not an integer";
         }
-        LOGGER.warnf("Ignoring invalid logSizeLimit '%s' (expected an integer >= -1) for agent %s, conversation %s — using %d",
-                sanitize(value), memory != null ? sanitize(memory.getAgentId()) : null,
+        LOGGER.warnf("Ignoring invalid logSizeLimit (%s, %d characters; expected an integer >= -1) for agent %s, conversation %s — using %d",
+                problem, value.length(), memory != null ? sanitize(memory.getAgentId()) : null,
                 memory != null ? sanitize(memory.getConversationId()) : null, fallback);
         return fallback;
     }

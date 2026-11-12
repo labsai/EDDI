@@ -157,17 +157,25 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     }
 
     /**
-     * One row as a {@link DeploymentInfo}, or {@code null} when its status is not
-     * one this release knows — logged and skipped, so one bad row cannot fail the
-     * read of every deployment (the startup redeploy included). It used to go
-     * through {@code Enum.valueOf}, which threw for such a row.
+     * One row as a {@link DeploymentInfo}, or {@code null} when its status or its
+     * environment is not one this release knows — logged and skipped, so one bad
+     * row cannot fail the read of every deployment (the startup redeploy included).
+     * Both used to go through {@code Enum.valueOf}, which threw for such a row.
      * <p>
-     * The environment is read the way {@code MongoDeploymentStorage} reads it,
-     * through {@link Environment#fromString}: the v5 names {@code unrestricted} and
-     * {@code restricted} map to {@code production}, and an unknown name falls back
-     * to {@code production} with a WARN. A status is never guessed: reading an
-     * unknown one as {@code deployed} or {@code undeployed} would deploy or drop an
-     * agent nobody asked for.
+     * Neither is guessed. Reading an unknown status as {@code deployed} or
+     * {@code undeployed} would deploy or drop an agent nobody asked for. And the
+     * environment is part of the primary key that every later write uses: a row
+     * read as {@code production} while it is stored as, say, {@code unrestricted}
+     * would be redeployed by the sweep, while the undeploy write and the cleanup
+     * delete, keyed on {@code production}, would never reach it. So only the exact
+     * name of an {@link Environment} constant — what {@link #setDeploymentInfo}
+     * stores — is accepted.
+     * <p>
+     * This differs from {@code MongoDeploymentStorage}, which reads through
+     * {@link Environment#fromString} (v5 names and unknown names become
+     * {@code production}); there {@code V6RenameMigration} rewrites v5 rows in
+     * place first. EDDI 5 never ran on PostgreSQL, so this table holds v5 names
+     * only if it was written by a pre-6.0 development build.
      */
     private DeploymentInfo toDeploymentInfo(ResultSet rs) throws SQLException {
         String environment = rs.getString("environment");
@@ -180,12 +188,28 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
                     sanitize(agentId), agentVersion, sanitize(status), Arrays.toString(DeploymentInfo.DeploymentStatus.values()));
             return null;
         }
+        Environment deploymentEnvironment = parseEnvironment(environment);
+        if (deploymentEnvironment == null) {
+            LOGGER.warnf("Skipping deployment row agentId=%s version=%d: unknown environment '%s' (expected one of %s)",
+                    sanitize(agentId), agentVersion, sanitize(environment), Arrays.toString(Environment.values()));
+            return null;
+        }
         DeploymentInfo info = new DeploymentInfo();
-        info.setEnvironment(Environment.fromString(environment));
+        info.setEnvironment(deploymentEnvironment);
         info.setAgentId(agentId);
         info.setAgentVersion(agentVersion);
         info.setDeploymentStatus(deploymentStatus);
         return info;
+    }
+
+    /** The environment whose name is exactly {@code environment}, else null. */
+    private static Environment parseEnvironment(String environment) {
+        for (Environment candidate : Environment.values()) {
+            if (candidate.name().equals(environment)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private static DeploymentInfo.DeploymentStatus parseStatus(String status) {
