@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -1015,7 +1016,8 @@ public class SlackEventHandler {
 
         // The button value carries the owning integration name and this card's id,
         // so the decision is bound to THIS integration and THIS card.
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId);
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId,
+                bookmark != null ? HitlPlanHash.presentable(bookmark.getHitlPlanHash()) : null);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(

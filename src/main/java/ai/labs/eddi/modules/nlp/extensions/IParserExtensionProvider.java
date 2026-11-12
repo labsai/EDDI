@@ -20,9 +20,19 @@ public interface IParserExtensionProvider<T> {
         return getId();
     }
 
+    /**
+     * Reads {@value #KEY_LOOKUP_IF_KNOWN} from a parser extension config. The value
+     * comes from workflow JSON, so it is a {@code Boolean} when the author wrote
+     * {@code true} and a {@code String} when they wrote {@code "true"} — both are
+     * accepted. Anything else is read by its string form. Absent means
+     * {@code false}.
+     */
     default boolean extractLookupIfKnownParam(Map<String, Object> config) {
         Object lookupIfKnownObj = config.get(KEY_LOOKUP_IF_KNOWN);
-        return lookupIfKnownObj != null && Boolean.parseBoolean((String) lookupIfKnownObj);
+        if (lookupIfKnownObj instanceof Boolean lookupIfKnown) {
+            return lookupIfKnown;
+        }
+        return lookupIfKnownObj != null && Boolean.parseBoolean(lookupIfKnownObj.toString().trim());
     }
 
     default T provide(Map<String, Object> config) throws IllegalExtensionConfigurationException {

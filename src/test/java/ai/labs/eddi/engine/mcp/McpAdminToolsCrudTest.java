@@ -37,7 +37,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -48,10 +48,6 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -113,9 +109,7 @@ class McpAdminToolsCrudTest {
     private IRestDictionaryStore dictionaryStore;
     private IRestAgentTriggerStore AgentTriggerStore;
     private IJsonSerialization jsonSerialization;
-    private IScheduleStore scheduleStore;
-    private ScheduleFireExecutor scheduleFireExecutor;
-    private SchedulePollerService schedulePollerService;
+    private IRestScheduleStore scheduleStore;
     private McpAdminTools tools;
 
     @BeforeEach
@@ -146,13 +140,10 @@ class McpAdminToolsCrudTest {
         when(restInterfaceFactory.get(IRestAgentTriggerStore.class)).thenReturn(AgentTriggerStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        scheduleStore = mock(IScheduleStore.class);
-        scheduleFireExecutor = mock(ScheduleFireExecutor.class);
-        schedulePollerService = mock(SchedulePollerService.class);
+        scheduleStore = mock(IRestScheduleStore.class);
         var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
-                scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
     }
 
@@ -678,7 +669,6 @@ class McpAdminToolsCrudTest {
     void createResource_unknownField_reportsTheKnownFieldsMessage() {
         var strictTools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
                 new StrictConfigurationParser(new ObjectMapper()), scheduleStore,
-                scheduleFireExecutor, schedulePollerService,
                 mock(SecurityIdentity.class), false, mock(AgentCascadeService.class));
 
         String result = strictTools.createResource("propertysetter",
@@ -696,7 +686,6 @@ class McpAdminToolsCrudTest {
     private McpAdminTools toolsWithTheRealParser() {
         return new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
                 new StrictConfigurationParser(new ObjectMapper()), scheduleStore,
-                scheduleFireExecutor, schedulePollerService,
                 mock(SecurityIdentity.class), false, mock(AgentCascadeService.class));
     }
 
