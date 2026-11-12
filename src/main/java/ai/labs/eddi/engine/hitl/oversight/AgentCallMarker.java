@@ -112,6 +112,14 @@ public class AgentCallMarker {
 
     private static final AgentCallMarker LOOPBACK_ONLY = new AgentCallMarker(Set.of());
 
+    /**
+     * {@link #targetsSelf} through a marker that may be absent: without one, only
+     * loopback targets are this deployment.
+     */
+    public static boolean targetsSelf(AgentCallMarker marker, URI target) {
+        return (marker != null ? marker : LOOPBACK_ONLY).targetsSelf(target);
+    }
+
     /** Whether a request target is this deployment. */
     public boolean targetsSelf(URI target) {
         if (target == null || target.getHost() == null) {

@@ -12,6 +12,8 @@ import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -46,34 +48,48 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
     @Override
     public void filter(ContainerRequestContext request) {
         String path = request.getUriInfo().getPath();
-        if (refused(request.getMethod(), path, request.getHeaderString(AgentCallMarker.HEADER))) {
-            String message = isDecision(path)
+        String rawPath = request.getUriInfo().getPath(false);
+        if (refused(request.getMethod(), path, rawPath, request.getHeaderString(AgentCallMarker.HEADER))) {
+            String message = isDecision(path, rawPath)
                     ? AgentOriginatedRequests.DECISION_REFUSAL
                     : "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions";
             request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED, message));
         }
     }
 
-    /** Whether a request is refused. */
+    /** Whether a request is refused, judged on its decoded path alone. */
     static boolean refused(String method, String path, String marker) {
-        if (!AgentOriginatedRequests.isMarked(marker) || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
-            return false;
-        }
-        if (path == null) {
-            return false;
-        }
-        String canonical = canonical(path);
-        return GUARDED.matcher(canonical).matches() || AgentOriginatedRequests.isDecisionPath(canonical);
-    }
-
-    private static boolean isDecision(String path) {
-        return path != null && AgentOriginatedRequests.isDecisionPath(canonical(path));
+        return refused(method, path, null, marker);
     }
 
     /**
-     * The path as routing sees it, so no spelling slips past the patterns: lower
-     * case, matrix parameters ({@code resume;x=1}) dropped and repeated slashes
-     * collapsed. A decision path is matched segment by segment
+     * Whether a request is refused. The path is judged in both readings routing may
+     * give it, and refused when either is guarded: the decoded path, and the raw
+     * one with matrix parameters stripped per raw segment before decoding. A matrix
+     * value holding an encoded slash ({@code approve;x=%2Fzzz}) adds a segment to
+     * the decoded reading only, which then no longer ends in {@code approve} —
+     * while the router drops the parameter and serves {@code approve}.
+     */
+    static boolean refused(String method, String path, String rawPath, String marker) {
+        if (!AgentOriginatedRequests.isMarked(marker) || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
+            return false;
+        }
+        return guarded(path == null ? null : canonical(path)) || guarded(rawPath == null ? null : canonicalRaw(rawPath));
+    }
+
+    private static boolean guarded(String canonical) {
+        return canonical != null && (GUARDED.matcher(canonical).matches() || AgentOriginatedRequests.isDecisionPath(canonical));
+    }
+
+    private static boolean isDecision(String path, String rawPath) {
+        return path != null && AgentOriginatedRequests.isDecisionPath(canonical(path))
+                || rawPath != null && AgentOriginatedRequests.isDecisionPath(canonicalRaw(rawPath));
+    }
+
+    /**
+     * The decoded path as routing sees it, so no spelling slips past the patterns:
+     * lower case, matrix parameters ({@code resume;x=1}) dropped and repeated
+     * slashes collapsed. A decision path is matched segment by segment
      * ({@link AgentOriginatedRequests#isDecisionPath}) and an identifier may span
      * several segments, so an id that decodes to contain a {@code /} ({@code %2F})
      * still ends in {@code /resume}. No {@code LegacyPathRewriteFilter} alias leads
@@ -83,5 +99,42 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
      */
     static String canonical(String path) {
         return path.toLowerCase(Locale.ROOT).replaceAll(";[^/]*", "").replaceAll("/{2,}", "/");
+    }
+
+    /**
+     * The raw (still encoded) path read the way the router reads it: split on the
+     * raw {@code /} only, each segment's matrix parameters dropped while still
+     * encoded, then each segment percent-decoded and lower-cased. Empty segments
+     * are dropped. Linear: one pass to split, one per segment to decode.
+     */
+    static String canonicalRaw(String rawPath) {
+        StringBuilder out = new StringBuilder(rawPath.length());
+        int start = 0;
+        for (int i = 0; i <= rawPath.length(); i++) {
+            if (i == rawPath.length() || rawPath.charAt(i) == '/') {
+                String segment = rawPath.substring(start, i);
+                int parameters = segment.indexOf(';');
+                if (parameters >= 0) {
+                    segment = segment.substring(0, parameters);
+                }
+                if (!segment.isEmpty()) {
+                    out.append('/').append(percentDecode(segment).toLowerCase(Locale.ROOT));
+                }
+                start = i + 1;
+            }
+        }
+        return out.toString();
+    }
+
+    /** {@code %XX} decoded as UTF-8; a malformed escape is kept as written. */
+    private static String percentDecode(String segment) {
+        if (segment.indexOf('%') < 0) {
+            return segment;
+        }
+        try {
+            return URLDecoder.decode(segment.replace("+", "%2B"), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return segment;
+        }
     }
 }

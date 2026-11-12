@@ -234,7 +234,7 @@ Neither an agent nor a model can influence its own promotion:
   `host:port`), **and the origin the turn's caller addressed** — the public hostname a browser used, which is exactly
   where `${caller:token}` is released. Independently of the target, **every request that carries a released
   `${caller:token}`** is marked — an httpcall header, or the `Authorization` of an MCP server (`mcpServers`,
-  `mcpcalls`): the token is only ever released to this deployment, so such a request is one by definition. Calls to
+  `mcpcalls`): the token is only ever released to this deployment, so such a request is one by definition. Every request to an MCP server that is this deployment is marked too, whatever its credential — a static key, a connection, or none. Calls to
   any other host carry no EDDI header. Any non-read request with the header to `/hitl/samples/**`,
   `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a forwarded
   `${caller:token}`. If agents reach this deployment under a name none of those cover, list it in
@@ -248,7 +248,7 @@ Neither an agent nor a model can influence its own promotion:
   marked `/mcp` request the same way (`errorCode: AGENT_ORIGINATED`): they call the services in-process, so the REST
   filter never sees them, and read the header off the inbound `/mcp` request instead. The MCP oversight tools are
   reads only. Cancelling (`/cancel`, `cancel_conversation`, `cancel_group_discussion`) stops work and records no
-  decision, so it is not guarded. Paths are matched case-insensitively, without matrix parameters and with repeated
+  decision, so it is not guarded. Paths are judged both decoded and raw (matrix parameters stripped per raw segment before decoding, so `approve;x=%2Fzzz` is still `approve`), case-insensitively, without matrix parameters and with repeated
   slashes collapsed; no legacy path alias leads to these endpoints. (Until this
   release only loopback, `eddi.self.base-url` and the self-hosts list were marked, and no decision endpoint read the
   marker.)

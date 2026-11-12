@@ -14,6 +14,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,6 +48,35 @@ class AgentOriginatedRequestFilterTest {
     @DisplayName("a marked HITL decision is refused: an agent may not resume a pause as the approver it talks to")
     void decisionRefused(String method, String path) {
         assertTrue(AgentOriginatedRequestFilter.refused(method, path, "true"), path);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"groups/g1/conversations/gc1/approve;x=%2Fzzz", "groups/g1/conversations/gc1/approve/stream;x=%2Fzzz",
+            "groups/g1/conversations/gc1/human-input;x=%2Fzzz", "agents/c2/resume;x=%2Fzzz", "agents/c2/resume/stream;x=%2F..%2Fzzz",
+            "agents/c2;v=%2Fa/resume;x=%2Fzzz", "hitl/samples/s1;x=%2Fzzz"})
+    @DisplayName("a matrix parameter holding an encoded slash cannot move the last segment: the raw reading is judged too")
+    void encodedSlashInMatrixParameterRefused(String rawPath) {
+        // The router drops ;x=%2Fzzz from the raw segment and serves approve; the
+        // decoded path is .../approve;x=/zzz, whose last segment reads zzz.
+        String decoded = URLDecoder.decode(rawPath, StandardCharsets.UTF_8);
+        assertTrue(AgentOriginatedRequestFilter.refused("POST", decoded, rawPath, "true"), rawPath);
+        assertFalse(AgentOriginatedRequestFilter.refused("POST", decoded, rawPath, null), "unmarked: " + rawPath);
+    }
+
+    @Test
+    @DisplayName("the filter reads the raw path from the request, so the encoded-slash form is aborted")
+    void filterReadsRawPath() {
+        ContainerRequestContext request = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn("groups/g1/conversations/gc1/approve;x=/zzz");
+        when(uriInfo.getPath(false)).thenReturn("groups/g1/conversations/gc1/approve;x=%2Fzzz");
+        when(request.getHeaderString(AgentCallMarker.HEADER)).thenReturn("true");
+
+        new AgentOriginatedRequestFilter().filter(request);
+
+        verify(request).abortWith(any());
     }
 
     @ParameterizedTest
