@@ -203,7 +203,10 @@ public class RestOpenAiAdapter {
      * rate-limit error event rather than an HTTP error, because by the time the
      * body runs the 200 status has already been committed. It also abandons the
      * turn: a stateless turn's conversation was started by prepare, and only
-     * {@code bridge.stream} would otherwise have ended it.
+     * {@code bridge.stream} would otherwise have ended it. A body the server never
+     * invokes (the client left before the response was written) cannot abandon
+     * anything: that stateless conversation stays open until the idle sweep, a
+     * known gap with no response-close hook yet.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
                                        String completionId, String model, long created, boolean includeUsage) {

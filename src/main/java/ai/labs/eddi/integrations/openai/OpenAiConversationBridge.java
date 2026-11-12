@@ -835,8 +835,11 @@ public class OpenAiConversationBridge {
      * pipeline emits after the terminator (see {@link OpenAiSseWriter}), so a
      * timeout can no longer be followed by late tokens.
      * <p>
-     * Every exit ends a stateless turn's conversation. A turn that is prepared but
-     * never streamed must be handed to {@link #abandon} instead.
+     * Every exit ends a stateless turn's conversation. A caller that prepares a
+     * turn and then decides not to stream it must hand it to {@link #abandon}
+     * instead. A streaming body the server never invokes at all (a client gone
+     * before the response is written) reaches neither, and its stateless
+     * conversation stays open until the idle sweep — a known, uncovered gap.
      */
     public void stream(PreparedTurn turn, OpenAiSseWriter writer) {
         long start = System.nanoTime();
@@ -988,9 +991,10 @@ public class OpenAiConversationBridge {
      * <p>
      * {@link #prepare} starts a stateless turn's conversation up front, and only
      * {@link #say} and {@link #stream} end it. A caller that gives up between
-     * prepare and run — a stream refused a concurrency permit — ends it here, or
-     * the throwaway conversation stays open. A stateful turn belongs to its chat
-     * and is left alone.
+     * prepare and run ends it here, or the throwaway conversation stays open. The
+     * only caller today is a stream body refused a concurrency permit; a body that
+     * never runs cannot call it (see {@link #stream}). A stateful turn belongs to
+     * its chat and is left alone.
      */
     public void abandon(PreparedTurn turn) {
         if (turn.stateless()) {
