@@ -1696,8 +1696,12 @@ class DreamServiceTest {
         verifyNoInteractions(summarizationService);
     }
 
+    /**
+     * Fail closed without a failed fire: a failed fire would walk the retry ladder
+     * and dead-letter the user's schedule over a transient store outage.
+     */
     @Test
-    void processScheduledFire_failsClosedWhenTheRestrictionCannotBeRead() throws Exception {
+    void processScheduledFire_unreadableRestriction_processesNothingAndDoesNotFailTheFire() throws Exception {
         var gdpr = mock(GdprComplianceService.class);
         when(gdpr.isProcessingRestricted("user-1")).thenThrow(new ProcessingRestrictionUnavailableException("store down",
                 new IllegalStateException("down")));
@@ -1705,7 +1709,8 @@ class DreamServiceTest {
 
         var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
 
-        assertFalse(result.isSuccess());
+        assertTrue(result.isSuccess(), "a failed fire spends the retry budget and dead-letters the schedule: " + result.error());
+        verify(agentStore, never()).read(anyString(), anyInt());
         verify(store, never()).getAllEntries(anyString());
         verifyNoInteractions(summarizationService);
     }

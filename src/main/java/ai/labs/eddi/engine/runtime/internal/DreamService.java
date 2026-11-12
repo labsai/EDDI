@@ -240,8 +240,8 @@ public class DreamService {
         // call over it. Checked before anything is read. A skip is a successful fire,
         // not a failure: the restriction is a legal state, and a failed fire would
         // spend the schedule's retry budget and dead-letter it, so consolidation would
-        // not resume once the restriction is lifted. A flag that cannot be read fails
-        // the fire (fail closed); the schedule retries it.
+        // not resume once the restriction is lifted. A flag that cannot be read skips
+        // the cycle as well (fail closed, see below).
         if (gdprComplianceService != null && gdprComplianceService.isResolvable()) {
             try {
                 if (gdprComplianceService.get().isProcessingRestricted(userId)) {
@@ -251,8 +251,15 @@ public class DreamService {
                     return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
                 }
             } catch (RuntimeException e) {
-                return rejected(userId, start, "The GDPR processing-restriction status could not be read (" + describe(e)
-                        + "); the dream cycle was not started.");
+                // Fail closed — nothing is read or processed — but as a skip, not a failed
+                // fire. A failed fire walks the schedule's retry ladder (15 s, 1 min, 4 min,
+                // 16 min) and then dead-letters it, where it stays until an operator re-arms
+                // it: a twenty-minute store outage would switch the user's consolidation off
+                // for good. Skipped, the cycle simply runs at the next cadence.
+                LOGGER.warnf("[DREAM] Dream cycle of agent '%s' skipped: the GDPR processing-restriction status could not be read (%s); "
+                        + "nothing was processed, the next scheduled cycle tries again", LogSanitizer.sanitize(agentId),
+                        LogSanitizer.sanitize(describe(e)));
+                return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
             }
         }
 
