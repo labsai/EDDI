@@ -11,7 +11,8 @@ its own. This page explains where the line is and how a loosening change reaches
   MCP caller as actor. A write with *any* loosening part writes nothing: it is stored as a **pending change** that an
   `eddi-admin` approves or rejects in the Manager (*Model Prices* or *Quotas*, **Pending changes**).
 - **The approver is the actor.** Approving applies exactly the proposed document, under the approver's name; an
-  approval by anyone who is not an `eddi-admin` applies nothing.
+  approval by anyone who is not an `eddi-admin` applies nothing, and neither does one by the principal that proposed
+  the change (with authentication — see [Four eyes](#four-eyes)).
 - **No tool approves.** There is no MCP tool, and no Platform Operator grant, to approve or reject. The proposer may
   withdraw its own pending change — that applies nothing either.
 - **Compare-and-set, reason, audit.** Every write names the catalog `revision` or the quota `fingerprint` it was
@@ -36,14 +37,16 @@ The classification errs towards "loosening": a change it cannot prove stricter g
 | --- | --- | --- |
 | Price of an existing entry | every price — input, output, cache read and write, the long-context tier's — is equal or higher | any price goes down, or a set price is cleared (it would fall back to another value) |
 | Long-context threshold | lowered over a tier that costs at least the base price | raised, or lowered over a cheaper tier |
-| New entry | the policy in force is `ALLOW` **and** its lowest price of every kind is at least the highest price of every existing entry whose pattern could match the same model | otherwise — in particular **any new price while unpriced calls are refused** (`REFUSE`, `REFUSE_WHEN_BUDGETED`): a price admits calls that are refused today |
+| New entry | the policy in force is `ALLOW` **and** its lowest price of every kind is at least the highest price of every existing entry of the same provider (or of provider `*`) | otherwise — in particular **any new price while unpriced calls are refused** (`REFUSE`, `REFUSE_WHEN_BUDGETED`): a price admits calls that are refused today |
 | Removed entry | — | always: its models fall back to another entry or become unpriced |
 | `unpricedPolicy` | `ALLOW` → `REFUSE_WHEN_BUDGETED` → `REFUSE` | the other direction |
 | `asOf`, `source`, `note` | always (they change no price) | — |
 
-Two patterns "could match the same model" unless that is decidable as impossible: two exact names, an exact name and
-a pattern, two prefix patterns (`gpt-4o*`, `claude*`) or two suffix patterns. Every other pair is assumed to overlap,
-and provider `*` overlaps every provider.
+The comparison is by provider, not by model pattern, because a call is priced by the model name the provider
+reported first and the requested name second, and the two can be unrelated (a dated snapshot, the model behind an
+Azure deployment, an OpenRouter route). A new `gpt-4o-2024*` entry overlaps no name the `gpt-4o` entry matches, yet
+it takes over every call that requested `gpt-4o` and got a dated snapshot back — so a cheaper one is loosening.
+Provider `*` counts as every provider.
 
 Under strict mode this means adding a price for a new model is a proposal. That is the point of strict mode: a
 model without a price is refused, and pricing it is admitting it.
@@ -64,11 +67,20 @@ never applies anything other than what the card showed.
 | Status | Meaning |
 | --- | --- |
 | `PENDING` | waits for an `eddi-admin` |
+| `APPLYING` | approved and being written. If it **stays** `APPLYING`, the approval was interrupted between claim and result (a crash, or the store failed recording the result): **the outcome is unknown** |
 | `APPLIED` | approved and written, the approver as actor |
 | `REJECTED` | an administrator said no |
 | `WITHDRAWN` | the proposer took it back |
 | `STALE` | approved, but the catalog or quota had changed since the proposal: nothing applied |
+| `FAILED` | approved, but the write threw: it may or may not have taken effect (`outcome` names the exception type only) |
 | `EXPIRED` | undecided for 7 days: nothing applied |
+
+**How an approval runs.** It first claims the change — `PENDING` → `APPLYING`, a compare-and-set on the stored
+status, on MongoDB and PostgreSQL alike — so of two administrators approving at once exactly one writes; the other
+gets `409 ALREADY_DECIDED`. Then it writes the catalog or quota (itself a compare-and-set against the proposal's
+base), then records `APPLIED`, `STALE` or `FAILED`. `APPLYING`, `FAILED` and every other status but `PENDING` are
+final: nothing re-applies them. Found one `APPLYING` or `FAILED`? Read the price catalog or the quota to see whether
+the change landed, and propose it again only if it did not. Retention never deletes an `APPLYING` change.
 
 Limits: at most **20** pending changes at once (a further one is refused with `TOO_MANY_PENDING`); the same proposal
 filed twice returns the pending one; decided changes are kept for 90 days (the audit ledger keeps the record for
@@ -86,7 +98,7 @@ Over REST, all `eddi-admin`:
 | --- | --- | --- |
 | GET | `/administration/spend-control-changes?status=&limit=` | `PENDING` by default; `ALL` or one status; `limit` 1..100 |
 | GET | `/administration/spend-control-changes/{id}` | one change with the proposed document |
-| POST | `/administration/spend-control-changes/{id}/approve` | `{ "note": "…" }`; 409 `STALE` / `ALREADY_DECIDED` |
+| POST | `/administration/spend-control-changes/{id}/approve` | `{ "note": "…" }`; 403 `SELF_APPROVAL`; 409 `STALE` / `ALREADY_DECIDED`; 500 `APPLY_FAILED` |
 | POST | `/administration/spend-control-changes/{id}/reject` | `{ "note": "…" }` |
 
 **An agent cannot approve.** A non-read request an agent's own httpcall makes to these paths is refused with 403
@@ -97,6 +109,18 @@ is the one path neither guard can see.
 
 There is no Slack or e-mail notification yet: the proposing client is told to tell its user, the proposal is logged
 at `WARN` and counted in `eddi.spendcontrol.changes{kind, result}`.
+
+### Four eyes
+
+The principal that proposed a change cannot approve it: the approval answers `403 SELF_APPROVAL` and applies
+nothing (names compare case-insensitively). An MCP client acts with its user's credential, so without this rule a
+steered model holding that credential could approve its own proposal over REST. Rejecting your own proposal is
+allowed — it applies nothing.
+
+This needs **authentication** (`authorization.enabled=true`, see [Security](security.md)). Without it every caller is
+`anonymous` and principals cannot be told apart, so the check is skipped and the single operator of an unauthenticated
+deployment still approves. With authentication, give the MCP client an account of its own (so you can approve what it
+proposes), or have a second administrator approve.
 
 ## Audit ledger entries
 
@@ -110,6 +134,7 @@ All `taskType: spendcontrol`, the acting principal as `userId`, the action in `i
 | `SPEND_CONTROL_REJECTED` | a proposal was rejected | the administrator |
 | `SPEND_CONTROL_WITHDRAWN` | the proposer withdrew it | the proposer |
 | `SPEND_CONTROL_STALE` | approved, but nothing applied (the control had changed) | the approver |
+| `SPEND_CONTROL_FAILED` | approved, but the write failed — whether it took effect is unknown | the approver |
 
 `output` carries `kind`, `tenantId` (quota), `reason`, `changes`, `loosening`, `channel` and, for a decision, the
 `changeId`, `proposedBy` and the decider's `note`. The catalog keeps its own `updatedBy` (the approver for an approved

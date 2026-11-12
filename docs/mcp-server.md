@@ -206,7 +206,7 @@ The model price catalog and the tenant quota, written by an administrator's AI c
 | `read_tenant_quota` | A tenant's quota (`-1` = unlimited) with its `fingerprint`, the current usage (conversations today, API calls this minute, this month's cost and reserved USD), the remaining monthly budget and the ids of pending quota changes. Default tenant without `tenantId` |
 | `update_model_prices` | `expectedRevision`, `upsertEntries` / `removeEntries` (JSON arrays, ≤ 50 each; every upserted entry needs an http(s) `source`), `unpricedPolicy`, `reason`. `APPLIED` when stricter only, `PROPOSED` (with `changeId` and the loosening parts) otherwise, `UNCHANGED` when nothing differs; `CONFLICT` with `currentRevision` on a stale revision |
 | `update_tenant_quota` | `expectedFingerprint`, any of `maxConversationsPerDay`, `maxAgentsPerTenant`, `maxApiCallsPerMinute`, `maxMonthlyCostUsd`, `enabled`, and `reason`. Lowering a limit or enabling applies; raising, `-1` or disabling is proposed; a mixed change is proposed as a whole |
-| `list_spend_control_changes` | Pending (default) or decided changes: what each changes, which part loosens, who proposed it and why, status (`PENDING`, `APPLIED`, `REJECTED`, `WITHDRAWN`, `STALE`, `EXPIRED`) |
+| `list_spend_control_changes` | Pending (default) or decided changes: what each changes, which part loosens, who proposed it and why, status (`PENDING`, `APPLYING`, `APPLIED`, `REJECTED`, `WITHDRAWN`, `STALE`, `FAILED`, `EXPIRED`; one left `APPLYING` or `FAILED` has an unknown outcome — read the catalog or quota) |
 | `withdraw_spend_control_change` | Withdraw a pending change the caller proposed; nothing is applied |
 
 ### Vault Tool (1)
