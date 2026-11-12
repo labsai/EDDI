@@ -111,7 +111,7 @@ class RestAgentStoreCredentialRedactionTest {
     void keyNamedDreamParametersAreRedacted() throws Exception {
         AgentConfiguration withKeys = mapper.readValue("""
                 {"workflows":[],"userMemoryConfig":{"dream":{"parameters":
-                  {"accessKey":"AKIALITERALACCESSKEY","subscriptionKey":"plainsub","modelName":"m"}}},
+                  {"accessKey":"plain-access-literal","subscriptionKey":"plainsub","modelName":"m"}}},
                  "channels":[{"type":"eddi://ai.labs.channel.slack","config":{"channelKey":"C0123"}}]}
                 """, AgentConfiguration.class);
         when(agentStore.read(ID, 1)).thenReturn(withKeys);

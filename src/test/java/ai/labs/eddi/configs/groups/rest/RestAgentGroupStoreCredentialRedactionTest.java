@@ -80,7 +80,7 @@ class RestAgentGroupStoreCredentialRedactionTest {
         var config = new AgentGroupConfiguration();
         config.setName("team");
         config.setLessonConfig(new LessonConfig(null, null, null, new LessonConsolidationConfig("bedrock", "m",
-                Map.of("accessKey", "AKIALITERALACCESSKEY", "subscriptionKey", "plainsub", "promptCacheKey", "${vault:k}"), null, null, null,
+                Map.of("accessKey", "plain-access-literal", "subscriptionKey", "plainsub", "promptCacheKey", "${vault:k}"), null, null, null,
                 null, null, null, null)));
         when(groupStore.read(ID, 1)).thenReturn(config);
         when(accessGuard.isAdmin()).thenReturn(false);
