@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.annotation.security.RolesAllowed;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
@@ -251,6 +252,77 @@ public interface IRestRagIngestion {
      *            them
      */
     record KnowledgeBaseSearch(String query, Integer maxResults, Double minScore, String sourceId) {
+    }
+
+    @POST
+    @Path("/{id}/evaluate")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "Per-query and aggregate retrieval scores, and the difference "
+            + "from the baseline when one was sent.")
+    @APIResponse(responseCode = "400", description = "No queries, too many queries, a query without text or "
+            + "without expected documents, a k or minScore out of bounds, or duplicate query keys.")
+    @Operation(summary = "Benchmark retrieval against golden queries",
+               description = "Runs each golden query through the same retrieval as POST /{id}/search and scores the "
+                       + "result against the documents it expects: rank of the first hit, hit@k and reciprocal "
+                       + "rank per query, and hit rate, recall@k and MRR over all of them. With a baseline (a "
+                       + "previous response, or its 'queries'), also returns per-query and aggregate deltas and "
+                       + "flags regressions. Costs one embedding call per query.")
+    Response evaluateRetrieval(@PathParam("id") String ragConfigId,
+                               @Parameter(name = "version", required = true, example = "1")
+                               @QueryParam("version") Integer version,
+                               RetrievalEvaluation evaluation);
+
+    /**
+     * A retrieval benchmark.
+     *
+     * @param queries
+     *            the golden queries; at most
+     *            {@code eddi.rag.evaluation.max-queries}
+     * @param k
+     *            the cut-off for queries that set none; defaults to the knowledge
+     *            base's own {@code maxResults}
+     * @param minScore
+     *            defaults to the knowledge base's own {@code minScore}
+     * @param sourceId
+     *            narrows every query to one source's chunks, as for search
+     * @param matchKeys
+     *            the chunk metadata keys whose values identify a document; defaults
+     *            to {@code source} (the {@code documentName} of a direct ingest),
+     *            {@code documentId} and {@code url} (an ingestion source's
+     *            document)
+     * @param baseline
+     *            a previous run to compare with; absent compares nothing
+     */
+    record RetrievalEvaluation(List<GoldenQuery> queries, Integer k, Double minScore, String sourceId,
+            List<String> matchKeys, EvaluationBaseline baseline) {
+    }
+
+    /**
+     * One golden query.
+     *
+     * @param id
+     *            pairs the query with the baseline; defaults to the query text
+     * @param expected
+     *            identifiers of the documents a good retrieval returns, matched
+     *            exactly and case-sensitively against the {@code matchKeys}
+     * @param k
+     *            this query's cut-off, overriding the request's
+     */
+    record GoldenQuery(String id, String query, List<String> expected, Integer k) {
+    }
+
+    /**
+     * The run to compare with — the {@code queries} of an earlier response, pasted
+     * as they came back. Fields the comparison does not use are ignored.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record EvaluationBaseline(List<BaselineQuery> queries) {
+    }
+
+    /** One query of the baseline run; a value left out is not compared. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record BaselineQuery(String id, String query, Integer k, Boolean hit, Double reciprocalRank, Double recall) {
     }
 
     @DELETE

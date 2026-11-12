@@ -269,6 +269,56 @@ Applies only if you run more than one node.
   field before enabling `allowResultEdits` on a mixed-version cluster. New collections and tables
   (settings, model prices, team budgets, approval analytics) are created on first use and ignored
   by older nodes.
+- **Rolling upgrades — the later 6.7 features.** Everything below is created on first use or is an
+  optional field, and nothing writes it until you configure it, so a mixed-version cluster is safe
+  as long as you finish the rollout before switching the feature on. A backlog task's `bet` is an
+  optional field of `TaskItem`, and `lessonConfig` is an optional field of a group: stored documents are
+  read leniently, so an older pod ignores them, but an older pod that saves the same document
+  silently drops the field. Do not set either until every pod is upgraded.
+  New collections and tables (`group_outcomes`, `group_lesson_history`, `conversation_ratings`,
+  `alert_rules`, `alert_events`, `alert_windows`, and the email channel's `email_mailbox_state`,
+  `email_mailbox_notices`, `email_message_ledger` and `email_suppressions`) are created on first use
+  and ignored by older nodes. `ratingConfig` is an optional agent field. The tenant cost reservation
+  and `toolQuotas` `"window": "RUN"` store nothing new beyond their own counters.
+- **Alerts run their maintenance schedule by default.** `eddi.alerts.enabled` defaults to `true`, which
+  creates one background maintenance schedule (retries and digests) at startup; with no alert rules
+  nothing is delivered. Set it to `false` to create nothing. **On a mixed-version cluster set it to
+  `false` until every pod runs 6.7:** a 6.5 or 6.6 scheduler does not recognise the `alertType` marker
+  on that schedule, so it may claim the row and treat it as an ordinary conversation fire, which has no
+  agent target and can fail, retry or dead-letter. Enable it once the rollout is complete.
+  **Setting it to `false` afterwards does not remove a schedule a 6.7 pod already created** (it only stops
+  creating one), and the REST API and the schedule MCP tool refuse to delete or disable it (`409
+  SYSTEM_SCHEDULE`). Before you roll back to 6.6 or run mixed versions, stop the 6.7 pods, then delete the row
+  directly in the datastore. It is the schedule named `alerts-maintenance` whose `metadata.alertType` is
+  `alert_maintenance`; a same-named row without that marker is an ordinary schedule, so match on the marker:
+  - MongoDB, collection `eddi_schedules`: `db.eddi_schedules.deleteMany({ "metadata.alertType": "alert_maintenance" })`
+  - PostgreSQL, table `eddi_schedules`: `DELETE FROM eddi_schedules WHERE metadata->>'alertType' = 'alert_maintenance';`
+
+  Alert rules, events and windows are separate collections or tables and are untouched. To confirm that
+  re-enabling recreates the schedule, return to 6.7 with `eddi.alerts.enabled=true` and restart (or save an
+  alert rule): the log shows `Created the alerts-maintenance system schedule`, and the schedule is listed
+  again under Schedules.
+
+### Slack channels still declared on an agent
+
+Applies only if a deployed agent still carries the deprecated `channels` list
+([Slack integration](slack-integration.md)). The startup migration that turns those connectors into
+channel integrations runs once more on the first 6.7 start, because the configs it created before
+were never listed: Slack kept routing through the legacy connector, and the integrations did not
+appear in the Manager, the REST listing or `list_channel_integrations`. After this start each
+channel has one integration, owned like the agent it routes to by default (its visibility narrowed
+to `space` unless the agent is `private`), and Slack routes through it: the default target is the
+first agent by id (or, if that agent's connector sets a `groupId`, that group), and every other
+agent sharing the channel is reached through its trigger keyword, the slug of its name. An agent
+whose name slugs to the reserved `help` gets no trigger; give it another one. The configs the
+earlier run created stay in the database unreferenced; nothing reads them. A channel that already
+has an integration is left alone.
+
+If the default agent has no descriptor, the integration is unowned, and under the default `shared`
+legacy policy other editors can read its configuration (literal Slack credentials are redacted for
+non-admins). Set `eddi.workspaces.legacy-visibility=admin-only` to restrict it; explicit grants still
+apply. If a descriptor write or the descriptor listing fails, the migration stays incomplete and
+startup continues: check the migration log, fix the cause and restart to retry.
 
 ### New opt-in features
 
@@ -285,8 +335,41 @@ None of these changes behaviour until configured; each has its own page.
 | Cross-team handoff | `teamHandoff.targets`, `handoffConfig` | [group-conversations](group-conversations.md) |
 | Model-backed convergence judge | `convergence.judge: SERVICE` | [group-conversations](group-conversations.md) |
 | Team budgets | `teamBudget` on a group | [group-conversations](group-conversations.md) |
+| Bets on backlog tasks | `bet` on a team backlog task | [team-learning-loop](team-learning-loop.md) |
+| Team outcome events | `outcomeConfig` on a group | [team-learning-loop](team-learning-loop.md) |
+| Team lessons — sharing between teams and cost-capped consolidation | `lessonConfig` on a group | [team-learning-loop](team-learning-loop.md#lessons) |
+| Agent operations tools — team scorecard, budget proposals, follow-ups | `team_scorecard`, `propose_team_budget`, `schedule_followup` in `builtInToolsWhitelist`; optional `agentOps` | [agent-ops-tools](agent-ops-tools.md) |
+| Hard tenant ceiling (cost reservation) | `eddi.tenant.quota.cost-reservation.enabled=true` (default `false`) | [tenant-quotas](tenant-quotas.md) |
+| Per-run tool caps | `"window": "RUN"` in `toolQuotas` | [langchain](langchain.md#per-run-caps-window-run) |
+| Email channel | A channel integration with `channelType: "email"` (`mode: trigger` or `conversation`); `eddi.email.allowed-hosts` confines servers | [email-integration](email-integration.md) |
+| Conversation ratings | `ratingConfig` on the agent | [conversation-ratings](conversation-ratings.md) |
+| Alert rules | Create rules in the Manager's Alerts page; `eddi.alerts.enabled` (default `true`) | [alerts](alerts.md) |
 
 ### Dependency advisories
 
 6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
 Manager and Chat UI. Nothing to do besides pulling the new image.
+
+## Changes after 6.7.0
+
+### An httpcall whose literal target is refused now fails at deploy
+
+With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an
+absolute `request.path`, names a host the SSRF check refuses (loopback such as `http://127.0.0.1:7070`, a
+private address, `localhost`, `*.internal`, `*.local`, not on `eddi.security.ssrf-protection.allowed-hosts`)
+used to save and deploy, and only failed when the first conversation reached the call. It now fails the
+deployment. Independent of the flag, a target that is a cloud instance-metadata address fails to deploy too (it
+already failed on every call).
+
+Who is affected: deployments with protection on that have agents calling internal APIs, or EDDI itself (the
+Platform Operator's tools, for one), without listing the host. What you will see: the deploy request fails
+(and an auto-deploy at startup logs the failure for that agent) with a message naming the host and the exact
+`host:port` entry to add. To keep the agent working, add that entry to
+`eddi.security.ssrf-protection.allowed-hosts`, or point the call at a public address. Templated and
+`${vars:...}` hosts, and hosts that do not resolve at deploy (logged as a WARN), are still only checked per call.
+There is no switch to restore the old deploy-then-fail behaviour.
+
+DNS lookups made by this check now give up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`) and
+count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
+refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
+See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).

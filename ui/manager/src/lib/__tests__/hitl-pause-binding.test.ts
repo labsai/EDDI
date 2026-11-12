@@ -125,6 +125,43 @@ describe("bindDecisionToPause", () => {
       ),
     ).rejects.toBeInstanceOf(PauseChangedError);
   });
+
+  describe("plan hash", () => {
+    const planned = { ...ruleStatus, pauseId: "1782900000000", planHash: "v1:" + "a".repeat(64) };
+
+    it("sends the shown plan hash with the shown pause id, without re-reading", async () => {
+      const read = vi.fn();
+      await expect(bindDecisionToPause(approve, shownPauseOf(planned), read)).resolves.toEqual({
+        verdict: "APPROVED",
+        pauseId: "1782900000000",
+        planHash: "v1:" + "a".repeat(64),
+      });
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it("takes the current plan hash only for the same pause, when the shown pause had none", async () => {
+      const shown = shownPauseOf(ruleStatus);
+      await expect(
+        bindDecisionToPause(approve, shown, async () => currentPauseOf({ ...ruleStatus, planHash: "v1:b" })),
+      ).resolves.toEqual({ verdict: "APPROVED", planHash: "v1:b" });
+    });
+
+    it("treats a different plan as a different pause", async () => {
+      expect(
+        isSamePause({ ...shownPauseOf(ruleStatus), planHash: "v1:a" }, currentPauseOf({ ...ruleStatus, planHash: "v1:b" })),
+      ).toBe(false);
+      await expect(
+        bindDecisionToPause(approve, { ...shownPauseOf(ruleStatus), planHash: "v1:a" }, async () =>
+          currentPauseOf({ ...ruleStatus, planHash: "v1:b" }),
+        ),
+      ).rejects.toBeInstanceOf(PauseChangedError);
+    });
+
+    it("reads a blank plan hash (not paused, or committed before plan hashing) as none", () => {
+      expect(shownPauseOf({ ...ruleStatus, planHash: "" }).planHash).toBeUndefined();
+      expect(currentGroupPauseOf({ state: "AWAITING_APPROVAL", pausedAt: "x", planHash: "v1:g" }).planHash).toBe("v1:g");
+    });
+  });
 });
 
 describe("isPauseChanged", () => {
@@ -136,6 +173,12 @@ describe("isPauseChanged", () => {
       ),
     ).toBe(true);
     expect(isPauseChanged(new ApiClientError(409, "Conversation is not awaiting approval (state READY)"))).toBe(false);
+    // The plan-hash refusal of either surface (EDDI 6.8+).
+    expect(
+      isPauseChanged(
+        new ApiClientError(409, "The pending approval's plan is not the one this decision was made for (planHash does not match) — re-read approval-status and decide again."),
+      ),
+    ).toBe(true);
     // The group approve's only wrong-state wording — #839's pause mismatch included.
     expect(
       isPauseChanged(
