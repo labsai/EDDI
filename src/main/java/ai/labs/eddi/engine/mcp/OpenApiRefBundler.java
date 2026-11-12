@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.mcp;
 
 import com.fasterxml.jackson.core.JsonPointer;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -13,13 +12,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.v3.parser.ObjectMapperFactory;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.io.Writer;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -51,7 +55,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * A textual {@code $id} is removed from the output: in an OpenAPI 3.1 schema it
  * is the base the parser would resolve that schema's references against, and
- * every reference has been resolved here already.
+ * every reference has been resolved here already. That base is not tracked: a
+ * relative or {@code #} reference inside a schema whose {@code $id} names a
+ * different base is refused, rather than resolved against the document's own
+ * URL and so against the wrong schema. The serialized result is capped at
+ * {@value #MAX_SERIALIZED_CHARS} characters while it is written.
  */
 final class OpenApiRefBundler {
 
@@ -66,6 +74,12 @@ final class OpenApiRefBundler {
     /** Most JSON nodes the bundled document may hold. */
     static final int MAX_EXPANDED_NODES = 500_000;
 
+    /**
+     * Most characters the bundled document may serialize to: twice the cap on one
+     * fetched spec, room for a spec plus the documents it references.
+     */
+    static final int MAX_SERIALIZED_CHARS = 32 * 1024 * 1024;
+
     private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
     private final OpenApiSpecFetcher fetcher;
@@ -73,6 +87,14 @@ final class OpenApiRefBundler {
     private final Map<String, Doc> documents = new HashMap<>();
     private long fetchedChars;
     private int expandedNodes;
+    /**
+     * Distinct documents fetched: {@link #documents} also holds redirect aliases.
+     */
+    private int fetchedDocuments;
+    /**
+     * How many enclosing objects carry an {@code $id} that changes the base URI.
+     */
+    private int foreignBaseDepth;
 
     private record Doc(String url, JsonNode tree, boolean root) {
     }
@@ -99,6 +121,11 @@ final class OpenApiRefBundler {
      *             fetched or read, does not point at a node, or a limit is exceeded
      */
     static String bundle(String content, String location, OpenApiSpecFetcher fetcher) {
+        return bundle(content, location, fetcher, MAX_SERIALIZED_CHARS);
+    }
+
+    /** {@link #bundle(String, String, OpenApiSpecFetcher)} with its output cap. */
+    static String bundle(String content, String location, OpenApiSpecFetcher fetcher, int maxSerializedChars) {
         JsonNode root = McpApiToolBuilder.deserializeLikeParser(content);
         if (root == null) {
             return content;
@@ -113,10 +140,50 @@ final class OpenApiRefBundler {
         var bundler = new OpenApiRefBundler(fetcher, location == null ? null : withoutFragment(URI.create(location)));
         JsonNode bundled = bundler.expand(root, new Doc(bundler.rootUrl, root, true), new ArrayDeque<>());
         requireInternalRefsOnly(bundled);
+        // Written through a bounded writer, not into one String: inlining shares a
+        // referenced value instead of copying it, so the node cap does not measure
+        // output size - a 1 MB description referenced 10,000 times serializes to
+        // 10 GB. The writer refuses past the cap as it is written.
+        var out = new BoundedWriter(maxSerializedChars);
         try {
-            return ObjectMapperFactory.createJson().writeValueAsString(bundled);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("OpenAPI spec could not be re-serialized after inlining its $refs", e);
+            ObjectMapperFactory.createJson().writeValue(out, bundled);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("OpenAPI spec is larger than " + maxSerializedChars
+                    + " characters once its $refs are inlined, or could not be re-serialized; refused", e);
+        }
+        return out.toString();
+    }
+
+    /** Collects serialized output and refuses to grow past a fixed size. */
+    static final class BoundedWriter extends Writer {
+        private final StringBuilder out = new StringBuilder();
+        private final int limit;
+
+        BoundedWriter(int limit) {
+            this.limit = limit;
+        }
+
+        @Override
+        public void write(char[] buffer, int offset, int length) throws IOException {
+            if ((long) out.length() + length > limit) {
+                throw new IOException("serialized output exceeds " + limit + " characters");
+            }
+            out.append(buffer, offset, length);
+        }
+
+        @Override
+        public void flush() {
+            // in memory
+        }
+
+        @Override
+        public void close() {
+            // in memory
+        }
+
+        @Override
+        public String toString() {
+            return out.toString();
         }
     }
 
@@ -206,21 +273,41 @@ final class OpenApiRefBundler {
                     "OpenAPI spec expands to more than " + MAX_EXPANDED_NODES + " nodes once its $refs are inlined; refused");
         }
         if (node.isObject()) {
-            JsonNode ref = node.get("$ref");
-            if (ref != null && ref.isTextual()) {
-                JsonNode replaced = resolveRef(ref.asText().trim(), node, doc, chain);
-                if (replaced != null) {
-                    return replaced;
+            JsonNode id = node.get("$id");
+            boolean entersForeignBase = id != null && id.isTextual() && changesBase(id.asText().trim(), doc);
+            if (entersForeignBase) {
+                foreignBaseDepth++;
+            }
+            try {
+                JsonNode ref = node.get("$ref");
+                if (ref != null && ref.isTextual()) {
+                    String refText = ref.asText().trim();
+                    if (foreignBaseDepth > 0 && !hasScheme(refText)) {
+                        // OpenAPI 3.1: a schema's $id is the base its relative $refs (and its
+                        // #-references) resolve against. EDDI does not track that base, and
+                        // resolving against the document's own URL would load a different
+                        // schema - so the reference is refused, never resolved wrongly.
+                        throw new IllegalArgumentException("OpenAPI spec has a relative $ref inside a schema whose $id changes the base "
+                                + "URI; such references are not resolved. Write the $ref as an absolute http(s) URL; refused");
+                    }
+                    JsonNode replaced = resolveRef(refText, node, doc, chain);
+                    if (replaced != null) {
+                        return replaced;
+                    }
+                }
+                ObjectNode out = NODES.objectNode();
+                for (Map.Entry<String, JsonNode> field : node.properties()) {
+                    if ("$id".equals(field.getKey()) && field.getValue().isTextual()) {
+                        continue;
+                    }
+                    out.set(field.getKey(), expand(field.getValue(), doc, chain));
+                }
+                return out;
+            } finally {
+                if (entersForeignBase) {
+                    foreignBaseDepth--;
                 }
             }
-            ObjectNode out = NODES.objectNode();
-            for (Map.Entry<String, JsonNode> field : node.properties()) {
-                if ("$id".equals(field.getKey()) && field.getValue().isTextual()) {
-                    continue;
-                }
-                out.set(field.getKey(), expand(field.getValue(), doc, chain));
-            }
-            return out;
         }
         if (node.isArray()) {
             ArrayNode out = NODES.arrayNode(node.size());
@@ -262,10 +349,15 @@ final class OpenApiRefBundler {
         Doc referenced = load(docUrl, target);
         JsonNode node = pointAt(referenced.tree(), fragment, target);
         chain.push(key);
+        // The referenced document is its own base scope: an $id around the reference
+        // does not reach into it.
+        int outerForeignBaseDepth = foreignBaseDepth;
+        foreignBaseDepth = 0;
         JsonNode expanded;
         try {
             expanded = expand(node, referenced, chain);
         } finally {
+            foreignBaseDepth = outerForeignBaseDepth;
             chain.pop();
         }
         if (expanded.isObject() && holder.size() > 1) {
@@ -275,15 +367,95 @@ final class OpenApiRefBundler {
         return expanded;
     }
 
-    /** {@code holder}'s fields other than {@code $ref} that {@code into} lacks. */
+    /** Bounds where the smaller value is the stricter one. */
+    private static final Set<String> UPPER_BOUNDS = Set.of("maxLength", "maxItems", "maxProperties", "maximum", "exclusiveMaximum",
+            "maxContains");
+
+    /** Bounds where the larger value is the stricter one. */
+    private static final Set<String> LOWER_BOUNDS = Set.of("minLength", "minItems", "minProperties", "minimum", "exclusiveMinimum",
+            "minContains");
+
+    /**
+     * {@code holder}'s fields other than {@code $ref}, merged into {@code into}.
+     * Under OpenAPI 3.1 both the reference's target and its siblings apply, and
+     * {@code OpenApiArgumentSchemas} turns an {@code allOf} of non-object parts
+     * into an untyped schema, so the two are merged into one schema here instead: a
+     * field only one side has is kept; a numeric bound both have keeps the stricter
+     * value (the smaller maximum, the larger minimum); {@code required} keeps the
+     * union; {@code enum} keeps the values both allow; any other field both have
+     * takes the holder's value (the author's local refinement — a description, a
+     * pattern).
+     */
     private ObjectNode copySiblings(JsonNode holder, ObjectNode into, Doc doc, Deque<String> chain) {
         for (Map.Entry<String, JsonNode> field : holder.properties()) {
             String name = field.getKey();
-            if (!"$ref".equals(name) && !into.has(name) && !("$id".equals(name) && field.getValue().isTextual())) {
-                into.set(name, expand(field.getValue(), doc, chain));
+            if ("$ref".equals(name) || "$id".equals(name) && field.getValue().isTextual()) {
+                continue;
             }
+            JsonNode sibling = expand(field.getValue(), doc, chain);
+            JsonNode existing = into.get(name);
+            into.set(name, existing == null ? sibling : stricter(name, existing, sibling));
         }
         return into;
+    }
+
+    private static JsonNode stricter(String name, JsonNode target, JsonNode holder) {
+        if (target.isNumber() && holder.isNumber()) {
+            int order = new BigDecimal(target.asText()).compareTo(new BigDecimal(holder.asText()));
+            if (UPPER_BOUNDS.contains(name)) {
+                return order <= 0 ? target : holder;
+            }
+            if (LOWER_BOUNDS.contains(name)) {
+                return order >= 0 ? target : holder;
+            }
+        }
+        if ("required".equals(name) && target.isArray() && holder.isArray()) {
+            Set<String> union = new LinkedHashSet<>();
+            target.forEach(value -> union.add(value.asText()));
+            holder.forEach(value -> union.add(value.asText()));
+            ArrayNode merged = NODES.arrayNode();
+            union.forEach(merged::add);
+            return merged;
+        }
+        if ("enum".equals(name) && target.isArray() && holder.isArray()) {
+            ArrayNode both = NODES.arrayNode();
+            for (JsonNode value : holder) {
+                for (JsonNode allowed : target) {
+                    if (allowed.equals(value)) {
+                        both.add(value);
+                        break;
+                    }
+                }
+            }
+            return both;
+        }
+        return holder;
+    }
+
+    /**
+     * Whether an {@code $id} sets a base other than the document's own: anything
+     * but a fragment ({@code #anchor}) or the document's URL itself.
+     */
+    private static boolean changesBase(String id, Doc doc) {
+        if (id.isEmpty() || id.startsWith("#")) {
+            return false;
+        }
+        if (doc.url() == null) {
+            return true;
+        }
+        try {
+            return !withoutFragment(new URI(doc.url()).resolve(new URI(id))).equals(doc.url());
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            return true;
+        }
+    }
+
+    private static boolean hasScheme(String ref) {
+        try {
+            return new URI(ref).getScheme() != null;
+        } catch (URISyntaxException e) {
+            return false;
+        }
     }
 
     private static URI absolute(String ref, Doc doc) {
@@ -310,7 +482,7 @@ final class OpenApiRefBundler {
         if (cached != null) {
             return cached;
         }
-        if (documents.size() >= MAX_REMOTE_DOCUMENTS) {
+        if (fetchedDocuments >= MAX_REMOTE_DOCUMENTS) {
             throw new IllegalArgumentException(
                     "OpenAPI spec references more than " + MAX_REMOTE_DOCUMENTS + " remote documents through its $refs; refused");
         }
@@ -321,6 +493,7 @@ final class OpenApiRefBundler {
             throw new IllegalArgumentException(
                     "OpenAPI spec $ref " + OpenApiSpecFetcher.forMessage(target) + " refused: " + e.getMessage(), e);
         }
+        fetchedDocuments++;
         fetchedChars += fetched.content().length();
         if (fetchedChars > OpenApiSpecFetcher.MAX_SPEC_BYTES) {
             throw new IllegalArgumentException("The documents an OpenAPI spec references through its $refs are larger than "
