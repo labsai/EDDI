@@ -9,15 +9,10 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Adapts a {@link StreamingChatModel} to the synchronous {@link ChatModel}
@@ -41,9 +36,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * of the final response (an exhausted iteration budget substitutes a synthetic
  * message) and a JSON round or a buffered provider may forward nothing.
  * <p>
- * Concurrency mirrors {@code StreamingLegacyChatExecutor}: one latch per call,
- * an {@code abandoned} gate plus lock so a timed-out attempt's late tokens can
- * never interleave with a retry's output on the shared sink.
+ * Concurrency is {@link AbandonableStreamCall}'s, shared with
+ * {@code StreamingLegacyChatExecutor}: one call per round, abandoned on
+ * timeout, interrupt or error, so a failed round's late tokens can never
+ * interleave with a retry's output on the shared sink.
  * <p>
  * <strong>A round that fails after forwarding text is not retried.</strong> The
  * tool loop retries a failed model round, and a retry streams the round again
@@ -93,7 +89,7 @@ class ToolLoopStreamingChatModel implements ChatModel {
 
     /**
      * Exactly the text forwarded to the sink by the most recent completed call.
-     * Written only by {@link #chat} after its latch is released; the tool loop is
+     * Written only by {@link #chat} after its call has completed; the tool loop is
      * single-threaded per conversation turn, so no further synchronization is
      * needed for reads by the caller.
      */
@@ -104,8 +100,8 @@ class ToolLoopStreamingChatModel implements ChatModel {
      * inter-round separator. Without it, interim commentary and the final answer
      * run together on the live stream ("Let me check…There are 3"). The separator
      * goes to the sink only, never into the per-call forwarded record, so the
-     * caller's exact-match suppression still compares pure round text. Written
-     * under {@code streamLock}.
+     * caller's exact-match suppression still compares pure round text. Written only
+     * by a live round's token forwarder, under that round's lock.
      */
     private volatile boolean anyRoundForwarded;
 
@@ -130,71 +126,20 @@ class ToolLoopStreamingChatModel implements ChatModel {
     public ChatResponse chat(ChatRequest chatRequest) {
         // Partial JSON is not renderable — run over the streaming transport but
         // do not forward tokens for this round.
-        boolean forward = chatRequest.responseFormat() == null;
-
-        var latch = new CountDownLatch(1);
-        var forwarded = new StringBuilder();
-        var errorRef = new AtomicReference<Throwable>();
-        var responseRef = new AtomicReference<ChatResponse>();
-        // Abandoning (timeout/interrupt) cannot cancel the provider's callback
-        // thread; the gate + lock silence it so a late token never writes to the
-        // shared sink alongside a retry's stream. See StreamingLegacyChatExecutor
-        // for the full reasoning — same pattern, same reasons.
-        var abandoned = new AtomicBoolean(false);
-        final Object streamLock = new Object();
-
-        delegate.chat(chatRequest, new StreamingChatResponseHandler() {
-            @Override
-            public void onPartialResponse(String partialResponse) {
-                if (!forward) {
-                    return;
-                }
-                synchronized (streamLock) {
-                    if (abandoned.get()) {
-                        return;
-                    }
-                    boolean firstForwardOfThisCall = forwarded.isEmpty();
-                    forwarded.append(partialResponse);
-                    try {
-                        if (firstForwardOfThisCall && anyRoundForwarded) {
-                            eventSink.onToken("\n\n");
-                        }
-                        eventSink.onToken(partialResponse);
-                    } catch (Exception e) {
-                        LOGGER.warnf("Error sending token event: %s", e.getMessage());
-                    }
-                    anyRoundForwarded = true;
-                }
-            }
-
-            @Override
-            public void onCompleteResponse(ChatResponse completeResponse) {
-                responseRef.set(completeResponse);
-                latch.countDown();
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                errorRef.set(error);
-                latch.countDown();
-            }
-        });
+        var call = chatRequest.responseFormat() == null
+                ? AbandonableStreamCall.forwardingTo(this::forwardToken)
+                : AbandonableStreamCall.discardingPartials();
+        delegate.chat(chatRequest, call);
 
         boolean completed;
         try {
-            completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
+            completed = call.await(timeoutSeconds);
         } catch (InterruptedException e) {
-            synchronized (streamLock) {
-                abandoned.set(true);
-            }
             Thread.currentThread().interrupt();
             throw new RuntimeException(String.format("[%s] Streaming chat request interrupted", modelType), e);
         }
 
         if (!completed) {
-            synchronized (streamLock) {
-                abandoned.set(true);
-            }
             // Counted here, when EDDI gives up (L3) — see StreamingLegacyChatExecutor.
             // This class is not CDI-managed, hence the global registry (the idiom
             // ToolContextBudget and LifecycleManager use).
@@ -211,21 +156,34 @@ class ToolLoopStreamingChatModel implements ChatModel {
             RuntimeException timeout = new RuntimeException(
                     String.format("[%s] Chat request timed out after %dms", modelType, timeoutSeconds * 1000),
                     new TimeoutException("streaming chat exceeded " + timeoutSeconds + "s backstop"));
-            throw partiallyStreamed(forwarded, streamLock, timeout);
+            throw partiallyStreamed(call, timeout);
         }
 
-        Throwable error = errorRef.get();
+        Throwable error = call.error();
         if (error != null) {
-            synchronized (streamLock) {
-                abandoned.set(true);
-            }
-            throw partiallyStreamed(forwarded, streamLock, error instanceof RuntimeException re ? re : new RuntimeException(error));
+            call.abandon();
+            throw partiallyStreamed(call, error instanceof RuntimeException re ? re : new RuntimeException(error));
         }
 
-        synchronized (streamLock) {
-            lastForwardedText = forwarded.toString();
+        lastForwardedText = call.forwardedText();
+        return call.response();
+    }
+
+    /**
+     * Forward one partial token of a live round, preceded by the inter-round
+     * separator when it is the round's first and an earlier round already forwarded
+     * text. Runs under the round's lock.
+     */
+    private void forwardToken(String token, boolean firstOfRound) {
+        try {
+            if (firstOfRound && anyRoundForwarded) {
+                eventSink.onToken("\n\n");
+            }
+            eventSink.onToken(token);
+        } catch (Exception e) {
+            LOGGER.warnf("Error sending token event: %s", e.getMessage());
         }
-        return responseRef.get();
+        anyRoundForwarded = true;
     }
 
     /**
@@ -233,11 +191,8 @@ class ToolLoopStreamingChatModel implements ChatModel {
      * forwarded (the retry may run the round again), otherwise a
      * {@link PartiallyStreamedRoundException} the retry will not repeat.
      */
-    private RuntimeException partiallyStreamed(StringBuilder forwarded, Object streamLock, RuntimeException failure) {
-        int forwardedChars;
-        synchronized (streamLock) {
-            forwardedChars = forwarded.length();
-        }
+    private RuntimeException partiallyStreamed(AbandonableStreamCall call, RuntimeException failure) {
+        int forwardedChars = call.forwardedText().length();
         if (forwardedChars == 0) {
             return failure;
         }

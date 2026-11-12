@@ -354,6 +354,45 @@ public class PendingToolCallBatch {
      * the task's base model, the one it had escalated away from.
      */
     private Integer cascadeStepIndex;
+    /**
+     * The plan hash of this batch (see {@code HitlPlanHash}), the same value as the
+     * snapshot's {@code hitlPlanHash}. Kept on the batch as well because the batch
+     * outlives the bookmark on a resume: {@code Conversation.resume} clears the
+     * bookmark before the pipeline re-enters, and {@code ToolLoopResumer}
+     * re-derives the hash from the calls it is about to execute and compares it
+     * with this one. Null on a batch persisted before plan hashing existed —
+     * readers then execute as before.
+     *
+     * @since 6.8.0
+     */
+    private String planHash;
+    /**
+     * Random per-pause secret mixed into {@link #planHash}. The hash covers the RAW
+     * arguments, and it is served to approvers next to the REDACTED ones; without a
+     * secret input it would be the same offline guessing oracle the batch
+     * {@link #fingerprint} is withheld for (guess the redacted value, hash,
+     * compare). Never served: the approver projection nulls it, the names-only
+     * projection never copies it, and the tail reads leave it on the server.
+     *
+     * @since 6.8.0
+     */
+    private String planNonce;
+
+    public String getPlanHash() {
+        return planHash;
+    }
+
+    public void setPlanHash(String planHash) {
+        this.planHash = planHash;
+    }
+
+    public String getPlanNonce() {
+        return planNonce;
+    }
+
+    public void setPlanNonce(String planNonce) {
+        this.planNonce = planNonce;
+    }
 
     public String getPauseEpoch() {
         return pauseEpoch;
