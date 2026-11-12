@@ -340,6 +340,40 @@ class OpenAiAuthFilterTest {
     }
 
     @Test
+    void oidcMode_refusesAPrincipalNamedLikeTheAnonymousDefaultUser() {
+        // With allow-anonymous on, "openai-anonymous" owns every unauthenticated /v1
+        // conversation. An OIDC account of exactly that name would own them all.
+        Principal principal = mock(Principal.class);
+        when(principal.getName()).thenReturn("OpenAI-Anonymous ");
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(principal);
+
+        run(OpenAiTestFixtures.config(b -> {
+            b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED;
+            b.allowAnonymous = true;
+        }));
+
+        assertEquals(401, abortedResponse().getStatus());
+        assertNull(resolvedUserId());
+    }
+
+    @Test
+    void oidcMode_refusesAPrincipalNamedLikeAConfiguredDefaultUser() {
+        Principal principal = mock(Principal.class);
+        when(principal.getName()).thenReturn("shared-user");
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(principal);
+
+        run(OpenAiTestFixtures.config(b -> {
+            b.httpPolicy = OpenAiCompatConfig.POLICY_AUTHENTICATED;
+            b.allowAnonymous = true;
+            b.defaultUser = "shared-user";
+        }));
+
+        assertEquals(401, abortedResponse().getStatus());
+    }
+
+    @Test
     void oidcMode_refusesAnonymousIdentity() {
         when(identity.isAnonymous()).thenReturn(true);
 

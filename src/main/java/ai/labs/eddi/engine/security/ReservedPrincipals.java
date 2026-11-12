@@ -78,7 +78,11 @@ public final class ReservedPrincipals {
      * Whole names that are synthetic too: the owner recorded for work done while
      * authorization was off.
      */
-    public static final Set<String> NAMES = Set.of("anonymous");
+    public static final Set<String> NAMES = Set.of("anonymous",
+            // Shipped default owner of every anonymous /v1 conversation
+            // (eddi.openai-compat.default-user); OpenAiAuthFilter also refuses a
+            // configured non-default value.
+            "openai-anonymous");
 
     private ReservedPrincipals() {
     }
