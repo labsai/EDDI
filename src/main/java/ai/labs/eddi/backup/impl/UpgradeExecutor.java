@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -115,6 +116,18 @@ public class UpgradeExecutor {
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Who may write restricted LLM providers, Jlama paths and content logging. Null
+     * when built outside the container, where the check is skipped; applied to the
+     * direct create in createExtension like the caller-token policy above.
+     */
+    private LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
+    @Inject
+    void useLlmProviderAuthorPolicy(LlmProviderAuthorPolicy policy) {
+        this.llmProviderAuthorPolicy = policy;
     }
 
     /**
@@ -953,6 +966,11 @@ public class UpgradeExecutor {
                 // the REST store does on the update path. Throwing here would abort the
                 // run with earlier resources already written and no rollback.
                 callerTokenAuthorPolicy.requireMayAuthor(content, source.type());
+            }
+            if (llmProviderAuthorPolicy != null) {
+                // Recorded as this resource failing, like the check above. A created
+                // resource has no stored version to carry a setting over from.
+                llmProviderAuthorPolicy.requireMayAuthor(content, null, source.type());
             }
             if (content instanceof ParserConfiguration parser) {
                 // RestParserStore's create check, recorded like the one above: a
