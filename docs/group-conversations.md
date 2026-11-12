@@ -346,7 +346,11 @@ peer-hidden until their phase completes (commit-reveal).
   `Option A: …` lines from the newest synthesis — instruct that synthesis to
   emit them (the default synthesis prompt does not). The line may be written the
   way models write it: `**Option A:** …`, `- Option B: …`, `1. Option C) …`,
-  `Option D. …`, in any letter case.
+  `Option D. …`, in any letter case. The labels must run in sequence — A, B, C…
+  or 1, 2, 3… — because a ballot may vote by label and the label is resolved by
+  position: a synthesis with a gap, a repeat, an option line over 1,000
+  characters or a label with no text before the next option yields no options,
+  and the vote does not run. At most 32 options are read.
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
@@ -766,7 +770,8 @@ as its answer has been read: its member conversations end and the agents its
 members created are cleaned up under its `lifecyclePolicy`, as for any closed
 discussion. A child stays readable, but it cannot be driven on its own —
 `continue` and `followup` on a discussion with `depth > 0` are refused with
-`409 Conflict`. A child is held to its parent's budget only while the parent runs
+`409 Conflict` over REST, and refused by the MCP tools too; if the discussion
+cannot be read to check its depth, the request fails rather than running. A child is held to its parent's budget only while the parent runs
 it (the team budget admits and charges the root discussion), so a continuation of
 the child would have spent outside it. Continue the parent instead.
 
@@ -979,7 +984,9 @@ including bracketed asides such as `Checked [details]: [...]` — no longer make
 That default fails open: a verifier that a reviewed result talks out of the format approves everything. Set
 `taskListConfig.onUnparseableVerdict` to `FAIL` (**recommended** wherever the verifier is the check that matters)
 to fail those tasks instead — with `maxReworks` they then go back for another attempt. Under `FAIL`, a verdict
-entry with no `passed` field also counts as not passed, where the default reads it as a pass.
+entry with no `passed` field also counts as not passed, where the default reads it as a pass, and a task a
+readable verdict does not name is failed too (the default leaves it `COMPLETED`, unchecked). The VERIFICATION
+transcript entry renders the verdict as applied, with a line for every task the policy failed.
 
 ```json
 { "style": "TASK_FORCE", "taskListConfig": { "onUnparseableVerdict": "FAIL" } }
@@ -991,8 +998,10 @@ entry with no `passed` field also counts as not passed, where the default reads 
 
 Task results reach the verifier, and a dependency's result reaches the task that depends on it, inside a
 ` ``` ` fence (a fence inside the result is broken), under the line that tells the model fenced text is quoted
-from other participants. The same holds for the engine's other prompts that quote members — the bid prompt, the
-convergence and verdict judges, the facilitator's briefing, the dissent round and the window summarizer.
+from other participants. The same holds for the engine's other prompts that quote members — the bid prompt
+(each task's subject and description sit in one fenced block, the subject on one line, which is the form a bid
+echoes), the convergence and verdict judges, the facilitator's briefing, the dissent round and the window
+summarizer (the previous rolling summary included).
 
 #### Pre-Configured Tasks
 

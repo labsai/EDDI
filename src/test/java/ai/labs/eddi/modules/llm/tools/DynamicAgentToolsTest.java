@@ -41,6 +41,8 @@ import java.util.HashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -201,6 +203,42 @@ class DynamicAgentToolsTest {
             verify(agentSetupService, times(2)).setupAgent(any(), any());
             assertTrue(replies.get(2).contains("Maximum created agents"), replies.get(2));
             assertEquals(List.of("sub-1", "sub-2"), gc.getCreatedAgentIds(), "a creation holds its slot at once, not at turn end");
+        }
+
+        @Test
+        @DisplayName("a creation still in setup holds its slot: an overlapping one is refused without entering setup")
+        void createSubAgent_overlappingCreationIsRefusedWhileTheFirstIsInSetup() throws Exception {
+            config.setMaxCreatedAgentsPerDiscussion(1);
+            var gc = new GroupConversation();
+            gc.setId("gc-7");
+            var inSetup = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any())).thenAnswer(inv -> {
+                inSetup.countDown();
+                assertTrue(release.await(10, TimeUnit.SECONDS), "the test never released the first setup");
+                return new SetupResult("created", "sub-1", "p/x", "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null,
+                        null, null, null);
+            });
+            var first = new CreateSubAgentTool(agentSetupService, conversationService, "parent-0", "user-1", config,
+                    new CopyOnWriteArrayList<>(), ConcurrentHashMap.newKeySet(), "conv-0", "gc-7", gc);
+            var second = new CreateSubAgentTool(agentSetupService, conversationService, "parent-1", "user-1", config,
+                    new CopyOnWriteArrayList<>(), ConcurrentHashMap.newKeySet(), "conv-1", "gc-7", gc);
+
+            var firstReply = CompletableFuture.supplyAsync(
+                    () -> first.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, null));
+            try {
+                assertTrue(inSetup.await(10, TimeUnit.SECONDS), "the first creation never reached setup");
+                assertTrue(gc.getCreatedAgentIds().isEmpty(), "nothing is committed while setup runs");
+
+                String secondReply = second.createSubAgent("Helper", "You help", "anthropic", "claude-sonnet-4-6", null, null);
+
+                assertTrue(secondReply.contains("Maximum created agents"), secondReply);
+                verify(agentSetupService, times(1)).setupAgent(any(), any());
+            } finally {
+                release.countDown();
+            }
+            assertTrue(firstReply.get(10, TimeUnit.SECONDS).contains("sub-1"));
+            assertEquals(List.of("sub-1"), gc.getCreatedAgentIds());
         }
 
         @Test

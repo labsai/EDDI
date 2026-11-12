@@ -110,6 +110,46 @@ changes so they merge cleanly with the open group-signing stack.
 docs: [`group-conversations.md`](../group-conversations.md), [`passing-context-information.md`](../passing-context-information.md),
 [`langchain.md`](../langchain.md), [`configuration-reference.md`](../configuration-reference.md).
 
+## 🔒 fix(groups): review follow-ups — vote labels in sequence, FAIL covers unnamed tasks, fail-closed depth check (2026-11-12)
+
+**Repo:** EDDI (`fix/group-engine-hardening`, PR #1395)
+
+### What changed and why
+
+- **Vote option labels must run in sequence.** A ballot may vote by label
+  ("Option B") and the label resolves by position, so a synthesis whose
+  `Option A` line was skipped (over 1,000 characters) made "Option B" mean
+  Option C's text. `VoteTallyEngine.synthesisOptions` now yields no options —
+  the vote does not run — when a label is out of sequence, repeated, missing, or
+  its line is over-long; and a label with no text no longer takes the next
+  option line as its text (`Option A:\nOption B: Stay`).
+- **`onUnparseableVerdict=FAIL` covers every unsettled task.** A readable
+  verdict that named only some tasks returned before the policy ran, so the
+  others stayed COMPLETED and were never reworked; they are failed now. The
+  VERIFICATION transcript entry renders the verdict as applied — a missing
+  `passed` shows as failed under FAIL — plus a line for each task the policy
+  failed.
+- **The nested-child check fails closed.** A store error while reading the
+  discussion's depth used to fall through to the operation, whose own read could
+  succeed and run the child; it now propagates (the MCP tools have no depth check
+  of their own). Not-found still falls through to the operation.
+- **Task-list parsing:** a separator inside a closed parenthesis no longer splits
+  the title, so `1. Research (assignedTo: agent-2) — find references` keeps its
+  assignee. `main` mis-split this input the same way; it is a fix, not a
+  regression repair.
+- **Quoting:** the bid prompt puts each task's subject (on one line) and
+  description in one fenced block; `parseBids` matches on the same one-line form.
+  The window summarizer fences the previous rolling summary.
+
+**Files:** [`VoteTallyEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/VoteTallyEngine.java),
+[`TaskForceEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/TaskForceEngine.java),
+[`GroupConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java),
+[`TaskListParser.java`](../../src/main/java/ai/labs/eddi/engine/internal/TaskListParser.java),
+[`TaskBidEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/TaskBidEngine.java),
+[`GroupContextBuilder.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupContextBuilder.java);
+docs: [`group-conversations.md`](../group-conversations.md).
+
 ```decision-log
+| 2026-11-12 | A `LAST_SYNTHESIS` vote with option labels out of sequence does not run | A skipped option line shifted every later label onto another option's text | Carrying a label-to-text map through ballot resolution: the options are a plain list in every consumer (prompt, tally, tie-break), so a map would touch all of them |
 | 2026-11-11 | `taskListConfig.onUnparseableVerdict` defaults to PASS, FAIL recommended | VERIFY auto-verified every task when the verdict was unreadable | Defaulting to FAIL: the fail-open was documented behaviour, so flipping it would break existing groups silently |
 ```
