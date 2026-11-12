@@ -936,8 +936,12 @@ class ConversationStepRunner {
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
                                 if (dispatcherGaveUp.getAsBoolean()) {
-                                    // Abandoned by the watchdog: inert (see the method doc).
+                                    // Abandoned by the watchdog: inert (see the method doc) — but
+                                    // an end-signalled turn still owes the teardown of the
+                                    // sub-agents it created, which only its live memory knows.
+                                    // Nothing is stored, no state is written.
                                     refreshCachedState(conversationId);
+                                    tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                                     return;
                                 }
                                 if (discardLeaseLostTurn(conversationId, conversationMemory)) {
@@ -1156,8 +1160,10 @@ class ConversationStepRunner {
                             if (dispatcherGaveUp.getAsBoolean()) {
                                 // The late outcome of a turn the watchdog abandoned: inert (see the
                                 // method doc). The watchdog recorded its state; the next turn of
-                                // the conversation may already have committed its own.
+                                // the conversation may already have committed its own. Only
+                                // the teardown an end owes runs, from the live memory.
                                 refreshCachedState(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                             } else if (conversationMemory.isCancelled() && !discardLeaseLostTurn(conversationId, conversationMemory)) {
                                 // Same settlement as a cancelled turn that completed: the
                                 // pipeline's own failure handling may have cached ERROR on its
