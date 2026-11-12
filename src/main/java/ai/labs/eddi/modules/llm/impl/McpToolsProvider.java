@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
@@ -25,6 +26,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Discovers mcpcalls configurations from the agent's workflow and connects to
@@ -101,7 +104,9 @@ class McpToolsProvider implements ToolSourceProvider {
                 return host;
             }
         } catch (IllegalArgumentException e) {
-            LOGGER.debugf("mcpServerUrl is not a URI, grouping its tools as 'mcp': %s", e.getMessage());
+            // The parser's message quotes the URL, which can carry a credential.
+            LOGGER.debugf("mcpServerUrl is not a URI, grouping its tools as 'mcp': %s",
+                    sanitize(UriRedactor.redactUri(String.valueOf(config.getMcpServerUrl()))));
         }
         return "mcp";
     }
@@ -209,13 +214,13 @@ class McpToolsProvider implements ToolSourceProvider {
                     // hostile or careless server can trigger against another's name.
                     ToolExecutor executor = result.executors().get(name);
                     if (executor == null) {
-                        LOGGER.warnf("mcpcalls tool '%s' has a specification but no executor — skipping", name);
+                        LOGGER.warnf("mcpcalls tool '%s' has a specification but no executor — skipping", sanitize(name));
                         continue;
                     }
                     if (executors.containsKey(name)) {
                         LOGGER.warnf("mcpcalls tool name collision: '%s' is exposed by more than one MCP server — "
                                 + "keeping the first and dropping the duplicate. Use 'toolsBlacklist' on the losing "
-                                + "server to make the choice explicit.", name);
+                                + "server to make the choice explicit.", sanitize(name));
                         continue;
                     }
                     toolSpecs.add(spec);
@@ -240,7 +245,7 @@ class McpToolsProvider implements ToolSourceProvider {
                             ToolExecutor executor = bridge.executors().get(spec.name());
                             if (executor == null || executors.containsKey(spec.name())) {
                                 LOGGER.warnf("mcpcalls resource-bridge tool '%s' dropped (missing executor or name collision)",
-                                        spec.name());
+                                        sanitize(spec.name()));
                                 continue;
                             }
                             toolSpecs.add(spec);

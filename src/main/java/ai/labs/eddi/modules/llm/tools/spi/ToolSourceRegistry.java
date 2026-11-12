@@ -13,6 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Iterates {@link ToolSourceProvider}s in a fixed order and merges their
  * {@link ToolContribution}s into one assembled result (R2 step 2 — the rewiring
@@ -204,12 +206,12 @@ public final class ToolSourceRegistry {
                     LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of "
                             + "the same name — the %s tool is DROPPED and the %s tool keeps the name. Rename the "
                             + "colliding tool in its own source config (for MCP servers, 'toolsBlacklist' can "
-                            + "exclude it instead).", source, name, incumbent, source, incumbent);
+                            + "exclude it instead).", source, sanitize(name), incumbent, source, incumbent);
                     continue;
                 }
                 ToolExecutor executor = contribution.executors().get(name);
                 if (executor == null) {
-                    LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, name);
+                    LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, sanitize(name));
                     continue;
                 }
 
