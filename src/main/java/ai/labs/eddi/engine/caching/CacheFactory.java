@@ -46,8 +46,9 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack and webhook event de-duplication, channel thread locks,
-     * and knowledge-base ingestion statuses, which a poll may ask any node for.
+     * paginated tool responses, Slack and webhook event de-duplication, channel
+     * thread locks, and knowledge-base ingestion statuses, which a poll may ask any
+     * node for.
      */
     static final Map<String, String> SHARED_BUCKETS = Map.of(
             "nonce-replay-protection", "NONCES",
