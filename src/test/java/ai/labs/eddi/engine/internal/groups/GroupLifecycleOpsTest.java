@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
@@ -27,6 +29,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.Convers
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -66,6 +69,7 @@ class GroupLifecycleOpsTest {
     private IAgentFactory agentFactory;
     private IAgentStore agentStore;
     private IGroupConversationStore conversationStore;
+    private IDeploymentStore deploymentStore;
 
     private ISharedArtifactStore sharedArtifactStore;
     private IAttachmentStore attachmentStore;
@@ -74,10 +78,11 @@ class GroupLifecycleOpsTest {
         agentFactory = mock(IAgentFactory.class);
         agentStore = mock(IAgentStore.class);
         conversationStore = mock(IGroupConversationStore.class);
+        deploymentStore = mock(IDeploymentStore.class);
         sharedArtifactStore = mock(ISharedArtifactStore.class);
         attachmentStore = mock(IAttachmentStore.class);
         return new GroupLifecycleOps(conversationStore, mock(IAgentGroupStore.class),
-                mock(IConversationService.class), agentFactory, agentStore, mock(IDeploymentStore.class),
+                mock(IConversationService.class), agentFactory, agentStore, deploymentStore,
                 sharedArtifactStore, attachmentStore,
                 ConcurrentHashMap.newKeySet(), new ConcurrentHashMap<String, DiscussionControlToken>(),
                 Mockito.mock(GroupConversationService.class),
@@ -154,6 +159,30 @@ class GroupLifecycleOpsTest {
 
         verify(agentFactory).undeployAgent(any(), eq(AGENT_A), isNull());
         verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
+    @Test
+    void cleanupEphemeralAgents_undeployOnlyPolicy_marksTheDeploymentRecordsUndeployed() throws Exception {
+        // A record left saying deployed is redeployed by the next deployment sweep,
+        // which deploys what is recorded and no longer served.
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production),
+                record(AGENT_A, 2, Environment.production), record(AGENT_A, 1, Environment.test), record("other", 1, Environment.production)));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.undeployed);
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 2, DeploymentStatus.undeployed);
+        verify(deploymentStore, never()).setDeploymentInfo(eq("test"), any(), any(), any());
+        verify(deploymentStore, never()).setDeploymentInfo(any(), eq("other"), any(), any());
+    }
+
+    private static DeploymentInfo record(String agentId, int version, Environment environment) {
+        var info = new DeploymentInfo();
+        info.setAgentId(agentId);
+        info.setAgentVersion(version);
+        info.setEnvironment(environment);
+        return info;
     }
 
     @Test

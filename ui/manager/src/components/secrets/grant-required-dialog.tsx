@@ -219,7 +219,7 @@ function GrantRequiredBody({
   };
 
   return (
-    <div className="space-y-4" data-testid="grant-required-body">
+    <div className="space-y-4 p-5" data-testid="grant-required-body">
       {request.source === "failure" && request.failure?.message && (
         <p
           className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"

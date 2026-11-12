@@ -281,12 +281,10 @@ public class ClusterAdminService implements ClusterStartable {
             if (!drained.contains(self)) {
                 return "the drain of this node was not recorded";
             }
-            long now = System.currentTimeMillis();
-            long staleAfter = 2 * config.presenceInterval().toMillis();
             long others = presence.get().currentMembers().stream()
                     .filter(m -> !self.equals(String.valueOf(m.get("node"))))
                     .filter(m -> !drained.contains(String.valueOf(m.get("node"))))
-                    .filter(m -> now - num(m.get("updatedAt")) <= staleAfter)
+                    .filter(m -> heartbeatFresh(String.valueOf(m.get("node"))))
                     .count();
             if (others == 0) {
                 return "this is the last node taking turns";
@@ -295,6 +293,17 @@ public class ClusterAdminService implements ClusterStartable {
         } catch (ClusterUnavailableException e) {
             return "NATS is unreachable: " + e.getMessage();
         }
+    }
+
+    /**
+     * Whether this node saw {@code node}'s presence record rewritten within two
+     * presence intervals, measured on its own clock (OPS-1). A record it cannot
+     * date yet does not count: the drain guards refuse rather than count a node
+     * that may be gone.
+     */
+    private boolean heartbeatFresh(String node) {
+        OptionalLong age = presence.get().heartbeatAgeMillis(node);
+        return age.isPresent() && age.getAsLong() <= 2 * config.presenceInterval().toMillis();
     }
 
     /**
@@ -358,11 +367,18 @@ public class ClusterAdminService implements ClusterStartable {
         for (Map.Entry<String, Map<String, Object>> e : members.entrySet()) {
             Map<String, Object> m = e.getValue();
             long updated = num(m.get("updatedAt"));
-            long age = updated > 0 ? now - updated : 0;
             boolean isSelf = self.equals(e.getKey());
+            // The age is how long ago this node saw the record rewritten, on its own
+            // clock: the writer's updatedAt against this clock misjudges any member
+            // whose clock is skewed. A record this node cannot date yet (just
+            // (re)connected) is shown with the writer's own timestamp, never judged
+            // STALE.
+            OptionalLong seen = isSelf ? OptionalLong.of(0) : presence.get().heartbeatAgeMillis(e.getKey());
+            long age = seen.orElse(updated > 0 ? Math.max(0, now - updated) : 0);
+            boolean late = seen.isPresent() && seen.getAsLong() > 2 * interval;
             // Cut off from NATS, this node only has the records it read last: whether
             // another node is still running is unknown, not "late".
-            String state = isSelf ? "LIVE" : !connected ? "UNKNOWN" : age > 2 * interval ? "STALE" : "LIVE";
+            String state = isSelf ? "LIVE" : !connected ? "UNKNOWN" : late ? "STALE" : "LIVE";
             if ("STALE".equals(state)) {
                 reasons.add("NODE_STALE");
             }
@@ -646,7 +662,7 @@ public class ClusterAdminService implements ClusterStartable {
                 return cached;
             }
             long generation = leaseScanGeneration.get();
-            List<LeaseSnapshot> snapshots = natsLeases.get().snapshot("", MAX_LEASE_SCAN);
+            List<LeaseSnapshot> snapshots = natsLeases.get().snapshot(MAX_LEASE_SCAN);
             // Agents for the conversations, in one read.
             List<String> conversationIds = snapshots.stream().map(LeaseSnapshot::key)
                     .filter(k -> k.startsWith(IConversationLeaseManager.CONVERSATION))
@@ -1672,13 +1688,11 @@ public class ClusterAdminService implements ClusterStartable {
         try {
             if (drain) {
                 Set<String> drained = drainedNodes(kv);
-                long now = System.currentTimeMillis();
-                long staleAfter = 2 * config.presenceInterval().toMillis();
                 long others = members.entrySet().stream().filter(e -> !e.getKey().equals(nodeId))
                         .filter(e -> !drained.contains(e.getKey()))
                         .filter(e -> !(e.getKey().equals(self) && natsLeases.get().isDraining()))
                         // A record that stopped being rewritten is a node that may be gone.
-                        .filter(e -> e.getKey().equals(self) || now - num(e.getValue().get("updatedAt")) <= staleAfter)
+                        .filter(e -> e.getKey().equals(self) || heartbeatFresh(e.getKey()))
                         .count();
                 if (others == 0) {
                     throw new ActionRefusedException(409, "LAST_NODE",
@@ -1780,17 +1794,33 @@ public class ClusterAdminService implements ClusterStartable {
         return drained;
     }
 
-    /** Keeps this node's drain key in step with its drain flag. */
+    /**
+     * Keeps this node's drain key in step with its drain flag. A key this node did
+     * not ask for is removed — left over from a drain a restart ended — but never
+     * one written for a decision being applied (OPS-9): {@link #drain} writes the
+     * key under the drain gate before its request reaches this node, and deleting
+     * it here made this node refuse the drain as "not recorded". So the key's
+     * revision is read first, the gate checked after, and the delete is conditional
+     * on that revision: a key written after the read is either guarded by a gate
+     * this check sees, or carries a newer revision the delete fails on. The flag is
+     * read again last: a drain applied here while this sync ran (the gate already
+     * closed again after the reply) leaves the flag set, and its key stays. A
+     * leftover key goes on the next sync.
+     */
     void syncOwnDrainKey() {
         if (!isClustered()) {
             return;
         }
         try {
+            ISharedKv kv = claims();
             String key = DRAIN_PREFIX + connections.get().node().nodeId();
             if (natsLeases.get().isDraining()) {
-                claims().put(key, "1".getBytes(StandardCharsets.UTF_8));
-            } else if (claims().get(key).isPresent()) {
-                claims().delete(key);
+                kv.put(key, "1".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+            Optional<ISharedKv.Versioned> leftover = kv.get(key);
+            if (leftover.isPresent() && kv.getConsistent(DRAIN_GATE).isEmpty() && !natsLeases.get().isDraining()) {
+                kv.delete(key, leftover.get().revision());
             }
         } catch (ClusterUnavailableException e) {
             LOGGER.debugf("Drain key not synced: %s", e.getMessage());

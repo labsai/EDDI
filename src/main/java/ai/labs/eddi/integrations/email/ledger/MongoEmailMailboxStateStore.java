@@ -14,6 +14,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
+import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,6 +32,11 @@ import java.util.Optional;
  * integration id) and {@code email_mailbox_notices} ({@code _id}
  * {@code <integrationId>|<noticeKey>}, so a claim is an insert that loses on a
  * duplicate key).
+ * <p>
+ * The cursor is {@code mailboxCursor} (serialised) plus the legacy IMAP fields
+ * {@code uidValidity}/{@code lastUid}, mapped by {@link StoredCursor}; a
+ * document written before opaque cursors has only the legacy fields and loads
+ * as the same IMAP cursor, with no migration.
  */
 @ApplicationScoped
 @DefaultBean
@@ -38,6 +44,14 @@ public class MongoEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     static final String COLLECTION = "email_mailbox_state";
     static final String NOTICES = "email_mailbox_notices";
+
+    /** The serialised {@link MailboxCursor}. */
+    static final String FIELD_CURSOR = "mailboxCursor";
+    /**
+     * Legacy IMAP cursor fields, still written for IMAP (see {@link StoredCursor}).
+     */
+    static final String FIELD_UID_VALIDITY = "uidValidity";
+    static final String FIELD_LAST_UID = "lastUid";
 
     private static final int DUPLICATE_KEY_ERROR_CODE = 11000;
 
@@ -57,16 +71,25 @@ public class MongoEmailMailboxStateStore implements IEmailMailboxStateStore {
         if (document == null) {
             return Optional.empty();
         }
-        return Optional.of(new MailboxState(integrationId, document.getString("folder"), longOf(document.get("uidValidity")),
-                longOf(document.get("lastUid")), instant(document.getDate("since")), (int) longOf(document.get("failures")),
-                instant(document.getDate("backoffUntil")), document.getString("lastError"), document.getString("budgetDay"),
-                document.get("spentUsd") instanceof Number n ? n.doubleValue() : 0.0, instant(document.getDate("updatedAt"))));
+        return Optional.of(toState(integrationId, document));
+    }
+
+    /** One state document read back; the cursor as {@link StoredCursor} says. */
+    static MailboxState toState(String integrationId, Document document) {
+        MailboxCursor cursor = StoredCursor.read(document.get(FIELD_CURSOR) instanceof String serialized ? serialized : null,
+                longOf(document.get(FIELD_UID_VALIDITY)), longOf(document.get(FIELD_LAST_UID)));
+        return new MailboxState(integrationId, document.getString("folder"), cursor, instant(document.getDate("since")),
+                (int) longOf(document.get("failures")), instant(document.getDate("backoffUntil")), document.getString("lastError"),
+                document.getString("budgetDay"), document.get("spentUsd") instanceof Number n ? n.doubleValue() : 0.0,
+                instant(document.getDate("updatedAt")));
     }
 
     @Override
-    public void saveCursor(String integrationId, String folder, long uidValidity, long lastUid, Instant since, Instant now) {
+    public void saveCursor(String integrationId, String folder, MailboxCursor cursor, Instant since, Instant now) {
         states.updateOne(Filters.eq("_id", integrationId),
-                Updates.combine(Updates.set("folder", folder), Updates.set("uidValidity", uidValidity), Updates.set("lastUid", lastUid),
+                Updates.combine(Updates.set("folder", folder), Updates.set(FIELD_CURSOR, StoredCursor.serialized(cursor)),
+                        Updates.set(FIELD_UID_VALIDITY, StoredCursor.legacyUidValidity(cursor)),
+                        Updates.set(FIELD_LAST_UID, StoredCursor.legacyLastUid(cursor)),
                         Updates.set("since", since == null ? null : Date.from(since)), Updates.set("failures", 0), Updates.set("backoffUntil", null),
                         Updates.set("lastError", null), Updates.set("updatedAt", Date.from(now))),
                 new UpdateOptions().upsert(true));

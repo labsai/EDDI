@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.net.BoundedHostResolver;
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
@@ -45,9 +46,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -198,6 +203,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     @Inject
     AgentCallMarker agentCallMarker;
+
+    /**
+     * Deadline of one DNS lookup made to check a target (deploy and per call).
+     * Field-injected for the same reason as above; the default applies in
+     * direct-construction tests.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.security.ssrf-protection.dns-timeout", defaultValue = "5s")
+    Duration dnsTimeout = Duration.ofMillis(BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+
+    /**
+     * The JDK resolver, bounded so a black-holed name server cannot hold a thread.
+     */
+    private UrlValidationUtils.HostResolver boundedResolver() {
+        return BoundedHostResolver.jdk(dnsTimeout != null ? dnsTimeout.toMillis() : BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+    }
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -333,6 +354,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // call failed. The store refuses that config at save time now; one stored
                 // before the check skips the save and says so, instead of failing the turn.
                 boolean saveResponse = effectiveSaveResponse(call);
+                // A failed attempt's {name}Error / {name}HttpCode. The template data holds
+                // the CURRENT attempt's, so a responseValuePathMatcher judges the response
+                // it is deciding about; memory gets the FINAL attempt's, once, after the loop.
+                String errorObjectName = call.getResponseObjectName() + "Error";
+                String httpCodeObjectName = call.getResponseObjectName() + "HttpCode";
+                boolean failureInTemplateData = false;
+                String failureBody = null;
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -341,6 +369,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
+                    // The same for the failure keys: a retry that succeeds, or fails with
+                    // a blank body, must not leave the previous attempt's code or error
+                    // body next to its own result.
+                    if (failureInTemplateData) {
+                        templateDataObjects.remove(errorObjectName);
+                        templateDataObjects.remove(httpCodeObjectName);
+                        failureInTemplateData = false;
+                    }
+                    failureBody = null;
                     // Agent test harness: with a mock (chosen above, BEFORE the request is
                     // built) everything below — saveResponse, postResponse property
                     // instructions, retries — runs on it unchanged. Building resolves ${vault:},
@@ -429,16 +466,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                 : SecretRedactionFilter.redact(httpCodeMessage);
                         result.put("body", toolErrorBody);
 
-                        // Store error body in memory so downstream templates / rules can inspect it
+                        // Keep the error body so downstream templates / rules can inspect it
                         if (saveResponse) {
-                            String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
-                                prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
                                 templateDataObjects.put(errorObjectName, truncatedError);
+                                failureBody = truncatedError;
                             }
-                            prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
-                                    call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
-                            templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                            templateDataObjects.put(httpCodeObjectName, response.getHttpCode());
+                            failureInTemplateData = true;
                         }
                     }
 
@@ -511,7 +546,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     amountOfExecutions++;
-                    retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                    // A failed attempt reaches memory only after the loop, so a matcher on
+                    // memory.current.httpCalls.{name}HttpCode / …Error is given this
+                    // attempt's values in a view of its own.
+                    Map<String, Object> retryDecisionData = failureInTemplateData
+                            ? withAttemptFailure(templateDataObjects, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode())
+                            : templateDataObjects;
+                    retryCall = retryCall(call.getPostResponse(), retryDecisionData, amountOfExecutions, response.getHttpCode(),
                             response.getContentAsString());
                     if (retryCall && memory.getTurnDeadline() != null
                             && !retryFitsDeadline(call, amountOfExecutions, memory.getTurnDeadline())) {
@@ -521,6 +562,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         retryCall = false;
                     }
                 } while (retryCall);
+
+                if (failureInTemplateData) {
+                    recordFailure(currentStep, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode());
+                }
 
                 // This executor has no response-validation stage, so a post-response
                 // property instruction never sees a validation error. Passing the flag
@@ -564,6 +609,56 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Stores the final attempt's failure in conversation memory: its error body
+     * (when it had one) and its code. Once per call, however many attempts it took,
+     * as the forEach path does.
+     */
+    private void recordFailure(IWritableConversationStep currentStep, String errorObjectName, String errorBody, String httpCodeObjectName,
+                               int httpCode) {
+        if (errorBody != null) {
+            prePostUtils.createMemoryEntry(currentStep, errorBody, errorObjectName, KEY_HTTP_CALLS);
+        }
+        prePostUtils.createMemoryEntry(currentStep, httpCode, httpCodeObjectName, KEY_HTTP_CALLS);
+    }
+
+    /**
+     * The template data a retry condition judges a failed attempt by: the same map,
+     * except that {@code memory.current.httpCalls} also holds this attempt's
+     * {@code {name}Error} (when it had a body) and {@code {name}HttpCode}. Every
+     * attempt used to write those to memory, and {@code memory.current} is the live
+     * step output, so a matcher on that path saw the current attempt; now only the
+     * final attempt is stored, after the loop. The maps on the way are copied, so
+     * neither the step nor the shared template data changes.
+     */
+    static Map<String, Object> withAttemptFailure(Map<String, Object> templateData, String errorObjectName, String errorBody,
+                                                  String httpCodeObjectName, int httpCode) {
+        Map<String, Object> httpCalls = copyOfMap(nestedMap(nestedMap(templateData.get("memory"), "current"), KEY_HTTP_CALLS));
+        if (errorBody != null) {
+            httpCalls.put(errorObjectName, errorBody);
+        }
+        httpCalls.put(httpCodeObjectName, httpCode);
+        Map<String, Object> current = copyOfMap(nestedMap(templateData.get("memory"), "current"));
+        current.put(KEY_HTTP_CALLS, httpCalls);
+        Map<String, Object> memoryView = copyOfMap(templateData.get("memory"));
+        memoryView.put("current", current);
+        Map<String, Object> view = new LinkedHashMap<>(templateData);
+        view.put("memory", memoryView);
+        return view;
+    }
+
+    private static Object nestedMap(Object map, String key) {
+        return map instanceof Map<?, ?> m ? m.get(key) : null;
+    }
+
+    private static Map<String, Object> copyOfMap(Object map) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        if (map instanceof Map<?, ?> m) {
+            m.forEach((k, v) -> copy.put(String.valueOf(k), v));
+        }
+        return copy;
     }
 
     /**
@@ -986,10 +1081,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * <li><b>An empty-but-present {@code propertyInstructions} list.</b>
      * {@code isNullOrEmpty} treated it as absent, but
      * {@code PrePostUtils#executePreRequestPropertyInstructions} guards on
-     * {@code != null} — so it still re-runs {@code memoryItemConverter.convert},
-     * discarding the model arguments merged in for this call. Every {@code {arg}}
-     * then renders empty at execution and non-empty in the preview. Hence
-     * {@code != null}, matching the code that actually runs.</li>
+     * {@code != null}, so the pre-request step runs in {@code execute} and never in
+     * {@code resolve}. Its instructions exist to change the properties the request
+     * templates, so the request sent can differ from the one previewed. (It also
+     * used to rebuild the template data from memory, dropping the model arguments,
+     * which made even an empty list diverge.) Hence {@code != null}, the predicate
+     * of the code that actually runs.</li>
      * <li><b>{@code fireAndForget} with {@code preRequest.batchRequests}.</b>
      * {@code execute} routes to {@code executeFireAndForgetCalls}, which calls
      * {@code buildRequest} once PER iteration object — N distinct requests, none of
@@ -1020,8 +1117,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Same argument, different loop: buildRequest sits INSIDE execute()'s
         // retry do-while, and between attempts the shared templateDataObjects
-        // map gains {responseObjectName}, …Error, …HttpCode and the response
-        // headers. A call whose path, body or headers template any of those
+        // map gains {responseObjectName} and the response headers (a failed
+        // attempt's …Error and …HttpCode are removed again before the next
+        // attempt is built). A call whose path, body or headers template any of those
         // sends attempts 2..N as requests that were never resolved, never
         // previewed and never fingerprinted — while the approver saw only
         // attempt 1. Keyed on the instruction being present and actually able
@@ -1107,21 +1205,53 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // The sending runs on a thread of its own; propagate() keeps the turn's
             // bindings available there for anything the send itself resolves.
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                for (BuiltRequest built : requests) {
-                    IRequest request = built.request();
-                    if (executeCallsSequentially) {
-                        long executionStart = currentTimeMillis();
-                        LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
-                        IResponse response = request.send();
-                        logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
-                    } else {
-                        executeFireAndForgetCall(built, callName);
-                    }
-                }
+                sendBatch(requests, callName, executeCallsSequentially);
                 return null;
             }), null);
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext), callName);
+        }
+    }
+
+    /**
+     * Sends a fire-and-forget batch on the batch's own thread, in order: each
+     * request in turn, or, concurrently, each dispatched in turn without waiting
+     * for its response. A request that fails — a timeout, a refused connection — is
+     * logged with its position and the rest are still sent: the batch used to be
+     * one task that a single exception ended, dropping every later request without
+     * a word while the turn had long reported success. A concurrent request that
+     * fails asynchronously never stopped the others; now one whose dispatch throws
+     * does not either. An interrupted thread stops sending: the runtime is shutting
+     * the task down.
+     */
+    private static void sendBatch(List<BuiltRequest> requests, String callName, boolean sequentially) {
+        int total = requests.size();
+        int failed = 0;
+        for (int i = 0; i < total; i++) {
+            if (Thread.currentThread().isInterrupted()) {
+                LOGGER.warnf("fire-and-forget batch of http call '%s' interrupted: %d of %d requests not sent", LogSanitizer.sanitize(callName),
+                        total - i, total);
+                break;
+            }
+            BuiltRequest built = requests.get(i);
+            try {
+                if (sequentially) {
+                    IRequest request = built.request();
+                    long executionStart = currentTimeMillis();
+                    LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
+                    IResponse response = request.send();
+                    logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
+                } else {
+                    executeFireAndForgetCall(built, callName);
+                }
+            } catch (IRequest.HttpRequestException | RuntimeException e) {
+                failed++;
+                LOGGER.warnf("fire-and-forget batch of http call '%s': request %d of %d failed, continuing with the rest: %s",
+                        LogSanitizer.sanitize(callName), i + 1, total, ForEachItems.describe(e, built.resolvedSecrets(), MAX_ITEM_ERROR_CHARS));
+            }
+        }
+        if (failed > 0) {
+            LOGGER.warnf("fire-and-forget batch of http call '%s': %d of %d requests failed", LogSanitizer.sanitize(callName), failed, total);
         }
     }
 
@@ -1590,24 +1720,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
-        // Off by default to preserve calls to internal/private APIs. A host on the
-        // operator's allow-list skips the address check (it is an internal API the
-        // operator named on purpose) but never the metadata check.
-        if (ssrfProtectionEnabled) {
-            if (isAllowListed(targetUri)) {
-                UrlValidationUtils.validateUrlSyntax(targetUri.toString());
-                UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-            } else {
-                UrlValidationUtils.validateUrl(targetUri.toString());
-            }
-        } else {
-            // Opting out of SSRF protection keeps private and loopback targets
-            // reachable (configured internal APIs), but never the cloud instance-
-            // metadata service: that is a credential endpoint, not an API anyone
-            // configures on purpose. Redirects stay followed here; the client itself
-            // refuses any hop onto the metadata service (HttpClientModule).
-            UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-        }
+        // Off by default to preserve calls to internal/private APIs. The decision
+        // itself is checkOutboundTarget, which the deploy-time check shares.
+        checkOutboundTarget(targetUri, boundedResolver());
 
         // Locale.ROOT is defensive rather than a live fix: no current Method
         // constant contains an 'i', so no locale changes the result today. It would
@@ -2152,6 +2267,129 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "conversation input to loopback or private addresses, so it is refused. Write the host literally (or as a "
                 + "${vars:...} reference), or set eddi.security.ssrf-protection.enabled=true and list internal hosts in "
                 + "eddi.security.ssrf-protection.allowed-hosts.");
+    }
+
+    /**
+     * The SSRF decision for one target, and the only definition of it: applied to
+     * the fully resolved URL of every request ({@code buildRequest}) and to the
+     * literal targets of a configuration at deploy
+     * ({@link #rejectRefusedLiteralTarget}), so the two cannot drift.
+     * <p>
+     * With protection on, a host on the operator's allow-list skips the address
+     * check (it is an internal API the operator named on purpose) but never the
+     * metadata check; any other host must resolve, and to public addresses only.
+     * There is deliberately <b>no exception for EDDI's own address</b>, unlike
+     * {@code OutboundTargetPolicy}: an httpcall to EDDI itself (the Platform
+     * Operator's self calls, for one) must be on the allow-list.
+     * <p>
+     * With protection off, private and loopback targets stay reachable (configured
+     * internal APIs), but never the cloud instance-metadata service: that is a
+     * credential endpoint, not an API anyone configures on purpose. Redirects stay
+     * followed then; the client itself refuses any hop onto the metadata service
+     * ({@code HttpClientModule}).
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    void checkOutboundTarget(URI targetUri, UrlValidationUtils.HostResolver resolver) {
+        String target = targetUri.toString();
+        if (ssrfProtectionEnabled) {
+            if (isAllowListed(targetUri)) {
+                UrlValidationUtils.validateUrlSyntax(target);
+                UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+            } else {
+                UrlValidationUtils.validateUrl(target, resolver);
+            }
+        } else {
+            UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+        }
+    }
+
+    @Override
+    public void rejectRefusedLiteralTarget(String targetDestination) {
+        rejectRefusedLiteralTarget(targetDestination, boundedResolver());
+    }
+
+    /**
+     * {@link #rejectRefusedLiteralTarget(String)} with an injectable resolver.
+     * <p>
+     * Only the scheme and authority are judged — the part
+     * {@link #checkOutboundTarget} decides on — so a templated path does not get in
+     * the way. A host that is a template, or a {@code ${vars:...}} /
+     * {@code ${vault:...}} reference, is skipped: its value is only known per call,
+     * where the same check runs on it ({@link #rejectTemplatedAuthority} covers the
+     * template case at deploy).
+     * <p>
+     * <b>A host that does not resolve is not refused here.</b> The execution path
+     * refuses it with protection on, and still will; but a failed lookup at deploy
+     * is as likely a transient DNS problem (a resolver not yet up when agents are
+     * auto-deployed at startup) as a wrong name, and failing the deployment for it
+     * would take down an agent that would have worked a minute later. A name that
+     * does not resolve cannot be reached either, so deferring exposes nothing; it
+     * is logged instead.
+     */
+    void rejectRefusedLiteralTarget(String targetDestination, UrlValidationUtils.HostResolver resolver) {
+        if (targetDestination == null) {
+            return;
+        }
+        String target = targetDestination.trim();
+        int end = authorityEnd(target);
+        if (end < 0) {
+            return;
+        }
+        String origin = target.substring(0, end);
+        if (origin.indexOf('{') >= 0) {
+            return;
+        }
+        URI originUri;
+        try {
+            originUri = new URI(origin);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("The httpcall target '" + LogSanitizer.sanitize(origin) + "' is not a valid URL: " + e.getMessage(),
+                    e);
+        }
+        // Metadata first, on its own: it is refused whatever the flag and the
+        // allow-list say, so the advice below would be wrong for it.
+        UrlValidationUtils.rejectCloudMetadataTarget(origin, resolver);
+        var lookup = new FailureRecordingResolver(resolver);
+        try {
+            checkOutboundTarget(originUri, lookup);
+        } catch (IllegalArgumentException e) {
+            if (!ssrfProtectionEnabled) {
+                throw e;
+            }
+            String host = originUri.getHost() != null ? originUri.getHost().toLowerCase(Locale.ROOT) : origin;
+            if (lookup.failed) {
+                LOGGER.warnf("httpcall target host '%s' does not resolve at deploy; with eddi.security.ssrf-protection.enabled=true "
+                        + "each call to it is refused until it does.", LogSanitizer.sanitize(host));
+                return;
+            }
+            String entry = originUri.getPort() >= 0 ? host + ":" + originUri.getPort() : host;
+            throw new IllegalArgumentException("The httpcall target host '" + LogSanitizer.sanitize(host)
+                    + "' is refused by the SSRF check (eddi.security.ssrf-protection.enabled=true): " + e.getMessage()
+                    + ". If it is an internal API you mean to call, add '" + LogSanitizer.sanitize(entry)
+                    + "' to eddi.security.ssrf-protection.allowed-hosts; otherwise use a public address.", e);
+        }
+    }
+
+    /** Remembers whether a lookup failed, so a DNS failure can be told apart. */
+    private static final class FailureRecordingResolver implements UrlValidationUtils.HostResolver {
+        private final UrlValidationUtils.HostResolver delegate;
+        private boolean failed;
+
+        FailureRecordingResolver(UrlValidationUtils.HostResolver delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public InetAddress[] resolveAll(String host) throws UnknownHostException {
+            try {
+                return delegate.resolveAll(host);
+            } catch (UnknownHostException e) {
+                failed = true;
+                throw e;
+            }
+        }
     }
 
     /**

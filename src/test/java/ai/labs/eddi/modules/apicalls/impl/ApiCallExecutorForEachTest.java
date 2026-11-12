@@ -23,7 +23,6 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -117,7 +116,7 @@ class ApiCallExecutorForEachTest {
         var jsonSerialization = new JsonSerialization(new ObjectMapper());
         var engine = Engine.builder().addDefaults().strictRendering(false).addNamespaceResolver(new ConfigReferenceNamespaceResolvers.Vault())
                 .build();
-        var prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), new TemplatingEngine(engine),
+        var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(engine),
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
 
         when(httpClient.newRequest(any(URI.class), any())).thenAnswer(inv -> {

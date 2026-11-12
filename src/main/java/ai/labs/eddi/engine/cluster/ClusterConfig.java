@@ -483,7 +483,10 @@ public class ClusterConfig {
         if (url == null) {
             return null;
         }
-        return url.replaceAll("(?<=//)[^/@\s]*@", "***@");
+        // A literal space, deliberately not the regex \s: "\s" in a Java string is the
+        // space escape, and widening it to all whitespace would let a tab or newline
+        // inside the userinfo end the match and leave the credentials in the log.
+        return url.replaceAll("(?<=//)[^/@ ]*@", "***@");
     }
 
     public Duration leaseTtl() {
