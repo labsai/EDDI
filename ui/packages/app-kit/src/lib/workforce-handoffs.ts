@@ -172,10 +172,34 @@ function newHandoffId(): string {
   }
 }
 
+/**
+ * Another tab or window changed (or cleared) a hand-off key. The `storage`
+ * event never fires in the tab that made the change, so same-tab readers are
+ * served by {@link emit}; this covers the other tabs, whose cached lists would
+ * otherwise stay stale until reload — and whose next write would overwrite what
+ * the first tab recorded. `key === null` means `localStorage.clear()`.
+ */
+function onStorage(event: StorageEvent): void {
+  if (event.key === null) {
+    cache.clear();
+  } else if (event.key.startsWith(WORKFORCE_HANDOFFS_PREFIX)) {
+    cache.delete(event.key);
+  } else {
+    return;
+  }
+  emit();
+}
+
 function subscribe(listener: () => void): () => void {
+  if (listeners.size === 0 && typeof window !== "undefined") {
+    window.addEventListener("storage", onStorage);
+  }
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+    if (listeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onStorage);
+    }
   };
 }
 
