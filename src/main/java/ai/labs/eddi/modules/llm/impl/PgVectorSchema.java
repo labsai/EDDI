@@ -298,10 +298,40 @@ final class PgVectorSchema {
 
     /** One identifier part, checked and quoted — see {@link #quotedTable}. */
     private static String quotedIdentifier(String part) {
-        if (!IDENTIFIER_PART.matcher(part).matches()) {
+        return '"' + sqlIdentifier(part) + '"';
+    }
+
+    /**
+     * Every character a returned identifier may hold, in the case it is returned
+     * in.
+     */
+    private static final String IDENTIFIER_ALPHABET = "abcdefghijklmnopqrstuvwxyz_0123456789$";
+
+    /**
+     * {@code part} as a validated, lower-case identifier, or an
+     * {@link IllegalArgumentException} that does not echo it. The result is not
+     * {@code part} itself: after {@link #IDENTIFIER_PART} has passed it, each
+     * character is looked up in {@link #IDENTIFIER_ALPHABET} and the result is
+     * spelled from that constant, so it can only ever hold those characters — the
+     * regex alone is the check, the rebuild makes the guarantee independent of it
+     * and lets static analysis (CodeQL {@code java/sql-injection}) see that no
+     * configured text reaches the DDL. A character outside the alphabet (one a
+     * future edit to the regex might let through) is refused, never passed on.
+     */
+    static String sqlIdentifier(String part) {
+        if (part == null || !IDENTIFIER_PART.matcher(part).matches()) {
             throw new IllegalArgumentException("pgvector table name must be a plain table name, optionally qualified with a schema");
         }
-        return '"' + part.toLowerCase(Locale.ROOT) + '"';
+        String lower = part.toLowerCase(Locale.ROOT);
+        StringBuilder identifier = new StringBuilder(lower.length());
+        for (int i = 0; i < lower.length(); i++) {
+            int index = IDENTIFIER_ALPHABET.indexOf(lower.charAt(i));
+            if (index < 0) {
+                throw new IllegalArgumentException("pgvector table name must be a plain table name, optionally qualified with a schema");
+            }
+            identifier.append(IDENTIFIER_ALPHABET.charAt(index));
+        }
+        return identifier.toString();
     }
 
     private static int requireRange(int value, int min, int max, String name) {

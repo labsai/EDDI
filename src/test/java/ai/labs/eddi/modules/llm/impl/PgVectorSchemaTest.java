@@ -188,6 +188,27 @@ class PgVectorSchemaTest {
             assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.quotedTable(table));
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"", "t;drop", "t\"x", "t x", "t\tx", "t\nx", "t\u0000", "t--", "t/*x*/", "t'x", "t.x", "1t", "$t",
+                "t\\x", "t`x", "tKx", "tİ", "té", "ｔ"})
+        @DisplayName("the identifier sanitizer refuses hostile and non-ASCII parts, Kelvin sign and dotted I included")
+        void hostileIdentifierPartRefused(String part) {
+            var e = assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.sqlIdentifier(part));
+            if (!part.isEmpty()) {
+                assertFalse(e.getMessage().contains(part), "the message must not echo the rejected name");
+            }
+        }
+
+        @Test
+        @DisplayName("the identifier sanitizer returns the lower-case name, spelled from its own alphabet")
+        void identifierSanitized() {
+            assertEquals("kb_1$x", PgVectorSchema.sqlIdentifier("KB_1$x"));
+            assertEquals("_t", PgVectorSchema.sqlIdentifier("_t"));
+            assertEquals("a".repeat(63), PgVectorSchema.sqlIdentifier("A".repeat(63)));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.sqlIdentifier("a".repeat(64)));
+            assertThrows(IllegalArgumentException.class, () -> PgVectorSchema.sqlIdentifier(null));
+        }
+
         @Test
         @DisplayName("an unsafe table name is refused before any statement runs")
         void unsafeTableRunsNothing() throws SQLException {
