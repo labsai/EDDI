@@ -435,6 +435,18 @@ public class GroupConversation {
      * they mean two different things at teardown.
      */
     private List<String> recruitedAgentIds = new CopyOnWriteArrayList<>();
+
+    /**
+     * Member ids that were asked for a human member's turn in this discussion —
+     * recorded when the discussion pauses for one ({@link #setPendingHumanInput})
+     * or skips one ({@link #recordHumanMember}). A transcript entry does not carry
+     * its speaker's member type, and a human turn can be written with any entry
+     * type, so this is what lets a GDPR export mask a person's entries even after a
+     * continuation, run under a configuration that changed since, has started a
+     * member conversation for the same id. Copy-on-write for the reason the agent
+     * lists above are. Absent from documents written before it existed.
+     */
+    private List<String> humanMemberIds = new CopyOnWriteArrayList<>();
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     /**
@@ -1382,6 +1394,25 @@ public class GroupConversation {
                 : new CopyOnWriteArrayList<>();
     }
 
+    public List<String> getHumanMemberIds() {
+        return humanMemberIds;
+    }
+
+    public void setHumanMemberIds(List<String> humanMemberIds) {
+        this.humanMemberIds = humanMemberIds != null
+                ? new CopyOnWriteArrayList<>(humanMemberIds)
+                : new CopyOnWriteArrayList<>();
+    }
+
+    /**
+     * Records {@code memberId} as having been a human member of this discussion.
+     */
+    public void recordHumanMember(String memberId) {
+        if (memberId != null && !humanMemberIds.contains(memberId)) {
+            humanMemberIds.add(memberId);
+        }
+    }
+
     public Set<String> getRetainedAgentIds() {
         return retainedAgentIds;
     }
@@ -1629,6 +1660,11 @@ public class GroupConversation {
 
     public void setPendingHumanInput(PendingHumanInput pendingHumanInput) {
         this.pendingHumanInput = pendingHumanInput;
+        if (pendingHumanInput != null) {
+            // Every human turn passes through here, whatever entry type it is written
+            // with later; kept after the pending marker is cleared.
+            recordHumanMember(pendingHumanInput.memberId());
+        }
     }
 
     public AgentGroupConfiguration.ProtocolConfig.CostPolicy getCostCeilingOutcome() {

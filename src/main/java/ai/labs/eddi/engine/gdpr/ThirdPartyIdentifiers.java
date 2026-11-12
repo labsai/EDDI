@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 
 import java.util.ArrayList;
@@ -80,10 +81,20 @@ public final class ThirdPartyIdentifiers {
      * member persisted with a non-{@code HUMAN} type. The group's <em>current</em>
      * configuration is never evidence that an id is an agent — it may have changed
      * since, and an id that was a HUMAN member then may be listed as an AGENT now —
-     * so it can only add masks: an id it lists as {@code HUMAN}
-     * ({@code configuredHumans}) is masked even where the discussion's own record
-     * would keep it, and so is the member a pending human turn waits on, and a
-     * dynamic member persisted as {@code HUMAN}.
+     * so it can only add masks.
+     * <p>
+     * Human evidence wins over agent evidence, in every entry of the transcript: an
+     * id is masked throughout if the configuration lists it as {@code HUMAN}
+     * ({@code configuredHumans}), the discussion recorded a human turn for it
+     * ({@code humanMemberIds}, kept since this field exists), a pending human turn
+     * waits on it, it is a dynamic member persisted as {@code HUMAN}, or any of its
+     * entries is a {@code HUMAN_INPUT} or a human-turn {@code SKIPPED}. A
+     * continuation, run under the configuration of its own day, may have started a
+     * member conversation for an id that was a person earlier; that does not unmask
+     * the earlier entries. Discussions stored before {@code humanMemberIds} existed
+     * rely on the remaining evidence, so a human turn there that was written with
+     * another entry type is caught only if the configuration still lists the member
+     * as {@code HUMAN}.
      * <p>
      * An agent that never got a member conversation (one that was only ever
      * skipped, say) is therefore masked as well: the bundle shows
@@ -121,10 +132,21 @@ public final class ThirdPartyIdentifiers {
         if (discussion.getCreatedAgentIds() != null) {
             agents.addAll(discussion.getCreatedAgentIds());
         }
-        agents.removeAll(humans);
-        if (discussion.getPendingHumanInput() != null) {
-            agents.remove(discussion.getPendingHumanInput().memberId());
+        // Human evidence wins over agent evidence, in every entry: a continuation runs
+        // under the configuration of its own day, so an id that was a person earlier
+        // in the transcript can have a member conversation by now.
+        if (discussion.getHumanMemberIds() != null) {
+            humans.addAll(discussion.getHumanMemberIds());
         }
+        if (discussion.getPendingHumanInput() != null && discussion.getPendingHumanInput().memberId() != null) {
+            humans.add(discussion.getPendingHumanInput().memberId());
+        }
+        for (TranscriptEntry entry : transcript) {
+            if (entry != null && entry.speakerAgentId() != null && isHumanEntry(entry)) {
+                humans.add(entry.speakerAgentId());
+            }
+        }
+        agents.removeAll(humans);
         List<TranscriptEntry> masked = new ArrayList<>(transcript.size());
         for (TranscriptEntry entry : transcript) {
             if (entry == null) {
@@ -143,6 +165,33 @@ public final class ThirdPartyIdentifiers {
                     entry.signature(), entry.signatureNonce(), entry.signatureTimestampMs(), entry.signatureKeyVersion()));
         }
         return masked;
+    }
+
+    /**
+     * Skip reasons only a human member's turn is written with: the turn timed out
+     * ({@code GroupHitlCoordinator}) or an automated sub-round asked a human
+     * ({@code MemberTurnExecutor}). Matched by prefix; the texts are this
+     * codebase's own, not user input.
+     */
+    static final List<String> HUMAN_SKIP_REASON_PREFIXES = List.of("No response from ", "Human member does not take automated turns");
+
+    /**
+     * Whether the entry itself shows a human speaker: a {@code HUMAN_INPUT} entry,
+     * or a {@code SKIPPED} one with a human-turn reason. Other entry types say
+     * nothing — a human turn can be written as an OPINION or a VOTE.
+     */
+    private static boolean isHumanEntry(TranscriptEntry entry) {
+        if (entry.type() == TranscriptEntryType.HUMAN_INPUT) {
+            return true;
+        }
+        if (entry.type() == TranscriptEntryType.SKIPPED && entry.errorReason() != null) {
+            for (String prefix : HUMAN_SKIP_REASON_PREFIXES) {
+                if (entry.errorReason().startsWith(prefix)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**

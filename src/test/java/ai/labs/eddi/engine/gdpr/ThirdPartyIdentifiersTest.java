@@ -104,6 +104,51 @@ class ThirdPartyIdentifiersTest {
     }
 
     @Test
+    @DisplayName("human evidence wins: a human skip, then a continuation that starts a member conversation for the same id")
+    void humanEvidenceWinsOverALaterMemberConversation() {
+        GroupConversation discussion = new GroupConversation();
+        List<TranscriptEntry> transcript = new ArrayList<>();
+        // round 1: x was a human member and timed out
+        transcript.add(new TranscriptEntry("x", "Xena", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH,
+                "No response from Xena within PT4H", null));
+        transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.CRITIQUE, "x"));
+        // continuation under a configuration that now lists x as an agent
+        transcript.add(entry("x", "Xena", TranscriptEntryType.OPINION, "agent-1"));
+        discussion.setTranscript(transcript);
+        discussion.getMemberConversationIds().put("agent-1", "conv-a");
+        discussion.getMemberConversationIds().put("x", "conv-x");
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner");
+
+        assertEquals(OTHER_PERSON, masked.get(0).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(0).speakerDisplayName());
+        assertEquals("agent-1", masked.get(1).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(1).targetAgentId());
+        assertEquals(OTHER_PERSON, masked.get(2).speakerAgentId(), "masked in every entry, the later 'agent' ones too");
+        assertEquals(OTHER_PERSON, masked.get(2).speakerDisplayName());
+        assertEquals("agent-1", masked.get(2).targetAgentId());
+    }
+
+    @Test
+    @DisplayName("a human turn written with any entry type is masked once the discussion recorded the human member")
+    void recordedHumanMemberIsMaskedWhateverTheEntryType() {
+        GroupConversation discussion = new GroupConversation();
+        discussion.setTranscript(List.of(entry("y", "Yuri", TranscriptEntryType.VOTE, null)));
+        // the pause for y's turn records y; the marker is cleared once the turn is
+        // answered
+        discussion.setPendingHumanInput(new PendingHumanInput("y", "Yuri", 0, 0, 0, "VOTE", null, null, Instant.EPOCH));
+        discussion.setPendingHumanInput(null);
+        // a later continuation started a member conversation for y
+        discussion.getMemberConversationIds().put("y", "conv-y");
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner");
+
+        assertEquals(List.of("y"), discussion.getHumanMemberIds());
+        assertEquals(OTHER_PERSON, masked.getFirst().speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.getFirst().speakerDisplayName());
+    }
+
+    @Test
     @DisplayName("only the discussion's own record makes an agent; a configured or persisted HUMAN is masked regardless")
     void onlyTheStoredRecordPlacesAgents() {
         GroupConversation discussion = new GroupConversation();

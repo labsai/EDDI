@@ -293,6 +293,11 @@ public class MemberTurnExecutor {
         // asked a human for an automated turn — those contexts cannot pause, so
         // the turn is skipped, mirroring handleMemberPause's SKIP precedent.
         if (member.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+            // GDPR export evidence that this id is a person
+            // (GroupConversation#humanMemberIds)
+            if (gc != null) {
+                gc.recordHumanMember(member.agentId());
+            }
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
                     TranscriptEntryType.SKIPPED, Instant.now(),
                     "Human member does not take automated turns in this context — skipped", targetAgentId);
