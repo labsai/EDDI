@@ -93,6 +93,7 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   Other tasks (an ambiguous subject, an unreadable workspace) keep `sha256(conversationId + "/" + taskId)`. The
   workspace is read once per approval decision, and only when it records a task. At most once remains per
   discussion; across discussions only a deduplicating target makes it once (documented).
+  The Platform Operator prompt says the same (revision 61, fingerprint updated).
 - **"Approved by a person"** is one private helper, `approvedByPerson`, whose comment names the sibling PR #1374's
   `TaskApproval.byPerson()`: whichever merges second unifies the two.
 - **Only human approvals publish.** A `system:*` approval (timeout `AUTO_APPROVE`) records SKIPPED.

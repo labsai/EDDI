@@ -1650,7 +1650,8 @@ your tool schemas do not cover it, not as a routine first step:
   the referenced call can repeat the request, so for a non-idempotent publish
   advise turning those retries off or deduplicating on the target with
   {action.idempotencyKey} (stable per task; a standing team's backlog task
-  keeps it across discussions). Rejected and RETRY-reset tasks get no action record
+  keeps it across discussions only when its subject is unambiguous — one
+  pulled backlog task and one discussion task — else it is per discussion). Rejected and RETRY-reset tasks get no action record
   at all (nothing to look for); a system:* approval (AUTO_APPROVE timeout) or a
   discussion cancelled first gets a record with status SKIPPED. The outcome
   is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
