@@ -120,6 +120,26 @@ class AlertDeliveryServiceTest {
     }
 
     @Test
+    @DisplayName("a retry after the rule moved to another agent is judged for the alert's own agent, not the rule's new scope")
+    void retryAfterScopeChange() throws Exception {
+        ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+        // The channel belongs to the agent the rule was moved to, not to the one whose
+        // alert is still pending.
+        when(router.channelTargetsAgent("slack", "C0123ABC", AlertTestData.OTHER_AGENT)).thenReturn(true);
+        DeliveryTarget editorTarget = SLACK.withAdminAdmitted(false);
+        AlertRule original = errorRule(List.of(ErrorKind.TURN_ERROR), editorTarget);
+        AlertEvent pendingForAgent = event("e8", original, AlertEvent.State.PENDING, pending(original));
+        AlertRule moved = new AlertRule(original.id(), original.name(), true, AlertScope.agent(AlertTestData.OTHER_AGENT), original.source(),
+                original.condition(), original.delivery(), null, null, "admin", NOW, "admin", NOW);
+        when(store.read("e8")).thenReturn(Optional.of(pendingForAgent));
+
+        AlertEvent outcome = withRouter(router).deliver(pendingForAgent, moved).orElseThrow();
+
+        verify(senders, never()).send(any(), any());
+        assertEquals(DeliveryStatus.FAILED, outcome.deliveries().get(0).status());
+    }
+
+    @Test
     @DisplayName("an administrator's Slack target, and a pre-mark rule over several agents, post anywhere")
     void adminTargetsExempt() throws Exception {
         ChannelTargetRouter router = mock(ChannelTargetRouter.class);

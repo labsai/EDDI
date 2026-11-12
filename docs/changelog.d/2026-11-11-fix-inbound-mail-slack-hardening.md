@@ -6,8 +6,11 @@ Seven confirmed findings of a security review of the inbound channels.
 
 ### What changed and why
 
-**1 — A DKIM aligned pass no longer survives unsigned headers, and a replayed signed mail no longer runs as its
-author (high, integrity).** A signature covers only the header instances its `h=` names. Anyone holding someone's
+**1 — A DKIM-aligned pass is refused when an unsigned body header could change what EDDI reads; unsigned Subject,
+Reply-To and To/Cc plus-tags no longer steer an authenticated mail; a replayed signed mail is refused as a duplicate
+or as too old (high, integrity).** Unsigned headers may still remain on an aligned pass — a single unsigned
+`Content-Type` under the structural rule below, unsigned thread headers and `Date` — but none of them can pick the
+target, the reply address or the parts EDDI reads. A signature covers only the header instances its `h=` names. Anyone holding someone's
 genuine signed mail could prepend `Content-Type: multipart/mixed; boundary=evil` (the body hash and signature still
 verify, the mail library reads the topmost `Content-Type`) and have EDDI run a part they had the victim quote as the
 victim's words; or deliver the signed mail again with an unsigned `Subject`, plus-tagged `To`, `In-Reply-To`,
@@ -66,6 +69,15 @@ delete. `POST /alerts/rules/test` allows `eddi.alerts.test-max-per-minute` (6) s
 (`429 TEST_THROTTLED`).
 
 **Review follow-up (2026-11-12).**
+
+- The replay key is every verifying aligned signature (sorted), not the first in header order: reordering the
+  `DKIM-Signature` fields or dropping one no longer yields an unseen key. A mail holding any key another row owns
+  is refused, and all keys are checked before any marker is written.
+- The MIME delimiter pre-count follows RFC 2046 and the mail library: `--boundary`, optionally `--`, then only
+  blanks to the line end. `--b-extra` near-matches no longer count, so a one-part body full of them is not refused
+  as a part bomb.
+- A Slack retry is authorised against the agent the alert is about (`event.agentId()`), not the rule's current
+  scope: an alert left pending when the rule moved to another agent does not reach that agent's channel.
 
 - The signature replay key hashes the domain with the *decoded* `b=` bytes, not its text: `b=` is blanked from the
   signed header input, so stripping its padding or refolding it kept the signature valid and gave a new key.

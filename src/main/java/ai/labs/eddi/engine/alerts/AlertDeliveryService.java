@@ -134,7 +134,7 @@ public class AlertDeliveryService {
                 // later.
                 return skipped(delivery, now);
             }
-            String refusal = slackRefusal(rule, target);
+            String refusal = slackRefusal(current.get(), rule, target);
             if (refusal != null) {
                 // Not worth retrying: the channel belongs to another agent's integration
                 // until someone changes the rule or the integration. Recorded on the event,
@@ -159,18 +159,22 @@ public class AlertDeliveryService {
      * anywhere;</li>
      * <li>a rule saved before the mark existed is an administrator's when its scope
      * is several or every agent (only an administrator can save such a rule);</li>
-     * <li>everything else needs the serving integration to target the rule's
-     * agent.</li>
+     * <li>everything else needs the serving integration to target the agent the
+     * alert is about ({@code event.agentId()}, else the rule's agent).</li>
      * </ul>
      */
-    String slackRefusal(AlertRule rule, DeliveryTarget target) {
+    String slackRefusal(AlertEvent event, AlertRule rule, DeliveryTarget target) {
         if (channelTargetRouter == null || target.type() != DeliveryTarget.DeliveryType.SLACK || Boolean.TRUE.equals(target.adminAdmitted())) {
             return null;
         }
-        String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
-        if (agentId == null && target.adminAdmitted() == null) {
+        String ruleAgent = rule.scope() == null ? null : rule.scope().singleAgent();
+        if (ruleAgent == null && target.adminAdmitted() == null) {
             return null;
         }
+        // The agent whose alert this is, not the rule's scope as it is now: an alert
+        // still pending when the rule was moved to another agent must not reach that
+        // agent's channel.
+        String agentId = event.agentId() != null ? event.agentId() : ruleAgent;
         if (agentId != null && channelTargetRouter.channelTargetsAgent("slack", target.channelId(), agentId)) {
             return null;
         }
