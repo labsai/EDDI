@@ -961,7 +961,7 @@ eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outc
 eddi_mcp_tool_schema_governed_total         # Remote tool parameter schemas changed before prompting; tag: outcome (redacted|truncated|dropped|dropped_server_cap)
 eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
 eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
-eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
+eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode (sync|stream), outcome (ok|paused|busy|timeout|error|client_gone)
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps

@@ -158,6 +158,17 @@ public class OpenAiSseWriter {
         return roleSent;
     }
 
+    /**
+     * Whether a write to the client has failed — the client disconnected, or the
+     * connection was closed under the stream. Latched: once true, every later write
+     * is dropped. Only a failed write or flush sets it; a chunk that cannot be
+     * serialized is dropped without it, so a bad payload is never mistaken for a
+     * vanished client (whose turn the caller then cancels).
+     */
+    public synchronized boolean isBroken() {
+        return broken;
+    }
+
     private void emit(ChunkChoice choice) {
         emitChunk(ChatCompletionChunk.of(id, model, created, choice));
     }
@@ -170,19 +181,21 @@ public class OpenAiSseWriter {
         if (broken) {
             return;
         }
+        byte[] json;
         try {
-            byte[] json = objectMapper.writeValueAsBytes(frame);
-            write(DATA_PREFIX);
-            write(json);
-            write(FRAME_SUFFIX);
-            flush();
-        } catch (IOException e) {
-            markBroken(e);
+            json = objectMapper.writeValueAsBytes(frame);
         } catch (Exception e) {
             // Serialization failure: drop this chunk rather than tearing down a
-            // stream the client is otherwise reading fine.
+            // stream the client is otherwise reading fine. Caught apart from the
+            // writes on purpose — Jackson's JsonProcessingException is an
+            // IOException, and latching it as broken would read as a disconnect.
             LOGGER.warnf("Could not serialize an OpenAI chunk: %s", e.getMessage());
+            return;
         }
+        write(DATA_PREFIX);
+        write(json);
+        write(FRAME_SUFFIX);
+        flush();
     }
 
     private void write(byte[] bytes) {
@@ -210,7 +223,8 @@ public class OpenAiSseWriter {
     /**
      * A client that disconnected mid-stream is routine, not an error worth
      * escalating. Latch it so the remaining handler callbacks become no-ops instead
-     * of raising once per token.
+     * of raising once per token. The bridge polls {@link #isBroken} after each
+     * token and cancels the turn nobody is reading any more.
      */
     private void markBroken(IOException e) {
         if (!broken) {
