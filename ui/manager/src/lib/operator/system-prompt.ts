@@ -280,12 +280,25 @@ a key keeps it, and peers trust it for v0 signatures until it is revoked). You h
 no tool for either, on purpose: whoever mints or retires an agent's key decides
 what signs as that agent. The private key stays in the secrets vault; the
 public key is added to the agent's \`identity.keys\` as a new agent version, and
-the agent signs its group-conversation messages with the newest one. Revoking
-a key deletes its private half from the vault (best effort; it does not stop
-anyone holding another copy from signing), and revoking the newest key stops
-the agent signing until a new one is generated. A peer that verifies treats a
-message signed with a revoked key as not verifying, whenever it was signed (a
-revoked legacy v0 key is removed, so its signatures no longer verify either). \`identity\` is
+the agent signs its group-conversation messages with the newest one at once.
+Its own audit entries are signed by the agent version a conversation runs, so
+they stay unsigned until a version that declares the key and has signing on
+is deployed. An audit entry's \`agentSignature\` is
+\`v<keyVersion>:<signature>\`, or plain Base64 on entries written by 6.7.0 or
+earlier, which is checked against the legacy \`identity.publicKey\` (AGENT_KEY_UNAVAILABLE
+when that version declares none); the audit verify endpoints report one that does
+not verify as AGENT_SIGNATURE_INVALID (counted in \`invalid\`: tampering).
+AGENT_SIGNATURE_MISSING (none where the version would have signed),
+AGENT_KEY_REVOKED (key revoked since) and AGENT_KEY_UNAVAILABLE (agent
+permanently deleted) count in \`agentSignatureUnproven\` instead: the content
+is intact, so they are not tampering. A revoked key is trusted for nothing,
+whenever it signed, audit entries included (a peer that verifies treats such a
+message as not verifying). Revoking deletes the private half from the vault,
+best effort: it does not stop anyone holding another copy from signing, and a
+node that already loaded the key can keep signing audit entries with it for up
+to 60 seconds (longer if the vault delete failed); those entries verify as
+AGENT_KEY_REVOKED. Once no node can load it, revoking the newest key stops the
+agent signing until a new one is generated. \`identity\` is
 engine-owned: an agent save — yours, an import or a sync included — keeps the
 stored identity whatever the body says, so editing \`identity.keys\` or
 \`validUntilMs\` does nothing; only those two endpoints change keys. A save with

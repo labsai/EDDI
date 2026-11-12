@@ -197,6 +197,37 @@ class HistorizedResourceStoreTest {
     }
 
     @Test
+    void theNewestVersionIncludingDeletedIsTheCurrentOneWhileThereIsOne() throws Exception {
+        when(storage.getCurrentVersion("id1")).thenReturn(3);
+
+        assertEquals(3, store.getNewestVersionIncludingDeleted("id1"));
+        verify(storage, never()).readHistoryLatest(anyString());
+    }
+
+    /**
+     * A soft delete archives the last version with the deleted flag and removes the
+     * current row: that archived version is still the newest.
+     */
+    @Test
+    void theNewestVersionIncludingDeletedOfASoftDeletedResourceIsTheDeletedOne() throws Exception {
+        when(storage.getCurrentVersion("id1")).thenReturn(-1);
+        IResourceStorage.IHistoryResource<String> deleted = mock(IResourceStorage.IHistoryResource.class);
+        when(deleted.getVersion()).thenReturn(4);
+        when(deleted.isDeleted()).thenReturn(true);
+        when(storage.readHistoryLatest("id1")).thenReturn(deleted);
+
+        assertEquals(4, store.getNewestVersionIncludingDeleted("id1"));
+    }
+
+    @Test
+    void aPermanentlyDeletedResourceHasNoNewestVersion() {
+        when(storage.getCurrentVersion("id1")).thenReturn(-1);
+        when(storage.readHistoryLatest("id1")).thenReturn(null);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.getNewestVersionIncludingDeleted("id1"));
+    }
+
+    @Test
     void shouldReadIncludingDeletedFromHistory() throws Exception {
         when(storage.read("id1", 1)).thenReturn(null);
 

@@ -71,25 +71,29 @@ provisioned, and that the keys it wrote were not the trust anchor they looked li
 
 ### Upgrading: agents already stored with these flags
 
-Before this branch the save-time check accepted `signInterAgentMessages` or
-`requirePeerVerification` whenever `identity` held any non-blank string, and nothing could put a
-private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing, and
+Before this change the save-time check accepted `signInterAgentMessages` or
+`requirePeerVerification` whenever `identity` held any non-blank string, and no EDDI API could put a
+private key in the vault. So an agent stored with `signInterAgentMessages: true` signs nothing (unless
+the private half of its legacy `identity.publicKey` was written into the vault outside the API, as
+`agent-signing-key:{agentId}`, and the legacy key is the one it signs with: `identity.keys` holds no key,
+revoked or not, with a version from 1 to 1,000,000, since the newest such version is selected over v0
+whether or not the vault holds its private half. That agent keeps signing with the legacy key, and its saves pass as long as every other
+non-revoked key in `identity.keys` is well-formed), and
 after the upgrade **every save of it is refused (400)** — a person's save, a workflow cascade, an
 autonomy change, an API sync — until an admin either generates a key (**Generate signing key** in
 the Manager, or `POST /agentstore/agents/{id}/signing-keys?version={current}`) or turns the flag
 off. Find them with a query on `security.signInterAgentMessages: true` in the agents collection
 (or table). An import or a sync onto such an agent turns the flag off and reports it, rather than
-failing. Any `identity.keys` entry a person pasted before this branch is a key whose private half
-someone outside EDDI may hold: review the keys of every agent a `requirePeerVerification` agent
-checks, and revoke every entry EDDI did not generate — the legacy `identity.publicKey` (v0)
-included, which generating a key does not remove. On this branch alone revoking the v0 key removes
-it, but a revoked versioned entry still verifies in peer checks: the peer verifier does not read the
-flag until group-signature verification, which builds on this change.
+failing. Any `identity.keys` entry a person pasted before this change is a key whose private half someone
+outside EDDI may hold, and peers trust it until it is revoked: review the keys of every agent a `requirePeerVerification` agent checks, and revoke
+every entry EDDI did not generate — the legacy `identity.publicKey` (v0) included, which generating
+a key does not remove.
 
 **Agents stored with `security.requirePeerVerification: true`.** Until now peer verification only
 logged a failure. With group-signature verification, which builds on this change, such an agent
-receives every peer entry that does not verify as a `[withheld ...]` placeholder — and since nothing
-could sign before this branch, that is every entry another agent wrote. One such agent among a
+receives every peer entry that does not verify as a `[withheld ...]` placeholder — and since no release
+could provision a key, that is every entry another agent wrote, apart from what an agent signing
+with such a legacy key writes after the upgrade. One such agent among a
 group's members, moderator or facilitator also makes the group's records count only entries that
 verify for every reader: the vote finds no options and records that it could not run, the
 negotiation table stays empty, and the SERVICE judge and the retrospective see only signed entries —
@@ -104,10 +108,11 @@ synthesizer, facilitator), or turn the flag off.
   endpoints that change keys are where the audit trail and the vault write are.
 - Revocation is a flag, not a deletion of the entry: a verifier must recognise and refuse an entry
   signed under the key, which an unknown version would only report as "unknown key". The group
-  verifier on this branch does not read the flag yet (that is the group-signing verification work);
-  until it does, a signature made with a revoked versioned key still verifies. Deleting the vault's
-  private key only stops EDDI signing with it (and is best effort); it does not stop anyone holding
-  another copy of that private key from signing messages that verify.
+  verifier in this change does not read the flag yet; until it does, the deleted private key is
+  what stops EDDI signing anything new with it (best effort; it does not stop anyone holding another
+  copy of that private key). (Superseded by the entry "peer verification is
+  fail-closed and binds the conversation, position and key version", 2026-11-08: a revoked key
+  vouches for nothing.)
 - The newest key being revoked stops signing rather than falling back to an older key, matching the
   signer's rule for a key outside its window. `GroupSigningGuard` reads the flag before it signs, so
   this holds when the vault delete failed and the private key is still there. "Newest" is

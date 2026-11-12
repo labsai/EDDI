@@ -36,6 +36,7 @@ import {
   auditVerdict,
   uncoveredCount,
   unknownKeyCount,
+  agentSignatureInvalidCount,
   type AuditEntryStatus,
   type AuditVerificationReport,
 } from "@/lib/api/audit-verify";
@@ -265,16 +266,19 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
         )}
 
         {/* Verification outcome for an entry the backend could not prove. */}
-        {problem === "INVALID" && (
+        {(problem === "INVALID" || problem === "AGENT_SIGNATURE_INVALID") && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
             data-testid="entry-verify-invalid"
+            data-problem={problem}
           >
             <ShieldX className="h-3 w-3" />
-            {t("audit.verify.entryInvalid", "Signature does not match")}
+            {problem === "AGENT_SIGNATURE_INVALID"
+              ? t("audit.verify.entryAgentSignatureInvalid", "Agent signature does not match")
+              : t("audit.verify.entryInvalid", "Signature does not match")}
           </span>
         )}
-        {problem !== undefined && problem !== "INVALID" && (
+        {problem !== undefined && problem !== "INVALID" && problem !== "AGENT_SIGNATURE_INVALID" && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[11px] font-medium text-warn-600 dark:text-warn-400"
             data-testid="entry-verify-unproven"
@@ -1316,9 +1320,10 @@ function IntegrityBanner({
   }
 
   if (verdict === "tampered") {
+    const agentSignatures = agentSignatureInvalidCount(report);
     const disproven = Math.max(
       0,
-      report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKeyCount(report),
+      report.invalid - Math.min(report.recoverySkipped, report.invalid) - unknownKeyCount(report) - agentSignatures,
     );
     return (
       <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3" data-testid="integrity-banner" data-verdict="tampered" role="alert">
@@ -1330,15 +1335,23 @@ function IntegrityBanner({
             {t("audit.verify.tamperedTitle", "Integrity check failed")}
           </p>
           {disproven > 0 && (
-            <p className="text-xs text-foreground">
+            <p className="text-xs text-foreground" data-testid="tampered-content">
               {t("audit.verify.tamperedInvalid", {
                 count: disproven,
                 defaultValue: "{{count}} entry signature(s) do not match their content — the entries were changed after they were written.",
               })}
             </p>
           )}
+          {agentSignatures > 0 && (
+            <p className="text-xs text-foreground" data-testid="tampered-agent-signature">
+              {t("audit.verify.tamperedAgentSignature", {
+                count: agentSignatures,
+                defaultValue: "{{count}} agent signature(s) do not verify — the content is intact, but the signature was altered or forged.",
+              })}
+            </p>
+          )}
           {report.chainStatus === "BROKEN" && (
-            <p className="text-xs text-foreground">
+            <p className="text-xs text-foreground" data-testid="tampered-chain">
               {t("audit.verify.tamperedChain", {
                 sequences: report.missingSequences.slice(0, 10).join(", "),
                 defaultValue: "Entries are missing from the sequence ({{sequences}}) — the record has been shortened.",
@@ -1371,23 +1384,40 @@ function IntegrityBanner({
 
   // unverified — nothing disproven, but not everything proven either
   const reasons: string[] = [];
+  // Which reasons apply, as ids a test can assert without matching translated copy.
+  const reasonIds: string[] = [];
   if (report.unsigned > 0) {
+    reasonIds.push("unsigned");
     reasons.push(t("audit.verify.reasonUnsigned", { count: report.unsigned, defaultValue: "{{count}} unsigned entry(ies)" }));
   }
   const unknown = unknownKeyCount(report);
   if (unknown > 0) {
+    reasonIds.push("unknown-key");
     reasons.push(t("audit.verify.reasonUnknownKey", { count: unknown, defaultValue: "{{count}} signed with a key this deployment no longer holds" }));
   }
+  if (report.agentSignatureUnproven > 0) {
+    reasonIds.push("agent-signature");
+    reasons.push(
+      t("audit.verify.reasonAgentSignature", {
+        count: report.agentSignatureUnproven,
+        defaultValue: "{{count}} entry(ies) whose agent signature is missing, revoked or can no longer be checked",
+      }),
+    );
+  }
   if (report.recoverySkipped > 0) {
+    reasonIds.push("skipped");
     reasons.push(t("audit.verify.reasonSkipped", { count: report.recoverySkipped, defaultValue: "{{count}} older entry(ies) not checked" }));
   }
   if (report.chainStatus === "INCOMPLETE" || report.chainStatus === "UNAVAILABLE") {
+    reasonIds.push("chain");
     reasons.push(t("audit.verify.reasonChain", "the sequence could not be fully established"));
   }
   if ((report.duplicateSequences?.length ?? 0) > 0) {
+    reasonIds.push("duplicates");
     reasons.push(t("audit.verify.reasonDuplicates", "duplicate sequence numbers"));
   }
   if (uncovered > 0) {
+    reasonIds.push("uncovered");
     reasons.push(t("audit.verify.reasonUncovered", { count: uncovered, defaultValue: "{{count}} loaded entry(ies) older than the checked window" }));
   }
   return (
@@ -1399,7 +1429,7 @@ function IntegrityBanner({
         <p className="text-sm font-medium text-warn-700 dark:text-warn-400">
           {t("audit.verify.unverifiedTitle", "Not fully verified")}
         </p>
-        <p className="text-xs text-warn-600/80 dark:text-warn-400/70">
+        <p className="text-xs text-warn-600/80 dark:text-warn-400/70" data-testid="unverified-reasons" data-reasons={reasonIds.join(" ")}>
           {t("audit.verify.unverifiedDesc", {
             reasons: reasons.join("; "),
             defaultValue: "No signature was disproven, but not everything could be checked: {{reasons}}.",

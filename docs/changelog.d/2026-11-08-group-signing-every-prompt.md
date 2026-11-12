@@ -156,7 +156,7 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
 Docs: [group-conversations.md](../group-conversations.md#signed-contributions) lists every prompt
 and record covered, and its "Not yet supported" row now names only what is still unsigned.
 [`architecture.md`](../architecture.md#cryptographic-agent-identity) item 8 describes the combined
-behaviour of this stack: every prompt filtered, own entries checked when the member signs, the
+behaviour of the signing changes: every prompt filtered, own entries checked when the member signs, the
 reserved names, withheld engine-named syntheses, the ballot taken from the voter's view and the
 group-wide records rule; the "Not filtered yet" sentence is gone. Item 8, the `GroupSigningGuard`
 class Javadoc and group-conversations.md call it opt-in per receiving member, not fail-closed (the

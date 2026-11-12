@@ -34,8 +34,9 @@ unsigned transcript entry while the configuration said the agent signed.
   cascade included) would also have been refused. An import *merge* keeps the local agent's
   identity (see the 2026-11-08 entry: `identity` is engine-owned).
 - **The crypto inventory lists `KeyPairGenerator` `Ed25519` again** (`CryptoInventoryTest`,
-  [`cryptography.md`](../cryptography.md)): the base branch dropped it with the unused generators,
-  and `generateKey` uses it.
+  [`cryptography.md`](../cryptography.md)): the entry "private-key cache expires; unused
+  provisioning and rotation methods removed" dropped it with the unused generators, and
+  `generateKey` uses it.
 - **Manager.** A "Generate signing key" button in Security & Identity (admins only; disabled with a
   reason while there are unsaved edits or an older version is open) that follows the version the key
   was saved as. The copy that said signing is "not yet available" and that the backend rejects any
@@ -51,6 +52,8 @@ unsigned transcript entry while the configuration said the agent signed.
   carry no agent signature) and the `eddi.a2a.signing.nonce.*` rows (they govern group-transcript
   entries; A2A requests are not signed). `AgentConfiguration` and `IRestAgentStore` Javadoc no longer
   say identities are generated on creation or that no endpoint can regenerate a key. (Superseded for
+  `eddi.audit.agent-signing-enabled` by the entry "agent signatures on audit entries are versioned
+  and verified", 2026-11-07: audit entries are signed with the newest versioned key.) (Superseded for
   the nonce rows by the entry "peer verification is fail-closed and binds the conversation, position
   and key version", 2026-11-08: the signer no longer registers nonces, so those two properties do
   nothing.)
@@ -60,7 +63,7 @@ unsigned transcript entry while the configuration said the agent signed.
 - Versioned keys only: the legacy unversioned `agent-signing-key:{id}` is still read and checked but
   not written, so there is one way to provision.
 - No MCP tool: the plan called it optional, and an MCP tool would widen who can mint keys beyond the
-  REST role gate this PR pins.
+  REST role gate this change pins.
 - Validity windows and verification outcomes are untouched here: enforcing `validUntilMs`, a
   fail-closed verdict per entry and binding the conversation into the signed bytes are the entry
   "peer verification is fail-closed and binds the conversation, position and key version"
