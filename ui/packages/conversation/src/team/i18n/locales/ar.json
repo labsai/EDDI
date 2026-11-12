@@ -195,6 +195,31 @@
       "rosterShowAll_two": "عرض كل الأعضاء ({{count}})",
       "rosterShowAll_few": "عرض كل الأعضاء ({{count}})",
       "rosterShowAll_many": "عرض كل الأعضاء ({{count}})"
+    },
+    "humanTurnOtherTitle": "دور {{name}}",
+    "humanTurnWhoMayAnswer": "تنتظر المناقشة {{name}}. لا يمكن الرد في هذا الدور إلا لـ {{name}} أو لمسؤول.",
+    "decisionPlain": {
+      "voteWon": "صوّت الفريق، وفاز «{{winner}}».",
+      "voteNoWinner": "صوّت الفريق، لكن لم يفز أي خيار.",
+      "arbitration": "قرّر محكّم. الحكم أدناه.",
+      "verdictWinner": "حكم القاضي لصالح {{winner}}.",
+      "verdictTie": "أعلن القاضي التعادل.",
+      "agreement": "توصّل الأعضاء إلى اتفاق.",
+      "award": "أُسند العمل إلى {{winner}}.",
+      "awardNone": "لم يُسند العمل إلى أحد.",
+      "none": "لم يتوصّل الفريق إلى قرار واضح.",
+      "dissents": "الأعضاء المخالفون: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "لا توجد عناصر مشتركة في هذه الجلسة بعد.",
+      "allArtifacts": "كل العناصر",
+      "versionShort": "الإصدار {{version}}",
+      "versionCurrent": "الإصدار {{version}} (الحالي)",
+      "version": "الإصدار",
+      "editedByAt": "كتبه {{editor}} في {{at}}",
+      "olderVersion": "هذا إصدار سابق ({{shown}}). الإصدار الحالي هو {{current}}.",
+      "showCurrent": "عرض الإصدار الحالي",
+      "historyTrimmed": "لم تعد الإصدارات السابقة للإصدار {{oldest}} محفوظة."
     }
   },
   "taskBoard": {

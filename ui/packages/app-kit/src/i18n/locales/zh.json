@@ -159,13 +159,6 @@
     "searchAgents": "搜索智能体",
     "noAgentMatches": "没有与搜索匹配的智能体",
     "transcript": "对话",
-    "guardrailPhaseInput": "输入",
-    "guardrailPhaseOutput": "输出",
-    "guardrailActionBlock": "已拦截",
-    "guardrailActionRedact": "已脱敏",
-    "guardrailActionReprompt": "已重新询问模型",
-    "guardrailActionWarn": "已标记",
-    "guardrailNotice": "防护栏（{{phase}}）：{{type}} {{action}}",
     "rating": {
       "card": "评价此对话",
       "reply": "评价此回复",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "正在上传… {{percent}}%",
     "attachProgress": "{{name}} 的上传进度",
     "attachRetry": "重试",
-    "attachHint": "附加文件——也可以在此粘贴或拖放"
+    "attachHint": "附加文件——也可以在此粘贴或拖放",
+    "mention": {
+      "listLabel": "转交给",
+      "team": "团队",
+      "agent": "智能体",
+      "handOffToTeam": "转交给团队 {{name}}",
+      "handOffToAgent": "转交给 {{name}}",
+      "remove": "不转交",
+      "count": "建议：{{n}} 个。用方向键选择，按 Enter 确认。",
+      "placeholder": "你要问 {{name}} 的问题…",
+      "hint": "消息 — 输入 @ 可转交给其他智能体或团队"
+    }
   },
   "editor": {
     "deployFailed": "部署失败",

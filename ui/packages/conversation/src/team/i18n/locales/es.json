@@ -171,6 +171,31 @@
       "rosterShowAll_one": "Mostrar {{count}} miembro",
       "rosterShowAll_other": "Mostrar los {{count}} miembros",
       "rosterShowAll_many": "Mostrar los {{count}} miembros"
+    },
+    "humanTurnOtherTitle": "Turno de {{name}}",
+    "humanTurnWhoMayAnswer": "La discusión espera a {{name}}. Solo {{name}} o un administrador puede responder en este turno.",
+    "decisionPlain": {
+      "voteWon": "El equipo votó y ganó «{{winner}}».",
+      "voteNoWinner": "El equipo votó, pero ninguna opción ganó.",
+      "arbitration": "Decidió un árbitro. El fallo está abajo.",
+      "verdictWinner": "El juez falló a favor de {{winner}}.",
+      "verdictTie": "El juez lo declaró empate.",
+      "agreement": "Los miembros llegaron a un acuerdo.",
+      "award": "El trabajo fue para {{winner}}.",
+      "awardNone": "Nadie recibió el trabajo.",
+      "none": "El equipo no llegó a una decisión clara.",
+      "dissents": "Miembros en desacuerdo: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "Aún no hay artefactos compartidos en esta sesión.",
+      "allArtifacts": "Todos los artefactos",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (actual)",
+      "version": "Versión",
+      "editedByAt": "Escrito por {{editor}} el {{at}}",
+      "olderVersion": "Esta es una versión anterior (v{{shown}}). La actual es la v{{current}}.",
+      "showCurrent": "Mostrar la versión actual",
+      "historyTrimmed": "Las versiones anteriores a la v{{oldest}} ya no se conservan."
     }
   },
   "taskBoard": {

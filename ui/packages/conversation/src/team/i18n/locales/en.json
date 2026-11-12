@@ -163,6 +163,31 @@
       "roundOption": "{{n}} of {{total}}",
       "rosterShowAll_one": "Show all {{count}} member",
       "rosterShowAll_other": "Show all {{count}} members"
+    },
+    "humanTurnOtherTitle": "{{name}}'s turn",
+    "humanTurnWhoMayAnswer": "The discussion waits for {{name}}. Only {{name}} or an administrator can answer this turn.",
+    "decisionPlain": {
+      "voteWon": "The team voted, and “{{winner}}” won.",
+      "voteNoWinner": "The team voted, but no option won.",
+      "arbitration": "An arbitrator decided. The ruling is below.",
+      "verdictWinner": "The judge ruled for {{winner}}.",
+      "verdictTie": "The judge called it a tie.",
+      "agreement": "The members reached an agreement.",
+      "award": "The work went to {{winner}}.",
+      "awardNone": "Nobody was given the work.",
+      "none": "The team didn't reach a clear decision.",
+      "dissents": "Members who disagreed: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "No shared artifacts in this session yet.",
+      "allArtifacts": "All artifacts",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (current)",
+      "version": "Version",
+      "editedByAt": "Written by {{editor}} on {{at}}",
+      "olderVersion": "This is an earlier version (v{{shown}}). The current one is v{{current}}.",
+      "showCurrent": "Show the current version",
+      "historyTrimmed": "Versions before v{{oldest}} are no longer kept."
     }
   },
   "taskBoard": {

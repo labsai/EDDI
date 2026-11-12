@@ -12,5 +12,33 @@
       "regenerate": "Ran {{tools}}. What they did stays, and a new reply may run them again.",
       "edited": "Your message is back in the composer. What {{tools}} did was not undone."
     }
+  },
+  "turnNotes": {
+    "region": "How this answer was reached",
+    "escalation": {
+      "lowConfidence": "Answered by a larger model because the first answer wasn't confident enough.",
+      "timeout": "Answered by another model because the first one took too long.",
+      "error": "Answered by another model because the first one failed.",
+      "invalidOutput": "Answered by another model because the first answer couldn't be used.",
+      "other": "Answered by another model than the first one tried."
+    },
+    "retry": {
+      "empty": "The model was asked again because its first reply was empty.",
+      "truncated": "The model was asked again because its first reply was cut off.",
+      "contentFilter": "The model was asked again because its provider's content filter stopped the first reply.",
+      "format": "The model was asked again because its first reply wasn't in the expected format.",
+      "contextTooLong": "The model was asked again because the conversation was too long for it.",
+      "other": "The model was asked again because its first reply couldn't be used."
+    },
+    "guardrail": {
+      "inputBlock": "A safety check stopped your message ({{type}}).",
+      "inputRedact": "A safety check removed part of your message before the agent saw it ({{type}}).",
+      "inputWarn": "A safety check flagged your message ({{type}}).",
+      "outputBlock": "A safety check withheld the answer ({{type}}).",
+      "outputRedact": "A safety check removed part of the answer ({{type}}).",
+      "outputReprompt": "A safety check sent the answer back to be rewritten ({{type}}).",
+      "outputWarn": "A safety check flagged the answer ({{type}}).",
+      "other": "A safety check acted on this turn ({{type}}: {{phase}}, {{action}})."
+    }
   }
 }

@@ -82,7 +82,15 @@
       "confirmNewDescription": "Une discussion est encore en cours. En démarrer une nouvelle l'arrête d'abord — tout travail en cours est abandonné.",
       "confirmNewButton": "Arrêter et recommencer",
       "keepRunning": "Laisser continuer",
-      "questionRequired": "Ajoutez une question pour votre groupe de travail — les fichiers lui sont transmis au début de la discussion."
+      "questionRequired": "Ajoutez une question pour votre groupe de travail — les fichiers lui sont transmis au début de la discussion.",
+      "humanTurnForbidden": "Seul le membre dont c’est le tour, ou un administrateur, peut répondre à ce tour.",
+      "announceOtherTurn": "La discussion attend {{name}}.",
+      "announceYourTurn": "C’est votre tour dans cette discussion.",
+      "artifacts": "Artefacts partagés ({{n}})",
+      "artifactsPanel": "Panneau des artefacts partagés",
+      "artifactsTitle": "Artefacts partagés",
+      "artifactsClose": "Fermer les artefacts partagés",
+      "artifactsHint": "Les membres de l’équipe les rédigent avec leurs outils. Vous pouvez lire chaque version que le serveur conserve encore."
     },
     "thread": {
       "fileTooLarge": "Le fichier doit faire moins de 20 Mo",
@@ -569,7 +577,11 @@
       "agentLabel": "Agent",
       "send": "Envoyer",
       "starters": "Suggestions",
-      "recent": "Récent"
+      "recent": "Récent",
+      "placeholderTeam": "Demandez à l’équipe {{team}}…",
+      "recipientLabel": "Agent ou équipe",
+      "agentsGroup": "Agents",
+      "teamsGroup": "Équipes"
     },
     "switcher": {
       "newChat": "Nouvelle discussion",
@@ -593,6 +605,16 @@
       "clear": "Effacer la recherche",
       "more": "Plus de résultats",
       "moreFailed": "Impossible d’en charger plus. Réessayer"
+    },
+    "handoff": {
+      "localOnly": "Enregistré dans ce navigateur uniquement",
+      "toTeam": "Vous avez transmis « {{question}} » à l’équipe {{name}}.",
+      "toAgent": "Vous avez transmis « {{question}} » à {{name}}.",
+      "openSession": "Ouvrir la session d’équipe",
+      "openChat": "Ouvrir ce chat",
+      "notStarted": "Elle n’a pas démarré.",
+      "fromChat": "Transmis depuis votre chat avec {{name}}.",
+      "backToChat": "Revenir à ce chat"
     }
   },
   "analyticsPage": {

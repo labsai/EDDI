@@ -143,6 +143,27 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
   its controller's `tool_result` events into a page-wide `ToolActivityLog` and draws
   `ToolActivityCards` under each turn's question. The chat page gets the same from
   `ChatPanel`.
+### Tier 2 (phase 8)
+
+- **Teams beside chats (T2.1).** Home's picker lists the catalog's teams under the agents; with
+  one picked, sending opens the board with the question in router state
+  (`lib/workforce-team-start.ts`), and the board starts a new session with it once and drops it.
+  The board announces (a polite `role="status"`) a HUMAN member's pending turn and a decision
+  (`decisionSummary`), and tells `HumanTurnBanner` whether the viewer is the member (username or
+  e-mail against `pendingHumanInput.memberId`: wording only, the server decides).
+- **@mention hand-off (T2.2).** `WorkforceChat` passes `ChatPanel` a `mention` config — the
+  candidates are `lib/mention-candidates.ts` over `GET /catalog/*`, never the agent store — and
+  `transcriptMarkers`. A hand-off is recorded in this browser only
+  (`@eddi/app-kit/lib/workforce-handoffs.ts`, keyed by principal, cleared at sign-out) and starts
+  the target chat (`workforceChatStart(…, {handoffId})`, completed through
+  `onInitialConversationStarted`) or team session (`workforceTeamStart`, completed when the stream
+  names the conversation). There is no backend record; see the module's header for why.
+- **Shared artifacts (T2.6).** The board's artifacts button opens `artifacts-drawer.tsx`, loaded
+  lazily, in the same non-modal slide-over as the Team and Sessions panels (full width on a phone),
+  around `@eddi/conversation/team`'s `ArtifactVersions`.
+- **Turn notes (T2.7).** The member thread feeds `cascade_escalation` / `llm_retry` into a
+  `TurnNotesLog` and renders `TurnNotes` and the reply's guardrail notices (`GuardrailNote`); the
+  chat gets the same from `ChatPanel` (`chatTurnNotes`).
 - **Installable, no service worker.** The shells link `/workforce/manifest.webmanifest`,
   which EDDI renders in the brand (`RestWorkforceResource#manifest`, `WorkforceManifest`;
   the dev server answers with the default brand's, `vite.config.ts`). There is deliberately

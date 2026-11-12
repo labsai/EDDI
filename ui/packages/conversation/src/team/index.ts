@@ -16,6 +16,8 @@ export * from "./group-utils";
 export * from "./group-payloads";
 export * from "./group-entry-body";
 export * from "./group-decision";
+export * from "./decision-summary";
+export * from "./artifact-version-list";
 export * from "./discussion-styles";
 export * from "./duration";
 export * from "./use-discussion-digest";
@@ -27,6 +29,8 @@ export * from "./decision-record-card";
 export * from "./task-board";
 export * from "./negotiation-ledger";
 export * from "./artifacts-panel";
+export * from "./artifact-content";
+export * from "./artifact-versions";
 export * from "./discussion-insights";
 export * from "./human-turn-banner";
 

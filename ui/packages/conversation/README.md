@@ -17,7 +17,7 @@ The entries, so an app resolves only what it renders:
 | `@eddi/conversation` | The agent kind: controller, components, the one markdown renderer, the `conversation.*` strings | All three apps |
 | `@eddi/conversation/team` | The team kind: the `GroupDiscussion` controller and the team components | The Manager and Workforce |
 | `@eddi/conversation/i18next` | `ConversationMarkdown`: the markdown renderer with a react-i18next app's translator | The Manager and Workforce |
-| `@eddi/conversation/tool-activity` | What a turn's tools did (T1.9) and the notice before Edit or Regenerate of such a turn (T1.6), below | The Manager and Workforce |
+| `@eddi/conversation/tool-activity` | What a turn's tools did (T1.9), the notice before Edit or Regenerate of such a turn (T1.6), and the turn notes: a cascade, a re-ask or a guardrail in plain words (T2.7), below | The Manager and Workforce |
 
 The Chat UI never resolves the last three, so they cost its bundle nothing
 (`tool-activity/ToolActivity.test.tsx` fails if `ui/chat/src` imports the tool entry or
@@ -93,7 +93,9 @@ setupI18n({ i18n, english, loaders, /* … */ });
 | `controller/group-discussion.ts` | `GroupDiscussion`: one group's discussion streamed over SSE — the state a run builds (phases, member turns, the human member's turn, the approval pause, the decision, costs, stances, tasks), `applyGroupStreamEvent` (the reducer every event goes through), and start, approve-and-resume, continue a round, detach (`abort`), Stop (`cancel`: the deferred Stop, 409 as already ended), `reset`, `whenAccepted`. A plain store (`subscribe`, `getSnapshot`) over a `GroupTransport` the host binds to its client, with an optional host store |
 | `team/i18n.ts`, `team/i18n/locales/*` | The team components' strings: nested `groups.*` keys read through the app's react-i18next, eleven locales, `withTeamLocales` (deep merge; `@eddi/app-kit`'s `setupAppI18n` calls it) |
 | `team/group-utils.ts`, `group-entry-body.ts`, `group-payloads.ts`, `group-decision.ts`, `discussion-styles.ts`, `duration.ts`, `use-discussion-digest.ts` | What a transcript entry says (structured bodies, VOTE/BID/BARGAIN/RETRO payloads, a decision's headline), style labels, ISO durations, the overview's digest |
-| `team/*.tsx` | `StructuredTurnCard`, `StructuredEntryBody`, `DecisionRecordCard`, `TaskBoard` / `PersistedTaskBoard`, `NegotiationLedger`, `ArtifactsPanel`, `DiscussionInsights`, `HumanTurnBanner` |
+| `team/*.tsx` | `StructuredTurnCard`, `StructuredEntryBody`, `DecisionRecordCard` (its first line is `decisionSummary`, the decision in plain words), `TaskBoard` / `PersistedTaskBoard`, `NegotiationLedger`, `ArtifactsPanel`, `DiscussionInsights`, `HumanTurnBanner` (`viewerIsMember: false` says whose turn it is and who may answer) |
+| `team/artifact-content.tsx`, `artifact-versions.tsx`, `artifact-version-list.ts` | T2.6: `ArtifactContent`, the one rendering policy for an artifact (MARKDOWN through the one renderer with raw HTML escaped, JSON pretty-printed, TEXT plain); `ArtifactVersions`, the list, one artifact opened and a switch between the versions its `history` keeps; `artifactVersions`, those versions newest first |
+| `team/decision-summary.ts` | `decisionSummary(decision)`: one or two plain sentences from the record's typed fields (never an agreement's proposal id), as i18n key, fallback and values |
 | `team/overview/*` | The overview: `PhaseRail`, `MemberRoster`, `ParticipationMatrix`, `InteractionMap`, `BidBoard`, `DiscussionOverview`, the transcript / overview / split toggle |
 
 The contract they render — `TranscriptEntry`, `GroupConversation`, the SSE events —
@@ -144,7 +146,8 @@ them. Tailwind-styled and read through the app's react-i18next, like the team ki
 | --- | --- |
 | `tool-activity/tool-activity-log.ts` | `ToolActivityLog`: the calls of each turn by conversation and step, a plain store (`subscribe`, `getSnapshot`). A host calls `beginTurn(conversationId, step)` from `onTurnStarting` (the step and every later, undone one start empty), `record` from `onStreamEvent` through `toolResultListener`, `clearStep` after a turn ran again without a stream. At most 50 calls per turn (the rest are counted) and 20 conversations. `toolCardPositions` puts a turn's cards under its question; `toolNames` lists a turn's tools once each |
 | `tool-activity/ToolActivity.tsx` | `ToolActivityCards` (one disclosure per turn, collapsed: "Tools used: 2 · 1 failed"; open, a card per call with the tool, whether it worked and the summary **as a text child, never markdown or HTML**), `ToolTurnNotice` (which tools the turn ran, beside Edit or Regenerate: neither takes back what they did), `useToolTurns(log, conversationId)`, `formatToolList` (`Intl.ListFormat`, three names then "+N more") |
-| `tool-activity/i18n.ts`, `i18n/locales/*` | `toolActivity.*` in the eleven locales, `withToolActivityLocales` (`setupAppI18n` calls it) |
+| `tool-activity/turn-notes.ts`, `TurnNotes.tsx` | T2.7: `parseTurnNote` reads `cascade_escalation` and `llm_retry` (their `reason` only), `TurnNotesLog` files them like `ToolActivityLog` (`beginTurn`, `record` through `turnNoteListener`, `clearStep`), `TurnNotes` renders a turn's notes as plain sentences, `GuardrailNote` words a `guardrail_triggered` notice the controller keeps on the reply. Only what the events say; live only |
+| `tool-activity/i18n.ts`, `i18n/locales/*` | `toolActivity.*` and `turnNotes.*` in the eleven locales, `withToolActivityLocales` (`setupAppI18n` calls it) |
 
 **Live only.** The events are not stored in a form a client may read: the detailed snapshot
 holds the raw tool trace, which the server redacts only on the way out through the stream. A

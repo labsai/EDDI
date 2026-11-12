@@ -244,6 +244,15 @@ never markdown) and, by default, a `ToolTurnNotice` beside Edit and Regenerate o
 tools, tied to the button with `aria-describedby`; **`renderTurnNotice`** overrides it. Live only:
 the stored trace is not redacted for clients, so nothing is restored from a snapshot.
 
+**Turn notes, @mention and markers (T2.7, T2.2).** `chatConversation` also feeds
+`cascade_escalation` and `llm_retry` into **`chatTurnNotes`** (a `TurnNotesLog`), and `ChatPanel`
+draws `TurnNotes` under each turn's last message; `ChatMessage`'s guardrail lines use
+`GuardrailNote` (plain words, the guardrail's type in brackets). `ChatPanel` takes two optional
+props the Manager does not pass: **`mention`** (the composer becomes a combobox over the host's
+candidates; a hand-off calls `onHandOff` instead of sending — the logic is
+`lib/chat-mention.ts`) and **`transcriptMarkers`** (host lines after a step's last message).
+Workforce sets both.
+
 ### Key Patterns
 
 #### 1. Editor Registry (Single Source of Truth)

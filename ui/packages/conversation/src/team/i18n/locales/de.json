@@ -163,6 +163,31 @@
       "roundOption": "{{n}} von {{total}}",
       "rosterShowAll_one": "Alle {{count}} Mitglied anzeigen",
       "rosterShowAll_other": "Alle {{count}} Mitglieder anzeigen"
+    },
+    "humanTurnOtherTitle": "{{name}} ist dran",
+    "humanTurnWhoMayAnswer": "Die Diskussion wartet auf {{name}}. Nur {{name}} oder ein Administrator kann diesen Zug beantworten.",
+    "decisionPlain": {
+      "voteWon": "Das Team hat abgestimmt, und „{{winner}}“ hat gewonnen.",
+      "voteNoWinner": "Das Team hat abgestimmt, aber keine Option hat gewonnen.",
+      "arbitration": "Ein Schlichter hat entschieden. Der Schiedsspruch steht unten.",
+      "verdictWinner": "Der Richter hat für {{winner}} entschieden.",
+      "verdictTie": "Der Richter hat auf Unentschieden entschieden.",
+      "agreement": "Die Mitglieder haben eine Einigung erzielt.",
+      "award": "Die Aufgabe ging an {{winner}}.",
+      "awardNone": "Niemand hat die Aufgabe bekommen.",
+      "none": "Das Team ist zu keiner klaren Entscheidung gekommen.",
+      "dissents": "Mitglieder, die anderer Meinung waren: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "In dieser Sitzung gibt es noch keine geteilten Artefakte.",
+      "allArtifacts": "Alle Artefakte",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (aktuell)",
+      "version": "Version",
+      "editedByAt": "Geschrieben von {{editor}} am {{at}}",
+      "olderVersion": "Das ist eine frühere Version (v{{shown}}). Die aktuelle ist v{{current}}.",
+      "showCurrent": "Aktuelle Version zeigen",
+      "historyTrimmed": "Versionen vor v{{oldest}} werden nicht mehr aufbewahrt."
     }
   },
   "taskBoard": {

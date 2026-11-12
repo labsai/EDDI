@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileStack, ChevronDown, ChevronUp, History } from "lucide-react";
 import { cn } from "@eddi/ui";
-import { formatJsonSafely } from "./group-utils";
 import { Badge } from "@eddi/ui";
 import type { SharedArtifact } from "@eddi/core/groups";
-import { ConversationMarkdown } from "../i18next/conversation-markdown";
+import { ArtifactContent } from "./artifact-content";
 
 interface ArtifactsPanelProps {
   artifacts: SharedArtifact[];
@@ -97,26 +96,11 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
                       {t("groups.artifactLastEdited", "Last edited by {{agent}}", { agent: artifact.lastEditorAgentId })}
                     </p>
                   )}
-                  {artifact.type === "JSON" ? (
-                    // Pretty-printed in a plain <pre> rather than a Monaco
-                    // instance: this is a read-only view, so a full editor buys
-                    // nothing and costs a heavyweight dependency on the
-                    // transcript path — which every group discussion renders.
-                    <pre
-                      className="max-h-72 overflow-auto rounded-md bg-background p-2.5 font-mono text-[11px] leading-relaxed text-foreground"
-                      data-testid={`artifact-json-${artifact.id}`}
-                    >
-                      {formatJsonSafely(artifact.content)}
-                    </pre>
-                  ) : artifact.type === "MARKDOWN" ? (
-                    <div className="prose prose-sm dark:prose-invert max-w-none rounded-md bg-background p-2.5 text-xs">
-                      <ConversationMarkdown escapeRawHtml>{artifact.content}</ConversationMarkdown>
-                    </div>
-                  ) : (
-                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-2.5 text-xs text-foreground">
-                      {artifact.content}
-                    </pre>
-                  )}
+                  <ArtifactContent
+                    type={artifact.type}
+                    content={artifact.content}
+                    testId={artifact.type === "JSON" ? `artifact-json-${artifact.id}` : undefined}
+                  />
                 </div>
               )}
             </div>

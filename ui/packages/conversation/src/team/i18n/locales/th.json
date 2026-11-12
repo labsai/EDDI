@@ -163,6 +163,31 @@
       "roundOption": "{{n}} จาก {{total}}",
       "rosterShowAll_one": "แสดงสมาชิกทั้ง {{count}} คน",
       "rosterShowAll_other": "แสดงสมาชิกทั้ง {{count}} คน"
+    },
+    "humanTurnOtherTitle": "ถึงตาของ {{name}}",
+    "humanTurnWhoMayAnswer": "การอภิปรายกำลังรอ {{name}} มีเพียง {{name}} หรือผู้ดูแลระบบเท่านั้นที่ตอบรอบนี้ได้",
+    "decisionPlain": {
+      "voteWon": "ทีมลงคะแนนแล้ว และ “{{winner}}” ชนะ",
+      "voteNoWinner": "ทีมลงคะแนนแล้ว แต่ไม่มีตัวเลือกใดชนะ",
+      "arbitration": "ผู้ชี้ขาดเป็นผู้ตัดสิน คำวินิจฉัยอยู่ด้านล่าง",
+      "verdictWinner": "ผู้ตัดสินชี้ขาดให้ {{winner}}",
+      "verdictTie": "ผู้ตัดสินให้ผลเสมอ",
+      "agreement": "สมาชิกบรรลุข้อตกลงแล้ว",
+      "award": "งานนี้ตกเป็นของ {{winner}}",
+      "awardNone": "ไม่มีใครได้รับงานนี้",
+      "none": "ทีมยังไม่ได้ข้อสรุปที่ชัดเจน",
+      "dissents": "สมาชิกที่ไม่เห็นด้วย: {{n}}"
+    },
+    "artifactPanel": {
+      "empty": "ยังไม่มีอาร์ทิแฟกต์ที่แชร์ในเซสชันนี้",
+      "allArtifacts": "อาร์ทิแฟกต์ทั้งหมด",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (ปัจจุบัน)",
+      "version": "เวอร์ชัน",
+      "editedByAt": "เขียนโดย {{editor}} เมื่อ {{at}}",
+      "olderVersion": "นี่คือเวอร์ชันก่อนหน้า (v{{shown}}) เวอร์ชันปัจจุบันคือ v{{current}}",
+      "showCurrent": "แสดงเวอร์ชันปัจจุบัน",
+      "historyTrimmed": "เวอร์ชันก่อน v{{oldest}} ไม่ได้เก็บไว้แล้ว"
     }
   },
   "taskBoard": {

@@ -163,6 +163,31 @@
       "roundOption": "第 {{n}} / {{total}} 轮",
       "rosterShowAll_one": "显示全部 {{count}} 位成员",
       "rosterShowAll_other": "显示全部 {{count}} 位成员"
+    },
+    "humanTurnOtherTitle": "轮到 {{name}}",
+    "humanTurnWhoMayAnswer": "讨论正在等待 {{name}}。只有 {{name}} 或管理员可以回答这一轮。",
+    "decisionPlain": {
+      "voteWon": "团队进行了投票，“{{winner}}”胜出。",
+      "voteNoWinner": "团队进行了投票，但没有选项胜出。",
+      "arbitration": "由仲裁者作出决定。裁决见下方。",
+      "verdictWinner": "裁判判定 {{winner}} 获胜。",
+      "verdictTie": "裁判判定为平局。",
+      "agreement": "成员们达成了协议。",
+      "award": "这项工作交给了 {{winner}}。",
+      "awardNone": "这项工作没有分配给任何人。",
+      "none": "团队没有得出明确的决定。",
+      "dissents": "持不同意见的成员：{{n}}。"
+    },
+    "artifactPanel": {
+      "empty": "本次会话还没有共享成果。",
+      "allArtifacts": "全部成果",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}}（当前）",
+      "version": "版本",
+      "editedByAt": "由 {{editor}} 于 {{at}} 撰写",
+      "olderVersion": "这是较早的版本（v{{shown}}）。当前版本是 v{{current}}。",
+      "showCurrent": "显示当前版本",
+      "historyTrimmed": "v{{oldest}} 之前的版本已不再保留。"
     }
   },
   "taskBoard": {

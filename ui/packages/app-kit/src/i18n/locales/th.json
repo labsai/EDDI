@@ -159,13 +159,6 @@
     "searchAgents": "ค้นหาเอเจนต์",
     "noAgentMatches": "ไม่มีเอเจนต์ที่ตรงกับการค้นหา",
     "transcript": "การสนทนา",
-    "guardrailPhaseInput": "อินพุต",
-    "guardrailPhaseOutput": "เอาต์พุต",
-    "guardrailActionBlock": "ถูกบล็อก",
-    "guardrailActionRedact": "ถูกปกปิด",
-    "guardrailActionReprompt": "ถามโมเดลซ้ำ",
-    "guardrailActionWarn": "ถูกเตือน",
-    "guardrailNotice": "การ์ดเรล ({{phase}}): {{type}} {{action}}",
     "rating": {
       "card": "ให้คะแนนบทสนทนานี้",
       "reply": "ให้คะแนนคำตอบนี้",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "กำลังอัปโหลด… {{percent}}%",
     "attachProgress": "การอัปโหลด {{name}}",
     "attachRetry": "ลองอีกครั้ง",
-    "attachHint": "แนบไฟล์ — หรือวางหรือลากมาวางที่นี่"
+    "attachHint": "แนบไฟล์ — หรือวางหรือลากมาวางที่นี่",
+    "mention": {
+      "listLabel": "ส่งต่อให้",
+      "team": "ทีม",
+      "agent": "เอเจนต์",
+      "handOffToTeam": "ส่งต่อให้ทีม {{name}}",
+      "handOffToAgent": "ส่งต่อให้ {{name}}",
+      "remove": "ไม่ส่งต่อ",
+      "count": "คำแนะนำ: {{n}} ใช้ปุ่มลูกศรและ Enter เพื่อเลือก",
+      "placeholder": "คำถามของคุณถึง {{name}}…",
+      "hint": "ข้อความ — พิมพ์ @ เพื่อส่งต่อให้เอเจนต์หรือทีมอื่น"
+    }
   },
   "editor": {
     "deployFailed": "การปรับใช้ล้มเหลว",

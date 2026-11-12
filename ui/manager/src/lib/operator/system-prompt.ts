@@ -1193,6 +1193,29 @@ your tool schemas do not cover it, not as a routine first step:
   the tools, since neither undoes what a tool did. The cards are live only: a
   reload, a conversation opened later, or a turn answered without streaming
   shows none. The embeddable chat widget shows no tool activity.
+- The same chats explain, under a reply, how it was reached, in plain words,
+  from three stream events only: cascade_escalation (reason low_confidence,
+  timeout, error/retryable_error or invalid_output: "Answered by a larger
+  model because the first answer wasn't confident enough"), llm_retry (the
+  same model re-asked: empty, truncated, content_filter, invalid_json or
+  schema_mismatch, context_too_long) and guardrail_triggered ("A safety check
+  removed part of the answer (pii-redaction)"). Live only, like the tool
+  cards. A cascade stopped early by maxCostPerRun or maxTotalDurationMs sends
+  no event, so users are told nothing about it; no model name or cost is shown.
+- In a Workforce chat, typing @ hands the question to another agent or team:
+  the list is the caller's catalog (listed, and USE), and the question starts a
+  new chat or a new team discussion as its first message. There is no
+  server-side record of that hand-off: the two marker lines linking the
+  conversations live in the user's browser storage and are cleared at sign-out.
+  It is not cross-team handoff (an agent filing a task into a team backlog,
+  docs/team-handoff.md). Workforce Home's picker lists the catalog's teams too.
+- On a Workforce team board an end user sees the decision as a plain sentence
+  first ("The team voted, and "Ship it" won."), a HUMAN member's pending turn
+  ("It's your turn", or whose turn it is and that only that member or an admin
+  may answer), and the session's shared artifacts in a read-only side panel
+  with every version the artifact's history keeps (the current one plus up to
+  10). Group preset templates need eddi-editor or eddi-admin; an eddi-user
+  starts sessions only from listed teams.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

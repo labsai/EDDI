@@ -171,6 +171,31 @@
       "rosterShowAll_one": "Mostrar {{count}} membro",
       "rosterShowAll_other": "Mostrar os {{count}} membros",
       "rosterShowAll_many": "Mostrar os {{count}} membros"
+    },
+    "humanTurnOtherTitle": "Vez de {{name}}",
+    "humanTurnWhoMayAnswer": "A discussão aguarda {{name}}. Só {{name}} ou um administrador pode responder nesta vez.",
+    "decisionPlain": {
+      "voteWon": "A equipe votou, e “{{winner}}” venceu.",
+      "voteNoWinner": "A equipe votou, mas nenhuma opção venceu.",
+      "arbitration": "Um árbitro decidiu. A decisão está abaixo.",
+      "verdictWinner": "O juiz decidiu a favor de {{winner}}.",
+      "verdictTie": "O juiz declarou empate.",
+      "agreement": "Os membros chegaram a um acordo.",
+      "award": "O trabalho ficou com {{winner}}.",
+      "awardNone": "Ninguém ficou com o trabalho.",
+      "none": "A equipe não chegou a uma decisão clara.",
+      "dissents": "Membros que discordaram: {{n}}."
+    },
+    "artifactPanel": {
+      "empty": "Ainda não há artefatos compartilhados nesta sessão.",
+      "allArtifacts": "Todos os artefatos",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}} (atual)",
+      "version": "Versão",
+      "editedByAt": "Escrito por {{editor}} em {{at}}",
+      "olderVersion": "Esta é uma versão anterior (v{{shown}}). A atual é a v{{current}}.",
+      "showCurrent": "Mostrar a versão atual",
+      "historyTrimmed": "As versões anteriores à v{{oldest}} não são mais mantidas."
     }
   },
   "taskBoard": {

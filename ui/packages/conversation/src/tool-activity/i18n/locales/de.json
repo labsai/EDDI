@@ -12,5 +12,33 @@
       "regenerate": "{{tools}} ausgeführt. Was sie getan haben, bleibt bestehen, und eine neue Antwort kann sie erneut ausführen.",
       "edited": "Ihre Nachricht ist wieder im Eingabefeld. Was {{tools}} getan hat, wurde nicht rückgängig gemacht."
     }
+  },
+  "turnNotes": {
+    "region": "Wie diese Antwort zustande kam",
+    "escalation": {
+      "lowConfidence": "Ein größeres Modell hat geantwortet, weil die erste Antwort nicht sicher genug war.",
+      "timeout": "Ein anderes Modell hat geantwortet, weil das erste zu lange brauchte.",
+      "error": "Ein anderes Modell hat geantwortet, weil das erste fehlgeschlagen ist.",
+      "invalidOutput": "Ein anderes Modell hat geantwortet, weil die erste Antwort unbrauchbar war.",
+      "other": "Ein anderes als das zuerst versuchte Modell hat geantwortet."
+    },
+    "retry": {
+      "empty": "Das Modell wurde erneut gefragt, weil seine erste Antwort leer war.",
+      "truncated": "Das Modell wurde erneut gefragt, weil seine erste Antwort abgeschnitten war.",
+      "contentFilter": "Das Modell wurde erneut gefragt, weil der Inhaltsfilter seines Anbieters die erste Antwort gestoppt hat.",
+      "format": "Das Modell wurde erneut gefragt, weil seine erste Antwort nicht im erwarteten Format war.",
+      "contextTooLong": "Das Modell wurde erneut gefragt, weil die Unterhaltung zu lang für es war.",
+      "other": "Das Modell wurde erneut gefragt, weil seine erste Antwort unbrauchbar war."
+    },
+    "guardrail": {
+      "inputBlock": "Eine Sicherheitsprüfung hat deine Nachricht gestoppt ({{type}}).",
+      "inputRedact": "Eine Sicherheitsprüfung hat einen Teil deiner Nachricht entfernt, bevor der Agent sie sah ({{type}}).",
+      "inputWarn": "Eine Sicherheitsprüfung hat deine Nachricht markiert ({{type}}).",
+      "outputBlock": "Eine Sicherheitsprüfung hat die Antwort zurückgehalten ({{type}}).",
+      "outputRedact": "Eine Sicherheitsprüfung hat einen Teil der Antwort entfernt ({{type}}).",
+      "outputReprompt": "Eine Sicherheitsprüfung hat die Antwort zum Umschreiben zurückgeschickt ({{type}}).",
+      "outputWarn": "Eine Sicherheitsprüfung hat die Antwort markiert ({{type}}).",
+      "other": "Eine Sicherheitsprüfung hat in diesem Zug eingegriffen ({{type}}: {{phase}}, {{action}})."
+    }
   }
 }

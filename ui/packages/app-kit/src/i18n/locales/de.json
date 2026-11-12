@@ -159,13 +159,6 @@
     "searchAgents": "Agenten suchen",
     "noAgentMatches": "Kein Agent entspricht deiner Suche",
     "transcript": "Konversation",
-    "guardrailPhaseInput": "Eingabe",
-    "guardrailPhaseOutput": "Ausgabe",
-    "guardrailActionBlock": "blockiert",
-    "guardrailActionRedact": "geschwärzt",
-    "guardrailActionReprompt": "Modell erneut angefragt",
-    "guardrailActionWarn": "markiert",
-    "guardrailNotice": "Guardrail ({{phase}}): {{type}}, {{action}}",
     "rating": {
       "card": "Diese Unterhaltung bewerten",
       "reply": "Diese Antwort bewerten",
@@ -194,7 +187,18 @@
     "attachUploadingPercent": "Wird hochgeladen… {{percent}} %",
     "attachProgress": "Hochladen von {{name}}",
     "attachRetry": "Erneut versuchen",
-    "attachHint": "Dateien anhängen – oder hier einfügen bzw. ablegen"
+    "attachHint": "Dateien anhängen – oder hier einfügen bzw. ablegen",
+    "mention": {
+      "listLabel": "Übergeben an",
+      "team": "Team",
+      "agent": "Agent",
+      "handOffToTeam": "An das Team {{name}} übergeben",
+      "handOffToAgent": "An {{name}} übergeben",
+      "remove": "Nicht übergeben",
+      "count": "Vorschläge: {{n}}. Mit den Pfeiltasten wählen, Enter übernimmt.",
+      "placeholder": "Deine Frage an {{name}}…",
+      "hint": "Nachricht – @ tippen, um an einen anderen Agenten oder ein Team zu übergeben"
+    }
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

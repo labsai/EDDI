@@ -163,6 +163,31 @@
       "roundOption": "{{total}} 中 {{n}}",
       "rosterShowAll_one": "{{count}} 人すべてを表示",
       "rosterShowAll_other": "{{count}} 人すべてを表示"
+    },
+    "humanTurnOtherTitle": "{{name}} の番です",
+    "humanTurnWhoMayAnswer": "ディスカッションは {{name}} を待っています。この番に回答できるのは {{name}} か管理者だけです。",
+    "decisionPlain": {
+      "voteWon": "チームが投票し、「{{winner}}」が選ばれました。",
+      "voteNoWinner": "チームは投票しましたが、どの選択肢も選ばれませんでした。",
+      "arbitration": "仲裁者が決定しました。裁定は下にあります。",
+      "verdictWinner": "審判は {{winner}} の勝ちと判定しました。",
+      "verdictTie": "審判は引き分けと判定しました。",
+      "agreement": "メンバーは合意に達しました。",
+      "award": "作業は {{winner}} に割り当てられました。",
+      "awardNone": "作業は誰にも割り当てられませんでした。",
+      "none": "チームは明確な結論に達しませんでした。",
+      "dissents": "反対したメンバー：{{n}}。"
+    },
+    "artifactPanel": {
+      "empty": "このセッションにはまだ共有アーティファクトがありません。",
+      "allArtifacts": "すべてのアーティファクト",
+      "versionShort": "v{{version}}",
+      "versionCurrent": "v{{version}}（現在）",
+      "version": "バージョン",
+      "editedByAt": "{{editor}} が {{at}} に作成",
+      "olderVersion": "これは以前のバージョン（v{{shown}}）です。現在のバージョンは v{{current}} です。",
+      "showCurrent": "現在のバージョンを表示",
+      "historyTrimmed": "v{{oldest}} より前のバージョンは保存されていません。"
     }
   },
   "taskBoard": {
