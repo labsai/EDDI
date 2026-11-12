@@ -524,10 +524,12 @@ public class RestRagIngestion implements IRestRagIngestion {
             } catch (UnsupportedOperationException e) {
                 return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
             } catch (RuntimeException e) {
-                LOGGER.warnf(e, "Evaluating knowledge base %s failed at query %d", sanitize(ragConfigId), i);
+                // The provider's text, redacted like every other failure of this
+                // knowledge base's model or store (see inspectionFailed).
+                var redacted = redactedFailure("Evaluating knowledge base " + sanitize(ragConfigId) + " failed at query " + i, knowledgeBase, e);
                 return Response.status(Response.Status.BAD_GATEWAY)
                         .entity(Map.of("error", "The embedding model or vector store failed at query " + i + ": "
-                                + e.getMessage(), "queryIndex", i))
+                                + redacted.text(), "queryIndex", i))
                         .build();
             }
             List<List<String>> ranked = hits.stream().map(chunk -> identifiers(chunk, matchKeys)).toList();
@@ -709,17 +711,28 @@ public class RestRagIngestion implements IRestRagIngestion {
      * then credential shapes.
      */
     private Response inspectionFailed(String ragConfigId, RagConfiguration knowledgeBase, RuntimeException e) {
-        var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, knowledgeBase, e);
-        if (redacted.altered()) {
-            // The raw exception carries what was just removed: log the redacted text.
-            LOGGER.warnf("Inspecting knowledge base %s failed (%s): %s", sanitize(ragConfigId), e.getClass().getName(), redacted.text());
-        } else {
-            LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
-        }
+        var redacted = redactedFailure("Inspecting knowledge base " + sanitize(ragConfigId) + " failed", knowledgeBase, e);
         String cause = redacted.text();
         return Response.status(Response.Status.BAD_GATEWAY)
                 .entity(Map.of("error", "The embedding model or vector store failed: " + cause))
                 .build();
+    }
+
+    /**
+     * Redacts a model or store failure of {@code knowledgeBase} and logs it. When
+     * redaction changed anything — anywhere in the cause chain — or the short-
+     * credential fail-safe applies, the log gets the redacted text (or only the
+     * classes), never the exception object, whose causes would carry what was
+     * removed.
+     */
+    private KnowledgeBaseFailureRedactor.Redacted redactedFailure(String what, RagConfiguration knowledgeBase, RuntimeException e) {
+        var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, knowledgeBase, e);
+        if (redacted.altered()) {
+            LOGGER.warnf("%s: %s", what, redacted.logText());
+        } else {
+            LOGGER.warnf(e, "%s", what);
+        }
+        return redacted;
     }
 
     private static Map<String, Object> describeDocument(KnowledgeBaseInspector.DocumentSummary document) {

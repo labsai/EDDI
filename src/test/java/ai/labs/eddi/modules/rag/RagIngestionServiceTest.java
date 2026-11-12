@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -12,6 +13,7 @@ import ai.labs.eddi.engine.caching.SharedKvCache;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.InMemorySharedKv;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.document.Metadata;
@@ -201,6 +203,38 @@ class RagIngestionServiceTest {
 
         assertTrue(service.getStatus(KB, id).startsWith("failed"), service.getStatus(KB, id));
         assertNotNull(service.getWarning(KB, id), "the status must say the new version is stored alongside the old");
+    }
+
+    /**
+     * A failure with no message of its own whose cause quotes a short store
+     * password: the stored status is the generic text, whatever the top-level
+     * message is.
+     */
+    @Test
+    void failureWithANullMessage_andAShortPasswordInItsCause_storesTheGenericStatus() {
+        String shortPassword = "v".repeat(5);
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        service.failureRedactor = new KnowledgeBaseFailureRedactor(secretResolver, variables);
+        when(embeddingModelFactory.getOrCreate(any(), any()))
+                .thenThrow(new RuntimeException((String) null, new IllegalStateException("password authentication failed: " + shortPassword)));
+        var config = createConfig();
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("user", "eddi", "password", shortPassword));
+
+        String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config);
+        long deadline = System.currentTimeMillis() + 5000;
+        while (service.getStatus(KB, id).equals("pending") || service.getStatus(KB, id).equals("processing")) {
+            assertTrue(System.currentTimeMillis() < deadline, "ingestion did not finish");
+            Thread.onSpinWait();
+        }
+
+        String status = service.getStatus(KB, id);
+        assertTrue(status.startsWith("failed: The provider's error was withheld"), status);
+        assertFalse(status.contains(shortPassword), status);
+        assertFalse(status.contains("password authentication failed"), status);
     }
 
     /**

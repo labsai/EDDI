@@ -126,6 +126,45 @@ class KnowledgeBaseFailureRedactorTest {
     }
 
     @Test
+    @DisplayName("a null top-level message does not bypass the short-credential fail-safe; the log text names only classes")
+    void nullMessageWithAShortPasswordInTheCause() {
+        String shortPassword = "v".repeat(5);
+        var config = knowledgeBase();
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("password", shortPassword));
+        String causeMessage = "password authentication failed: " + shortPassword;
+        var failure = new RuntimeException((String) null, new IllegalStateException(causeMessage));
+
+        var redacted = redactor.redactFailure(config, failure);
+
+        assertTrue(redacted.altered(), "the caller must not log the exception object");
+        assertFalse(redacted.text().contains(shortPassword), redacted.text());
+        assertTrue(redacted.text().contains("RuntimeException"), redacted.text());
+        assertFalse(redacted.logText().contains(shortPassword), redacted.logText());
+        assertFalse(redacted.logText().contains("password authentication failed"), redacted.logText());
+        assertTrue(redacted.logText().contains(IllegalStateException.class.getName()), redacted.logText());
+    }
+
+    @Test
+    @DisplayName("a secret in a cause, under a null top-level message, marks the failure altered and is redacted in the log text")
+    void secretInACauseIsRedactedInTheLogText() {
+        var config = knowledgeBase();
+        config.setStoreType("pgvector");
+        var failure = new RuntimeException((String) null, new IllegalStateException("authentication failed for " + PLAINTEXT + " on host db"));
+
+        var redacted = redactor.redactFailure(config, failure);
+
+        assertTrue(redacted.altered(), "the caller must not log the exception object");
+        assertNull(redacted.text());
+        assertFalse(redacted.logText().contains(PLAINTEXT), redacted.logText());
+        assertTrue(redacted.logText().contains("on host db"), redacted.logText());
+        // Nothing to remove anywhere in the chain: not altered, the exception may be
+        // logged.
+        var clean = redactor.redactFailure(config, new RuntimeException((String) null, new IllegalStateException("connection refused")));
+        assertFalse(clean.altered());
+    }
+
+    @Test
     @DisplayName("long and reference credentials only: the scrubbed provider text is returned")
     void longCredentialsKeepTheProviderText() {
         var config = knowledgeBase();

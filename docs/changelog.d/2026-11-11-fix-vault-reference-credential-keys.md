@@ -88,7 +88,10 @@ so the fallback stays usable.
   characters cannot be covered there, the set being process-wide. A knowledge base with any credential
   parameter shorter than 8 characters (not `user`/`userName`) never returns or stores its provider's failure
   text: `KnowledgeBaseFailureRedactor` returns a generic message naming the exception class, and the log line
-  carries only the class and the knowledge base. Remedy: a vault reference or a credential of 8+ characters.
+  carries only the classes of the cause chain and the knowledge base — also when the top-level message is
+  `null`, since a cause can quote the credential. Remedy: a vault reference or a credential of 8+ characters.
+  Otherwise every message of the cause chain is redacted, and when any of them changed the log gets that
+  redacted chain, never the exception object (ingestion status, inspection and evaluation endpoints alike).
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
 - `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; a shorter

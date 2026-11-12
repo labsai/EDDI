@@ -225,10 +225,11 @@ public class RagIngestionService {
             if (redacted.altered()) {
                 // The exception and its causes carry what was just removed: the log gets
                 // the redacted cause chain (or only its classes), never the exception.
-                LOGGER.errorf("Ingestion %s failed for KB '%s' (%s): %s", ingestionId, sanitize(kbId), e.getClass().getName(), redacted.text());
+                LOGGER.errorf("Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), redacted.logText());
             } else {
                 LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
-            }        }
+            }
+        }
     }
 
     private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String ragConfigId,

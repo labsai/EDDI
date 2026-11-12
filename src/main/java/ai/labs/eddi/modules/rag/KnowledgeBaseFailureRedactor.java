@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 /**
  * Makes an embedding-model or vector-store failure safe to hand back to the
@@ -52,20 +53,34 @@ public class KnowledgeBaseFailureRedactor {
     }
 
     /**
-     * A redacted failure message, and whether redaction changed it — a caller then
-     * logs the redacted text rather than the raw exception, whose message the
-     * server log must not carry either.
+     * A redacted failure: the text a caller may return or store, whether redaction
+     * changed anything anywhere in the cause chain, and the text to log in place of
+     * the exception when it did.
+     *
+     * @param logText
+     *            what a caller logs instead of the exception object when
+     *            {@code altered}: the exception classes alone when the short-
+     *            credential fail-safe applies, otherwise the redacted message of
+     *            every exception in the cause chain
      */
-    public record Redacted(String text, boolean altered) {
+    public record Redacted(String text, boolean altered, String logText) {
     }
+
+    /** How deep a cause chain is walked; a cycle ends it too. */
+    private static final int MAX_CAUSE_DEPTH = 16;
 
     /**
      * {@code message} with the knowledge base's secrets removed by value and
-     * credential shapes redacted; {@code null} for {@code null}. A message carrying
-     * a short credential (see {@link #redactFailure}) is withheld whole.
+     * credential shapes redacted; {@code null} for {@code null}. A configuration
+     * with a short credential (see {@link #redactFailure}) never has a message
+     * returned.
      */
     public String redact(RagConfiguration config, String message) {
-        return redact(config, message, null).text();
+        if (message == null) {
+            return null;
+        }
+        var secrets = secretsOf(config);
+        return secrets.shortPlaintexts().isEmpty() ? scrub(message, secrets.plaintexts()) : withheld(null);
     }
 
     /**
@@ -78,13 +93,24 @@ public class KnowledgeBaseFailureRedactor {
      * password, say) cannot be replaced everywhere without mangling ordinary text,
      * nor found reliably — it may be echoed joined to other text — so a
      * configuration with one never has its provider text returned: every failure
-     * becomes the generic message naming the exception class. Use a vault reference
-     * resolving to, or a literal of, 8 characters or more to get the provider's
-     * text back. Identity parameters ({@code user}, {@code userName}) are not
-     * secrets on their own and take no part in that.
+     * becomes the generic message naming the exception class, and the log text
+     * names only the classes of the cause chain, never a message. That holds
+     * whatever the top-level message is, a {@code null} one included: the cause
+     * chain can carry the credential. Use a vault reference resolving to, or a
+     * literal of, 8 characters or more to get the provider's text back. Identity
+     * parameters ({@code user}, {@code userName}) are not secrets on their own and
+     * take no part in that.
+     * <p>
+     * Otherwise every message of the cause chain is redacted, and {@code altered}
+     * says whether any of them changed: the caller then logs {@code logText} rather
+     * than the exception, whose cause messages would carry what was removed.
      */
     public Redacted redactFailure(RagConfiguration config, Throwable failure) {
-        return redact(config, failure == null ? null : failure.getMessage(), failure);
+        var secrets = secretsOf(config);
+        if (!secrets.shortPlaintexts().isEmpty()) {
+            return new Redacted(withheld(failure), true, classesOf(failure));
+        }
+        return redactChain(failure, message -> scrub(message, secrets.plaintexts()));
     }
 
     /**
@@ -95,9 +121,7 @@ public class KnowledgeBaseFailureRedactor {
         if (redactor != null) {
             return redactor.redactFailure(config, failure);
         }
-        String message = failure == null ? null : failure.getMessage();
-        String redacted = message == null ? null : SecretRedactionFilter.redact(message);
-        return new Redacted(redacted, redacted != null && !redacted.equals(message));
+        return redactChain(failure, SecretRedactionFilter::redact);
     }
 
     /**
@@ -108,31 +132,68 @@ public class KnowledgeBaseFailureRedactor {
         return redactor != null ? redactor.redact(config, message) : message == null ? null : SecretRedactionFilter.redact(message);
     }
 
-    private Redacted redact(RagConfiguration config, String message, Throwable failure) {
-        if (message == null) {
-            return new Redacted(null, false);
+    private static Redacted redactChain(Throwable failure, UnaryOperator<String> redactor) {
+        if (failure == null) {
+            return new Redacted(null, false, null);
         }
-        Set<String> plaintexts = new HashSet<>();
-        Set<String> shortPlaintexts = new HashSet<>();
-        collectPlaintexts(config, plaintexts, shortPlaintexts);
+        String top = failure.getMessage();
+        String text = top == null ? null : redactor.apply(top);
+        boolean altered = text != null && !text.equals(top);
+        var log = new StringBuilder();
+        Set<Throwable> seen = new HashSet<>();
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH && seen.add(current); depth++) {
+            String message = current.getMessage();
+            String redacted = message == null ? null : redactor.apply(message);
+            altered |= redacted != null && !redacted.equals(message);
+            if (!log.isEmpty()) {
+                log.append(" <- caused by ");
+            }
+            log.append(current.getClass().getName());
+            if (redacted != null) {
+                log.append(": ").append(redacted);
+            }
+            current = current.getCause();
+        }
+        return new Redacted(text, altered, log.toString());
+    }
+
+    private static String classesOf(Throwable failure) {
+        var classes = new StringBuilder();
+        Set<Throwable> seen = new HashSet<>();
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH && seen.add(current); depth++) {
+            if (!classes.isEmpty()) {
+                classes.append(" <- caused by ");
+            }
+            classes.append(current.getClass().getName());
+            current = current.getCause();
+        }
+        return classes.isEmpty() ? "failure" : classes.append(" (messages withheld: the knowledge base has a short credential)").toString();
+    }
+
+    private static String scrub(String message, Set<String> plaintexts) {
         String scrubbed = message;
         if (!plaintexts.isEmpty() && SecretValueScrubber.scrubAll(scrubbed, plaintexts, SecretRedactionFilter.REDACTED) instanceof String s) {
             scrubbed = s;
         }
-        if (!shortPlaintexts.isEmpty()) {
-            // Fail safe, without guessing how a provider might echo it: a credential too
-            // short to replace by value (any length under the minimum, joined to other
-            // text or not) means this configuration's provider text is never returned.
-            return new Redacted(withheld(failure), true);
-        }
-        scrubbed = SecretRedactionFilter.redact(scrubbed);
-        return new Redacted(scrubbed, !scrubbed.equals(message));
+        return SecretRedactionFilter.redact(scrubbed);
+    }
+
+    private record Secrets(Set<String> plaintexts, Set<String> shortPlaintexts) {
+    }
+
+    private Secrets secretsOf(RagConfiguration config) {
+        Set<String> plaintexts = new HashSet<>();
+        Set<String> shortPlaintexts = new HashSet<>();
+        collectPlaintexts(config, plaintexts, shortPlaintexts);
+        return new Secrets(plaintexts, shortPlaintexts);
     }
 
     private static String withheld(Throwable failure) {
         String kind = failure == null ? "failure" : failure.getClass().getSimpleName();
-        return "The provider's error was withheld because it repeated a credential of this knowledge base (" + kind
-                + "); the server log records the failure without it.";
+        return "The provider's error was withheld because this knowledge base has a credential too short to remove from it (" + kind
+                + "); use a vault reference or a credential of 8 characters or more. The server log records the failure without it.";
     }
 
     private void collectPlaintexts(RagConfiguration config, Set<String> plaintexts, Set<String> shortPlaintexts) {
