@@ -31,6 +31,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
+import ai.labs.eddi.integrations.email.ledger.LedgerRetry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -97,9 +98,6 @@ public class HitlEmailNotifier {
     /** How long a claim holds a row: covers connect + submission timeouts. */
     static final Duration LEASE = Duration.ofMinutes(5);
 
-    /** The longest a retry waits. */
-    static final Duration MAX_BACKOFF = Duration.ofHours(1);
-
     /** Rows one sweep attempts. */
     static final int SWEEP_BATCH = 20;
 
@@ -130,8 +128,7 @@ public class HitlEmailNotifier {
     private final GdprPseudonymizer pseudonymizer;
     private final MeterRegistry meterRegistry;
     private final Duration retention;
-    private final int maxAttempts;
-    private final Duration retryBackoff;
+    private final LedgerRetry retry;
     private final NotifyRecipientPolicy recipientPolicy;
     private final String recipientPolicyError;
     private final int maxPerRecipientPerHour;
@@ -162,8 +159,7 @@ public class HitlEmailNotifier {
         this.pseudonymizer = pseudonymizer;
         this.meterRegistry = meterRegistry;
         this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
-        this.maxAttempts = Math.max(1, maxAttempts);
-        this.retryBackoff = retryBackoff == null || retryBackoff.isZero() || retryBackoff.isNegative() ? Duration.ofMinutes(1) : retryBackoff;
+        this.retry = new LedgerRetry(ledger, maxAttempts, retryBackoff);
         this.maxPerRecipientPerHour = maxPerRecipientPerHour;
         NotifyRecipientPolicy policy;
         String error = null;
@@ -398,15 +394,13 @@ public class HitlEmailNotifier {
             // The store could not answer: retried with the send backoff, bounded by the
             // same attempt limit, never suppressed as a resolved pause.
             String error = "UNREADABLE: " + truncate(e.getMessage(), 300);
-            if (row.attempts() >= maxAttempts) {
+            retry.deferOrFail(row, error, false, now, () -> {
                 if (ledger.complete(row.id(), row.claimToken(), State.FAILED, null, error, now)) {
                     count("failed");
                     LOGGER.warnf("HITL notification %s for conversation %s FAILED after %d attempt(s): its pause could not be read", row.id(),
                             sanitize(row.conversationId()), row.attempts());
                 }
-            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
-                count("retry");
-            }
+            }, () -> count("retry"));
             return;
         }
         if (context.isEmpty()) {
@@ -442,23 +436,17 @@ public class HitlEmailNotifier {
             }
         } catch (MailSendException e) {
             String error = e.getCategory() + ": " + truncate(e.getMessage(), 300);
-            if (e.isPermanent() || row.attempts() >= maxAttempts) {
-                fail(row, context.get(), error, now);
-            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
+            retry.deferOrFail(row, error, e.isPermanent(), now, () -> fail(row, context.get(), error, now), () -> {
                 count("retry");
                 LOGGER.infof("HITL notification %s for conversation %s deferred after attempt %d: %s", row.id(), sanitize(row.conversationId()),
                         row.attempts(), e.getCategory());
-            }
+            });
         } catch (RuntimeException e) {
             // Not a categorised SMTP failure (a bad address, a mailer that could not be
             // built): still an attempt. Escaping here would leave the row PENDING,
             // reclaimed after every lease without ever reaching max-attempts.
             String error = "SEND: " + e.getClass().getSimpleName() + ": " + truncate(e.getMessage(), 300);
-            if (row.attempts() >= maxAttempts) {
-                fail(row, context.get(), error, now);
-            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
-                count("retry");
-            }
+            retry.deferOrFail(row, error, false, now, () -> fail(row, context.get(), error, now), () -> count("retry"));
         }
     }
 
@@ -471,11 +459,12 @@ public class HitlEmailNotifier {
         }
     }
 
-    /** {@code retry-backoff × 2^(attempts-1)}, capped at {@link #MAX_BACKOFF}. */
+    /**
+     * {@code retry-backoff × 2^(attempts-1)}, capped at
+     * {@link LedgerRetry#MAX_BACKOFF}.
+     */
     Duration backoff(int attempts) {
-        int doublings = Math.min(Math.max(0, attempts - 1), 20);
-        Duration delay = retryBackoff.multipliedBy(1L << doublings);
-        return delay.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : delay;
+        return retry.backoff(attempts);
     }
 
     /**

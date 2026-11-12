@@ -29,6 +29,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
+import ai.labs.eddi.engine.internal.groups.GroupQuestionLimits;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -163,13 +164,20 @@ public class McpGroupTools {
      * from the store such as a validation message, a stale version — are described,
      * because the caller can act on them ({@link McpToolUtils#isCallerFacing}
      * decides, so an {@link IllegalArgumentException} a library raised is not one
-     * of them). A missing group or conversation is reported as such. Anything else
-     * is a server-side failure: its exception text can carry datastore or
-     * configuration detail (and a {@code NullPointerException} reads literally as
-     * "null"), so it is logged under a short reference id and the caller gets a
-     * fixed message with errorCode {@code INTERNAL} and that reference.
+     * of them). A missing group or conversation is reported as such, and an access
+     * refusal from a guard the store runs (an assigned agent the caller may not
+     * use, which REST answers with 403) as {@code FORBIDDEN}, the way
+     * {@link McpToolUtils#toolFailure(Logger, String, String, Throwable)} answers
+     * it. Anything else is a server-side failure: its exception text can carry
+     * datastore or configuration detail (and a {@code NullPointerException} reads
+     * literally as "null"), so it is logged under a short reference id and the
+     * caller gets a fixed message with errorCode {@code INTERNAL} and that
+     * reference.
      */
     private String failure(String tool, String message, Exception e) {
+        if (e instanceof ForbiddenException denied) {
+            return accessRefusal(LOGGER, tool, message, denied);
+        }
         if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
             LOGGER.debugf("%s: not found: %s", tool, LogSanitizer.sanitize(e.getMessage()));
             return errorJson(message + ": not found", "NOT_FOUND", null);
@@ -450,6 +458,12 @@ public class McpGroupTools {
                                      @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                               required = false) String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        // The ceilings REST holds a question to: no validator sees an in-process MCP
+        // call, and the question is fanned out to every member in every phase.
+        String rejection = GroupQuestionLimits.rejectionReason(question, userId);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             // Parity with REST: running a group is the USE act on it (see
             // RestGroupConversation#requireGroupUseAccess).
@@ -542,6 +556,10 @@ public class McpGroupTools {
                                          @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                                   required = false) String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.rejectionReason(question, userId);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             resourceAccessGuard.requireUseAccess(groupId, "group");
         } catch (ForbiddenException e) {
@@ -590,6 +608,10 @@ public class McpGroupTools {
                                        @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
                                        @ToolArg(description = "The follow-up question") String question) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.followUpRejectionReason(question, targetAgentId, null);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             GroupConversation owned = requireConversationOwner(groupConversationId);
             // A follow-up runs a member agent, like a continuation: re-check USE on
@@ -621,6 +643,10 @@ public class McpGroupTools {
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
                                             @ToolArg(description = "The follow-up question for the group") String question) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.rejectionReason(question, null);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         GroupConversation owned;
         try {
             owned = requireConversationOwner(groupConversationId);
