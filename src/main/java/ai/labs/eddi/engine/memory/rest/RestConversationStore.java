@@ -603,10 +603,10 @@ public class RestConversationStore implements IRestConversationStore {
      * conversation in {@link #conversationAdmits}. The version is left to the
      * per-row check.</li>
      * <li><b>Owner</b> (non-admins) — the caller, or no recorded owner (a
-     * pre-v5.1.6 conversation, whose owner comes from its memory). Not pushed when
-     * an agent is named: a reviewer of that agent may list conversations they do
-     * not own (see {@link #mayReview}), and the agent group narrows the query
-     * instead.</li>
+     * pre-v5.1.6 conversation, whose owner comes from its memory). When an agent is
+     * named, pushed only for a caller who does not maintain it: a maintainer may
+     * review conversations they do not own (see {@link #mayReview}), and the agent
+     * group narrows the query instead.</li>
      * <li><b>View state</b> — equality; a descriptor without one never
      * matched.</li>
      * </ul>
@@ -620,6 +620,15 @@ public class RestConversationStore implements IRestConversationStore {
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
                     new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
                     new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
+            if (!seesAllConversations && !conversationAccessGuard.maintainsAgent(agentId)) {
+                // A caller who cannot review this agent lists only their own
+                // conversations, so the query says so. Without it, the first page held
+                // every owner's matches: a search matching only somebody else's
+                // conversation came back empty (rows rejected one by one), while one
+                // matching nobody's fell back to the unfiltered listing — an existence
+                // oracle over other users' ids and conversation ids.
+                restrictions.addAll(ownerScope(false));
+            }
         } else {
             restrictions.addAll(ownerScope(seesAllConversations));
         }
