@@ -55,7 +55,11 @@ import java.util.function.LongSupplier;
  * <ul>
  * <li>At most {@code eddi.user-events.max-connections-per-user} streams per
  * principal and {@code eddi.user-events.max-connections} per node; the next one
- * is refused ({@code 429}).</li>
+ * is refused ({@code 429}). The per-user cap does not apply to the anonymous
+ * bucket: with authorization off every caller of the deployment shares it, so a
+ * per-user cap there would cap the whole deployment; only the node cap bounds
+ * it. Before refusing, the caller's own streams whose client has already gone
+ * are unregistered, so a reconnect is not refused by its own dead tabs.</li>
  * <li>Fan-out runs on one thread behind a queue of
  * {@code eddi.user-events.dispatch-queue-size}; an event that finds it full is
  * dropped and counted.</li>
@@ -78,7 +82,10 @@ public class UserEventHub {
     private static final Logger LOGGER = Logger.getLogger(UserEventHub.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** The bucket every connection shares when authorization is off. */
+    /**
+     * The bucket every connection shares when authorization is off. Exempt from the
+     * per-user cap; the node cap still applies.
+     */
     static final String ANONYMOUS_BUCKET = "anonymous";
 
     /** The first frame of every stream: the connection is live. */
@@ -244,21 +251,32 @@ public class UserEventHub {
     }
 
     /**
-     * Registers a stream and writes its {@code ready} frame.
+     * Registers a stream and writes its {@code ready} frame. The caps are checked,
+     * the caller's dead streams swept and the stream added under one lock, so two
+     * concurrent opens at one below a cap cannot both pass it.
      *
      * @throws Refused
-     *             when the caller or this node already has the most streams allowed
+     *             when the caller (unless anonymous) or this node already has the
+     *             most live streams allowed
      */
     public Connection open(Subscriber subscriber, UserEventSink sink) throws Refused {
         String bucket = bucketOf(subscriber);
         Connection connection = new Connection(subscriber, bucket, sink, clock.getAsLong());
+        boolean perUserCapped = !ANONYMOUS_BUCKET.equals(bucket);
         synchronized (registration) {
+            if (total.get() >= maxConnections || (perUserCapped && connectionCountOfBucket(bucket) >= maxConnectionsPerUser)) {
+                // At a cap: first drop this caller's streams whose client already went
+                // away (a reload, a dropped network) but that no write or heartbeat has
+                // noticed yet, so they do not hold the slots of the reconnect.
+                sweepClosed(bucket);
+            }
             if (total.get() >= maxConnections) {
                 rejected(REJECT_NODE_LIMIT);
                 throw new Refused(REJECT_NODE_LIMIT, "This node has the most event streams it accepts open");
             }
+            // Looked up after the sweep, which removes a bucket it empties.
             Set<Connection> connections = buckets.computeIfAbsent(bucket, b -> new CopyOnWriteArraySet<>());
-            if (connections.size() >= maxConnectionsPerUser) {
+            if (perUserCapped && connections.size() >= maxConnectionsPerUser) {
                 rejected(REJECT_USER_LIMIT);
                 throw new Refused(REJECT_USER_LIMIT, "Too many event streams are open for this user");
             }
@@ -296,8 +314,38 @@ public class UserEventHub {
 
     /** Open streams of one principal on this node. */
     int connectionCount(String principal) {
-        Set<Connection> connections = buckets.get(bucketOf(principal));
+        return connectionCountOfBucket(bucketOf(principal));
+    }
+
+    private int connectionCountOfBucket(String bucket) {
+        Set<Connection> connections = buckets.get(bucket);
         return connections == null ? 0 : connections.size();
+    }
+
+    /**
+     * Unregisters the streams of one bucket whose sink is already closed, or whose
+     * {@link #close} has begun but not yet unregistered it. Called with
+     * {@link #registration} held, and only for the bucket of the caller being
+     * admitted — never a scan of every bucket.
+     */
+    private void sweepClosed(String bucket) {
+        Set<Connection> connections = buckets.get(bucket);
+        if (connections == null) {
+            return;
+        }
+        for (Connection connection : connections) {
+            if (connection.isClosed() || connection.sink.isClosed()) {
+                // Marked closed so fan-out skips it; a close() racing on another thread
+                // then finds it already removed and does not count it twice.
+                connection.closed.set(true);
+                if (connections.remove(connection)) {
+                    total.decrementAndGet();
+                }
+            }
+        }
+        if (connections.isEmpty()) {
+            buckets.remove(bucket, connections);
+        }
     }
 
     private String bucketOf(Subscriber subscriber) {
