@@ -1870,6 +1870,13 @@ set "BRANCH_FROM_ENV="
 if defined EDDI_BRANCH (set "BRANCH_FROM_ENV=1") else (
     if defined CFG_BRANCH (set "EDDI_BRANCH=!CFG_BRANCH!") else (set "EDDI_BRANCH=main")
 )
+rem A value set as `set EDDI_BRANCH=main & eddi update` (unquoted) carries a trailing space:
+rem trim it, or the ref check below rejects it.
+:trim_branch
+if defined EDDI_BRANCH if "!EDDI_BRANCH:~-1!"==" " (
+    set "EDDI_BRANCH=!EDDI_BRANCH:~0,-1!"
+    goto trim_branch
+)
 call :check_ref || exit /b 1
 set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
 
@@ -1955,7 +1962,7 @@ if defined LATEST_TAG (
     rem An install that tracks releases must not slide onto main because one API call
     rem failed: main has no SHA256SUMS, so its compose files, which run with the vault
     rem key and the database credentials, would be unverified. Refuse instead.
-    rem An operator who wants main on purpose says so: set EDDI_BRANCH=main
+    rem An operator who wants main on purpose says so: set "EDDI_BRANCH=main" ^& eddi update
     set "PINNED="
     if /i "!CFG_SOURCE!"=="version" set "PINNED=1"
     if /i "!CFG_SOURCE!"=="latest-release" set "PINNED=1"
@@ -1963,7 +1970,7 @@ if defined LATEST_TAG (
     if defined PINNED (
         echo Could not look up the newest EDDI release, and this install is pinned to release !EDDI_BRANCH!.
         echo Not falling back to main: its compose files are not checksum-verified. Nothing was changed.
-        echo Retry later, or run: set EDDI_BRANCH=main ^& eddi update
+        echo Retry later, or run: set "EDDI_BRANCH=main" ^& eddi update ^& set "EDDI_BRANCH="
         exit /b 1
     )
     set "EDDI_BRANCH=main"
@@ -2072,18 +2079,18 @@ exit /b 1
 
 :update_assets_missing
 echo.
-echo Aborting before restart. The files listed above are bind-mounted by
-echo docker-compose.monitoring.yml but are not on disk and could not be downloaded.
-echo Starting now would leave Grafana unable to mount them, so nothing was replaced
-echo and the running stack was left untouched. Re-run once GitHub is reachable, or
-echo re-run the install script.
+echo Aborting before restart. The files listed above could not be downloaded
+echo ^(compose files and the monitoring files they bind-mount are all required^).
+echo Nothing was replaced or recorded and the running stack was left untouched.
+echo Re-run once GitHub is reachable, or re-run the install script.
 exit /b 1
 
 :update_refused
 echo.
 echo Update refused: a downloaded file failed verification against the release checksums,
-echo or the checksums could not be verified, see above. Nothing was moved into place and
-echo the running stack was left untouched. Retry later; if it persists, report it.
+echo the checksums could not be verified, or a file could not be replaced, see above.
+echo Nothing was replaced ^(files moved before a failure were restored^) and the running
+echo stack was left untouched. Retry later; if it persists, report it.
 exit /b 1
 
 :cmd_uninstall
@@ -2177,17 +2184,11 @@ try {
             $staged += , @($temporary, $target, $rel, $Assets)
         }
         else {
+            # Every item is REQUIRED: keeping an old file while the new ref is recorded
+            # would run the new image with old files. Nothing is replaced or recorded.
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $target -PathType Leaf) {
-                Write-Host "  $rel : could not be downloaded, keeping the existing file"
-            }
-            elseif ($Assets) {
-                Write-Host "  $rel : FAILED, not on disk and could not be downloaded"
-                $missing += $rel
-            }
-            else {
-                Write-Host "  $rel : could not be downloaded, keeping the existing file"
-            }
+            Write-Host "  $rel : FAILED, could not be downloaded"
+            $missing += $rel
         }
     }
     if ($missing.Count -gt 0) { throw "monitoring assets missing" }
@@ -2197,11 +2198,33 @@ try {
     foreach ($s in $staged) {
         if ($s[3] -and (Test-Path -LiteralPath $s[1] -PathType Container)) { Remove-Item -LiteralPath $s[1] -Force }
     }
-    foreach ($s in $staged) {
-        Move-Item -LiteralPath $s[0] -Destination $s[1] -Force
-        Write-Host "  Updated $($s[2])"
+    # Replace with ROLLBACK: each existing file is set aside as <name>.eddi-old before its
+    # replacement is moved in, and every one is put back if any move fails, so the
+    # update is all-or-nothing even when a later Move-Item (locked file, full disk) fails.
+    $moved = @()
+    try {
+        foreach ($s in $staged) {
+            $backup = $null
+            if (Test-Path -LiteralPath $s[1] -PathType Leaf) {
+                $backup = "$($s[1]).eddi-old"
+                Move-Item -LiteralPath $s[1] -Destination $backup -Force
+            }
+            $moved += , @($s[1], $backup)
+            Move-Item -LiteralPath $s[0] -Destination $s[1] -Force
+            Write-Host "  Updated $($s[2])"
+        }
+        foreach ($m in $moved) { if ($m[1]) { Remove-Item -LiteralPath $m[1] -Force -ErrorAction SilentlyContinue } }
+        $staged = @()
     }
-    $staged = @()
+    catch {
+        [Array]::Reverse($moved)
+        foreach ($m in $moved) {
+            if ($m[1] -and (Test-Path -LiteralPath $m[1])) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction SilentlyContinue }
+            elseif (-not $m[1]) { Remove-Item -LiteralPath $m[0] -Force -ErrorAction SilentlyContinue }
+        }
+        Write-Host "  A file could not be replaced; every file already replaced was restored."
+        throw
+    }
 }
 catch {
     $failed = $true
