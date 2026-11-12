@@ -367,6 +367,44 @@ public class RagSourceIngestionService {
         return stateStore.activeRun(sourceKey);
     }
 
+    /**
+     * The ingestion source of this knowledge base that holds a document by this
+     * name, if one does: an upload source with a file of that name (or id), or a
+     * crawling source whose state records the name as a document it has ingested
+     * and not since tombstoned (a crawled document is identified by its canonical
+     * URL).
+     * <p>
+     * What a source ingested is removed through the source — deleting the file, or
+     * excluding the page and re-running — because its state would otherwise still
+     * claim the document and the next run would report it "unchanged" over an empty
+     * store. The document-delete endpoint asks this first, so a name the client
+     * shares with a source's document is refused with a pointer to the right
+     * endpoint rather than answered "deleted" while the source's text stays
+     * retrievable. (That endpoint's own filter could not touch a source's chunks
+     * anyway: they carry {@code sourceName} and {@code sourceKey}, never the
+     * {@code source} key it matches on.)
+     */
+    public Optional<IngestionSource> sourceHoldingDocument(String ragConfigId, RagConfiguration knowledgeBase,
+                                                           String documentName) {
+        if (knowledgeBase == null || knowledgeBase.getSources() == null || documentName == null) {
+            return Optional.empty();
+        }
+        for (IngestionSource source : knowledgeBase.getSources()) {
+            if (source == null) {
+                continue;
+            }
+            String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+            boolean holds = source.isUpload()
+                    ? fileStore.list(sourceKey).stream()
+                            .anyMatch(file -> documentName.equals(file.fileName()) || documentName.equals(file.fileId()))
+                    : stateStore.lookup(sourceKey, documentName).filter(state -> !state.tombstoned()).isPresent();
+            if (holds) {
+                return Optional.of(source);
+            }
+        }
+        return Optional.empty();
+    }
+
     /** How many past fires {@link #scheduleStatus} reports. */
     static final int RECENT_FIRES = 5;
 

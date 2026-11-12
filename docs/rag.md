@@ -219,6 +219,7 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). `kbId` is deprecated — see below |
+| `DELETE` | `/ragstore/rags/{id}/documents?version=N&documentName=...` | Remove a document ingested through `/ingest` (see [Deleting a document](#deleting-a-document)) |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
 > **Documents always go into the knowledge base in the path.** `kbId` no longer selects a store. Up
@@ -276,6 +277,39 @@ is refused with a `400` without one: every document ingested without a name shar
 replacing that would delete all of them. On a vector store that cannot delete by metadata, the
 ingestion still completes and the status response carries a `warning` saying the previous version is
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+#### Deleting a document
+
+```bash
+curl -X DELETE "http://localhost:7070/ragstore/rags/abc123/documents?version=1&documentName=pricing.md"
+```
+
+Removes everything ingested through `/ingest` under that `documentName` in this knowledge base — the
+same chunks `replace=true` supersedes: every version of the name, including chunks written before
+chunks carried an ingestion id, and nothing of another knowledge base sharing the store. It needs
+EDIT on the knowledge base, like ingesting, and it is synchronous.
+
+| Status | Meaning |
+| --- | --- |
+| `200` `{"status": "deleted", ...}` | The document's chunks are gone. A name nothing was ingested under is also `200`: there is nothing left to remove |
+| `200` with `warning` | The vector store cannot delete by metadata, so nothing was removed and the text is still retrievable (`status: "not_deleted"`) |
+| `400` | `documentName` is missing, blank or `unnamed` — every document ingested without a name shares `unnamed`, and deleting that would delete all of them |
+| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement of the same name is still embedding after 30 seconds |
+| `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
+
+**A delete and a replacement of one name never interleave.** Both take the same per-document lock, so
+a delete waits for a replacement in flight and then removes its chunks too, rather than landing
+between the replacement's store and its cleanup. As with replacements, the lock is per instance. An
+ingestion *without* `replace` takes no lock, so one still in flight when the delete answers can store
+its chunks afterwards.
+
+**What a source ingested is removed through the source.** Its chunks carry `sourceName` and a
+`sourceKey`, never the `source` key this endpoint matches on, so a delete could not touch them — and
+answering "deleted" while the source's text stays retrievable would be wrong. The endpoint therefore
+refuses a name a source holds with `409` and the source's id: delete an uploaded file through
+[its endpoint](#file-endpoints), or exclude a crawled page and run the source. The check is by name,
+so a document pushed through `/ingest` under the same name as a source's file cannot be deleted here
+until that file is gone.
 
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
@@ -866,6 +900,9 @@ with `replaceUnsupported` not raised. The other supported stores — `mongodb-at
 `elasticsearch`, `qdrant` — are expected to support it through their langchain4j drivers but are not
 covered by these tests. Where a store does not, the run still succeeds and reports
 `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that backend.
+The same `removeAll(Filter)` serves `replace=true` and
+[deleting a document](#deleting-a-document) on `/ingest`'s documents; where it is missing, both answer
+with a `warning` instead.
 
 ## Evaluating retrieval
 
