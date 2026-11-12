@@ -106,7 +106,7 @@ class GroupTieBreakPausesTest {
         });
         var callers = new CallerIdentityContext(null, null);
         coordinator = new GroupHitlCoordinator(groupStore, conversationStore, mock(IScheduleStore.class), audit,
-                new GroupSigningGuard(null, null, null, "default"), controls, executor, callers, service,
+                new GroupSigningGuard(null, null, "default"), controls, executor, callers, service,
                 meters.counter("pause"), meters.counter("resume"), meters.counter("failure"));
         var engine = new PhaseExecutionEngine(memberTurnExecutor, mock(GroupContextBuilder.class), executor, callers);
         pauses = new GroupTieBreakPauses(groupStore, conversationStore, audit, controls, executor, callers, service, coordinator, engine,

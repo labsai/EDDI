@@ -88,7 +88,7 @@ out. Longer, each area applies its policy:
 | Area | Default | Alternative |
 |---|---|---|
 | Turns | run with node-local ordering only, **unfenced**: steps appended concurrently on different nodes merge, but the conversation properties a turn writes are last-writer-wins, so concurrent turns can overwrite each other's properties and miss each other's context | `degraded.turns=reject`: 409 + `Retry-After` |
-| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on); nothing else uses nonces | `degraded.nonces=local` |
+| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide. Nothing registers signed-envelope nonces any more, and inter-agent signing in group discussions does not use NATS, so an outage leaves it unaffected; the policy still governs the webhook de-duplication below | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |

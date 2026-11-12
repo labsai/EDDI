@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -80,8 +79,6 @@ class GroupConversationServiceTest {
     private AgentSigningService agentSigningService;
     @Mock
     private IAgentStore agentStore;
-    @Mock
-    private NonceCacheService nonceCacheService;
 
     private GroupConversationService service;
     /** Real registry (not a mock) so the new operation counters can be asserted. */
@@ -98,7 +95,7 @@ class GroupConversationServiceTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                mock(IScheduleStore.class), nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                mock(IScheduleStore.class), null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================

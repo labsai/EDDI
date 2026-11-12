@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -86,8 +85,6 @@ class GroupConversationServiceHitlCoverage2Test {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
@@ -106,7 +103,7 @@ class GroupConversationServiceHitlCoverage2Test {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================

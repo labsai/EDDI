@@ -318,6 +318,32 @@ public class MemberTurnExecutor {
                     Instant.now(), "Agent unavailable: " + e.getMessage(), targetAgentId);
         }
 
+        // Snapshot instead of handing out the live list: the groupTranscript context
+        // is serialised on the member conversation's own thread while the
+        // orchestrator keeps appending entries. Collections.synchronizedList makes
+        // add() safe but NOT iteration — publishing it by reference produced
+        // intermittent ConcurrentModificationExceptions that failed a member turn at
+        // random.
+        List<TranscriptEntry> transcriptSnapshot;
+        synchronized (gc.getTranscript()) {
+            transcriptSnapshot = List.copyOf(gc.getTranscript());
+        }
+        // For a member that requires peer verification, every agent entry that does
+        // not verify is replaced by a [withheld] placeholder (see
+        // GroupSigningGuard.viewFor). Its rendered prompt went through the same filter
+        // in GroupContextBuilder.buildPhaseInput.
+        var view = signingGuard.viewFor(member.agentId(), gc, transcriptSnapshot);
+        if (view.requirement() == GroupSigningGuard.Requirement.UNKNOWN) {
+            // Neither a fully withheld transcript (wrong if the member never asked
+            // for verification) nor an unverified one (wrong if it did) is a fair
+            // basis for a reply that stays in the transcript. Checked before the member
+            // conversation is started: a skipped turn must not use up the first turn,
+            // which is the one that is given the discussion's attachments.
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), "Its peer-verification setting could not be read", targetAgentId);
+        }
+        transcriptSnapshot = view.transcript();
+
         // Get or create private conversation
         String convKey = conversationKey != null ? conversationKey : member.agentId();
         String privateConvId = gc.getMemberConversationIds().get(convKey);
@@ -343,15 +369,6 @@ public class MemberTurnExecutor {
         InputData inputData = new InputData();
         inputData.setInput(input);
         Map<String, Context> context = new LinkedHashMap<>();
-        // Snapshot instead of handing out the live list: this context is serialised
-        // on the member conversation's own thread while the orchestrator keeps
-        // appending entries. Collections.synchronizedList makes add() safe but NOT
-        // iteration — publishing it by reference produced intermittent
-        // ConcurrentModificationExceptions that failed a member turn at random.
-        List<TranscriptEntry> transcriptSnapshot;
-        synchronized (gc.getTranscript()) {
-            transcriptSnapshot = List.copyOf(gc.getTranscript());
-        }
         // Scoped like the rendered prompt: this key reaches every template in the
         // member's workflow, so it may not show what the phase's contextScope hides.
         context.put("groupTranscript", new Context(Context.ContextType.object,
@@ -374,10 +391,6 @@ public class MemberTurnExecutor {
         if (firstMemberTurn) {
             groupConversationService.grantAndInjectAttachments(gc, privateConvId, context);
         }
-
-        // Wave 6: Peer verification — if the receiving agent requires it,
-        // verify all signed entries from prior speakers before sending context
-        signingGuard.verifyPriorEntriesIfRequired(member.agentId(), gc);
 
         inputData.setContext(context);
 
@@ -520,16 +533,12 @@ public class MemberTurnExecutor {
                     return abstentionEntry(member, phaseIdx, phase, targetAgentId);
                 }
 
-                // Wave 6: Sign inter-agent messages with full envelope if configured
-                GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
-                        member.agentId(), gc.getGroupId(), response, phase.name());
-
-                var entry = new TranscriptEntry(
+                // Signed if the member's config says so; the signature binds the entry
+                // to this conversation and phase.
+                return signingGuard.sign(gc, new TranscriptEntry(
                         member.agentId(), member.displayName(), response,
                         phaseIdx, phase.name(), entryType, Instant.now(),
-                        null, targetAgentId, signing.signature(),
-                        signing.nonce(), signing.timestampMs(), signing.keyVersion());
-                return entry;
+                        null, targetAgentId));
 
             } catch (GroupConversationService.MemberTurnCancelledException e) {
                 // Cooperative cancellation is not a member failure: never retried, never
@@ -773,12 +782,12 @@ public class MemberTurnExecutor {
 
         // Signed exactly like the normal path above: this is a real member
         // contribution with the same role in the transcript, and peers read it
-        // through the same verifyPriorEntriesIfRequired. Returning it unsigned meant
-        // a signing-enabled agent silently produced an unverifiable entry whenever
-        // its tool pause was auto-rejected — the one branch where an entry's
-        // provenance matters most, since its content was shaped by a rejection the
-        // agent did not choose. signOutgoingMessage yields UNSIGNED when signing is
-        // off, so this is a no-op for agents that never sign.
+        // through the same GroupSigningGuard.visibleTo. Returned unsigned, a peer
+        // that requires verification would withhold it whenever the member's tool
+        // pause was auto-rejected — the one branch where an entry's provenance
+        // matters most, since its content was shaped by a rejection the agent did
+        // not choose. sign() returns the entry unchanged when signing is off, so
+        // this is a no-op for agents that never sign.
         // I4: same abstention rule as the normal path. A member whose gated tool call
         // was auto-rejected can legitimately conclude it has nothing to add; without
         // this the identical reply becomes a real contribution on one path and an
@@ -787,13 +796,8 @@ public class MemberTurnExecutor {
             return abstentionEntry(member, phaseIdx, phase, targetAgentId);
         }
 
-        GroupSigningGuard.SigningResult signing = signingGuard.signOutgoingMessage(
-                member.agentId(), gc.getGroupId(), response, phase.name());
-
-        return new TranscriptEntry(member.agentId(), member.displayName(), response,
-                phaseIdx, phase.name(), entryType, Instant.now(),
-                null, targetAgentId, signing.signature(),
-                signing.nonce(), signing.timestampMs(), signing.keyVersion());
+        return signingGuard.sign(gc, new TranscriptEntry(member.agentId(), member.displayName(), response,
+                phaseIdx, phase.name(), entryType, Instant.now(), null, targetAgentId));
     }
 
     /**
@@ -954,6 +958,15 @@ public class MemberTurnExecutor {
         }
         return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED, Instant.now(),
                 prefix + ": " + cause.getMessage(), targetAgentId);
+    }
+
+    /**
+     * {@code entry}, signed for its speaker exactly as a member turn's own entry
+     * is: for the engine's re-recordings of a reply under another type (a
+     * {@code DISSENT}, a {@code BID}), since the signature covers the type.
+     */
+    public TranscriptEntry sign(GroupConversation gc, TranscriptEntry entry) {
+        return signingGuard.sign(gc, entry);
     }
 
     public TranscriptEntry errorEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String message) {

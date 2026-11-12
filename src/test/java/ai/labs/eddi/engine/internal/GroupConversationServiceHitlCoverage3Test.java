@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -68,9 +67,8 @@ import static org.mockito.Mockito.*;
  * {@code executeGroupMemberTurn} (group-of-groups nesting),
  * {@code executeTaskPhase} routing, {@code resolveTaskAssignment} direct-id,
  * {@code buildTaskExecutionInput}, verification parsing,
- * {@code resetStrandedInProgressTasks}, {@code handleTaskFailure},
- * {@code verifyPriorEntriesIfRequired} guards, list/read entry points, and
- * {@code startAndDiscussAsync} guards.
+ * {@code resetStrandedInProgressTasks}, {@code handleTaskFailure}, list/read
+ * entry points, and {@code startAndDiscussAsync} guards.
  */
 class GroupConversationServiceHitlCoverage3Test {
 
@@ -90,8 +88,6 @@ class GroupConversationServiceHitlCoverage3Test {
     private AgentSigningService agentSigningService;
     @Mock
     private IAgentStore agentStore;
-    @Mock
-    private NonceCacheService nonceCacheService;
     @Mock
     private IScheduleStore scheduleStore;
 
@@ -122,7 +118,7 @@ class GroupConversationServiceHitlCoverage3Test {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, null, new CallerIdentityContext(null, null), DEFAULT_TENANT, MAX_DEPTH);
         taskForceEngine = new TaskForceEngine(null, templatingEngine, jsonSerialization, null,
                 new CallerIdentityContext(null, null), new ConcurrentHashMap<>(), 180, 5);
     }
@@ -965,31 +961,6 @@ class GroupConversationServiceHitlCoverage3Test {
         assertThrows(GroupDiscussionException.class,
                 () -> invoke(executeAgentTurnMethod(), member(), g, "input", failProtocol, 0,
                         phase(PhaseType.OPINION), null, null));
-    }
-
-    // =================================================================
-    // verifyPriorEntriesIfRequired() guards (private, via reflection)
-    // =================================================================
-
-    private Method verifyPriorMethod() throws NoSuchMethodException {
-        return method("verifyPriorEntriesIfRequired", String.class, GroupConversation.class);
-    }
-
-    @Test
-    @DisplayName("verifyPriorEntriesIfRequired: resId null → early return (no read of config)")
-    void verifyPriorResIdNull() throws Exception {
-        var g = gc("gc-verify-prior-null");
-        doReturn(null).when(agentStore).getCurrentResourceId(AGENT_A);
-        assertDoesNotThrow(() -> invoke(verifyPriorMethod(), AGENT_A, g));
-        verify(agentStore, never()).read(eq(AGENT_A), anyInt());
-    }
-
-    @Test
-    @DisplayName("verifyPriorEntriesIfRequired: getCurrentResourceId throws → swallowed")
-    void verifyPriorStoreThrows() throws Exception {
-        var g = gc("gc-verify-prior-throw");
-        doThrow(new RuntimeException("store down")).when(agentStore).getCurrentResourceId(AGENT_A);
-        assertDoesNotThrow(() -> invoke(verifyPriorMethod(), AGENT_A, g));
     }
 
     // =================================================================

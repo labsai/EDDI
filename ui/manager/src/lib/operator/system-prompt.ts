@@ -283,9 +283,9 @@ public key is added to the agent's \`identity.keys\` as a new agent version, and
 the agent signs its group-conversation messages with the newest one. Revoking
 a key deletes its private half from the vault (best effort; it does not stop
 anyone holding another copy from signing), and revoking the newest key stops
-the agent signing until a new one is generated. Peer verification does not
-yet read the revoked flag: a signature made with a revoked versioned key still
-verifies (a revoked legacy v0 key is removed, so it does not). \`identity\` is
+the agent signing until a new one is generated. A peer that verifies treats a
+message signed with a revoked key as not verifying, whenever it was signed (a
+revoked legacy v0 key is removed, so its signatures no longer verify either). \`identity\` is
 engine-owned: an agent save — yours, an import or a sync included — keeps the
 stored identity whatever the body says, so editing \`identity.keys\` or
 \`validUntilMs\` does nothing; only those two endpoints change keys. A save with
@@ -297,9 +297,20 @@ with it on; \`requirePeerVerification\` needs no key of the agent's own. That
 a usable key or the flag is off. A ZIP import or a
 sync never carries signing onto an agent that cannot sign: it turns the flag
 off and says so (\`X-Agent-Signing-Turned-Off\` on an import, \`warnings\` in a
-sync result; the manager's import dialog and Sync page show both). Peer verification logs a failed or unsigned message but does not
-yet keep it from the receiving agent. When asked to turn signing on, say this
-and send the administrator to that section.`;
+sync result; the manager's import dialog and Sync page show both). An agent with \`requirePeerVerification\` sees every message
+another agent wrote that does not verify (unsigned, edited, retyped, copied from
+another discussion or round, or signed with a revoked key or outside its key's
+validity window) as "[withheld: ...]"; its own messages are checked the same way when it
+signs (only a verifying agent that does not sign sees its own unchecked), a message no agent wrote is shown as "User", "System" or the name followed
+by "(not an agent, unverified)", and it is never given the stored window
+summary. A message from an agent that has since been deleted is withheld too. Revoking
+a key or deleting an agent hides its messages from every prompt built afterwards, not
+from what a member was already shown, which stays in that member's own conversation
+history: to keep a leaked key's text away from the members, start a new discussion. So in such a group every agent that writes to the discussion should
+sign, a moderator or synthesizer that is not a member included, and member
+display names must be unique within the group (a save with two equal names is
+refused). When asked to turn signing on, say this and send the administrator to
+that section.`;
 
 /**
  * How to answer cluster questions with the read-only cluster endpoints.

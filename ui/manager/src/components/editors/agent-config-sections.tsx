@@ -339,7 +339,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
           description={t(
             "agentDetail.revokeSigningKeyDesc",
-            "Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it, so peers stop trusting messages signed with it. A revoked versioned key stays listed, and peer verification does not refuse it yet: a message signed with it, by anyone holding a copy of its private key, can still verify. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
+            "Peers stop trusting every message signed with this key, whenever it was signed. Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it; a revoked versioned key stays listed, marked revoked. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
           )}
           confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
           cancelLabel={t("common.cancel", "Cancel")}
@@ -377,7 +377,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input

@@ -885,6 +885,8 @@ export interface TranscriptEntry {
   signatureTimestampMs?: number | null;
   /** Signing key version. `0` means the pre-versioning legacy `publicKey`. */
   signatureKeyVersion?: number | null;
+  /** Discussion round the signature binds the entry to; null on unsigned entries. */
+  signatureRound?: number | null;
 }
 
 /**

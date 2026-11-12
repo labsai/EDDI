@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -89,8 +88,6 @@ class GroupConversationServiceTeamBudgetTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
-    private NonceCacheService nonceCacheService;
-    @Mock
     private IScheduleStore scheduleStore;
     @Mock
     private TenantQuotaService tenant;
@@ -103,7 +100,7 @@ class GroupConversationServiceTeamBudgetTest {
         MockitoAnnotations.openMocks(this);
         var registry = new SimpleMeterRegistry();
         service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine, jsonSerialization,
-                registry, agentSigningService, agentStore, scheduleStore, nonceCacheService, null, new CallerIdentityContext(null, null), "default",
+                registry, agentSigningService, agentStore, scheduleStore, null, new CallerIdentityContext(null, null), "default",
                 3);
         when(tenant.getDefaultTenantId()).thenReturn("default");
         when(tenant.remainingCostUsd(anyString())).thenReturn(OptionalDouble.empty());
