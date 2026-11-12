@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import java.util.function.BiConsumer;
 import java.util.TreeSet;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.Optional;
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -203,6 +205,49 @@ class HealthRollupServiceTest {
         verify(dirty, never()).mark(eq("agent-2"), any());
         verify(dirty).setSelfHealWatermark(half);
         verify(dirty, never()).setSelfHealWatermark(end);
+    }
+
+    @Test
+    @DisplayName("more pairs than one scan holds, all written at the same instant: every one is marked, and a second pass marks none again")
+    void selfHealNeverSkipsPastATruncatedScan() {
+        Instant watermark = NOW.minusSeconds(3600);
+        Instant written = watermark; // every row at one instant: no window narrower than the tie
+        int total = HealthRollupService.SELF_HEAL_MAX + 500;
+        Instant[] stored = {watermark};
+        when(dirty.selfHealWatermark()).thenAnswer(inv -> Optional.of(stored[0]));
+        doAnswer(inv -> {
+            stored[0] = inv.getArgument(0);
+            return null;
+        }).when(dirty).setSelfHealWatermark(any());
+        when(dirty.oldest(anyInt())).thenReturn(List.of());
+        doAnswer(inv -> {
+            Instant since = inv.getArgument(0);
+            Instant until = inv.getArgument(1);
+            int limit = inv.getArgument(2);
+            BiConsumer<String, LocalDate> consumer = inv.getArgument(3);
+            if (!written.isBefore(since) && written.isBefore(until)) {
+                for (int i = 0; i < Math.min(limit, total); i++) {
+                    consumer.accept("agent-" + i, TODAY);
+                }
+            }
+            return null;
+        }).when(turns).forEachAgentDayUpdatedSince(any(), any(), anyInt(), any());
+        Set<String> marked = new HashSet<>();
+        int[] marks = {0};
+        doAnswer(inv -> {
+            marked.add(inv.getArgument(0));
+            marks[0]++;
+            return null;
+        }).when(dirty).mark(any(), any());
+
+        service.run();
+        assertEquals(total, marked.size(), "every agent day of the window is marked, none skipped");
+        assertEquals(total, marks[0], "each pair marked once");
+        Instant afterFirst = stored[0];
+        assertTrue(afterFirst.isAfter(written), "the watermark passed the rows it marked");
+
+        service.run();
+        assertEquals(total, marks[0], "the second pass marks nothing again");
     }
 
     @Test
