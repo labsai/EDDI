@@ -126,6 +126,49 @@ class SecretScrubberRedactorParityTest {
         }
     }
 
+    /**
+     * Reads {@code /parameters/<field>} of {@code json} after export and after the
+     * read redaction.
+     */
+    private List<String> exportedAndRead(String field, String value) throws Exception {
+        ObjectNode document = mapper.createObjectNode();
+        document.putObject("parameters").put(field, value);
+        String json = mapper.writeValueAsString(document);
+        return List.of(mapper.readTree(scrubber.scrubJson(json)).at("/parameters/" + field).asText(),
+                mapper.readTree(ConfigSecretRedactor.redactJson(json, Set.of())).at("/parameters/" + field).asText());
+    }
+
+    @Test
+    @DisplayName("a reference under a newly recognised credential name stays legible on read and on export")
+    void referencesStayLegible() throws Exception {
+        for (String field : List.of("nonAzureApiKey", "connectionString", "secretAccessKey", "vendorApiKey")) {
+            for (String reference : List.of("${vars.proxyKey}", "${vars:proxyKey}", "{properties.proxyKey}", "Bearer ${vars.proxyKey}")) {
+                assertEquals(List.of(reference, reference), exportedAndRead(field, reference), field + " = " + reference);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a literal beside a reference is masked on read and on export alike")
+    void mixedLiteralAndReferenceIsMasked() throws Exception {
+        for (String mixed : List.of("my-litellm-master-key ${vars.proxyKey}", "prefix-{properties.token}")) {
+            List<String> both = exportedAndRead("nonAzureApiKey", mixed);
+            assertEquals(SecretScrubber.REDACTED, both.get(0), mixed);
+            assertEquals(ConfigSecretRedactor.REDACTED, both.get(1), mixed);
+        }
+    }
+
+    @Test
+    @DisplayName("a query-map credential parameter holding a template stays legible on both paths")
+    void queryParameterReference() throws Exception {
+        ObjectNode document = mapper.createObjectNode();
+        document.putObject("queryParams").put("sig", "{properties.sig}");
+        String json = mapper.writeValueAsString(document);
+
+        assertEquals("{properties.sig}", mapper.readTree(scrubber.scrubJson(json)).at("/queryParams/sig").asText());
+        assertEquals("{properties.sig}", mapper.readTree(ConfigSecretRedactor.redactJson(json, Set.of())).at("/queryParams/sig").asText());
+    }
+
     @Test
     @DisplayName("a query-parameter name is not a credential outside a query map")
     void queryNamesStayLocal() throws Exception {

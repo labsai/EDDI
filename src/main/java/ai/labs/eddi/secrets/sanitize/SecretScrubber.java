@@ -739,9 +739,19 @@ public class SecretScrubber {
             }
         }
 
-        // Check 1: Known secret field names
+        // Check 1: Known secret field names — for a literal. A value made only of
+        // references and templates (${vars:x}, ${vars.x}, {properties.key},
+        // ${context:…}), optionally with a scheme word ("Bearer ${vars.t}"), is a
+        // pointer: the read redaction keeps it (ConfigSecretRedactor.isLiteral) and so
+        // does the export now, or the export → import round trip replaced a configured
+        // reference with a placeholder. Whatever sits beside a reference is still
+        // judged — "sk-… ${vars.x}" or "prefix {properties.t}" is a literal and is
+        // masked whole, exactly as the read masks it. Vault references were decided
+        // above, by the stricter scaffolding rule. A pointer is returned as it is, so
+        // the free-text shape scan that follows a null cannot take "Bearer ${vars.t}"
+        // for a bearer token.
         if (isSecretFieldName(fieldName, parentFieldName)) {
-            return REDACTED;
+            return ConfigSecretRedactor.isLiteral(textValue) ? REDACTED : textValue;
         }
 
         // Check 2: a credential embedded in a URL. Neither of the other checks can
