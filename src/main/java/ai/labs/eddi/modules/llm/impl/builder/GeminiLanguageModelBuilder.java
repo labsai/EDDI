@@ -16,6 +16,7 @@ import dev.langchain4j.model.googleai.GeminiHarmCategory;
 import dev.langchain4j.model.googleai.GeminiMediaResolutionLevel;
 import dev.langchain4j.model.googleai.GeminiThinkingConfig;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatRequestParameters;
 import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,13 +30,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanOrNull;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.longValue;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.objectMap;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringList;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringMap;
@@ -140,39 +139,30 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     /**
-     * The settings added on top of the original handful, shared by the synchronous
-     * and the streaming client (both extend the same base builder).
-     * <p>
+     * Every setting the builders read; {@code null} leaves the provider default.
+     * The request-level ones travel as one
+     * {@link GoogleAiGeminiChatRequestParameters}, handed to the synchronous and
+     * the streaming client alike; the rest are options only the client builders
+     * take.
+     */
+    private record Settings(String apiKey, String baseUrl, Long timeoutMs, Boolean logRequestsAndResponses,
+            Boolean allowCodeExecution, boolean returnThinking, boolean sendThinking, Integer seed, GeminiThinkingConfig thinkingConfig,
+            Boolean allowGoogleSearch, Boolean allowGoogleMaps, Boolean allowUrlContext,
+            Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safetySettings, GeminiMediaResolutionLevel mediaResolution,
+            Map<String, String> customHeaders, GoogleAiGeminiChatRequestParameters requestParameters) {
+    }
+
+    /**
      * {@code includeThoughts} is deliberately not offered: thought parts are what
      * the signature note above warns about, so
      * {@code thinkingLevel}/{@code thinkingBudget} steer how hard the model thinks
      * without ever asking for the thoughts back.
      */
-    private static void applyExtras(GoogleAiGeminiChatModel.GoogleAiGeminiChatModelBuilder b, Map<String, String> p,
-                                    OutboundTargetPolicy targetPolicy) {
+    private static Settings read(Map<String, String> p, OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(p, KEY_BASE_URL);
         if (baseUrl != null) {
             targetPolicy.validateUrl(baseUrl);
-            b.baseUrl(baseUrl);
         }
-        Double topP = doubleValue(p, KEY_TOP_P);
-        if (topP != null)
-            b.topP(topP);
-        Integer topK = intValue(p, KEY_TOP_K);
-        if (topK != null)
-            b.topK(topK);
-        Integer seed = intValue(p, KEY_SEED);
-        if (seed != null)
-            b.seed(seed);
-        Double frequencyPenalty = doubleValue(p, KEY_FREQUENCY_PENALTY);
-        if (frequencyPenalty != null)
-            b.frequencyPenalty(frequencyPenalty);
-        Double presencePenalty = doubleValue(p, KEY_PRESENCE_PENALTY);
-        if (presencePenalty != null)
-            b.presencePenalty(presencePenalty);
-        List<String> stop = stringList(p, KEY_STOP_SEQUENCES);
-        if (stop != null)
-            b.stopSequences(stop);
 
         String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
         Integer budget = intValue(p, KEY_THINKING_BUDGET);
@@ -180,120 +170,39 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
             LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");
             budget = null;
         }
+        GeminiThinkingConfig thinkingConfig = null;
         if (level != null || budget != null) {
             var thinking = GeminiThinkingConfig.builder();
             if (level != null)
                 thinking.thinkingLevel(level);
             if (budget != null)
                 thinking.thinkingBudget(budget);
-            b.thinkingConfig(thinking.build());
+            thinkingConfig = thinking.build();
         }
 
-        Boolean search = booleanOrNull(p, KEY_ALLOW_GOOGLE_SEARCH);
-        if (search != null)
-            b.allowGoogleSearch(search);
-        Boolean maps = booleanOrNull(p, KEY_ALLOW_GOOGLE_MAPS);
-        if (maps != null)
-            b.allowGoogleMaps(maps);
-        Boolean urlContext = booleanOrNull(p, KEY_ALLOW_URL_CONTEXT);
-        if (urlContext != null)
-            b.allowUrlContext(urlContext);
-
-        Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safety = safetySettings(p);
-        if (safety != null)
-            b.safetySettings(safety);
-
-        String mediaResolution = stringValue(p, KEY_MEDIA_RESOLUTION);
-        if (mediaResolution != null) {
-            GeminiMediaResolutionLevel resolved = enumConstant(GeminiMediaResolutionLevel.class, "MEDIA_RESOLUTION_",
-                    mediaResolution);
-            if (resolved != null) {
-                b.mediaResolution(resolved);
-            } else {
+        GeminiMediaResolutionLevel mediaResolution = null;
+        String mediaResolutionName = stringValue(p, KEY_MEDIA_RESOLUTION);
+        if (mediaResolutionName != null) {
+            mediaResolution = enumConstant(GeminiMediaResolutionLevel.class, "MEDIA_RESOLUTION_", mediaResolutionName);
+            if (mediaResolution == null) {
                 LOGGER.warnf("Gemini mediaResolution must be one of %s - ignoring it.",
                         Arrays.toString(GeminiMediaResolutionLevel.values()));
             }
         }
-        String cached = stringValue(p, KEY_CACHED_CONTENT);
-        if (cached != null)
-            b.cachedContentName(cached);
-        Map<String, String> headers = stringMap(p, KEY_CUSTOM_HEADERS);
-        if (headers != null)
-            b.customHeaders(headers);
-    }
 
-    private static void applyExtras(GoogleAiGeminiStreamingChatModel.GoogleAiGeminiStreamingChatModelBuilder b,
-                                    Map<String, String> p, OutboundTargetPolicy targetPolicy) {
-        String baseUrl = stringValue(p, KEY_BASE_URL);
-        if (baseUrl != null) {
-            targetPolicy.validateUrl(baseUrl);
-            b.baseUrl(baseUrl);
-        }
-        Double topP = doubleValue(p, KEY_TOP_P);
-        if (topP != null)
-            b.topP(topP);
-        Integer topK = intValue(p, KEY_TOP_K);
-        if (topK != null)
-            b.topK(topK);
-        Integer seed = intValue(p, KEY_SEED);
-        if (seed != null)
-            b.seed(seed);
-        Double frequencyPenalty = doubleValue(p, KEY_FREQUENCY_PENALTY);
-        if (frequencyPenalty != null)
-            b.frequencyPenalty(frequencyPenalty);
-        Double presencePenalty = doubleValue(p, KEY_PRESENCE_PENALTY);
-        if (presencePenalty != null)
-            b.presencePenalty(presencePenalty);
-        List<String> stop = stringList(p, KEY_STOP_SEQUENCES);
-        if (stop != null)
-            b.stopSequences(stop);
+        var requestParameters = GoogleAiGeminiChatRequestParameters.builder()
+                .modelName(isNullOrEmpty(p.get(KEY_MODEL_NAME)) ? null : p.get(KEY_MODEL_NAME)).temperature(doubleValue(p, KEY_TEMPERATURE))
+                .maxOutputTokens(intValue(p, KEY_MAX_OUTPUT_TOKENS)).topP(doubleValue(p, KEY_TOP_P)).topK(intValue(p, KEY_TOP_K))
+                .frequencyPenalty(doubleValue(p, KEY_FREQUENCY_PENALTY)).presencePenalty(doubleValue(p, KEY_PRESENCE_PENALTY))
+                .stopSequences(stringList(p, KEY_STOP_SEQUENCES)).cachedContentName(stringValue(p, KEY_CACHED_CONTENT)).build();
 
-        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
-        Integer budget = intValue(p, KEY_THINKING_BUDGET);
-        if (level != null && budget != null) {
-            LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");
-            budget = null;
-        }
-        if (level != null || budget != null) {
-            var thinking = GeminiThinkingConfig.builder();
-            if (level != null)
-                thinking.thinkingLevel(level);
-            if (budget != null)
-                thinking.thinkingBudget(budget);
-            b.thinkingConfig(thinking.build());
-        }
-
-        Boolean search = booleanOrNull(p, KEY_ALLOW_GOOGLE_SEARCH);
-        if (search != null)
-            b.allowGoogleSearch(search);
-        Boolean maps = booleanOrNull(p, KEY_ALLOW_GOOGLE_MAPS);
-        if (maps != null)
-            b.allowGoogleMaps(maps);
-        Boolean urlContext = booleanOrNull(p, KEY_ALLOW_URL_CONTEXT);
-        if (urlContext != null)
-            b.allowUrlContext(urlContext);
-
-        Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safety = safetySettings(p);
-        if (safety != null)
-            b.safetySettings(safety);
-
-        String mediaResolution = stringValue(p, KEY_MEDIA_RESOLUTION);
-        if (mediaResolution != null) {
-            GeminiMediaResolutionLevel resolved = enumConstant(GeminiMediaResolutionLevel.class, "MEDIA_RESOLUTION_",
-                    mediaResolution);
-            if (resolved != null) {
-                b.mediaResolution(resolved);
-            } else {
-                LOGGER.warnf("Gemini mediaResolution must be one of %s - ignoring it.",
-                        Arrays.toString(GeminiMediaResolutionLevel.values()));
-            }
-        }
-        String cached = stringValue(p, KEY_CACHED_CONTENT);
-        if (cached != null)
-            b.cachedContentName(cached);
-        Map<String, String> headers = stringMap(p, KEY_CUSTOM_HEADERS);
-        if (headers != null)
-            b.customHeaders(headers);
+        return new Settings(isNullOrEmpty(p.get(KEY_API_KEY)) ? null : p.get(KEY_API_KEY), baseUrl, longValue(p, KEY_TIMEOUT),
+                isNullOrEmpty(p.get(KEY_LOG_REQUESTS_AND_RESPONSES)) ? null : Boolean.parseBoolean(p.get(KEY_LOG_REQUESTS_AND_RESPONSES)),
+                isNullOrEmpty(p.get(KEY_ALLOW_CODE_EXECUTION)) ? null : Boolean.parseBoolean(p.get(KEY_ALLOW_CODE_EXECUTION)),
+                booleanValue(p, KEY_RETURN_THINKING, THINKING_DEFAULT), booleanValue(p, KEY_SEND_THINKING, THINKING_DEFAULT),
+                intValue(p, KEY_SEED), thinkingConfig, booleanOrNull(p, KEY_ALLOW_GOOGLE_SEARCH), booleanOrNull(p, KEY_ALLOW_GOOGLE_MAPS),
+                booleanOrNull(p, KEY_ALLOW_URL_CONTEXT), safetySettings(p), mediaResolution, stringMap(p, KEY_CUSTOM_HEADERS),
+                requestParameters);
     }
 
     /**
@@ -351,31 +260,41 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * Production goes through {@link #build(Map)}.
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        var builder = GoogleAiGeminiChatModel.builder().httpClientBuilder(httpClientBuilder);
-
-        if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
-            builder.apiKey(parameters.get(KEY_API_KEY));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
-            builder.modelName(parameters.get(KEY_MODEL_NAME));
-        }
-        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-        applyInt(parameters, KEY_MAX_OUTPUT_TOKENS, builder::maxOutputTokens);
-        if (!isNullOrEmpty(parameters.get(KEY_ALLOW_CODE_EXECUTION))) {
-            builder.allowCodeExecution(Boolean.parseBoolean(parameters.get(KEY_ALLOW_CODE_EXECUTION)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
-            builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
-        }
-        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-        builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
-        builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
-        applyExtras(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        var b = GoogleAiGeminiChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(s.requestParameters());
+        if (s.apiKey() != null)
+            b.apiKey(s.apiKey());
+        if (s.baseUrl() != null)
+            b.baseUrl(s.baseUrl());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.logRequestsAndResponses() != null)
+            b.logRequestsAndResponses(s.logRequestsAndResponses());
+        if (s.allowCodeExecution() != null)
+            b.allowCodeExecution(s.allowCodeExecution());
+        b.returnThinking(s.returnThinking());
+        b.sendThinking(s.sendThinking());
+        if (s.seed() != null)
+            b.seed(s.seed());
+        if (s.thinkingConfig() != null)
+            b.thinkingConfig(s.thinkingConfig());
+        if (s.allowGoogleSearch() != null)
+            b.allowGoogleSearch(s.allowGoogleSearch());
+        if (s.allowGoogleMaps() != null)
+            b.allowGoogleMaps(s.allowGoogleMaps());
+        if (s.allowUrlContext() != null)
+            b.allowUrlContext(s.allowUrlContext());
+        if (s.safetySettings() != null)
+            b.safetySettings(s.safetySettings());
+        if (s.mediaResolution() != null)
+            b.mediaResolution(s.mediaResolution());
+        if (s.customHeaders() != null)
+            b.customHeaders(s.customHeaders());
 
         // executeWithRetry is the single retry owner; library retries multiply it.
-        builder.maxRetries(NO_LIBRARY_RETRIES);
+        b.maxRetries(NO_LIBRARY_RETRIES);
 
-        return builder.build();
+        return b.build();
     }
 
     @Override
@@ -385,27 +304,37 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
     StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        var builder = GoogleAiGeminiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
-
-        if (!isNullOrEmpty(parameters.get(KEY_API_KEY))) {
-            builder.apiKey(parameters.get(KEY_API_KEY));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
-            builder.modelName(parameters.get(KEY_MODEL_NAME));
-        }
-        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-        applyInt(parameters, KEY_MAX_OUTPUT_TOKENS, builder::maxOutputTokens);
-        if (!isNullOrEmpty(parameters.get(KEY_ALLOW_CODE_EXECUTION))) {
-            builder.allowCodeExecution(Boolean.parseBoolean(parameters.get(KEY_ALLOW_CODE_EXECUTION)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES))) {
-            builder.logRequestsAndResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS_AND_RESPONSES)));
-        }
-        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-        builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
-        builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
-        applyExtras(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-
-        return builder.build();
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        var b = GoogleAiGeminiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder)
+                .defaultRequestParameters(s.requestParameters());
+        if (s.apiKey() != null)
+            b.apiKey(s.apiKey());
+        if (s.baseUrl() != null)
+            b.baseUrl(s.baseUrl());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.logRequestsAndResponses() != null)
+            b.logRequestsAndResponses(s.logRequestsAndResponses());
+        if (s.allowCodeExecution() != null)
+            b.allowCodeExecution(s.allowCodeExecution());
+        b.returnThinking(s.returnThinking());
+        b.sendThinking(s.sendThinking());
+        if (s.seed() != null)
+            b.seed(s.seed());
+        if (s.thinkingConfig() != null)
+            b.thinkingConfig(s.thinkingConfig());
+        if (s.allowGoogleSearch() != null)
+            b.allowGoogleSearch(s.allowGoogleSearch());
+        if (s.allowGoogleMaps() != null)
+            b.allowGoogleMaps(s.allowGoogleMaps());
+        if (s.allowUrlContext() != null)
+            b.allowUrlContext(s.allowUrlContext());
+        if (s.safetySettings() != null)
+            b.safetySettings(s.safetySettings());
+        if (s.mediaResolution() != null)
+            b.mediaResolution(s.mediaResolution());
+        if (s.customHeaders() != null)
+            b.customHeaders(s.customHeaders());
+        return b.build();
     }
 }
