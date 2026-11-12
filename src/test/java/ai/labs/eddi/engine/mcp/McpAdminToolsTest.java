@@ -17,7 +17,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -30,10 +30,6 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -94,15 +90,12 @@ class McpAdminToolsTest {
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
         when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
 
-        var scheduleStore = mock(IScheduleStore.class);
-        var scheduleFireExecutor = mock(ScheduleFireExecutor.class);
-        var schedulePollerService = mock(SchedulePollerService.class);
+        var scheduleStore = mock(IRestScheduleStore.class);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization, strictConfigurationParser(), scheduleStore,
-                scheduleFireExecutor, schedulePollerService,
                 mockIdentity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
     }
 

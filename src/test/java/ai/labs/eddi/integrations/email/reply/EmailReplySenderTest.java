@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.mail.DeliveryReport;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -84,6 +85,8 @@ import static org.mockito.Mockito.when;
 
 class EmailReplySenderTest {
 
+    static final String PSEUDONYM = "gdpr-erased:k1:alice";
+
     InMemoryEmailMessageLedger ledger;
     InMemoryEmailSuppressionStore suppressions;
     EmailIntegrationDirectory directory;
@@ -91,6 +94,7 @@ class EmailReplySenderTest {
     RecordingTransport transport;
     EmailOwnerNotifier ownerNotifier;
     AuditLedgerService audit;
+    GdprPseudonymizer pseudonymizer;
     EmailReplySender sender;
     SimpleMeterRegistry registry;
 
@@ -99,6 +103,7 @@ class EmailReplySenderTest {
         final List<String> recipients = new ArrayList<>();
         final List<byte[]> messages = new ArrayList<>();
         final List<MailSendException> failures = new ArrayList<>();
+        final List<RuntimeException> crashes = new ArrayList<>();
 
         @Override
         public String id() {
@@ -115,6 +120,9 @@ class EmailReplySenderTest {
                 throws MailSendException {
             if (!failures.isEmpty()) {
                 throw failures.remove(0);
+            }
+            if (!crashes.isEmpty()) {
+                throw crashes.remove(0);
             }
             recipients.add(recipient);
             messages.add(mime);
@@ -137,10 +145,12 @@ class EmailReplySenderTest {
         Instance<AuditLedgerService> audits = mock(Instance.class);
         when(audits.isResolvable()).thenReturn(true);
         when(audits.get()).thenReturn(audit);
+        pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor(SENDER)).thenReturn(PSEUDONYM);
         registry = new SimpleMeterRegistry();
         sender = new EmailReplySender(ledger, suppressions, directory, conversations, transport,
                 new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())), ownerNotifier, audits,
-                registry, Runnable::run, Duration.ofDays(30), 3, Duration.ofMinutes(1));
+                pseudonymizer, registry, Runnable::run, Duration.ofDays(30), 3, Duration.ofMinutes(1));
     }
 
     private void integration(Map<String, String> extra) {
@@ -192,8 +202,11 @@ class EmailReplySenderTest {
             ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
             verify(audit).submit(entry.capture());
             assertEquals("email.reply", entry.getValue().taskId());
-            assertFalse(entry.getValue().output().toString().contains(SENDER), "the address only as a hash");
+            assertFalse(entry.getValue().output().toString().contains(SENDER), "the address only as a pseudonym");
             assertFalse(entry.getValue().output().toString().contains("ships Monday"), "no body");
+            assertEquals(PSEUDONYM, entry.getValue().output().get("recipientPseudonym"), "the keyed pseudonym HITL notifications use");
+            assertEquals("supplier.com", entry.getValue().output().get("recipientDomain"));
+            assertFalse(entry.getValue().output().containsKey("recipientHash"), "no unkeyed hash a list of candidate addresses could confirm");
         }
 
         @Test
@@ -282,7 +295,8 @@ class EmailReplySenderTest {
             LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
             List<Runnable> queued = new ArrayList<>();
             var deferred = new EmailReplySender(ledger, suppressions, directory, conversations, transport,
-                    new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().build())), ownerNotifier, null, null, queued::add,
+                    new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().build())), ownerNotifier, null, pseudonymizer, null,
+                    queued::add,
                     Duration.ofDays(30), 3, Duration.ofMinutes(1));
             deferred.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, answered("x"), NOW);
             suppressions.suppress(INTEGRATION, SENDER, "bounce:5.1.1", NOW);
@@ -353,6 +367,20 @@ class EmailReplySenderTest {
 
             assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
             assertEquals(List.of(SENDER), transport.recipients);
+        }
+
+        @Test
+        @DisplayName("an unexpected failure with attempts left is rescheduled and counted as a retry, like a transient one")
+        void unexpectedFailureCountsARetry() {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            transport.crashes.add(new IllegalStateException("mailer not built"));
+
+            var row = sender.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, answered("Ships Monday."), NOW).orElseThrow();
+
+            LedgerEntry pending = ledger.findById(row.id()).orElseThrow();
+            assertEquals(State.PENDING, pending.state());
+            assertEquals("OTHER: IllegalStateException", pending.lastError());
+            assertEquals(1.0, registry.get("eddi.email.outbound").tag("kind", "reply").tag("outcome", "retry").counter().count());
         }
 
         @Test
@@ -564,6 +592,23 @@ class EmailReplySenderTest {
                     EmailUserIdentity.anonymous(), mail("<q9@supplier.com>", SENDER), "x", NOW).isEmpty(), "anonymous: never");
             verify(conversations, never()).readConversation(anyString(), any(), any(), any());
             verify(audit, atLeastOnce()).submit(any());
+        }
+
+        @Test
+        @DisplayName("past the cache bound one group reply is dropped, not every cached one")
+        void boundedCache() {
+            String user = EmailUserIdentity.perSender(INTEGRATION, SENDER);
+            List<String> rows = new ArrayList<>();
+            for (int i = 0; i <= EmailReplySender.MAX_CACHED_GROUP_REPLIES; i++) {
+                transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+                String messageId = "<g" + i + "@supplier.com>";
+                rows.add(sender.onGroupCompleted(INTEGRATION, settings(), inbound("in-g" + i, messageId, SENDER, State.DONE), "gc-" + i, user,
+                        mail(messageId, SENDER), "The panel recommends B.", NOW).orElseThrow().id());
+            }
+
+            long held = rows.stream().filter(sender::holdsGroupReply).count();
+            assertTrue(held >= EmailReplySender.MAX_CACHED_GROUP_REPLIES, "still cached for their retries: " + held);
+            assertTrue(transport.recipients.isEmpty(), "every attempt failed transiently");
         }
 
         @Test
