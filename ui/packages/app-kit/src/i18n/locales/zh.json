@@ -856,7 +856,10 @@
     "noProgressAbort": "中止",
     "confirmCancelGroupTitle": "取消讨论？",
     "confirmCancelGroupDescription": "取消此讨论？所有进行中的工作都将中止。",
-    "confirmCancelGroupButton": "取消讨论"
+    "confirmCancelGroupButton": "取消讨论",
+    "noticeAutoApprove": "如无人提前决定，将于 {{time}} 自动批准",
+    "noticeAutoReject": "如无人提前决定，将于 {{time}} 自动拒绝",
+    "noticeAutoAbort": "如无人提前决定，将于 {{time}} 自动停止"
   },
   "chatDrawer": {
     "timeout": "部署超时"

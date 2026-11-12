@@ -856,7 +856,10 @@
     "noProgressAbort": "निरस्त करें",
     "confirmCancelGroupTitle": "चर्चा रद्द करें?",
     "confirmCancelGroupDescription": "इस चर्चा को रद्द करें? कोई भी चल रहा कार्य रोक दिया जाएगा।",
-    "confirmCancelGroupButton": "चर्चा रद्द करें"
+    "confirmCancelGroupButton": "चर्चा रद्द करें",
+    "noticeAutoApprove": "{{time}} पर अपने आप स्वीकृत हो जाएगा, जब तक कोई पहले निर्णय न ले",
+    "noticeAutoReject": "{{time}} पर अपने आप अस्वीकृत हो जाएगा, जब तक कोई पहले निर्णय न ले",
+    "noticeAutoAbort": "{{time}} पर अपने आप रोक दिया जाएगा, जब तक कोई पहले निर्णय न ले"
   },
   "chatDrawer": {
     "timeout": "Deploy टाइम-आउट हो गया"

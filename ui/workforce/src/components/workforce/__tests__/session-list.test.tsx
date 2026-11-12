@@ -167,4 +167,16 @@ describe("SessionList", () => {
     expect(screen.queryByTestId("session-team-gc-x-pin")).toBeNull();
     expect(screen.getByTestId("session-team-gc-x-delete")).toBeInTheDocument();
   });
+
+  it("marks a chat that is paused for approval (T2.3), and only that one", async () => {
+    server.use(
+      http.get("*/agents/pending-approvals", () =>
+        HttpResponse.json([{ conversationId: "conv3", agentId: "agent1", pausedAt: new Date().toISOString() }]),
+      ),
+    );
+    renderWithProviders(<SessionList />);
+    const marker = await screen.findByTestId("session-chat-conv3-paused");
+    expect(marker).toHaveTextContent("Waiting for approval");
+    expect(screen.queryByTestId("session-chat-conv1-paused")).toBeNull();
+  });
 });

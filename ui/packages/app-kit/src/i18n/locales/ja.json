@@ -856,7 +856,10 @@
     "noProgressAbort": "中止",
     "confirmCancelGroupTitle": "ディスカッションをキャンセルしますか？",
     "confirmCancelGroupDescription": "このディスカッションをキャンセルしますか？進行中の作業はすべて中止されます。",
-    "confirmCancelGroupButton": "ディスカッションをキャンセル"
+    "confirmCancelGroupButton": "ディスカッションをキャンセル",
+    "noticeAutoApprove": "それまでに誰も判断しなければ {{time}} に自動的に承認されます",
+    "noticeAutoReject": "それまでに誰も判断しなければ {{time}} に自動的に却下されます",
+    "noticeAutoAbort": "それまでに誰も判断しなければ {{time}} に自動的に停止されます"
   },
   "chatDrawer": {
     "timeout": "デプロイがタイムアウトしました"
