@@ -14,6 +14,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
@@ -37,6 +38,7 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Path("/descriptors")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of channel integration descriptors.")
+    @APIResponse(responseCode = "200", description = "List of channel integration descriptors")
     List<DocumentDescriptor> readChannelDescriptors(
                                                     @QueryParam("filter")
                                                     @DefaultValue("") String filter,
@@ -49,6 +51,8 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read channel integration configuration.")
+    @APIResponse(responseCode = "200", description = "Channel integration configuration")
+    @APIResponse(responseCode = "404", description = "Channel integration configuration not found")
     ChannelIntegrationConfiguration readChannel(
                                                 @PathParam("id") String id,
                                                 @Parameter(name = "version", required = true, example = "1")
@@ -58,6 +62,9 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Update channel integration configuration.")
+    @APIResponse(responseCode = "200", description = "Channel integration configuration updated")
+    @APIResponse(responseCode = "400", description = "Invalid channel integration configuration")
+    @APIResponse(responseCode = "404", description = "Channel integration configuration not found")
     Response updateChannel(
                            @PathParam("id") String id,
                            @Parameter(name = "version", required = true, example = "1")
@@ -67,17 +74,24 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Create channel integration configuration.")
+    @APIResponse(responseCode = "201", description = "Channel integration configuration created")
+    @APIResponse(responseCode = "400", description = "Invalid channel integration configuration")
     Response createChannel(ChannelIntegrationConfiguration channelConfiguration);
 
     @POST
     @Path("/{id}")
     @Operation(description = "Duplicate this channel integration configuration.")
+    @APIResponse(responseCode = "201", description = "Channel integration configuration duplicated")
+    @APIResponse(responseCode = "400", description = "Invalid channel integration configuration")
+    @APIResponse(responseCode = "404", description = "Channel integration configuration not found")
     Response duplicateChannel(@PathParam("id") String id,
                               @QueryParam("version") Integer version);
 
     @DELETE
     @Path("/{id}")
     @Operation(description = "Delete channel integration configuration.")
+    @APIResponse(responseCode = "200", description = "Channel integration configuration deleted")
+    @APIResponse(responseCode = "404", description = "Channel integration configuration not found")
     Response deleteChannel(
                            @PathParam("id") String id,
                            @Parameter(name = "version", required = true, example = "1")
