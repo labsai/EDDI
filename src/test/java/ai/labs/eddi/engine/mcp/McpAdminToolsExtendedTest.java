@@ -55,15 +55,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -76,15 +68,11 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import org.mockito.ArgumentCaptor;
 
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.io.IOException;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import java.time.Instant;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.*;
 
@@ -100,15 +88,14 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
 
 /**
- * Extended tests for McpAdminTools — schedule management, channel integrations,
- * deploy edge cases, readWorkflow, readResource, updateAgent, and error paths
- * not covered by McpAdminToolsTest or McpAdminToolsCrudTest.
+ * Extended tests for McpAdminTools — channel integrations, deploy edge cases,
+ * readWorkflow, readResource, updateAgent, and error paths not covered by
+ * McpAdminToolsTest or McpAdminToolsCrudTest.
  */
 class McpAdminToolsExtendedTest {
 
     private static final String AGENT_ID = "test-agent-id";
     private static final String RESOURCE_ID = "test-resource-id";
-    private static final String SCHEDULE_ID = "test-schedule-id";
 
     private IRestAgentAdministration agentAdmin;
     private IRestAgentStore agentStore;
@@ -124,9 +111,6 @@ class McpAdminToolsExtendedTest {
     private IRestChannelIntegrationStore channelStore;
     private IRestAgentTriggerStore agentTriggerStore;
     private IJsonSerialization jsonSerialization;
-    private IScheduleStore scheduleStore;
-    private ScheduleFireExecutor scheduleFireExecutor;
-    private SchedulePollerService schedulePollerService;
     private McpAdminTools tools;
 
     @BeforeEach
@@ -145,10 +129,6 @@ class McpAdminToolsExtendedTest {
         channelStore = mock(IRestChannelIntegrationStore.class);
         agentTriggerStore = mock(IRestAgentTriggerStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        scheduleStore = mock(IScheduleStore.class);
-        scheduleFireExecutor = mock(ScheduleFireExecutor.class);
-        schedulePollerService = mock(SchedulePollerService.class);
-
         var restInterfaceFactory = mock(IRestInterfaceFactory.class);
         when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(agentStore);
         when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
@@ -164,18 +144,13 @@ class McpAdminToolsExtendedTest {
         when(restInterfaceFactory.get(IRestAgentTriggerStore.class)).thenReturn(agentTriggerStore);
 
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
-        lenient().when(schedulePollerService.getInstanceId()).thenReturn("test-instance");
-        // fire_schedule_now claims the schedule first, exactly as the poller and the
-        // REST endpoint do. Default the claim to "won" so tests about anything else
-        // still reach the fire.
-        lenient().when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
 
         var mockIdentity = mock(SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
 
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 strictConfigurationParser(),
-                scheduleStore, scheduleFireExecutor, schedulePollerService,
+                mock(IRestScheduleStore.class),
                 mockIdentity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
     }
 
@@ -908,335 +883,8 @@ class McpAdminToolsExtendedTest {
         assertTrue(result.contains("agentId is required"));
     }
 
-    // ==================== Schedule Management ====================
-
-    @Test
-    void createSchedule_cron_success() throws Exception {
-        when(scheduleStore.createSchedule(any())).thenReturn(SCHEDULE_ID);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_created\"}");
-
-        String result = tools.createSchedule(AGENT_ID, "CRON", "0 9 * * MON-FRI", null,
-                "Daily report", "Morning Report", "Europe/Vienna", "new", "system:scheduler", "production");
-
-        assertNotNull(result);
-        assertTrue(result.contains("schedule_created"));
-        verify(scheduleStore).createSchedule(any());
-    }
-
-    @Test
-    void createSchedule_heartbeat_success() throws Exception {
-        when(scheduleStore.createSchedule(any())).thenReturn(SCHEDULE_ID);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_created\"}");
-
-        String result = tools.createSchedule(AGENT_ID, "HEARTBEAT", null, 300L,
-                null, "Health Check", null, null, null, null);
-
-        assertNotNull(result);
-        assertTrue(result.contains("schedule_created"));
-
-        ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        verify(scheduleStore).createSchedule(captor.capture());
-        assertEquals(ScheduleConfiguration.TriggerType.HEARTBEAT, captor.getValue().getTriggerType());
-        assertEquals("heartbeat", captor.getValue().getMessage());
-        assertEquals("persistent", captor.getValue().getConversationStrategy());
-    }
-
-    @Test
-    void createSchedule_inferHeartbeat_fromInterval() throws Exception {
-        when(scheduleStore.createSchedule(any())).thenReturn(SCHEDULE_ID);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_created\"}");
-
-        // No triggerType, but heartbeatIntervalSeconds is set
-        tools.createSchedule(AGENT_ID, null, null, 60L,
-                "ping", "Pinger", null, null, null, null);
-
-        ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        verify(scheduleStore).createSchedule(captor.capture());
-        assertEquals(ScheduleConfiguration.TriggerType.HEARTBEAT, captor.getValue().getTriggerType());
-    }
-
-    @Test
-    void createSchedule_missingAgentId_returnsError() {
-        String result = tools.createSchedule(null, "CRON", "0 9 * * *", null,
-                "msg", "name", null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("agentId is required"));
-    }
-
-    @Test
-    void createSchedule_missingName_returnsError() {
-        String result = tools.createSchedule(AGENT_ID, "CRON", "0 9 * * *", null,
-                "msg", null, null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("name is required"));
-    }
-
-    @Test
-    void createSchedule_cronMissingExpression_returnsError() {
-        String result = tools.createSchedule(AGENT_ID, "CRON", null, null,
-                "msg", "name", null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("cron expression is required"));
-    }
-
-    @Test
-    void createSchedule_cronMissingMessage_returnsError() {
-        String result = tools.createSchedule(AGENT_ID, "CRON", "0 9 * * *", null,
-                null, "name", null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("message is required"));
-    }
-
-    @Test
-    void createSchedule_heartbeatMissingInterval_returnsError() {
-        String result = tools.createSchedule(AGENT_ID, "HEARTBEAT", null, null,
-                "msg", "name", null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("heartbeatIntervalSeconds is required"));
-    }
-
-    @Test
-    void createSchedule_heartbeatZeroInterval_returnsError() {
-        String result = tools.createSchedule(AGENT_ID, "HEARTBEAT", null, 0L,
-                "msg", "name", null, null, null, null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("heartbeatIntervalSeconds is required"));
-    }
-
-    @Test
-    void createSchedule_handlesException() throws Exception {
-        when(scheduleStore.createSchedule(any())).thenThrow(new RuntimeException("DB error"));
-
-        String result = tools.createSchedule(AGENT_ID, "HEARTBEAT", null, 300L,
-                "msg", "name", null, null, null, null);
-
-        assertTrue(result.contains("error"));
-        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
-        assertTrue(result.contains("reference"), result);
-    }
-
-    // ==================== listSchedules ====================
-
-    @Test
-    void listSchedules_noFilter_returnsAll() throws Exception {
-        var schedule = new ScheduleConfiguration();
-        schedule.setId(SCHEDULE_ID);
-        schedule.setName("Test Schedule");
-        schedule.setAgentId(AGENT_ID);
-        schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
-        schedule.setCronExpression("0 9 * * *");
-        schedule.setEnabled(true);
-        schedule.setFireStatus(ScheduleConfiguration.FireStatus.PENDING);
-        when(scheduleStore.readAllSchedules(100)).thenReturn(List.of(schedule));
-        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
-
-        String result = tools.listSchedules(null);
-
-        assertNotNull(result);
-        verify(scheduleStore).readAllSchedules(100);
-    }
-
-    @Test
-    void listSchedules_withAgentFilter() throws Exception {
-        when(scheduleStore.readSchedulesByAgentId(AGENT_ID)).thenReturn(List.of());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":0}");
-
-        tools.listSchedules(AGENT_ID);
-
-        verify(scheduleStore).readSchedulesByAgentId(AGENT_ID);
-        verify(scheduleStore, never()).readAllSchedules(anyInt());
-    }
-
-    @Test
-    void listSchedules_blankFilter_treatedAsNoFilter() throws Exception {
-        when(scheduleStore.readAllSchedules(100)).thenReturn(List.of());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":0}");
-
-        tools.listSchedules("  ");
-
-        verify(scheduleStore).readAllSchedules(100);
-    }
-
-    @Test
-    void listSchedules_handlesException() throws Exception {
-        when(scheduleStore.readAllSchedules(anyInt())).thenThrow(new RuntimeException("list error"));
-
-        String result = tools.listSchedules(null);
-
-        assertTrue(result.contains("error"));
-    }
-
-    @Test
-    void listSchedules_heartbeatSchedule_includesInterval() throws Exception {
-        var schedule = new ScheduleConfiguration();
-        schedule.setId(SCHEDULE_ID);
-        schedule.setTriggerType(ScheduleConfiguration.TriggerType.HEARTBEAT);
-        schedule.setHeartbeatIntervalSeconds(300L);
-        when(scheduleStore.readAllSchedules(100)).thenReturn(List.of(schedule));
-        when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
-
-        String result = tools.listSchedules(null);
-
-        assertNotNull(result);
-    }
-
-    // ==================== readSchedule ====================
-
-    @Test
-    void readSchedule_success() throws Exception {
-        var schedule = new ScheduleConfiguration();
-        schedule.setId(SCHEDULE_ID);
-        schedule.setName("Test");
-        schedule.setAgentId(AGENT_ID);
-        schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
-        schedule.setCronExpression("0 9 * * *");
-        schedule.setTimeZone("UTC");
-        schedule.setEnabled(true);
-        when(scheduleStore.readSchedule(SCHEDULE_ID)).thenReturn(schedule);
-        when(scheduleStore.readFireLogs(SCHEDULE_ID, 10)).thenReturn(List.of());
-        when(jsonSerialization.serialize(any())).thenReturn("{\"scheduleId\":\"test-schedule-id\"}");
-
-        String result = tools.readSchedule(SCHEDULE_ID);
-
-        assertNotNull(result);
-        verify(scheduleStore).readSchedule(SCHEDULE_ID);
-        verify(scheduleStore).readFireLogs(SCHEDULE_ID, 10);
-    }
-
-    @Test
-    void readSchedule_nullId_returnsError() {
-        String result = tools.readSchedule(null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("scheduleId is required"));
-    }
-
-    @Test
-    void readSchedule_blankId_returnsError() {
-        String result = tools.readSchedule("  ");
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("scheduleId is required"));
-    }
-
-    @Test
-    void readSchedule_handlesException() throws Exception {
-        when(scheduleStore.readSchedule(SCHEDULE_ID)).thenThrow(new RuntimeException("not found"));
-
-        String result = tools.readSchedule(SCHEDULE_ID);
-
-        assertTrue(result.contains("error"));
-    }
-
-    // ==================== deleteSchedule ====================
-
-    @Test
-    void deleteSchedule_success() throws Exception {
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_deleted\"}");
-
-        String result = tools.deleteSchedule(SCHEDULE_ID);
-
-        assertNotNull(result);
-        assertTrue(result.contains("schedule_deleted"));
-        verify(scheduleStore).deleteSchedule(SCHEDULE_ID);
-    }
-
-    @Test
-    void deleteSchedule_nullId_returnsError() {
-        String result = tools.deleteSchedule(null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("scheduleId is required"));
-    }
-
-    @Test
-    void deleteSchedule_handlesException() throws Exception {
-        doThrow(new RuntimeException("delete failed")).when(scheduleStore).deleteSchedule(SCHEDULE_ID);
-
-        String result = tools.deleteSchedule(SCHEDULE_ID);
-
-        assertTrue(result.contains("error"));
-    }
-
-    // ==================== fireScheduleNow ====================
-
-    @Test
-    void fireScheduleNow_success() throws Exception {
-        var schedule = new ScheduleConfiguration();
-        schedule.setName("Test Schedule");
-        when(scheduleStore.readSchedule(SCHEDULE_ID)).thenReturn(schedule);
-
-        var fireLog = new ScheduleFireLog("log1", SCHEDULE_ID, "fire1",
-                Instant.now(), Instant.now(), Instant.now().plusSeconds(2),
-                "COMPLETED", "inst-1", "conv-1", null, 1, 0.01);
-        when(scheduleFireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(fireLog);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_fired\"}");
-
-        String result = tools.fireScheduleNow(SCHEDULE_ID);
-
-        assertNotNull(result);
-        assertTrue(result.contains("schedule_fired"));
-        verify(scheduleFireExecutor).fire(schedule, "test-instance", 1);
-    }
-
-    @Test
-    void fireScheduleNow_withError() throws Exception {
-        var schedule = new ScheduleConfiguration();
-        schedule.setName("Test Schedule");
-        when(scheduleStore.readSchedule(SCHEDULE_ID)).thenReturn(schedule);
-
-        var fireLog = new ScheduleFireLog("log1", SCHEDULE_ID, "fire1",
-                Instant.now(), Instant.now(), null,
-                "FAILED", "inst-1", null, "Agent timeout", 1, 0.0);
-        when(scheduleFireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(fireLog);
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_fired\",\"error\":\"Agent timeout\"}");
-
-        String result = tools.fireScheduleNow(SCHEDULE_ID);
-
-        assertNotNull(result);
-    }
-
-    @Test
-    void fireScheduleNow_nullId_returnsError() {
-        String result = tools.fireScheduleNow(null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("scheduleId is required"));
-    }
-
-    @Test
-    void fireScheduleNow_handlesException() throws Exception {
-        when(scheduleStore.readSchedule(SCHEDULE_ID)).thenThrow(new RuntimeException("not found"));
-
-        String result = tools.fireScheduleNow(SCHEDULE_ID);
-
-        assertTrue(result.contains("error"));
-    }
-
-    // ==================== retryFailedSchedule ====================
-
-    @Test
-    void retryFailedSchedule_success() throws Exception {
-        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"schedule_requeued\"}");
-
-        String result = tools.retryFailedSchedule(SCHEDULE_ID);
-
-        assertNotNull(result);
-        assertTrue(result.contains("schedule_requeued"));
-        verify(scheduleStore).requeueDeadLetter(SCHEDULE_ID);
-    }
-
-    @Test
-    void retryFailedSchedule_nullId_returnsError() {
-        String result = tools.retryFailedSchedule(null);
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("scheduleId is required"));
-    }
-
-    @Test
-    void retryFailedSchedule_handlesException() throws Exception {
-        doThrow(new RuntimeException("not dead-lettered")).when(scheduleStore).requeueDeadLetter(SCHEDULE_ID);
-
-        String result = tools.retryFailedSchedule(SCHEDULE_ID);
-
-        assertTrue(result.contains("error"));
-    }
+    // Schedule tools: McpScheduleToolsTest (the adapters) and McpScheduleParityTest
+    // (the same answers as REST).
 
     // ==================== Channel Integration Tools ====================
 

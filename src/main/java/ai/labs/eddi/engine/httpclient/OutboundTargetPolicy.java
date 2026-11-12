@@ -24,8 +24,11 @@ import java.util.Set;
  * from the model: LLM provider base URLs, embedding endpoints, vector-store
  * hosts, OpenAPI spec locations and the setup wizard's {@code llmBaseUrl}.
  * <p>
- * It applies {@code eddi.security.ssrf-protection.enabled} the way
- * {@code ApiCallExecutor} applies it to httpcalls:
+ * It applies {@code eddi.security.ssrf-protection.enabled} much as
+ * {@code ApiCallExecutor} applies it to httpcalls, with one difference: the
+ * self-URL exception below is this class's alone. An httpcall to EDDI's own
+ * address is refused with protection on unless that host is on
+ * {@value #ALLOWED_HOSTS_KEY}.
  * <ul>
  * <li>The cloud instance-metadata service is refused <b>always</b>
  * ({@link UrlValidationUtils#rejectCloudMetadataTarget}) — it hands out the

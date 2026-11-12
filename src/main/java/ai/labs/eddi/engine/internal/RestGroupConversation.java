@@ -18,12 +18,17 @@ import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetRefusedException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
+import ai.labs.eddi.engine.internal.groups.GroupQuestionLimits;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
 import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -50,6 +55,7 @@ import java.util.concurrent.TimeUnit;
 
 import jakarta.ws.rs.NotFoundException;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.engine.internal.groups.GroupQuestionLimits.rejectionReason;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
@@ -82,6 +88,13 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final ResourceAccessGuard resourceAccessGuard;
 
     /**
+     * Carries the caller onto {@link #executorService}, the one place this class
+     * hands discussion work to a thread of its own: see
+     * {@link #continueDiscussionStreaming}.
+     */
+    private final CallerIdentityContext callerIdentityContext;
+
+    /**
      * The limits a 1:1 upload is held to, re-checked for a discussion's inline
      * attachments before anything is decoded or stored — see
      * {@link GroupAttachmentLimits}. Field-injected so the constructor the tests
@@ -102,13 +115,15 @@ public class RestGroupConversation implements IRestGroupConversation {
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             HitlAccessGuard hitlAccessGuard,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard,
+            CallerIdentityContext callerIdentityContext) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.hitlAccessGuard = hitlAccessGuard;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.callerIdentityContext = callerIdentityContext;
     }
 
     /**
@@ -183,35 +198,6 @@ public class RestGroupConversation implements IRestGroupConversation {
         return gc;
     }
 
-    /**
-     * Server-side re-check of the request-body ceilings declared on
-     * {@link IRestGroupConversation}.
-     * <p>
-     * The ceilings themselves are Bean Validation constraints on a JAX-RS
-     * <em>interface</em>. Quarkus is expected to honour those on the implementing
-     * resource, but this deployment has no test that proves it (and one cannot be
-     * written without booting the HTTP layer), so a wiring regression would leave
-     * every ceiling silently inert while looking enforced. A group question is
-     * fanned out to every member agent in every phase, which makes an unbounded one
-     * an amplification surface — cheap to re-check here, and independent of the
-     * interceptor being wired.
-     *
-     * @return a client-safe rejection reason, or {@code null} when the body is
-     *         acceptable
-     */
-    private static String rejectionReason(String question, String userId) {
-        if (blank(question)) {
-            return "'question' is required.";
-        }
-        if (question.length() > MAX_QUESTION_CHARS) {
-            return "'question' must be at most " + MAX_QUESTION_CHARS + " characters.";
-        }
-        if (userId != null && userId.length() > MAX_IDENTIFIER_CHARS) {
-            return "'userId' must be at most " + MAX_IDENTIFIER_CHARS + " characters.";
-        }
-        return null;
-    }
-
     /** {@link GroupAttachmentLimits} with this deployment's limits. */
     private String attachmentRejectionReason(DiscussRequest request) {
         return GroupAttachmentLimits.rejectionReason(request.attachments(), maxAttachmentBytes, maxAttachmentsPerConversation,
@@ -232,7 +218,10 @@ public class RestGroupConversation implements IRestGroupConversation {
      * A spent team budget: 409 with the refusal's own text (docs/team-budgets.md).
      * Unlike the curated bodies elsewhere in this class, this message is written
      * for the caller by {@code TeamBudgetService} (team name, spend, cap, reset
-     * instant and what an administrator can do) and carries no caller-supplied id.
+     * instant and what an administrator can do). It names the team by its display
+     * name and by its <em>stored</em> group id &mdash; the id a successful group
+     * read already resolved before admission ran, which the exhausted message's
+     * administrator {@code PUT} path needs &mdash; and carries no raw request text.
      * Caught before {@link IGroupConversationService.GroupDiscussionException}, its
      * parent, whose canned "must be COMPLETED" text would name the wrong cause.
      */
@@ -320,6 +309,11 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     static String invalidApprovalDetail(IllegalArgumentException e) {
         if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
+            return "Invalid approval request: " + e.getMessage();
+        }
+        // Strict plan binding's refusal: its message is fixed text that names the
+        // planHash field and no value, so it is appended like a review refusal's.
+        if (e instanceof HitlPlanBinding.PlanHashRequired) {
             return "Invalid approval request: " + e.getMessage();
         }
         return "Invalid approval request: an unknown task id was referenced, or a task is not awaiting approval.";
@@ -478,24 +472,16 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
-    /** True when the string is absent or whitespace-only. */
-    private static boolean blank(String s) {
-        return s == null || s.isBlank();
-    }
-
     @Override
     @RunOnVirtualThread
     public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
         // Reject an incomplete body up front: without this a missing targetAgentId NPEs
-        // during member resolution and surfaces as a 500 rather than a 400.
-        if (request == null || blank(request.question()) || blank(request.targetAgentId())) {
+        // during member resolution and surfaces as a 500 rather than a 400. Then the
+        // same ceilings as discuss() — see GroupQuestionLimits.
+        if (request == null) {
             return badRequest("Both 'question' and 'targetAgentId' are required.");
         }
-        // Same ceilings as discuss() — see rejectionReason.
-        String rejection = rejectionReason(request.question(), request.userId());
-        if (rejection == null && request.targetAgentId().length() > MAX_IDENTIFIER_CHARS) {
-            rejection = "'targetAgentId' must be at most " + MAX_IDENTIFIER_CHARS + " characters.";
-        }
+        String rejection = GroupQuestionLimits.followUpRejectionReason(request.question(), request.targetAgentId(), request.userId());
         if (rejection != null) {
             return badRequest(rejection);
         }
@@ -610,6 +596,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
     private static final String PAUSE_CHANGED_MESSAGE = "The pending approval changed since this decision was made "
             + "(pauseId no longer current) — re-read approval-status and decide again.";
+    private static final String PLAN_CHANGED_MESSAGE = "The pending approval's plan is not the one this decision was made for "
+            + "(planHash does not match) — re-read approval-status and decide again.";
 
     @Override
     @RunOnVirtualThread
@@ -646,6 +634,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Group conversation not found.").build();
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            // The decision named a plan (planHash) other than the pending one.
+            LOGGER.infof("Approve of group conversation %s rejected (plan changed)", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity(PLAN_CHANGED_MESSAGE).build();
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             // The decision named a pause (pauseId) that is no longer current: the
             // discussion is still awaiting approval, but on something the reviewer
@@ -858,7 +851,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             // swallowing them and hanging the client.
             var listener = createStreamingListener(eventSink, sse);
 
-            executorService.submit(() -> {
+            // Captured here, on the request thread: on the executor's thread the request
+            // scope is gone, so the member turns' own capture finds nobody and every
+            // ${caller:...} reference fails closed — on this path alone, since
+            // startAndDiscussAsync captures for a streamed start the same way.
+            final CallerIdentity caller = callerIdentityContext.captureOrCurrent();
+            executorService.submit(callerIdentityContext.withIdentity(caller, () -> {
                 try {
                     groupConversationService.continueDiscussion(gcId, request.question(), listener);
                 } catch (TeamBudgetRefusedException e) {
@@ -870,7 +868,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
                             "The continuation could not be completed."));
                 }
-            });
+            }));
 
         } catch (ForbiddenException e) {
             throw e;
@@ -936,6 +934,10 @@ public class RestGroupConversation implements IRestGroupConversation {
                 | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404 equivalent
             sendErrorEvent(eventSink, sse, "Group conversation not found.");
+            closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupPlanMismatchException e) {
+            // Still awaiting approval, but not on the plan this decision was made for.
+            sendErrorEvent(eventSink, sse, PLAN_CHANGED_MESSAGE);
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             // Still awaiting approval, but not the pause this decision was made for.
@@ -1050,6 +1052,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && gc.getPausedAt() != null ? HitlDecision.pauseIdOf(gc.getPausedAt()) : "");
+            // The plan hash a decision passes back as HitlDecision.planHash
+            // (HitlPlanHash#forGroup) — derived from what is awaiting approval, so it
+            // is reported only for an approval pause.
+            summary.put("planHash", awaitingApproval ? HitlPlanHash.forGroup(gc) : "");
             summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
             summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
             summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");

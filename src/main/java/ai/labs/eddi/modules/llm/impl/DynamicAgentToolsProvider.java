@@ -27,6 +27,7 @@ import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
 import ai.labs.eddi.modules.llm.tools.RecruitAgentTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
+import ai.labs.eddi.modules.llm.tools.TurnCounter;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
@@ -125,6 +126,13 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * tracking them too.
      */
     static final String KEY_DYNAMIC_TORN_DOWN_AGENT_IDS = MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS;
+
+    /**
+     * Step-data key prefix of an LLM task's delegation count this turn
+     * ({@code maxDelegationsPerTask}); the task id follows. A task without an id
+     * counts under {@code default}, as {@code LlmTask} names it elsewhere.
+     */
+    static final String KEY_DELEGATIONS_PREFIX = "tools:delegations:";
 
     private final AgentSetupService agentSetupService;
     private final CapabilityRegistryService capabilityRegistryService;
@@ -233,7 +241,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         List<Object> tools = new ArrayList<>();
-        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId());
+        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId(), ctx.task().getId());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }
@@ -257,6 +265,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
+        addDynamicAgentTools(tools, whitelist, memory, groupConversationId, null);
+    }
+
+    /**
+     * @param taskId
+     *            the id of the LLM task the tools serve; its delegations this turn
+     *            are counted under it, so {@code maxDelegationsPerTask} holds
+     *            across every assembly of the task's tools in the turn
+     */
+    void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId,
+                              String taskId) {
         // V7. An omitted whitelist means "all built-in tools" everywhere else —
         // docs/langchain.md states it twice ("(all if not specified)", "Omitting
         // builtInToolsWhitelist enables all available built-in tools") and
@@ -332,8 +351,11 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                     : (agentId, principal) -> (sharedCreatedIds.contains(agentId)
                             && createdHere(agentId, callerConversationId, groupConversationId))
                             || useCheck.test(agentId, principal);
+            // Counted on the step: this method runs once per tool assembly, and a turn
+            // assembles once per cascade step and again on a HITL resume.
+            TurnCounter delegations = TurnCounter.onStep(memory, KEY_DELEGATIONS_PREFIX + (taskId != null ? taskId : "default"));
             tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
-                    resolveDelegationCeiling(memory)));
+                    resolveDelegationCeiling(memory), delegations));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
