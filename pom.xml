@@ -917,11 +917,12 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.16</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
-                     Excluded wholesale by package pattern, so each pattern also removes any
-                     logic-bearing class that later landed in that package from the coverage
-                     numbers (see the per-pattern notes). The patterns were added together in
-                     6f48a5e4ea ("CDI-wiring exclusions"); the per-class reasons were not
-                     recorded beyond the one-line comments below. -->
+                     Most are package patterns, so each also removes any logic-bearing class
+                     that later landed in that package from the coverage numbers (see the
+                     per-pattern notes). The patterns were added together in 6f48a5e4ea
+                     ("CDI-wiring exclusions"); the per-class reasons were not recorded beyond
+                     the one-line comments below. The builder exclusion has since been narrowed
+                     to two named classes. -->
                 <configuration>
                     <excludes>
                         <!-- Every package named "bootstrap": the modules/*/bootstrap/*Module
@@ -939,18 +940,19 @@
                              have their own unit tests under src/test/java. Reason for the
                              exclusion not recorded. -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- Package modules/llm/impl/builder: the ILanguageModelBuilder
-                             implementations (one per provider: OpenAI, Anthropic, Bedrock, ...)
-                             that wrap an external SDK constructor, so most of it cannot be tested
-                             without live API keys. The package also holds logic-bearing helpers
-                             (ModelParameterCatalog, ModelParameterValues, BoundedJdkHttpClient,
-                             JlamaRuntimeSupport, OpenAiCompatibleProviders) that are excluded too. -->
-                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- The two LLM provider builders whose clients cannot be built offline:
+                             Vertex needs GCP credentials and OCI an ~/.oci/config. The rest of
+                             the builder package (parameter catalog, value parsing, the bounded
+                             HTTP client, every other provider) is unit-tested against
+                             langchain4j's real request mapping and counts towards the gate. -->
+                        <exclude>**/llm/impl/builder/VertexGeminiLanguageModelBuilder*</exclude>
+                        <exclude>**/llm/impl/builder/OracleGenAiLanguageModelBuilder*</exclude>
                         <!-- Package integrations/slack and its subpackages (event handler,
                              interactivity, HITL, signature verification, REST webhook, ...).
                              The Slack Web API calls need a live Slack workspace, but the package
                              also contains pure logic (e.g. SlackSignatureVerifier, SlackMrkdwn)
                              that has unit tests yet is excluded from the coverage numbers. -->
+
                         <exclude>**/integrations/slack/**</exclude>
                     </excludes>
                 </configuration>

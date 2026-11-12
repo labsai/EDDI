@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.api.IRestGroupConversation.FollowUpRequest;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -64,7 +65,7 @@ class RestGroupConversationTest {
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
     }
 
     @Nested
@@ -411,7 +412,7 @@ class RestGroupConversationTest {
             when(caller.getPrincipal()).thenReturn(principal);
             when(caller.hasRole("eddi-admin")).thenReturn(false);
             return new RestGroupConversation(groupService, jsonSerialization, caller, new OwnershipValidator(true),
-                    mock(HitlAccessGuard.class), resourceAccessGuard);
+                    mock(HitlAccessGuard.class), resourceAccessGuard, new CallerIdentityContext(null, null));
         }
 
         @Test
@@ -482,7 +483,7 @@ class RestGroupConversationTest {
             when(caller.getPrincipal()).thenReturn(principal);
             when(caller.hasRole("eddi-admin")).thenReturn(false);
             var rest = new RestGroupConversation(groupService, jsonSerialization, caller, realValidator, mock(HitlAccessGuard.class),
-                    resourceAccessGuard);
+                    resourceAccessGuard, new CallerIdentityContext(null, null));
             var gc = new GroupConversation();
             gc.setId("gc-1");
             gc.setGroupId("group-1");
@@ -500,7 +501,7 @@ class RestGroupConversationTest {
             var admin = mock(SecurityIdentity.class);
             when(admin.hasRole("eddi-admin")).thenReturn(true);
             var rest = new RestGroupConversation(groupService, jsonSerialization, admin, realValidator, mock(HitlAccessGuard.class),
-                    resourceAccessGuard);
+                    resourceAccessGuard, new CallerIdentityContext(null, null));
             var gc = new GroupConversation();
             gc.setId("gc-1");
             gc.setGroupId("group-1");
