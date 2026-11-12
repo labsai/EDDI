@@ -242,7 +242,8 @@ public class DreamService {
         // spend the schedule's retry budget and dead-letter it, so consolidation would
         // not resume once the restriction is lifted. A flag that cannot be read skips
         // the cycle as well (fail closed, see below).
-        // GdprComplianceService is an unconditional @ApplicationScoped bean, so under CDI
+        // GdprComplianceService is an unconditional @ApplicationScoped bean, so under
+        // CDI
         // the Instance always resolves; unresolvable means a broken bean graph, and is
         // treated like an unreadable flag. Null is only a test constructing the service
         // with new and no GDPR wiring.

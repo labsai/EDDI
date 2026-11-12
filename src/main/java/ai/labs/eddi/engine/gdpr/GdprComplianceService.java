@@ -169,9 +169,9 @@ public class GdprComplianceService {
 
     /**
      * Group configurations, read by the export to tell a discussion's human members
-     * from its agents (their ids are masked in the subject's bundle). Field-injected
-     * and lazy; null in tests built with {@code new}, which fall back to the
-     * transcript heuristics of {@link ThirdPartyIdentifiers}.
+     * from its agents (their ids are masked in the subject's bundle).
+     * Field-injected and lazy; null in tests built with {@code new}, which fall
+     * back to the transcript heuristics of {@link ThirdPartyIdentifiers}.
      */
     @Inject
     Instance<IAgentGroupStore> agentGroupStore;
@@ -1327,7 +1327,8 @@ public class GdprComplianceService {
         var groupConversationEntries = new ArrayList<UserDataExport.GroupConversationExportEntry>();
         boolean groupConversationsTruncated = false;
         Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
-        // One configuration read per group, however many of its discussions the user started.
+        // One configuration read per group, however many of its discussions the user
+        // started.
         Map<String, Set<String>> configuredHumans = new HashMap<>();
         try {
             GroupConversationsPage page = groupConversationsOf(userId, GROUP_CONVERSATION_EXPORT_LIMIT);

@@ -71,9 +71,8 @@ public final class ThirdPartyIdentifiers {
      * As {@link #transcriptFor(GroupConversation, String)}, with the ids the
      * group's configuration declares as {@code HUMAN} members — the authoritative
      * source, which also covers a human who only ever skipped, never spoke and has
-     * no address for an id. The transcript heuristics still apply on top of it,
-     * for members a configuration that changed since (or was deleted) no longer
-     * lists.
+     * no address for an id. The transcript heuristics still apply on top of it, for
+     * members a configuration that changed since (or was deleted) no longer lists.
      */
     public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredHumans) {
         List<TranscriptEntry> stored = discussion.getTranscript();

@@ -283,10 +283,11 @@ public class BoundedLogStore {
     static final String REMOTE_ERASURE_MARKER = "gdpr-erased";
 
     /**
-     * {@code KvKeys.sha256(userId)} of a recently erased user → what replaces the id
-     * and until when. One map for erasures on this node and on others, keyed by the
-     * hash either way, so the store never holds an erased user's raw id — not even
-     * for the hour the mark lives, nor after it expired and before it is pruned.
+     * {@code KvKeys.sha256(userId)} of a recently erased user → what replaces the
+     * id and until when. One map for erasures on this node and on others, keyed by
+     * the hash either way, so the store never holds an erased user's raw id — not
+     * even for the hour the mark lives, nor after it expired and before it is
+     * pruned.
      */
     private final Map<String, Erasure> erasedUserHashes = new ConcurrentHashMap<>();
 
@@ -349,10 +350,10 @@ public class BoundedLogStore {
      * publisher adds meanwhile. {@code flushToDb} never takes the write lock and
      * {@code publish} never takes the monitor, so the two cannot deadlock.
      * <p>
-     * The queue is rewritten here rather than only scrubbed on its way out: an entry
-     * that waited in it longer than the mark lives (a database call hanging for
-     * longer than {@link #ERASED_USER_REWRITE_WINDOW}) would otherwise leave with the
-     * raw id after the mark expired.
+     * The queue is rewritten here rather than only scrubbed on its way out: an
+     * entry that waited in it longer than the mark lives (a database call hanging
+     * for longer than {@link #ERASED_USER_REWRITE_WINDOW}) would otherwise leave
+     * with the raw id after the mark expired.
      */
     private synchronized int mark(String hash, Erasure erasure) {
         erasedUserHashes.merge(hash, erasure,
@@ -538,8 +539,9 @@ public class BoundedLogStore {
     /**
      * Flush pending log entries to the database in a single batch.
      * <p>
-     * Synchronized so an erasure mark ({@link #markUserErased}) can wait for a batch that was
-     * drained before an erasure marked its user and may still be committing.
+     * Synchronized so an erasure mark ({@link #markUserErased}) can wait for a
+     * batch that was drained before an erasure marked its user and may still be
+     * committing.
      */
     synchronized void flushToDb() {
         if (dbQueue.isEmpty())
