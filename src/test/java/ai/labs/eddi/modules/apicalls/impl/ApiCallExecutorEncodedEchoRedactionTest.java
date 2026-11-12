@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -160,7 +162,8 @@ class ApiCallExecutorEncodedEchoRedactionTest {
         @Test
         @DisplayName("an unrelated body comes back as it was")
         void unrelated() {
-            Map<String, Object> tree = Map.of("token", "ZmFrZS10b2tlbg==", "path", "/a%20b", "n", 12345678);
+            String unrelatedBase64 = Base64.getEncoder().encodeToString("fake-ref".getBytes(StandardCharsets.UTF_8));
+            Map<String, Object> tree = Map.of("ref", unrelatedBase64, "path", "/a%20b", "n", 12345678);
             assertSame(tree, ApiCallExecutor.redactSuccessTree(tree, Set.of(ECHOED_VALUE, SPECIAL, "alice12")));
         }
 

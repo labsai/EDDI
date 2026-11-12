@@ -25,6 +25,12 @@ exact pass (floor 4, `MIN_SEARCHED_SECRET_INPUT_LENGTH` — whole-value matches 
 values and the error body (floor 8 for the encoded forms; the plaintext itself is still redacted at
 every length there).
 
+The error body goes through one helper, `redactErrorBody`, for a single call **and** for every
+`forEach` item. The item path used to redact its error body with the plaintexts only, so an item
+whose 401 echoed the key base64- or URL-encoded was stored with the echo while the same response to a
+single call was redacted; `ApiCallExecutorForEachTest` now covers both forms and asserts the two
+paths store the same text.
+
 ### Design decisions
 
 - **Same floor for the forms as for the value.** Every encoded form is at least as long as the value
@@ -43,4 +49,5 @@ every length there).
 [`SecretEncodingsTest.java`](../../src/test/java/ai/labs/eddi/engine/memory/SecretEncodingsTest.java),
 [`ApiCallExecutorEncodedEchoRedactionTest.java`](../../src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorEncodedEchoRedactionTest.java),
 [`ApiCallExecutorConfigReferenceTest.java`](../../src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorConfigReferenceTest.java),
+[`ApiCallExecutorForEachTest.java`](../../src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorForEachTest.java),
 [`secrets-vault.md`](../secrets-vault.md)
