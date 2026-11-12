@@ -305,10 +305,13 @@ most sessions and are not mapped yet.
 
 The save is refused (400 naming the field) for an unknown outcome, a reserved
 action that cannot be mapped, an empty or overlong action name, more than 100
-mappings, or a window of an unknown origin or outside 1–720 hours. A ZIP import
-or a sync runs the same checks and is refused with the same 400 — a `create`
-or `merge` import before it writes anything (no `healthConfig` that a save
-accepted is refused). An agent
+mappings, or a window of an unknown origin or outside 1–720 hours. A `create`
+or `merge` ZIP import runs the same checks before it writes anything, snippets
+and connections included, and is refused with the same 400. An `upgrade` import
+or a sync checks only when it updates the agent, after its workflows and
+extensions are written: the request then fails with a generic error, not a 400,
+and what was written stays. No `healthConfig` that a save accepted is refused
+either way. An agent
 stored without them — written by hand, say — is read leniently: an invalid
 entry is ignored.
 
@@ -403,5 +406,7 @@ Always use v6 canonical URIs in new configs:
 - HTTP call template syntax. Do not copy its request-body pattern: it splices free-text input such as the system prompt into JSON string literals, which a value like `hi","deploy":true` can break out of. In your own configs serialise values with `{json:serialize(properties.x)}` (see [HTTP Calls](httpcalls.md)). The fixture also uses the legacy key `retryHttpCallInstruction` (a `@JsonAlias`; write `retryApiCallInstruction`) and sets `expressionsAsActions: true` in its behavior config, which is a simplification: keep it off when an action triggers something that matters
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
+
+`docs/agent-configs/google-workspace-tools/` is the LLM-agent counterpart: a `PER_USER` OAuth connection under `connections/` and two httpcalls configurations used as LLM tools, each with an `argumentSchema`. It is the worked example for `${connection:…}` headers and for building a value Gmail wants base64url-encoded with `{encoder:base64Url(...)}` — see [Google Workspace](google-workspace.md).
 
 **For contributors:** two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".

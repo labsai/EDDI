@@ -28,6 +28,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.UnsatisfiedResolutionException;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -48,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.description;
@@ -296,6 +298,81 @@ class RestImportServiceSnippetResilienceTest {
         verify(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());
         verify(restSnippetStore, never()).createSnippet(any());
         verify(snippetStore, never()).deleteAllPermanently(anyString());
+    }
+
+    /**
+     * Snippets are global and live the moment they are written, so an archive whose
+     * agent a save would refuse is refused before the first of them: a matched
+     * snippet a merge would update is left as it is, and no conversation sees
+     * content from an archive that was turned away.
+     */
+    @Test
+    @DisplayName("a merge whose healthConfig is refused writes no snippet")
+    void refusedHealthConfigWritesNoSnippet() throws Exception {
+        stubUnzip(dir -> {
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                    "{\"workflows\":[],\"healthConfig\":{\"outcomes\":{\"order_confirmed\":\"SOLVED\"}}}");
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".descriptor.json").toPath(), "{\"name\":\"Agent\"}");
+            writeSnippet(dir, "good", "{\"name\":\"cautious_mode\",\"content\":\"changed\"}");
+        });
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create(
+                "eddi://ai.labs.snippet/snippetstore/snippets/" + EXISTING_SNIPPET_ID + "?version=2"));
+        when(restSnippetStore.readSnippetDescriptors("", 0, 0)).thenReturn(List.of(descriptor));
+        var existing = new PromptSnippet();
+        existing.setName("cautious_mode");
+        when(restSnippetStore.readSnippet(EXISTING_SNIPPET_ID, 2)).thenReturn(existing);
+        doReturn(Response.status(200).build()).when(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());
+
+        var snippetStore = mock(IPromptSnippetStore.class);
+        when(snippetStore.read(EXISTING_SNIPPET_ID, 2)).thenReturn(existing);
+        var ex = assertThrows(BadRequestException.class, () -> runFailingImport(snippetStore, true));
+
+        assertTrue(ex.getMessage().contains("healthConfig.outcomes.order_confirmed"), ex.getMessage());
+        verify(restSnippetStore, never()).updateSnippet(anyString(), anyInt(), any());
+        verify(restSnippetStore, never()).createSnippet(any());
+    }
+
+    /**
+     * An update of the snippet of the same name that is refused used to "fall
+     * through to create" — a second snippet with the name the merge had just
+     * matched, the duplicate the name check exists to prevent. The refusal now
+     * costs that snippet, as any snippet failure does, and nothing is created.
+     */
+    @Test
+    @DisplayName("a refused snippet update costs the snippet, never creates a second one of the same name")
+    void refusedSnippetUpdateCreatesNoDuplicate() throws Exception {
+        stubUnzip(dir -> {
+            writeAgent(dir);
+            writeSnippet(dir, "good", "{\"name\":\"cautious_mode\",\"content\":\"be careful\"}");
+        });
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create(
+                "eddi://ai.labs.snippet/snippetstore/snippets/" + EXISTING_SNIPPET_ID + "?version=2"));
+        when(restSnippetStore.readSnippetDescriptors("", 0, 0)).thenReturn(List.of(descriptor));
+        var existing = new PromptSnippet();
+        existing.setName("cautious_mode");
+        when(restSnippetStore.readSnippet(EXISTING_SNIPPET_ID, 2)).thenReturn(existing);
+        doReturn(Response.status(409).build()).when(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());
+        var snippetStore = mock(IPromptSnippetStore.class);
+        when(snippetStore.read(EXISTING_SNIPPET_ID, 2)).thenReturn(existing);
+
+        var agentStore = mock(IAgentStore.class);
+        when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
+        when(documentDescriptorStore.getCurrentResourceId(NEW_AGENT_ID)).thenReturn(resourceId(NEW_AGENT_ID, 1));
+        var agentDescriptor = new DocumentDescriptor();
+        agentDescriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + NEW_AGENT_ID + "?version=1"));
+        when(documentDescriptorStore.readDescriptor(NEW_AGENT_ID, 1)).thenReturn(agentDescriptor);
+
+        Response response;
+        try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestPromptSnippetStore.class, restSnippetStore,
+                IPromptSnippetStore.class, snippetStore)) {
+            response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
+        }
+
+        assertEquals(201, response.getStatus(), "snippets are best-effort: the refusal costs the snippet, not the agent");
+        verify(restSnippetStore).updateSnippet(eq(EXISTING_SNIPPET_ID), eq(2), any());
+        verify(restSnippetStore, never()).createSnippet(any());
     }
 
     /**
