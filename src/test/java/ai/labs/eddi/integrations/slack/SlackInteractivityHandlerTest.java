@@ -328,6 +328,46 @@ class SlackInteractivityHandlerTest {
                 contains("already been resolved"), any());
     }
 
+    @Test
+    void buttonCarriesThePlanHashIntoTheDecision() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        String plan = "v1:" + "c".repeat(64);
+        String cardId = cardIds.get(INT_NAME + "|conv-1");
+
+        handler.handlePayload(approvePayload("U_APPROVER", SlackHitlSupport.buildActionValue(INT_NAME, "conv-1", cardId, plan)));
+
+        ArgumentCaptor<HitlDecision> captor = ArgumentCaptor.forClass(HitlDecision.class);
+        verify(conversationService).resumeConversation(eq("conv-1"), captor.capture(), isNull());
+        assertEquals(plan, captor.getValue().getPlanHash());
+    }
+
+    @Test
+    void planChanged_cardSaysSoInsteadOfKeepingDeadButtons() throws Exception {
+        // The card's plan is not the pending one: nothing ran, the pause stays, and the
+        // card's buttons (which carry the old plan) could only be refused again.
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value("conv-1")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                eq(SlackInteractivityHandler.PLAN_CHANGED_TEXT), any());
+        verify(slackApi, never()).updateMessage(anyString(), anyString(), anyString(), contains("already been resolved"), any());
+    }
+
+    @Test
+    void groupPlanChanged_cardSaysSo() throws Exception {
+        bindIntegration(integrationWith(INT_NAME, "U_APPROVER", "s"));
+        doThrow(new IGroupConversationService.GroupPlanMismatchException("plan changed"))
+                .when(groupConversationService).resumeDiscussion(eq("gc-7"), any(), isNull());
+
+        handler.handlePayload(approvePayload("U_APPROVER", value(SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-7")));
+
+        verify(slackApi).updateMessage(anyString(), eq("C_APPROVAL"), anyString(),
+                eq(SlackInteractivityHandler.PLAN_CHANGED_TEXT), any());
+    }
+
     // ─── H1: cross-integration IDOR — decision binds to the value's integration
     // ───
 

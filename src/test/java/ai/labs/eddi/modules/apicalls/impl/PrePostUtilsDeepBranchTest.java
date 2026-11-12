@@ -15,7 +15,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,17 +37,15 @@ class PrePostUtilsDeepBranchTest {
 
     private PrePostUtils prePostUtils;
     private IJsonSerialization jsonSerialization;
-    private IMemoryItemConverter memoryItemConverter;
     private ITemplatingEngine templatingEngine;
     private IDataFactory dataFactory;
 
     @BeforeEach
     void setUp() {
         jsonSerialization = mock(IJsonSerialization.class);
-        memoryItemConverter = mock(IMemoryItemConverter.class);
         templatingEngine = mock(ITemplatingEngine.class);
         dataFactory = mock(IDataFactory.class);
-        prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
+        prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, dataFactory, mock(SecretPropertyVault.class));
     }
 
     // ─── executePreRequestPropertyInstructions ──────────────────────────
@@ -78,7 +75,7 @@ class PrePostUtilsDeepBranchTest {
         }
 
         @Test
-        @DisplayName("preRequest with instructions — calls memoryItemConverter.convert")
+        @DisplayName("preRequest with instructions — returns the caller's map, refreshed in place")
         void withInstructions() throws Exception {
             IConversationMemory memory = mock(IConversationMemory.class);
             ConversationProperties props = mock(ConversationProperties.class);
@@ -94,13 +91,14 @@ class PrePostUtilsDeepBranchTest {
             instruction.setScope(Property.Scope.conversation);
             preRequest.setPropertyInstructions(List.of(instruction));
 
-            Map<String, Object> newData = new HashMap<>();
-            doReturn(newData).when(memoryItemConverter).convert(memory);
+            Map<String, Object> callerData = new HashMap<>();
+            callerData.put("arg", "a");
 
             Map<String, Object> result = prePostUtils.executePreRequestPropertyInstructions(
-                    memory, new HashMap<>(), preRequest);
-            assertSame(newData, result);
-            verify(memoryItemConverter).convert(memory);
+                    memory, callerData, preRequest);
+            assertSame(callerData, result);
+            assertEquals("a", result.get("arg"));
+            assertTrue(result.containsKey("properties"), "the instruction refreshes {properties} in the caller's map");
         }
     }
 

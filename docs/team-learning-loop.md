@@ -98,7 +98,8 @@ POST /groupstore/groups/{groupId}/outcomes
   An external system uses a service account; the recorded principal is the authenticated caller, never a body field.
 - **201** when stored, **200** with the stored event when the `idempotencyKey` was already stored (scoped to the team, so
   a retrying webhook stores once), **400** invalid, **404** no such task on the team's backlog, **409** outcomes are not
-  enabled for the group (add `outcomeConfig`) or the subject is full.
+  enabled for the group (add `outcomeConfig`) or the subject is full. The subject cap is checked and the event stored in
+  one step, so concurrent posts into a subject's last free place store one event, not one each.
 - `GET /groupstore/groups/{groupId}/outcomes[?subjectId=…&limit=…]` reads them back, newest first.
 - A permanent group deletion removes the team's outcomes. A GDPR erasure keeps them (they describe work, not a person) and
   replaces the posting principal with the ledger pseudonym.

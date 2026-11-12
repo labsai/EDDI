@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
@@ -30,8 +31,11 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
+import ai.labs.eddi.integrations.email.ledger.LedgerRetry;
 import ai.labs.eddi.integrations.email.transport.ImapMailTransport;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -49,10 +53,10 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -80,8 +84,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * re-renders the reply from the step it answers, under the Message-ID the row
  * was given. Group replies are the exception that proves the rule: a group
  * discussion keeps no copy of the mail it answered, so their rendered message
- * is held in this node's memory for its retries only; on another node or after
- * a restart such a row ends {@code FAILED} ({@code CONTENT_UNAVAILABLE}).
+ * is held in this node's memory for its retries only — at most
+ * {@value #MAX_CACHED_GROUP_REPLIES} of them, each for as long as its row can
+ * stay retryable; on another node, after a restart or past that bound such a
+ * row ends {@code FAILED} ({@code CONTENT_UNAVAILABLE}).
  * <p>
  * <b>Who it goes to</b> is {@link EmailReplyRecipients}' decision alone, on
  * every attempt. <b>Never</b> to a suppressed address (checked when the row is
@@ -103,7 +109,6 @@ public class EmailReplySender {
 
     /** How long a claim holds a row: covers connect and submission timeouts. */
     static final Duration LEASE = Duration.ofMinutes(5);
-    static final Duration MAX_BACKOFF = Duration.ofHours(1);
     static final int SWEEP_BATCH = 20;
     static final int MAX_CACHED_GROUP_REPLIES = 1000;
 
@@ -166,28 +171,31 @@ public class EmailReplySender {
     private final EmailReplyComposer composer;
     private final EmailOwnerNotifier ownerNotifier;
     private final Instance<AuditLedgerService> auditLedger;
+    private final GdprPseudonymizer pseudonymizer;
     private final EmailMetrics metrics;
     private final Executor executor;
     private final Duration retention;
-    private final int maxAttempts;
-    private final Duration retryBackoff;
+    private final LedgerRetry retry;
 
     /**
      * What this node's group replies were built from, by row id, so a retry can
      * choose the recipient and render the mail again under the current settings (a
-     * group conversation keeps no copy of the mail it answered).
+     * group conversation keeps no copy of the mail it answered). An entry leaves
+     * when its row ends here; one whose row another node's sweep finished ages out
+     * once no row could still be retrying, and past the size bound one entry is
+     * evicted, never the lot.
      */
-    private final Map<String, Request> groupReplies = new ConcurrentHashMap<>();
+    private final Cache<String, Request> groupReplies;
 
     @Inject
     public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
             IConversationService conversationService, ImapMailTransport transport, EmailReplyComposer composer, EmailOwnerNotifier ownerNotifier,
-            Instance<AuditLedgerService> auditLedger, MeterRegistry meterRegistry, ManagedExecutor executor,
+            Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry, ManagedExecutor executor,
             @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention,
             @ConfigProperty(name = "eddi.email.outbound.max-attempts", defaultValue = "6") int maxAttempts,
             @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff) {
-        this(ledger, suppressions, directory, conversationService, (MailTransport) transport, composer, ownerNotifier, auditLedger, meterRegistry,
-                (Executor) executor, retention, maxAttempts, retryBackoff);
+        this(ledger, suppressions, directory, conversationService, (MailTransport) transport, composer, ownerNotifier, auditLedger, pseudonymizer,
+                meterRegistry, (Executor) executor, retention, maxAttempts, retryBackoff);
     }
 
     /**
@@ -196,8 +204,8 @@ public class EmailReplySender {
      */
     public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
             IConversationService conversationService, MailTransport transport, EmailReplyComposer composer, EmailOwnerNotifier ownerNotifier,
-            Instance<AuditLedgerService> auditLedger, MeterRegistry meterRegistry, Executor executor, Duration retention, int maxAttempts,
-            Duration retryBackoff) {
+            Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry, Executor executor,
+            Duration retention, int maxAttempts, Duration retryBackoff) {
         this.ledger = ledger;
         this.suppressions = suppressions;
         this.directory = directory;
@@ -206,11 +214,15 @@ public class EmailReplySender {
         this.composer = composer;
         this.ownerNotifier = ownerNotifier;
         this.auditLedger = auditLedger;
+        this.pseudonymizer = pseudonymizer;
         this.metrics = new EmailMetrics(meterRegistry);
         this.executor = executor;
         this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
-        this.maxAttempts = Math.max(1, maxAttempts);
-        this.retryBackoff = retryBackoff == null || retryBackoff.isZero() || retryBackoff.isNegative() ? Duration.ofMinutes(1) : retryBackoff;
+        this.retry = new LedgerRetry(ledger, maxAttempts, retryBackoff);
+        // Every attempt can hold its lease and then wait the longest backoff. The
+        // direct executor runs eviction on the writing thread, not some time later.
+        this.groupReplies = Caffeine.newBuilder().maximumSize(MAX_CACHED_GROUP_REPLIES)
+                .expireAfterWrite(LEASE.plus(LedgerRetry.MAX_BACKOFF).multipliedBy(retry.maxAttempts())).executor(Runnable::run).build();
     }
 
     // --- Entry points --------------------------------------------------------
@@ -483,9 +495,6 @@ public class EmailReplySender {
             return Optional.empty();
         }
         if (request.kind() == ReplyKind.GROUP) {
-            if (groupReplies.size() >= MAX_CACHED_GROUP_REPLIES) {
-                groupReplies.clear();
-            }
             groupReplies.put(row.id(), request);
         }
         try {
@@ -504,7 +513,7 @@ public class EmailReplySender {
             if (suppressions.isSuppressed(row.integrationId(), row.recipient())) {
                 if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, SUPPRESSED_RECIPIENT, now)) {
                     metrics.reply("suppressed");
-                    groupReplies.remove(row.id());
+                    groupReplies.invalidate(row.id());
                 }
                 return;
             }
@@ -513,26 +522,21 @@ public class EmailReplySender {
                 metrics.reply("sent");
                 metrics.replyLatency(Duration.between(row.createdAt(), now));
                 audit(row, "sent", provider, null);
-                groupReplies.remove(row.id());
+                groupReplies.invalidate(row.id());
                 LOGGER.infof("Email integration %s: reply %s for conversation %s sent", sanitize(row.integrationId()), row.id(),
                         sanitize(row.conversationId()));
             }
         } catch (MailSendException e) {
             String error = e.getCategory() + ": " + truncate(e.getMessage());
-            if (e.isPermanent() || row.attempts() >= maxAttempts) {
-                fail(row, prepared.settings(), error, now);
-            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
+            retry.deferOrFail(row, error, e.isPermanent(), now, () -> fail(row, prepared.settings(), error, now), () -> {
                 metrics.reply("retry");
                 LOGGER.infof("Email integration %s: reply %s deferred after attempt %d: %s", sanitize(row.integrationId()), row.id(),
                         row.attempts(), e.getCategory());
-            }
+            });
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Email integration %s: reply %s failed unexpectedly", sanitize(row.integrationId()), row.id());
-            if (row.attempts() >= maxAttempts) {
-                fail(row, prepared.settings(), "OTHER: " + e.getClass().getSimpleName(), now);
-            } else {
-                ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), "OTHER: " + e.getClass().getSimpleName(), now);
-            }
+            String error = "OTHER: " + e.getClass().getSimpleName();
+            retry.deferOrFail(row, error, false, now, () -> fail(row, prepared.settings(), error, now), () -> metrics.reply("retry"));
         }
     }
 
@@ -540,7 +544,7 @@ public class EmailReplySender {
         if (ledger.complete(row.id(), row.claimToken(), State.FAILED, null, error, now)) {
             metrics.reply("failed");
             audit(row, "failed", null, error);
-            groupReplies.remove(row.id());
+            groupReplies.invalidate(row.id());
             LOGGER.warnf("Email integration %s: reply %s for conversation %s FAILED after %d attempt(s): %s", sanitize(row.integrationId()), row.id(),
                     sanitize(row.conversationId()), row.attempts(), error);
             notifyOwners(row.integrationId(), settings, EmailOwnerNotifier.Reason.REPLY_FAILED, now);
@@ -587,7 +591,7 @@ public class EmailReplySender {
             return;
         }
         if (kind == ReplyKind.GROUP) {
-            Request request = groupReplies.get(row.id());
+            Request request = groupReplies.getIfPresent(row.id());
             if (request == null) {
                 failTerminal(row, settings, CONTENT_UNAVAILABLE, now);
                 return;
@@ -678,19 +682,12 @@ public class EmailReplySender {
     private void terminal(LedgerEntry row, State state, String reason, String outcome, Instant now) {
         if (ledger.complete(row.id(), row.claimToken(), state, null, reason, now)) {
             metrics.reply(outcome);
-            groupReplies.remove(row.id());
+            groupReplies.invalidate(row.id());
         }
     }
 
     private void failTerminal(LedgerEntry row, EmailChannelSettings settings, String reason, Instant now) {
         fail(row, settings, reason, now);
-    }
-
-    /** {@code retry-backoff × 2^(attempts-1)}, capped at {@link #MAX_BACKOFF}. */
-    Duration backoff(int attempts) {
-        int doublings = Math.min(Math.max(0, attempts - 1), 20);
-        Duration delay = retryBackoff.multipliedBy(1L << doublings);
-        return delay.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : delay;
     }
 
     // --- Bounces -------------------------------------------------------------
@@ -729,7 +726,7 @@ public class EmailReplySender {
                 if (suppressions.suppress(integrationId, address, "bounce:" + status, now)) {
                     metrics.suppressed("bounce");
                     LOGGER.infof("Email integration %s: address %s suppressed after a permanent bounce (%s)", sanitize(integrationId),
-                            IEmailSuppressionStore.hash(address), sanitize(status));
+                            recipientPseudonym(address), sanitize(status));
                 }
                 applied = true;
             } else if (block.isTransientFailure()) {
@@ -821,8 +818,9 @@ public class EmailReplySender {
 
     /**
      * One audit entry per sent, failed or bounced reply: integration, kind,
-     * outcome, Message-ID, ledger row, the recipient's domain and SHA-256 — never
-     * the address (the audit ledger is write-once) and never the body.
+     * outcome, Message-ID, ledger row, the recipient's domain and
+     * {@linkplain #recipientPseudonym pseudonym} — never the address (the audit
+     * ledger is write-once) and never the body.
      */
     private void audit(LedgerEntry row, String outcome, String providerResponse, String error) {
         if (auditLedger == null || !auditLedger.isResolvable()) {
@@ -841,7 +839,7 @@ public class EmailReplySender {
                 detail.put("replyKind", ref[1]);
             }
             detail.put("outcome", outcome);
-            detail.put("recipientHash", IEmailSuppressionStore.hash(row.recipient()));
+            detail.put("recipientPseudonym", recipientPseudonym(row.recipient()));
             detail.put("recipientDomain", IEmailSuppressionStore.domainOf(row.recipient()));
             detail.put("messageId", row.messageId());
             detail.put("ledgerId", row.id());
@@ -857,6 +855,18 @@ public class EmailReplySender {
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not audit reply %s: %s", row.id(), e.getMessage());
         }
+    }
+
+    /**
+     * The recipient as {@link GdprPseudonymizer} names it: keyed (or salted per
+     * deployment), so a reader of the audit ledger or the logs cannot confirm an
+     * address by hashing a list of candidates, as an unkeyed hash beside its domain
+     * would allow — unless the deployment has neither a key nor a salt, where the
+     * pseudonymizer falls back to an unsalted hash. The same token HITL
+     * notifications and GDPR erasure write for that address.
+     */
+    private String recipientPseudonym(String recipient) {
+        return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));
     }
 
     static String sha256(String value) {
@@ -877,6 +887,6 @@ public class EmailReplySender {
 
     /** Package-private for tests: whether a group reply is cached for retries. */
     boolean holdsGroupReply(String rowId) {
-        return groupReplies.containsKey(rowId);
+        return groupReplies.getIfPresent(rowId) != null;
     }
 }
