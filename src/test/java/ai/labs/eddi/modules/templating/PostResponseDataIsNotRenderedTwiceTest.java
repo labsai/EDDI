@@ -79,7 +79,7 @@ class PostResponseDataIsNotRenderedTwiceTest {
     }
 
     private PrePostUtils prePostUtils() {
-        return new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), templatingEngine, dataFactory,
+        return new PrePostUtils(mock(IJsonSerialization.class), templatingEngine, dataFactory,
                 mock(SecretPropertyVault.class));
     }
 

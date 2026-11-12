@@ -795,7 +795,8 @@ class TenantQuotaServiceTest {
     @Test
     @DisplayName("quota-store-unavailable counters exist at zero for the default tenant")
     void unavailableCountersExistBeforeTheFirstOutage() {
-        for (String type : List.of("conversation", "api_call", "cost")) {
+        // Every type a gate records on the counter, the deploy gate's "agent" included.
+        for (String type : List.of("conversation", "api_call", "agent", "cost")) {
             var counter = meterRegistry.find("eddi.tenant.quota.unavailable").tags("tenant", TENANT_ID, "type", type).counter();
             assertNotNull(counter, type + " is registered only by its first increment");
             assertEquals(0.0, counter.count());
