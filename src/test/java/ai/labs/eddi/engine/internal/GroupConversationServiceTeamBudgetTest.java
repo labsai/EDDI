@@ -289,6 +289,24 @@ class GroupConversationServiceTeamBudgetTest {
     }
 
     @Test
+    @DisplayName("a store failure while checking the depth fails closed: the operation never runs")
+    void nestedChildCheck_storeFailure_failsClosed() throws Exception {
+        // The operation reads the discussion again; if that second read succeeded it
+        // would start a child's member turns with no depth check at all.
+        var child = new GroupConversation();
+        child.setId("gc-flaky");
+        child.setGroupId(GROUP_ID);
+        child.setDepth(1);
+        child.setState(GroupConversationState.COMPLETED);
+        doThrow(new IResourceStore.ResourceStoreException("store unavailable")).doReturn(child).when(conversationStore).read("gc-flaky");
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> service.continueDiscussion("gc-flaky", "more", null));
+
+        doThrow(new IResourceStore.ResourceStoreException("store unavailable")).doReturn(child).when(conversationStore).read("gc-flaky");
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> service.followUpWithMember("gc-flaky", AGENT_A, "why?"));
+        verify(conversationStore, never()).compareAndSetState(anyString(), any(), any());
+    }
+
+    @Test
     @DisplayName("a follow-up runs under the team ceiling: its ceiling is tightened by what the team has left")
     void followUpCeilingIncludesTheTeamCeiling() throws Exception {
         config(10.0, null, protocol(50.0, null));
