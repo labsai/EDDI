@@ -531,11 +531,28 @@ class DynamicAgentToolsTest {
         @Test
         @DisplayName("without allowedModels and an unreadable parent, an explicit model is refused")
         void createSubAgent_noModelPolicy_unreadableParentRefusesExplicitModel() throws Exception {
-            String result = tool.createSubAgent("Test", "prompt", "bedrock", "some-large-model", null, null);
+            String result = tool.createSubAgent("Test", "prompt", "openai", "some-large-model", null, null);
 
             assertTrue(result.contains("⚠️"), result);
             assertTrue(result.contains("could not be read"), result);
             verify(agentSetupService, never()).setupAgent(any(), any());
+        }
+
+        @Test
+        @DisplayName("a model-chosen restricted provider is refused, even when allowedModels lists it; the parent's own passes")
+        void createSubAgent_restrictedProviderOnlyAsParents() throws Exception {
+            config.setAllowedModels(Map.of("bedrock", List.of("big-model"), "Bedrock", List.of("big-model")));
+
+            String chosen = tool.createSubAgent("Test", "prompt", " Bedrock ", "big-model", null, null);
+            assertTrue(chosen.contains("restricted"), chosen);
+            verify(agentSetupService, never()).setupAgent(any(), any());
+
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("bedrock", "big-model", null));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+            String inherited = tool.createSubAgent("Test", "prompt", null, null, null, null);
+            assertTrue(inherited.contains("✅"), inherited);
         }
 
         @Test

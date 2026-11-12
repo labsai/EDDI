@@ -144,6 +144,48 @@ class LlmProviderAuthorPolicyTest {
     }
 
     @Nested
+    @DisplayName("indirect provider names")
+    class Indirect {
+
+        @Test
+        @DisplayName("a provider given as ${vars:...} or a template is refused — it could resolve to a restricted one")
+        void variableOrTemplateRefused() {
+            var policy = asEditor();
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(task("${vars:provider}", "\"modelId\":\"m\""), null, "langchain"));
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(task("{context.p}", ""), null, "langchain"));
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(task("{properties.x}", ""), null, "langchain"));
+            String cascade = "{\"tasks\":[{\"type\":\"openai\",\"parameters\":{},\"modelCascade\":{\"steps\":[{\"type\":\"${vars:p}\","
+                    + "\"parameters\":{}}],\"judgeModel\":{\"type\":\"${vars:j}\",\"parameters\":{}}}}]}";
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(cascade, null, "langchain"));
+            assertThrows(ForbiddenException.class,
+                    () -> policy.requireMayAuthor("{\"contextWindow\":{\"llmProvider\":\"${vars:p}\",\"llmModel\":\"x\"}}", null, "group"));
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor("{\"embeddingProvider\":\"${vars:e}\"}", null, "rag"));
+        }
+
+        @Test
+        @DisplayName("an unchanged indirect provider an administrator stored is carried over")
+        void carryOver() {
+            String stored = task("${vars:provider}", "\"systemMessage\":\"a\"");
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(task("${vars:provider}", "\"systemMessage\":\"b\""), stored, "langchain"));
+        }
+
+        @Test
+        @DisplayName("case and whitespace do not hide a restricted provider")
+        void normalisation() {
+            var policy = asEditor();
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(task(" Bedrock ", "\"modelId\":\"m\""), null, "langchain"));
+            assertThrows(ForbiddenException.class, () -> policy.requireMayAuthor(task("JLAMA", ""), null, "langchain"));
+        }
+
+        @Test
+        @DisplayName("a log flag given as a variable counts as on")
+        void variableLogFlag() {
+            assertThrows(ForbiddenException.class,
+                    () -> asEditor().requireMayAuthor(task("openai", "\"logRequests\":\"${vars:debug}\""), null, "langchain"));
+        }
+    }
+
+    @Nested
     @DisplayName("content logging")
     class ContentLogging {
 

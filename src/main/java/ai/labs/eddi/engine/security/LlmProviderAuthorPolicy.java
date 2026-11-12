@@ -85,6 +85,17 @@ public class LlmProviderAuthorPolicy {
     private static final List<String> PROVIDER_FIELDS = List.of("type", "provider", "llmProvider");
     /** The field that names an embedding provider. */
     private static final String EMBEDDING_PROVIDER_FIELD = "embeddingProvider";
+    /** Fields whose non-literal value could select any provider at run time. */
+    private static final List<String> INDIRECTION_FIELDS = List.of("type", "provider", "llmProvider", "embeddingProvider");
+
+    /**
+     * Whether a provider value is a variable or template rather than a provider
+     * name.
+     */
+    static boolean isIndirect(String value) {
+        return value != null && (value.contains("${") || value.contains("{"));
+    }
+
     /** Children holding a provider's parameters. */
     private static final List<String> PARAMETER_FIELDS = List.of("parameters", "embeddingParameters");
 
@@ -224,6 +235,20 @@ public class LlmProviderAuthorPolicy {
         Map<String, String> settings = settingsOf(node);
         String provider = providerOf(node);
 
+        // A provider field that is not a plain literal: the runtime expands ${vars:...}
+        // in an LLM task's, cascade step's and judge's type, so "${vars:p}" could name
+        // a restricted provider the scan above never sees. A template ("{...}") is
+        // refused the same way — no provider ever needs one.
+        for (String field : INDIRECTION_FIELDS) {
+            JsonNode value = node.get(field);
+            // "type" is a generic field name: it counts only on an object that also
+            // carries model parameters (an LLM task, a cascade step, a judge).
+            boolean modelSpec = !"type".equals(field) || node.has("parameters");
+            if (modelSpec && value != null && value.isTextual() && isIndirect(value.asText())) {
+                facts.privileged.add("indirect|" + field + "|" + value.asText().trim());
+            }
+        }
+
         if (!contentLoggingEditorsAllowed) {
             for (String flag : LOG_FLAGS) {
                 if (isOn(settings.get(flag))) {
@@ -325,6 +350,8 @@ public class LlmProviderAuthorPolicy {
             case "jlama-path" -> "the Jlama path '" + parts[1] + "'" + (jlamaBase.isPresent()
                     ? " outside " + JlamaModelDirectory.PROPERTY
                     : " (set " + JlamaModelDirectory.PROPERTY + " to let editors choose paths under it)");
+            case "indirect" -> "a provider '" + parts[1] + "' given as a variable or template ('" + (parts.length > 2 ? parts[2] : "")
+                    + "'), which could resolve to a restricted provider — name the provider literally";
             case "provider" -> "the restricted provider '" + parts[1] + "' or its model, location or credentials ("
                     + RESTRICTED_PROVIDERS_PROPERTY + ", " + RESTRICTED_EMBEDDING_PROVIDERS_PROPERTY + ")";
             default -> "a document that could not be inspected";

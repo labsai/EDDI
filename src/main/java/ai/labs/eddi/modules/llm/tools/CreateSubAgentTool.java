@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.llm.impl.ProviderTypes;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
@@ -248,6 +249,14 @@ public class CreateSubAgentTool {
             // has no parameter for and a parent cannot hand down yet. Refused here, with
             // a message the model can act on, rather than as setup's bare 'requires
             // baseUrl' after the guardrails have run.
+            // A provider that authenticates with the server's own cloud identity (or
+            // runs models in the JVM) is never the model's choice: only the parent's
+            // own, already admin-authored, provider may be one.
+            if (ProviderTypes.isRestricted(resolvedProvider)
+                    && (parentProfile == null || !resolvedProvider.equalsIgnoreCase(parentProfile.provider()))) {
+                return ("⚠️ Provider '%s' is restricted to administrators (eddi.llm.restricted-providers) and is not the parent's "
+                        + "provider, so a sub-agent cannot use it.").formatted(resolvedProvider);
+            }
             if (OpenAiCompatibleEndpoint.isType(resolvedProvider)) {
                 return "⚠️ Dynamic sub-agents cannot target a self-hosted OpenAI-compatible endpoint (provider 'openai-compatible') yet: "
                         + "it needs a baseUrl, which this tool cannot pass. Pick another provider, or ask an administrator to create "
