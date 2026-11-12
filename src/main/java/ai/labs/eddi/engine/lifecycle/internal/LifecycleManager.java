@@ -1083,8 +1083,10 @@ public class LifecycleManager implements ILifecycleManager {
                                    Map<String, Object> outputBefore, List<String> actionsBefore,
                                    String onFailureMode) {
 
+        // The summary the audit and digest carry, not the raw message: a provider can
+        // quote the credential it rejected.
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
-                task.getId(), task.getType(), onFailureMode, exception.getMessage());
+                task.getId(), task.getType(), onFailureMode, summarizeForAudit(exception, this::scrubResolvedCredentials));
 
         // 1. Mark new or overwritten IData entries as uncommitted.
         // An entry is "dirty" if its key didn't exist before OR if the

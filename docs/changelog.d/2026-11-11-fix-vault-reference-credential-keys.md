@@ -90,8 +90,18 @@ so the fallback stays usable.
   text: `KnowledgeBaseFailureRedactor` returns a generic message naming the exception class, and the log line
   carries only the classes of the cause chain and the knowledge base — also when the top-level message is
   `null`, since a cause can quote the credential. Remedy: a vault reference or a credential of 8+ characters.
-  Otherwise every message of the cause chain is redacted, and when any of them changed the log gets that
-  redacted chain, never the exception object (ingestion status, inspection and evaluation endpoints alike).
+  Otherwise every inspected message of the cause chain is redacted, and the log always gets that redacted
+  chain, never the exception object (ingestion status, inspection and evaluation endpoints alike): at most 16
+  causes are inspected, and further causes and suppressed exceptions are named as not inspected rather than
+  printed. A knowledge base whose vault reference cannot be resolved at failure time also has its provider
+  text withheld (the failing client may hold the plaintext), and the redactor additionally removes every
+  credential a live model or store client was built with, so a value rotated away while a request was in
+  flight is still removed.
+- `ResolvedCredentials` ties recorded plaintexts to the client built with them (`record(holder, values)`,
+  weak keys compared by identity): kept while the chat model, embedding model or vector store client is
+  cached or still used by a running request, however many other values are recorded; values without a
+  holder keep the bounded set. The strict-write failure log line in `LifecycleManager` now logs the same
+  scrubbed summary as the audit entry instead of the raw exception message.
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
 - `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; a shorter

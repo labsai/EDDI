@@ -222,13 +222,10 @@ public class RagIngestionService {
             // redacted before it is kept.
             var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, ragConfig, e);
             ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + redacted.text());
-            if (redacted.altered()) {
-                // The exception and its causes carry what was just removed: the log gets
-                // the redacted cause chain (or only its classes), never the exception.
-                LOGGER.errorf("Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), redacted.logText());
-            } else {
-                LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
-            }
+            // Never the exception object: the log gets the redacted cause chain (or only
+            // its classes), and causes or suppressed exceptions nothing inspected are
+            // named, not printed.
+            LOGGER.errorf("Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), redacted.logText());
         }
     }
 

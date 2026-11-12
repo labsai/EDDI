@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.EndpointParameters;
@@ -129,6 +130,13 @@ public class EmbeddingModelFactory {
         return isBlank(value) ? fallback : value.trim();
     }
 
+    /**
+     * Where the credentials handed to a client are recorded for by-value error
+     * scrubbing. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
+
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
             OutboundTargetPolicy targetPolicy) {
@@ -233,6 +241,7 @@ public class EmbeddingModelFactory {
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
+        Map<String, String> withReferences = params;
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
@@ -252,6 +261,12 @@ public class EmbeddingModelFactory {
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
+        // What the client now holds, kept for by-value scrubbing for as long as the
+        // client lives: a failure after a rotation echoes this value, not the new one.
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(model,
+                    ResolvedCredentials.substituted(withReferences, params, EmbeddingParameters.credentialParameters(provider)));
+        }
 
         if (pinsNonRetrievalTaskType(provider, params)) {
             LOGGER.infof("Embedding provider %s pins taskType=%s; leaving the %s role unset so the configured task type stands",

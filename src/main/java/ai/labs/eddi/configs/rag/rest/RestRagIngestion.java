@@ -719,19 +719,14 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     /**
-     * Redacts a model or store failure of {@code knowledgeBase} and logs it. When
-     * redaction changed anything — anywhere in the cause chain — or the short-
-     * credential fail-safe applies, the log gets the redacted text (or only the
-     * classes), never the exception object, whose causes would carry what was
-     * removed.
+     * Redacts a model or store failure of {@code knowledgeBase} and logs it. The
+     * log gets the redacted cause chain (or only its classes), never the exception
+     * object: causes beyond the inspected depth and suppressed exceptions would
+     * carry text nothing checked.
      */
     private KnowledgeBaseFailureRedactor.Redacted redactedFailure(String what, RagConfiguration knowledgeBase, RuntimeException e) {
         var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, knowledgeBase, e);
-        if (redacted.altered()) {
-            LOGGER.warnf("%s: %s", what, redacted.logText());
-        } else {
-            LOGGER.warnf(e, "%s", what);
-        }
+        LOGGER.warnf("%s: %s", what, redacted.logText());
         return redacted;
     }
 

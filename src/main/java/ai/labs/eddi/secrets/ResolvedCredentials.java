@@ -5,11 +5,16 @@
 package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
+import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -40,8 +45,15 @@ import java.util.Set;
  * characters <em>cannot be covered</em> here: the set is process-wide, and
  * withholding every error that contains some two- or three-character string
  * would hide the cause of nearly every failure. Use credentials of 8 characters
- * or more. Bounded; a value that falls out was resolved long enough ago that
- * the model holding it has typically been rebuilt and recorded it again.
+ * or more.
+ * <p>
+ * <b>Retention.</b> A value recorded against the client that holds it
+ * ({@link #record(Object, Collection)}) is kept for exactly as long as that
+ * client is reachable — while it is cached, and while any request still running
+ * on it after an eviction or rotation holds it — however many other values are
+ * recorded meanwhile: the holder is a weak key, compared by identity. Values
+ * recorded without a holder (a build that has not produced its client yet) go
+ * to a bounded set.
  */
 @ApplicationScoped
 public class ResolvedCredentials {
@@ -59,6 +71,40 @@ public class ResolvedCredentials {
 
     private final Cache<String, Boolean> plaintexts = Caffeine.newBuilder().maximumSize(MAX_VALUES).build();
     private final Cache<String, Boolean> shortPlaintexts = Caffeine.newBuilder().maximumSize(MAX_VALUES).build();
+
+    /**
+     * The values each live client was built with. Weak keys: an entry leaves when
+     * its client becomes unreachable, never because others were recorded.
+     */
+    private final Cache<Object, Set<String>> byHolder = Caffeine.newBuilder().weakKeys().build();
+
+    /**
+     * Remembers {@code values} for as long as {@code holder} — the model or store
+     * client they were resolved into — is reachable. Without a holder, as
+     * {@link #record(Collection)}.
+     */
+    public void record(Object holder, Collection<String> values) {
+        if (holder == null) {
+            record(values);
+            return;
+        }
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        Set<String> kept = new HashSet<>();
+        for (String value : values) {
+            if (value != null && value.length() >= MIN_SHORT_LENGTH) {
+                kept.add(value);
+            }
+        }
+        if (!kept.isEmpty()) {
+            byHolder.asMap().merge(holder, Set.copyOf(kept), (a, b) -> {
+                Set<String> union = new HashSet<>(a);
+                union.addAll(b);
+                return Set.copyOf(union);
+            });
+        }
+    }
 
     /** Remembers {@code values} — plaintexts just resolved into a model client. */
     public void record(Collection<String> values) {
@@ -85,14 +131,40 @@ public class ResolvedCredentials {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        Set<String> known = plaintexts.asMap().keySet();
+        Set<String> known = new HashSet<>(plaintexts.asMap().keySet());
+        Set<String> knownShort = new HashSet<>(shortPlaintexts.asMap().keySet());
+        for (Set<String> held : byHolder.asMap().values()) {
+            for (String value : held) {
+                (value.length() >= MIN_LENGTH ? known : knownShort).add(value);
+            }
+        }
         String scrubbed = known.isEmpty() ? text : RequestRedactor.redactResolvedSecrets(text, Set.copyOf(known));
-        for (String value : shortPlaintexts.asMap().keySet()) {
+        for (String value : knownShort) {
             if (scrubbed.contains(value)) {
                 return WITHHELD;
             }
         }
         return scrubbed;
+    }
+
+    /**
+     * The values a resolution substituted into {@code keys}: each credential
+     * parameter that held a vault reference before and differs after — what the
+     * client built from {@code after} holds.
+     */
+    public static List<String> substituted(Map<String, String> before, Map<String, String> after, Set<String> keys) {
+        List<String> values = new ArrayList<>();
+        if (before == null || after == null || keys == null) {
+            return values;
+        }
+        for (String key : keys) {
+            String reference = before.get(key);
+            String value = after.get(key);
+            if (reference != null && value != null && SecretReference.isVaultReference(reference) && !value.equals(reference)) {
+                values.add(value);
+            }
+        }
+        return values;
     }
 
     /** {@link #scrub} for a caller built without this bean (unit tests). */

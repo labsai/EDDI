@@ -14,6 +14,7 @@ import jakarta.inject.Provider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,9 +23,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -155,6 +159,36 @@ class ChatErrorCredentialScrubbingTest {
         // Under four characters it cannot be covered on this process-wide path.
         assertEquals("abc is fine", credentials.scrub("abc is fine"));
         assertEquals("x", ResolvedCredentials.scrub(null, "x"));
+    }
+
+    @Test
+    @DisplayName("a value recorded against a live model is still scrubbed after 20,000 other values have been recorded")
+    void valueHeldByALiveModelOutlivesTheBoundedSet() {
+        var credentials = new ResolvedCredentials();
+        Object liveModel = new Object();
+        credentials.record(liveModel, List.of(GATEWAY_VALUE));
+        List<String> churn = new ArrayList<>();
+        for (int i = 0; i < 20_000; i++) {
+            churn.add("churn-" + i + "-" + "c".repeat(8));
+        }
+        credentials.record(churn);
+
+        String scrubbed = credentials.scrub("401: " + GATEWAY_VALUE + " rejected");
+
+        assertFalse(scrubbed.contains(GATEWAY_VALUE), scrubbed);
+        assertNotNull(liveModel, "the model is still reachable, so its values are kept");
+    }
+
+    @Test
+    @DisplayName("the registry ties a built model's credentials to that model")
+    void registryRecordsAgainstTheModel() throws Exception {
+        var registry = registry(mock(SecretResolver.class), Map.of("${vault:gateway-key}", GATEWAY_VALUE));
+        var credentials = mock(ResolvedCredentials.class);
+        registry.resolvedCredentials = credentials;
+
+        var model = registry.getOrCreate("openai", Map.of("apiKey", "${vault:gateway-key}"));
+
+        verify(credentials).record(same(model), eq(List.of(GATEWAY_VALUE)));
     }
 
     @Test

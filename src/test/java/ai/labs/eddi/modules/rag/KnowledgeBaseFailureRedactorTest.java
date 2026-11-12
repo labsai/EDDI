@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,6 +38,9 @@ class KnowledgeBaseFailureRedactorTest {
      */
     private static final String PLAINTEXT = "store-" + "p".repeat(16);
 
+    /** What the embedding key reference resolves to; runtime-built. */
+    private static final String EMBEDDING_PLAINTEXT = "embed-" + "e".repeat(16);
+
     /** A key shape the pattern redaction recognises, built at runtime. */
     private static final String SHAPED_KEY = "sk-proj-" + "a".repeat(32);
 
@@ -46,7 +51,13 @@ class KnowledgeBaseFailureRedactorTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> {
             String value = inv.getArgument(0);
-            return "${vault:store-password}".equals(value) ? PLAINTEXT : value;
+            return switch (value) {
+                case "${vault:store-password}" -> PLAINTEXT;
+                case "${vault:embedding-key}" -> EMBEDDING_PLAINTEXT;
+                // An unknown reference stays in place, as the resolver leaves one it
+                // cannot resolve.
+                default -> value;
+            };
         });
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -162,6 +173,65 @@ class KnowledgeBaseFailureRedactorTest {
         // logged.
         var clean = redactor.redactFailure(config, new RuntimeException((String) null, new IllegalStateException("connection refused")));
         assertFalse(clean.altered());
+    }
+
+    @Test
+    @DisplayName("a credential in cause #17, beyond the inspected depth, never reaches the log text, which says causes were left out")
+    void credentialBeyondTheDepthCapIsNotLogged() {
+        Throwable failure = new IllegalStateException("authentication failed for " + PLAINTEXT);
+        for (int i = 0; i < KnowledgeBaseFailureRedactor.MAX_CAUSE_DEPTH; i++) {
+            failure = new RuntimeException("wrapped " + i, failure);
+        }
+
+        var redacted = redactor.redactFailure(knowledgeBase(), failure);
+
+        assertFalse(redacted.logText().contains(PLAINTEXT), redacted.logText());
+        assertFalse(redacted.logText().contains("authentication failed"), redacted.logText());
+        assertTrue(redacted.logText().contains("further causes not inspected"), redacted.logText());
+    }
+
+    @Test
+    @DisplayName("a credential in a suppressed exception never reaches the log text, which counts the suppressed exception")
+    void credentialInASuppressedExceptionIsNotLogged() {
+        var failure = new IllegalStateException("store write failed");
+        failure.addSuppressed(new IllegalStateException("close failed for " + PLAINTEXT));
+
+        var redacted = redactor.redactFailure(knowledgeBase(), failure);
+
+        assertFalse(redacted.logText().contains(PLAINTEXT), redacted.logText());
+        assertFalse(redacted.logText().contains("close failed"), redacted.logText());
+        assertTrue(redacted.logText().contains("1 suppressed exception(s) not inspected"), redacted.logText());
+        assertEquals("store write failed", redacted.text());
+    }
+
+    @Test
+    @DisplayName("a vault reference that cannot be resolved now withholds the provider's text")
+    void unresolvableReferenceWithholdsTheText() {
+        var config = knowledgeBase();
+        config.setStoreParameters(Map.of("password", "${vault:rotated-away}"));
+
+        var redacted = redactor.redactFailure(config, new IllegalStateException("authentication failed for some-old-value"));
+
+        assertTrue(redacted.altered());
+        assertTrue(redacted.text().contains("cannot be resolved now"), redacted.text());
+        assertFalse(redacted.logText().contains("some-old-value"), redacted.logText());
+    }
+
+    @Test
+    @DisplayName("a value a live client was built with before a rotation is removed, though the reference now resolves to another")
+    void preRotationValueHeldByALiveClientIsRemoved() {
+        String rotatedAway = "before-rotation-" + "r".repeat(12);
+        var credentials = new ResolvedCredentials();
+        Object liveClient = new Object();
+        credentials.record(liveClient, List.of(rotatedAway));
+        redactor.resolvedCredentials = credentials;
+
+        var redacted = redactor.redactFailure(knowledgeBase(), new IllegalStateException("rejected " + rotatedAway + " on host db"));
+
+        assertFalse(redacted.text().contains(rotatedAway), redacted.text());
+        assertFalse(redacted.logText().contains(rotatedAway), redacted.logText());
+        assertTrue(redacted.text().contains("on host db"), redacted.text());
+        assertNotNull(liveClient);
     }
 
     @Test

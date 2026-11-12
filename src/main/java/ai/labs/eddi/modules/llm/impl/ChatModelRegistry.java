@@ -317,6 +317,17 @@ public class ChatModelRegistry {
             resolvedCredentials.record(captured);
         }
     }
+
+    /**
+     * Ties the plaintexts to the model built with them: kept while the model is
+     * cached or still in use by a running request, whatever else is recorded
+     * meanwhile (see {@code ResolvedCredentials.record(holder, values)}).
+     */
+    private void recordCredentials(Object model, List<String> captured) {
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(model, captured);
+        }
+    }
     /**
      * Cluster mode: evicts models built longer ago than
      * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
@@ -433,6 +444,7 @@ public class ChatModelRegistry {
         var rawModel = modelBuilder.build(resolvedParams);
         var model = ObservableChatModel.wrap(rawModel, type, timeoutMs, logReq, logResp, telemetryListener,
                 telemetryProvider(type, resolvedParams));
+        recordCredentials(model, captured);
         publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
         return model;
@@ -492,6 +504,7 @@ public class ChatModelRegistry {
             var rawModel = modelBuilder.buildStreaming(resolvedParams);
             var model = ObservableStreamingChatModel.wrap(rawModel, type, logReq, logResp, telemetryListener,
                     telemetryProvider(type, resolvedParams));
+            recordCredentials(model, captured);
             publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
         } catch (UnsupportedOperationException e) {
