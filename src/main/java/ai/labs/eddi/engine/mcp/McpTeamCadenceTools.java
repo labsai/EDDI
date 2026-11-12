@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace.CadenceRequest;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -213,13 +214,17 @@ public class McpTeamCadenceTools {
         }
     }
 
-    private ScheduleConfiguration schedule(String scheduleId) {
+    /**
+     * The cadence's schedule, null only when there is none. A store failure is
+     * thrown: reported as "missing" it would read as a cadence that never fires.
+     */
+    private ScheduleConfiguration schedule(String scheduleId) throws IResourceStore.ResourceStoreException {
         if (scheduleId == null) {
             return null;
         }
         try {
             return scheduleStore.readSchedule(scheduleId);
-        } catch (Exception e) {
+        } catch (IResourceStore.ResourceNotFoundException e) {
             return null;
         }
     }

@@ -29,7 +29,11 @@ class AgentOriginatedRequestFilterTest {
     @ParameterizedTest
     @CsvSource({"PATCH,hitl/samples/s1", "POST,/hitl/autonomy/a1/apply", "POST,hitl/analytics/rebuild", "post,hitl/autonomy/a1/lift",
             "DELETE,hitl/samples/s1", "POST,administration/spend-control-changes/c1/approve",
-            "POST,/administration/spend-control-changes/c1/reject"})
+            "POST,/administration/spend-control-changes/c1/reject",
+            // matrix parameters do not change the route, so they must not change the
+            // verdict
+            "POST,administration/spend-control-changes;x=1/c1/approve", "POST,administration;a=b/spend-control-changes/c1/approve",
+            "PATCH,hitl;v=1/samples/s1", "POST,hitl/autonomy;x/a1/apply"})
     @DisplayName("a marked write to a guarded path is refused")
     void refused(String method, String path) {
         assertTrue(AgentOriginatedRequestFilter.refused(method, path, "true"));

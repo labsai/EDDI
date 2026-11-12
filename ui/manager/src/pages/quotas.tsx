@@ -162,7 +162,21 @@ export function QuotasPage() {
             <RefetchErrorNotice onRetry={() => refetchQuota()} />
           )}
 
-          <PendingSpendChanges kind="TENANT_QUOTA" isAdmin={isAdmin} />
+          {/* The form stops following the server while it is dirty, and Save sends the
+              whole form: approving now and saving afterwards would overwrite the
+              approved quota with the limits read before it. */}
+          <PendingSpendChanges
+            kind="TENANT_QUOTA"
+            isAdmin={isAdmin}
+            approveBlockedReason={
+              dirty
+                ? t(
+                    "spendControl.approveBlockedDirty",
+                    "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota.",
+                  )
+                : undefined
+            }
+          />
 
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (

@@ -4738,7 +4738,8 @@
     "approveDesc": "Sie wird jetzt mit Ihnen als Verantwortlichem angewendet und lockert die Ausgabenkontrolle: {{loosening}}",
     "rejectDesc": "Es wird nichts angewendet. Der Vorschlagende kann sie erneut einreichen.",
     "approved": "Änderung genehmigt und angewendet",
-    "rejected": "Änderung abgelehnt; nichts wurde angewendet"
+    "rejected": "Änderung abgelehnt; nichts wurde angewendet",
+    "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
   },
   "modelPrices": {
     "nav": "Modellpreise",

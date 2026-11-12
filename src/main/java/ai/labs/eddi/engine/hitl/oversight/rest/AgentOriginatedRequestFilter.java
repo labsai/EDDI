@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.oversight.rest;
 
 import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
+import ai.labs.eddi.engine.hitl.oversight.OversightWriteGuard;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.core.Response;
@@ -43,11 +44,15 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
         }
     }
 
-    /** Whether a request is refused. */
+    /**
+     * Whether a request is refused. The path is matched without its matrix
+     * parameters ({@code ;x=1} on a segment): routing ignores them, so
+     * {@code spend-control-changes;x=1/c1/approve} reaches the same method.
+     */
     static boolean refused(String method, String path, String marker) {
         if (marker == null || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
             return false;
         }
-        return path != null && GUARDED.matcher(path.toLowerCase(Locale.ROOT)).matches();
+        return path != null && GUARDED.matcher(OversightWriteGuard.withoutMatrixParams(path.toLowerCase(Locale.ROOT))).matches();
     }
 }

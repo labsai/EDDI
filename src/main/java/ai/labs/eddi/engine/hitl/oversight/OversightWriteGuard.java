@@ -33,6 +33,7 @@ public final class OversightWriteGuard {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Pattern OVERSIGHT_API = Pattern.compile("/hitl/(?:samples|autonomy|analytics/rebuild)(?:[/?#]|$)");
     private static final Pattern SPEND_CONTROL_API = Pattern.compile("/administration/spend-control-changes(?:[/?#]|$)");
+    private static final Pattern MATRIX_PARAMS = Pattern.compile(";[^/?#]*");
     private static final String HITL_CONFIG_KEY = "hitlConfig";
     private static final String OVERSIGHT_KEY = "oversight";
 
@@ -69,10 +70,11 @@ public final class OversightWriteGuard {
         if (decodedUri == null) {
             return null;
         }
-        if (OVERSIGHT_API.matcher(decodedUri).find()) {
+        String routed = withoutMatrixParams(decodedUri);
+        if (OVERSIGHT_API.matcher(routed).find()) {
             return OVERSIGHT_API_REASON;
         }
-        if (SPEND_CONTROL_API.matcher(decodedUri).find()) {
+        if (SPEND_CONTROL_API.matcher(routed).find()) {
             return SPEND_CONTROL_API_REASON;
         }
         Matcher target = agentStoreTarget != null ? agentStoreTarget.matcher(decodedUri) : null;
@@ -98,6 +100,17 @@ public final class OversightWriteGuard {
             return written.isMissingNode() || written.isNull() ? null : OVERSIGHT_CONFIG_REASON;
         }
         return same(storedOversight, written) ? null : OVERSIGHT_CONFIG_REASON;
+    }
+
+    /**
+     * A path or URI without the matrix parameters of its segments ({@code /a;x=1/b}
+     * → {@code /a/b}). JAX-RS routes on the segments alone, so a guard that matched
+     * the raw path would let
+     * {@code /administration/spend-control-changes;x=1/c1/approve} through to the
+     * method it guards.
+     */
+    public static String withoutMatrixParams(String path) {
+        return path == null ? null : MATRIX_PARAMS.matcher(path).replaceAll("");
     }
 
     private static boolean same(JsonNode stored, JsonNode written) {

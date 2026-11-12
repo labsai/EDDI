@@ -48,6 +48,11 @@ Azure deployment, an OpenRouter route). A new `gpt-4o-2024*` entry overlaps no n
 it takes over every call that requested `gpt-4o` and got a dated snapshot back — so a cheaper one is loosening.
 Provider `*` counts as every provider.
 
+Prices are compared as metering charges them, unset ones included: an unset cache price is the input price, and an
+unset long-context price is the base price of its kind — except an unset long-context *cache* price, which is the
+entry's base cache price when one is set and otherwise the **tier's** input price. So with input 10, a tier input
+of 20 and no cache prices, long-context cache reads cost 20, and setting the tier's cache read to 15 is loosening.
+
 Under strict mode this means adding a price for a new model is a proposal. That is the point of strict mode: a
 model without a price is refused, and pricing it is admitting it.
 
@@ -90,7 +95,8 @@ good). Storage: MongoDB `spendcontrolchanges`, PostgreSQL `spend_control_changes
 
 In the Manager, **Model Prices** and **Quotas** each show a *Pending changes* panel: who proposed what, why, every
 change and — highlighted — the parts that loosen spending, with **Approve** and **Reject**. Only `eddi-admin` sees
-and decides them.
+and decides them. On **Quotas**, Approve is disabled while the quota form has unsaved edits: the form saves every
+limit at once, so saving it after an approval would put back the limits read before it.
 
 Over REST, all `eddi-admin`:
 
@@ -104,7 +110,8 @@ Over REST, all `eddi-admin`:
 **An agent cannot approve.** A non-read request an agent's own httpcall makes to these paths is refused with 403
 `AGENT_ORIGINATED` (the engine marks every httpcall to this deployment; see
 [HITL Oversight → Security](hitl-oversight.md#security)), and an approved tool call writing there is refused by the
-self-ungating guard. Never give an agent or an MCP client's model an administrator credential to the REST API — that
+self-ungating guard. Both match the path without its matrix parameters (`…/spend-control-changes;x=1/…` routes to
+the same method, so it is refused the same way). Never give an agent or an MCP client's model an administrator credential to the REST API — that
 is the one path neither guard can see.
 
 There is no Slack or e-mail notification yet: the proposing client is told to tell its user, the proposal is logged

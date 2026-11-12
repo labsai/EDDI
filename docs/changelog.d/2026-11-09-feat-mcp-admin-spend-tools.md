@@ -20,7 +20,9 @@ approver as actor. See [Spend-Control Changes](../spend-control-changes.md).
 - **Classifier** ([`SpendControlDiff`](../../src/main/java/ai/labs/eddi/engine/spendcontrol/SpendControlDiff.java)),
   conservative by construction: a removed entry, any lower or cleared price, a looser policy, a raised or
   disabled quota loosen; a new entry is stricter only under `ALLOW` and only if it costs at least every
-  existing entry of the same provider (or of provider `*`) — whatever the two model patterns.
+  existing entry of the same provider (or of provider `*`) — whatever the two model patterns. Unset prices are
+  compared as metering charges them: an unset long-context cache price is the base cache price if set, else
+  the tier's input price (not the base input price, which made a cut from 20 to 15 read as a raise from 10).
 - **Pending changes** ([`SpendControlChangeService`](../../src/main/java/ai/labs/eddi/engine/spendcontrol/SpendControlChangeService.java)):
   stored with the whole proposed document and its base (catalog revision / stored quota); approval applies
   it only while the base is unchanged (else `STALE`, nothing applied). At most 20 pending, 7-day expiry,
@@ -35,14 +37,22 @@ approver as actor. See [Spend-Control Changes](../spend-control-changes.md).
   anything, and not the principal that proposed the change (`403 SELF_APPROVAL`, case-insensitive) — an MCP
   client acts with its user's credential, so this stops a steered model approving its own proposal over
   REST. Without authentication every caller is `anonymous` and the single operator still approves. The
-  approve/reject paths join the `AGENT_ORIGINATED` request filter and the self-ungating guard.
+  approve/reject paths join the `AGENT_ORIGINATED` request filter and the self-ungating guard; both now match
+  the path without matrix parameters (`/spend-control-changes;x=1/c1/approve` routes to the same method), which
+  also closes that gap for the existing `/hitl/samples`, `/hitl/autonomy` and `/hitl/analytics/rebuild` guards.
 - **Compare-and-set for quotas.** `ITenantQuotaStore.compareAndSetQuota`, atomic in the MongoDB (filter on
   every stored field), PostgreSQL (one conditional statement) and in-memory stores; the MCP side reads a
-  `fingerprint`.
+  `fingerprint`. Creating the first quota of a tenant on MongoDB is an upsert keyed on `tenantId` alone with
+  `$setOnInsert`, true only when it inserted — like every other write there that may insert.
 - **Audit.** Every direct write, proposal and decision writes a `taskType: spendcontrol` ledger entry
   naming actor, reason, changes and the loosening parts.
 - **Manager:** a *Pending changes* panel on Model Prices and Quotas (admins only) with Approve / Reject
-  behind a confirmation; 11 locales.
+  behind a confirmation; 11 locales. A failed first read shows an error with Retry (not an empty page); a
+  selected change that someone else decided is dropped, so its dialog cannot reopen for a later proposal; on
+  Quotas, Approve is disabled while the quota form has unsaved edits (Save sends the whole form, so it would
+  overwrite the approved quota).
+- **`list_team_cadences`** reports `"schedule": "missing"` only when the schedule does not exist; a schedule
+  store failure fails the call instead of reading as a cadence that never fires.
 - **Platform Operator:** may read `GET /administration/spend-control-changes` (never decide) and its prompt
   explains why a proposed price did not take effect. Revision 62 (61 is taken by three open PRs).
 - **Claude Code plugin:** the `eddi-admin` skill teaches the new tools and the PROPOSED outcome.

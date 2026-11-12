@@ -143,6 +143,38 @@ class SpendControlDiffTest {
             assertTrue(diff(after, before).loosens());
         }
 
+        /*
+         * Metering charges an unset tier cache price at the base cache price when one
+         * is set, else at the TIER input price (BucketPrices.tier, then cost) — so with
+         * base input 10 and tier input 20, an unset tier cache read costs 20, not 10.
+         */
+        @Test
+        @DisplayName("a tier cache price set below the tier input price it replaces loosens")
+        void tierCacheBelowTierInput() {
+            var unset = new LongContextTier(1_000L, 20.0, 20.0, null, null);
+            var cheaper = new LongContextTier(1_000L, 20.0, 20.0, 15.0, null);
+            var dearer = new LongContextTier(1_000L, 20.0, 20.0, 25.0, null);
+            var before = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, unset, null, SRC, null));
+            var toCheaper = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, cheaper, null, SRC, null));
+            var toDearer = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, dearer, null, SRC, null));
+            var result = diff(before, toCheaper);
+            assertTrue(result.loosens(), result.changes().toString());
+            assertTrue(result.loosening().get(0).contains("long-context cacheRead unset(20.0) -> 15.0"), result.loosening().toString());
+            assertFalse(diff(before, toDearer).loosens());
+        }
+
+        @Test
+        @DisplayName("an unset tier cache price follows the base cache price when the entry sets one")
+        void tierCacheFollowsBaseCache() {
+            var tier = new LongContextTier(1_000L, 20.0, 20.0, null, null);
+            var before = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, 5.0, null, tier, null, SRC, null));
+            // tier cache read is 5 (the base cache price) before; 6 is a raise
+            var after = catalog(UnpricedPolicy.ALLOW,
+                    new ModelPriceEntry("anthropic", "c", 10.0, 10.0, 5.0, null, new LongContextTier(1_000L, 20.0, 20.0, 6.0, null), null, SRC,
+                            null));
+            assertFalse(diff(before, after).loosens());
+        }
+
         @Test
         @DisplayName("metadata only is a change that loosens nothing")
         void metadata() {
@@ -157,6 +189,10 @@ class SpendControlDiffTest {
             var gpt4o = entry("openai", "gpt-4o", 2.5, 10.0);
             var tiered = new ModelPriceEntry("openai", "gpt-4o", 2.5, 10.0, null, null, new LongContextTier(128_000L, 5.0, 20.0, null, null), null,
                     SRC, null);
+            // base input 10, tier input 20, no cache prices: its long-context cache reads
+            // cost 20
+            var tieredNoCache = new ModelPriceEntry("openai", "gpt-4o", 10.0, 10.0, null, null, new LongContextTier(1_000L, 20.0, 20.0, null, null),
+                    null, SRC, null);
             return Stream.of(
                     // shape, existing, added, policy in force, loosens
                     Arguments.of("another provider, any price", List.of(gpt4o), entry("anthropic", "claude-x", 0.1, 0.1), UnpricedPolicy.ALLOW,
@@ -186,6 +222,14 @@ class SpendControlDiffTest {
                             UnpricedPolicy.ALLOW, true),
                     Arguments.of("an explicit cache price below an entry's (input) cache price", List.of(gpt4o),
                             new ModelPriceEntry("openai", "gpt-4o*", 3.0, 12.0, 0.3, null, null, null, SRC, null), UnpricedPolicy.ALLOW, true),
+                    Arguments.of("a cache price below an entry's unset long-context cache price (its tier input)", List.of(tieredNoCache),
+                            new ModelPriceEntry("openai", "o9", 20.0, 20.0, 15.0, 20.0, null, null, SRC, null), UnpricedPolicy.ALLOW, true),
+                    Arguments.of("its own unset tier cache price, at its tier input, is not below an entry",
+                            List.of(entry("openai", "gpt-4o", 10.0, 10.0)),
+                            new ModelPriceEntry("openai", "o9", 10.0, 10.0, null, null, new LongContextTier(1_000L, 20.0, 20.0, null, null), null,
+                                    SRC,
+                                    null),
+                            UnpricedPolicy.ALLOW, false),
                     Arguments.of("an entry without prices next to a priced one", List.of(gpt4o), entry("openai", "gpt-4o*", null, null),
                             UnpricedPolicy.ALLOW,
                             true),

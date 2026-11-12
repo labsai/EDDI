@@ -4788,7 +4788,8 @@
     "approveDesc": "Ela é aplicada agora, com você como autor, e afrouxa o controle de gastos: {{loosening}}",
     "rejectDesc": "Nada é aplicado. Quem propôs pode enviá-la novamente.",
     "approved": "Alteração aprovada e aplicada",
-    "rejected": "Alteração rejeitada; nada foi aplicado"
+    "rejected": "Alteração rejeitada; nada foi aplicado",
+    "approveBlockedDirty": "Guarde primeiro as suas alterações à quota ou recarregue a página para as descartar: guardá-las depois de uma aprovação substituiria a quota aprovada."
   },
   "modelPrices": {
     "nav": "Preços de modelos",

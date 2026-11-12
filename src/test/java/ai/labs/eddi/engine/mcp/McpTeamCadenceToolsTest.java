@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace.CadenceRequest;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
@@ -27,12 +28,14 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +96,24 @@ class McpTeamCadenceToolsTest {
         assertEquals("c1", row.get("cadenceId").asText());
         assertEquals("Europe/Vienna", row.get("timeZone").asText());
         assertEquals("0 9 * * 1", row.get("cronExpression").asText());
+    }
+
+    @Test
+    @DisplayName("a schedule that does not exist is reported missing; a store failure fails the call instead")
+    void scheduleMissingVersusStoreFailure() throws Exception {
+        GroupWorkspace ws = new GroupWorkspace();
+        ws.addCadence(new Cadence("c1", "s1", "Plan", 3, 2.0, "alice"));
+        when(workspace.readWorkspace(GROUP)).thenReturn(Response.ok(ws).build());
+
+        when(scheduleStore.readSchedule("s1")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        JsonNode missing = mapper.readTree(tools(Set.of("eddi-admin")).listTeamCadences(GROUP));
+        assertEquals("missing", missing.get("cadences").get(0).get("schedule").asText());
+
+        reset(scheduleStore);
+        when(scheduleStore.readSchedule("s1")).thenThrow(new IResourceStore.ResourceStoreException("database down"));
+        JsonNode failed = mapper.readTree(tools(Set.of("eddi-admin")).listTeamCadences(GROUP));
+        assertNull(failed.get("cadences"), failed.toString());
+        assertEquals("INTERNAL", failed.get("errorCode").asText());
     }
 
     @Test

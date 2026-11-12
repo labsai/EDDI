@@ -248,13 +248,17 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 if (current != null) {
                     return false;
                 }
-                quotas.insertOne(new Document("tenantId", next.tenantId())
-                        .append("maxConversationsPerDay", next.maxConversationsPerDay())
-                        .append("maxAgentsPerTenant", next.maxAgentsPerTenant())
-                        .append("maxApiCallsPerMinute", next.maxApiCallsPerMinute())
-                        .append("maxMonthlyCostUsd", next.maxMonthlyCostUsd())
-                        .append("enabled", next.enabled()));
-                return true;
+                // Keyed on tenantId alone, like every other write here that may insert: a
+                // writer that lost the race matches the winner's document, changes nothing
+                // ($setOnInsert) and reports false. Only an actual insert is a success.
+                return quotas.updateOne(Filters.eq("tenantId", next.tenantId()), Updates.combine(
+                        Updates.setOnInsert("tenantId", next.tenantId()),
+                        Updates.setOnInsert("maxConversationsPerDay", next.maxConversationsPerDay()),
+                        Updates.setOnInsert("maxAgentsPerTenant", next.maxAgentsPerTenant()),
+                        Updates.setOnInsert("maxApiCallsPerMinute", next.maxApiCallsPerMinute()),
+                        Updates.setOnInsert("maxMonthlyCostUsd", next.maxMonthlyCostUsd()),
+                        Updates.setOnInsert("enabled", next.enabled())),
+                        new UpdateOptions().upsert(true)).getUpsertedId() != null;
             }
             if (current == null || !expected.equals(toQuota(current))) {
                 return false;

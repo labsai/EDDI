@@ -4788,7 +4788,8 @@
     "approveDesc": "Se aplica ahora con usted como autor y relaja el control del gasto: {{loosening}}",
     "rejectDesc": "No se aplica nada. Quien lo propuso puede volver a presentarlo.",
     "approved": "Cambio aprobado y aplicado",
-    "rejected": "Cambio rechazado; no se aplicó nada"
+    "rejected": "Cambio rechazado; no se aplicó nada",
+    "approveBlockedDirty": "Guarda primero tus cambios de la cuota o recarga la página para descartarlos: guardarlos después de una aprobación sobrescribiría la cuota aprobada."
   },
   "modelPrices": {
     "nav": "Precios de modelos",

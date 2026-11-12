@@ -4738,7 +4738,8 @@
     "approveDesc": "将立即以您为执行人应用，并放宽支出控制：{{loosening}}",
     "rejectDesc": "不会应用任何内容。提出者可以重新提交。",
     "approved": "更改已批准并应用",
-    "rejected": "更改已拒绝；未应用任何内容"
+    "rejected": "更改已拒绝；未应用任何内容",
+    "approveBlockedDirty": "请先保存您对配额的编辑，或重新加载页面以放弃这些编辑：在批准后再保存会覆盖已批准的配额。"
   },
   "modelPrices": {
     "nav": "模型价格",

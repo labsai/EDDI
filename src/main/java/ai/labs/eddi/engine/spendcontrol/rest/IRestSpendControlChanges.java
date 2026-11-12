@@ -42,8 +42,9 @@ public interface IRestSpendControlChanges {
 
     @GET
     @NoCache
-    @Operation(summary = "List spend-control changes", description = "Newest first. status: PENDING (default), APPLIED, REJECTED, "
-            + "WITHDRAWN, STALE, EXPIRED or ALL; limit 1..100 (default 20).")
+    @Operation(summary = "List spend-control changes", description = "Newest first. status: PENDING (default), APPLYING (approved, "
+            + "write started but no result recorded: outcome unknown), APPLIED, REJECTED, WITHDRAWN, STALE, FAILED (the write threw: "
+            + "outcome unknown), EXPIRED or ALL; limit 1..100 (default 20).")
     Response list(@QueryParam("status") String status, @QueryParam("limit") Integer limit);
 
     @GET

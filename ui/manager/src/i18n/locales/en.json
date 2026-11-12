@@ -4779,7 +4779,8 @@
     "approveDesc": "It is applied now with you as the actor and loosens spending: {{loosening}}",
     "rejectDesc": "Nothing is applied. The proposer can file it again.",
     "approved": "Change approved and applied",
-    "rejected": "Change rejected; nothing was applied"
+    "rejected": "Change rejected; nothing was applied",
+    "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
   },
   "modelPrices": {
     "nav": "Model Prices",

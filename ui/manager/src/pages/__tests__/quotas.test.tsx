@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
+import { sampleSpendControlChange, seedSpendControlMock } from "@/test/mocks/spend-control-handlers";
 import { toast } from "sonner";
 
 import { QuotasPage } from "@/pages/quotas";
@@ -432,6 +433,25 @@ describe("QuotasPage", () => {
   });
 
   // ─── Error handling ──────────────────────────────────────────
+
+  it("blocks approving a pending quota change while the form has unsaved edits", async () => {
+    seedSpendControlMock([{ ...sampleSpendControlChange, id: "q-1", kind: "TENANT_QUOTA", tenantId: "default" }]);
+    try {
+      const user = userEvent.setup();
+      renderQuotas();
+      const approve = await screen.findByTestId("spend-change-approve-q-1");
+      expect(approve).toBeEnabled();
+
+      const input = await screen.findByTestId("quota-max-conversations");
+      await user.clear(input);
+      await user.type(input, "999");
+
+      await waitFor(() => expect(screen.getByTestId("spend-change-approve-q-1")).toBeDisabled());
+      expect(screen.getByTestId("spend-change-approve-blocked-q-1")).toBeInTheDocument();
+    } finally {
+      seedSpendControlMock();
+    }
+  });
 
   it("does not crash on server error (non-404)", async () => {
     server.use(

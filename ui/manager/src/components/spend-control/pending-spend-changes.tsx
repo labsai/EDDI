@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { getErrorMessage } from "@/lib/api-client";
+import { ErrorState } from "@/components/shared/error-state";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   useApproveSpendControlChange,
   usePendingSpendControlChanges,
@@ -18,6 +19,12 @@ interface PendingSpendChangesProps {
   kind: SpendControlKind;
   /** Only an eddi-admin may read or decide them; the panel renders nothing otherwise. */
   isAdmin: boolean;
+  /**
+   * Set while approving would be unsafe on this page (the Quotas form has unsaved
+   * edits: saving them afterwards would overwrite the approved quota). Approve is
+   * disabled and this says why; Reject stays available.
+   */
+  approveBlockedReason?: string;
 }
 
 type Pending = { change: SpendControlChange; action: "approve" | "reject" };
@@ -30,18 +37,40 @@ type Pending = { change: SpendControlChange; action: "approve" | "reject" };
  * approver as actor, and only while the control is still what it was computed
  * against (otherwise the backend answers STALE and applies nothing).
  */
-export function PendingSpendChanges({ kind, isAdmin }: PendingSpendChangesProps) {
+export function PendingSpendChanges({ kind, isAdmin, approveBlockedReason }: PendingSpendChangesProps) {
   const { t } = useTranslation();
-  const { data } = usePendingSpendControlChanges(isAdmin);
+  const { data, isError, error, refetch } = usePendingSpendControlChanges(isAdmin);
   const approve = useApproveSpendControlChange();
   const reject = useRejectSpendControlChange();
   const [pending, setPending] = useState<Pending | null>(null);
 
   const changes = (data ?? []).filter((c) => c.kind === kind);
-  if (!isAdmin || changes.length === 0) return null;
+  const deciding = approve.isPending || reject.isPending;
+  const selectedStillPending = pending !== null && changes.some((c) => c.id === pending.change.id);
+  // Another administrator (or expiry) decided the selected change while its dialog
+  // was open: drop the selection, or the dialog would reopen with it — and submit
+  // its id — when the next proposal arrives. A decision in flight keeps it until
+  // it settles; its own callbacks clear it.
+  useEffect(() => {
+    if (pending !== null && !selectedStillPending && !deciding) setPending(null);
+  }, [pending, selectedStillPending, deciding]);
+
+  if (!isAdmin) return null;
+  // The first read failed: say so rather than look like "no proposals". A 403 means
+  // this user is no administrator after all — render nothing, as for a non-admin.
+  if (isError && data === undefined) {
+    if (isApiError(error) && error.status === 403) return null;
+    return (
+      <section className="rounded-xl border border-warning/40 bg-warning/5 p-4" data-testid={`spend-changes-${kind}-error`}>
+        <h2 className="text-sm font-semibold text-foreground">{t("spendControl.title", "Pending changes")}</h2>
+        <ErrorState error={error} message={t("common.error")} onRetry={() => refetch()} retryLabel={t("common.retry")} />
+      </section>
+    );
+  }
+  if (changes.length === 0 && !(pending !== null && deciding)) return null;
 
   const decide = () => {
-    if (!pending) return;
+    if (!pending || (pending.action === "approve" && approveBlockedReason)) return;
     const mutation = pending.action === "approve" ? approve : reject;
     mutation.mutate(
       { id: pending.change.id },
@@ -54,8 +83,8 @@ export function PendingSpendChanges({ kind, isAdmin }: PendingSpendChangesProps)
           );
           setPending(null);
         },
-        onError: (error) => {
-          toast.error(getErrorMessage(error));
+        onError: (err) => {
+          toast.error(getErrorMessage(err));
           setPending(null);
         },
       },
@@ -114,6 +143,8 @@ export function PendingSpendChanges({ kind, isAdmin }: PendingSpendChangesProps)
                 size="sm"
                 variant="warning"
                 onClick={() => setPending({ change, action: "approve" })}
+                disabled={Boolean(approveBlockedReason)}
+                title={approveBlockedReason}
                 data-testid={`spend-change-approve-${change.id}`}
               >
                 {t("spendControl.approve", "Approve")}
@@ -127,6 +158,11 @@ export function PendingSpendChanges({ kind, isAdmin }: PendingSpendChangesProps)
                 {t("spendControl.reject", "Reject")}
               </Button>
             </div>
+            {approveBlockedReason && (
+              <p className="mt-2 text-xs text-muted-foreground" data-testid={`spend-change-approve-blocked-${change.id}`}>
+                {approveBlockedReason}
+              </p>
+            )}
           </li>
         ))}
       </ul>

@@ -231,20 +231,26 @@ public final class SpendControlDiff {
     }
 
     /**
-     * Long-context prices per kind: an unset tier price is the base price of the
-     * same kind.
+     * Long-context prices per kind, as metering charges them
+     * ({@code BucketPrices.tier} then {@code BucketPrices.cost}): an unset tier
+     * input or output price is the base price of that kind; an unset tier cache
+     * price is the entry's own base cache price when one is set, and otherwise the
+     * <em>tier's</em> input price — not the base input price.
      */
     private static double[] tier(ModelPriceEntry e, double[] base) {
         LongContextTier t = e.longContext();
         if (t == null) {
             return base.clone();
         }
-        double[] result = new double[4];
-        for (int kind = 0; kind < 4; kind++) {
-            Double value = tierField(t, kind);
-            result[kind] = value != null ? value : base[kind];
-        }
-        return result;
+        double in = t.inputPricePer1M() != null ? t.inputPricePer1M() : base[0];
+        double out = t.outputPricePer1M() != null ? t.outputPricePer1M() : base[1];
+        double cacheRead = t.cacheReadPricePer1M() != null
+                ? t.cacheReadPricePer1M()
+                : e.cacheReadPricePer1M() != null ? e.cacheReadPricePer1M() : in;
+        double cacheWrite = t.cacheWritePricePer1M() != null
+                ? t.cacheWritePricePer1M()
+                : e.cacheWritePricePer1M() != null ? e.cacheWritePricePer1M() : in;
+        return new double[]{in, out, cacheRead, cacheWrite};
     }
 
     private static Double tierField(LongContextTier t, int kind) {
