@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.cluster;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Expiry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
 /**
@@ -83,7 +85,6 @@ public class ClusterMessageSigner {
     private static final String SCHEME = "v1";
     private static final String DOMAIN = "eddi-cluster-msg-v1";
     private static final int NONCE_BYTES = 16;
-    private static final long MAX_REMEMBERED_NONCES = 200_000L;
     /**
      * A sealed value is a user-id hash; anything larger is a caller bug, not data
      * to seal.
@@ -94,7 +95,13 @@ public class ClusterMessageSigner {
      * Why a message was refused; the tag of {@code eddi.cluster.signing.rejected}.
      */
     public enum Rejection {
-        UNSIGNED, MALFORMED, UNKNOWN_KEY, BAD_SIGNATURE, EXPIRED, REPLAYED
+        UNSIGNED, MALFORMED, UNKNOWN_KEY, BAD_SIGNATURE, EXPIRED, REPLAYED,
+        /**
+         * Valid and fresh, but this node already remembers
+         * {@code eddi.cluster.signing.max-remembered-nonces} unexpired nonces and could
+         * not remember this one, so it could not refuse a replay of it.
+         */
+        NONCE_CAPACITY
     }
 
     /**
@@ -131,7 +138,9 @@ public class ClusterMessageSigner {
     private final SecureRandom random = new SecureRandom();
     private final Set<String> warnedUnsigned = ConcurrentHashMap.newKeySet();
     private final Set<String> warnedRejections = ConcurrentHashMap.newKeySet();
-    private final Cache<String, Boolean> seenNonces;
+    /** Nonce of every accepted message, until that message's own expiry. */
+    private final Cache<String, Long> seenNonces;
+    private final long maxRememberedNonces;
     private LongSupplier clock = System::currentTimeMillis;
 
     @Inject
@@ -165,9 +174,31 @@ public class ClusterMessageSigner {
                 }
             }
         }
-        Duration window = config.maxAge() == null ? Duration.ofSeconds(60) : config.maxAge();
-        this.seenNonces = Caffeine.newBuilder().maximumSize(MAX_REMEMBERED_NONCES)
-                .expireAfterWrite(window.multipliedBy(2).plusHours(2)).build();
+        this.maxRememberedNonces = config.maxRememberedNonces() > 0
+                ? config.maxRememberedNonces()
+                : ClusterSigningConfig.DEFAULT_MAX_REMEMBERED_NONCES;
+        // No maximumSize: a size bound EVICTS, and an evicted nonce whose message is
+        // still inside its window can be replayed. Each nonce is kept exactly until
+        // its own message expires (ts + window, on this signer's clock) and no
+        // longer, and a full cache refuses new messages instead (see verify).
+        this.seenNonces = Caffeine.newBuilder()
+                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.getAsLong()))
+                .expireAfter(new Expiry<String, Long>() {
+                    @Override
+                    public long expireAfterCreate(String nonce, Long expiresAt, long currentTime) {
+                        return TimeUnit.MILLISECONDS.toNanos(Math.max(1, expiresAt - clock.getAsLong()));
+                    }
+
+                    @Override
+                    public long expireAfterUpdate(String nonce, Long expiresAt, long currentTime, long currentDuration) {
+                        return currentDuration;
+                    }
+
+                    @Override
+                    public long expireAfterRead(String nonce, Long expiresAt, long currentTime, long currentDuration) {
+                        return currentDuration;
+                    }
+                }).build();
         if (config.required() || !verificationKeys.isEmpty()) {
             // Only a node that can refuse anything gets the zero series.
             for (String kind : VERIFIED_KINDS) {
@@ -311,10 +342,36 @@ public class ClusterMessageSigner {
         if (Math.abs(now - ts) > window.toMillis()) {
             return rejected(kind, Rejection.EXPIRED);
         }
-        if (rememberNonce && seenNonces.asMap().putIfAbsent(kind + ":" + fields.get("n"), Boolean.TRUE) != null) {
-            return rejected(kind, Rejection.REPLAYED);
+        if (rememberNonce) {
+            String nonceKey = kind + ":" + fields.get("n");
+            if (seenNonces.getIfPresent(nonceKey) != null) {
+                return rejected(kind, Rejection.REPLAYED);
+            }
+            if (!hasRoomForNonce()) {
+                // Fail closed: accepting a message whose nonce cannot be remembered
+                // is accepting its replay too.
+                return rejected(kind, Rejection.NONCE_CAPACITY);
+            }
+            // Kept through the last millisecond the freshness check above still passes.
+            if (seenNonces.asMap().putIfAbsent(nonceKey, ts + window.toMillis() + 1) != null) {
+                return rejected(kind, Rejection.REPLAYED);
+            }
         }
         return Verdict.accept(fields.get("n"));
+    }
+
+    /**
+     * Whether another nonce may be remembered. Expired nonces are swept first, so
+     * only nonces whose messages could still be replayed count. Checked before the
+     * insert, so concurrent verifications may overshoot the bound by at most the
+     * number of verifying threads.
+     */
+    private boolean hasRoomForNonce() {
+        if (seenNonces.estimatedSize() < maxRememberedNonces) {
+            return true;
+        }
+        seenNonces.cleanUp();
+        return seenNonces.estimatedSize() < maxRememberedNonces;
     }
 
     private Counter rejectionCounter(String kind, Rejection why) {
