@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../hooks/use-auth";
+import { createInvalidationCoalescer } from "../../lib/coalesce-invalidations";
 import { appUserEventStream, REFETCH_ON_OPEN, staleQueryKeys } from "../../lib/user-event-stream";
 
 /**
@@ -22,20 +23,22 @@ export function UserEventBridge() {
 
   useEffect(() => {
     const stream = appUserEventStream();
+    // A burst of events (a team discussion, a batch) refetches each query at
+    // most once per window; one isolated event still refetches at once.
+    const coalescer = createInvalidationCoalescer((queryKey) => {
+      void queryClient.invalidateQueries({ queryKey: [...queryKey] });
+    });
     const offEvents = stream.on("*", (event) => {
-      for (const queryKey of staleQueryKeys(event)) {
-        void queryClient.invalidateQueries({ queryKey });
-      }
+      for (const queryKey of staleQueryKeys(event)) coalescer.invalidate(queryKey);
     });
     const offStatus = stream.onStatus((status) => {
       if (status !== "open") return;
-      for (const queryKey of REFETCH_ON_OPEN) {
-        void queryClient.invalidateQueries({ queryKey });
-      }
+      for (const queryKey of REFETCH_ON_OPEN) coalescer.invalidate(queryKey);
     });
     return () => {
       offEvents();
       offStatus();
+      coalescer.dispose();
     };
   }, [queryClient]);
 

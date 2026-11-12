@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { resetUserEventStreamForTests } from "@eddi/core/user-events";
 import { AuthContext, GUEST_CONTEXT } from "@eddi/app-kit/components/auth/auth-context";
 import { UserEventBridge } from "@eddi/app-kit/components/layout/user-event-bridge";
+import { INVALIDATION_WINDOW_MS } from "@eddi/app-kit/lib/coalesce-invalidations";
 import { appUserEventStream, staleQueryKeys } from "@eddi/app-kit/lib/user-event-stream";
 import { createTestQueryClient } from "@eddi/app-kit/test/test-utils";
 import { closeMockUserEventStreams, pushMockUserEvent } from "@eddi/app-kit/test/mocks/handlers";
@@ -61,8 +62,31 @@ describe("UserEventBridge", () => {
     pushMockUserEvent({ kind: "approval.decided", surface: "regular", conversationId: "c-42", agentId: "a1", state: "APPROVED" });
 
     await waitFor(() => expect(invalidatedKeys(invalidate)).toContain(JSON.stringify(["approval-status", "c-42"])));
-    expect(invalidatedKeys(invalidate)).toContain(JSON.stringify(["pending-approvals"]));
-    expect(invalidatedKeys(invalidate)).toContain(JSON.stringify(["all-group-pending-approvals"]));
+    // The inbox keys were just refetched by the on-open pass, so their refetch
+    // lands at the end of that window (at most INVALIDATION_WINDOW_MS later).
+    await waitFor(
+      () => {
+        expect(invalidatedKeys(invalidate)).toContain(JSON.stringify(["pending-approvals"]));
+        expect(invalidatedKeys(invalidate)).toContain(JSON.stringify(["all-group-pending-approvals"]));
+      },
+      { timeout: INVALIDATION_WINDOW_MS + 1500 },
+    );
+  });
+
+  it("a burst of events refetches each query once now and once more after the window, not once per event", async () => {
+    const { invalidate } = mount(true);
+    await waitFor(() => expect(appUserEventStream().status).toBe("open"));
+    // The on-open refetches start their own windows; let them lapse.
+    await new Promise((resolve) => setTimeout(resolve, INVALIDATION_WINDOW_MS + 100));
+    invalidate.mockClear();
+
+    for (let i = 0; i < 10; i++) {
+      pushMockUserEvent({ kind: "approval.decided", surface: "regular", conversationId: "c-9", agentId: "a1", state: "APPROVED" });
+    }
+    const count = () => invalidatedKeys(invalidate).filter((key: string) => key === JSON.stringify(["approval-status", "c-9"])).length;
+    await waitFor(() => expect(count()).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, INVALIDATION_WINDOW_MS + 200));
+    expect(count()).toBe(2);
   });
 });
 
