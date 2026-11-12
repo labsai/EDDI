@@ -4,7 +4,11 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.getUtc;
+import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
+
+import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.arc.DefaultBean;
@@ -19,14 +23,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Timestamp;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
-import java.util.TimeZone;
 
 /**
  * PostgreSQL implementation of {@link IConnectionGrantStore}.
@@ -43,9 +43,13 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
     private static final Logger LOGGER = Logger.getLogger(PostgresConnectionGrantStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** The zone refresh_lease_expires_at is written and read in. */
-    private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
-
+    /**
+     * Every timestamp column is a {@code TIMESTAMP} (without time zone) holding a
+     * UTC wall clock: bound and read through {@link PostgresTimestamps}, stamped by
+     * the database as {@code (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')}. The column
+     * defaults matter only to a table created by this release; an existing table
+     * keeps its old ones, which is why the insert names {@code created_at}.
+     */
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS connection_grants (
                 id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -60,8 +64,8 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
                 expires_at TIMESTAMP,
                 scopes JSONB,
                 status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+                updated_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
                 last_refresh_at TIMESTAMP,
                 version BIGINT NOT NULL DEFAULT 0,
                 refresh_in_progress VARCHAR(128),
@@ -136,9 +140,10 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         createSchema();
         String sql = """
                 INSERT INTO connection_grants (tenant_id, connection_name, principal, encrypted_access_token, access_token_iv,
-                    encrypted_refresh_token, refresh_token_iv, dek_id, expires_at, scopes, status, updated_at, last_refresh_at,
+                    encrypted_refresh_token, refresh_token_iv, dek_id, expires_at, scopes, status, created_at, updated_at, last_refresh_at,
                     version, refresh_in_progress, refresh_lease_expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP, ?, 1, NULL, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+                    ?, 1, NULL, NULL)
                 ON CONFLICT (tenant_id, connection_name, principal) DO UPDATE SET
                     encrypted_access_token = EXCLUDED.encrypted_access_token,
                     access_token_iv = EXCLUDED.access_token_iv,
@@ -148,7 +153,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
                     expires_at = EXCLUDED.expires_at,
                     scopes = EXCLUDED.scopes,
                     status = EXCLUDED.status,
-                    updated_at = CURRENT_TIMESTAMP,
+                    updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
                     last_refresh_at = EXCLUDED.last_refresh_at,
                     version = connection_grants.version + 1,
                     refresh_in_progress = NULL,
@@ -163,10 +168,10 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(6, grant.getEncryptedRefreshToken());
             statement.setString(7, grant.getRefreshTokenIv());
             statement.setString(8, grant.getDekId());
-            statement.setTimestamp(9, toTimestamp(grant.getExpiresAt()));
+            setUtc(statement, 9, grant.getExpiresAt());
             statement.setString(10, writeScopes(grant.getScopes()));
             statement.setString(11, grant.statusName());
-            statement.setTimestamp(12, toTimestamp(grant.getLastRefreshAt()));
+            setUtc(statement, 12, grant.getLastRefreshAt());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write connection grant", e);
@@ -200,7 +205,8 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         // cast between them uses each session's TimeZone, which the JDBC driver sets
         // from each replica's JVM default. Both sides are therefore spelled
         // `CURRENT_TIMESTAMP AT TIME ZONE 'UTC'`, a UTC wall clock no session setting
-        // can move, and toGrant reads the column back as UTC.
+        // can move, and toGrant reads the column back as UTC — as it does every other
+        // timestamp column of the table.
         String sql = """
                 UPDATE connection_grants
                    SET refresh_in_progress = ?,
@@ -226,8 +232,8 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         String sql = """
                 UPDATE connection_grants
                    SET encrypted_access_token = ?, access_token_iv = ?, encrypted_refresh_token = ?, refresh_token_iv = ?,
-                       dek_id = ?, expires_at = ?, scopes = ?::jsonb, status = ?, updated_at = CURRENT_TIMESTAMP,
-                       last_refresh_at = CURRENT_TIMESTAMP, version = version + 1,
+                       dek_id = ?, expires_at = ?, scopes = ?::jsonb, status = ?, updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+                       last_refresh_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'), version = version + 1,
                        refresh_in_progress = NULL, refresh_lease_expires_at = NULL
                  WHERE tenant_id = ? AND connection_name = ? AND principal = ? AND version = ?
                 """;
@@ -237,7 +243,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
             statement.setString(3, grant.getEncryptedRefreshToken());
             statement.setString(4, grant.getRefreshTokenIv());
             statement.setString(5, grant.getDekId());
-            statement.setTimestamp(6, toTimestamp(grant.getExpiresAt()));
+            setUtc(statement, 6, grant.getExpiresAt());
             statement.setString(7, writeScopes(grant.getScopes()));
             statement.setString(8, grant.statusName());
             statement.setString(9, grant.getTenantId());
@@ -445,18 +451,16 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         grant.setEncryptedRefreshToken(rows.getString("encrypted_refresh_token"));
         grant.setRefreshTokenIv(rows.getString("refresh_token_iv"));
         grant.setDekId(rows.getString("dek_id"));
-        grant.setExpiresAt(toInstant(rows.getTimestamp("expires_at")));
+        grant.setExpiresAt(getUtc(rows, "expires_at"));
         grant.setScopes(readScopes(rows.getString("scopes")));
         String status = rows.getString("status");
         grant.setStatus(status == null ? ConnectionGrant.Status.ACTIVE : ConnectionGrant.Status.valueOf(status));
-        grant.setCreatedAt(toInstant(rows.getTimestamp("created_at")));
-        grant.setUpdatedAt(toInstant(rows.getTimestamp("updated_at")));
-        grant.setLastRefreshAt(toInstant(rows.getTimestamp("last_refresh_at")));
+        grant.setCreatedAt(getUtc(rows, "created_at"));
+        grant.setUpdatedAt(getUtc(rows, "updated_at"));
+        grant.setLastRefreshAt(getUtc(rows, "last_refresh_at"));
         grant.setVersion(rows.getLong("version"));
         grant.setRefreshInProgress(rows.getString("refresh_in_progress"));
-        // Written as a UTC wall clock by claimRefresh, so read back as one; the
-        // driver's default would interpret it in this JVM's time zone.
-        grant.setRefreshLeaseExpiresAt(toInstant(rows.getTimestamp("refresh_lease_expires_at", Calendar.getInstance(UTC))));
+        grant.setRefreshLeaseExpiresAt(getUtc(rows, "refresh_lease_expires_at"));
         return grant;
     }
 
@@ -478,13 +482,5 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static Timestamp toTimestamp(Instant instant) {
-        return instant == null ? null : Timestamp.from(instant);
-    }
-
-    private static Instant toInstant(Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toInstant();
     }
 }

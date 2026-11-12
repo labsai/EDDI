@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
@@ -721,6 +723,7 @@ public class GroupLifecycleOps {
                             LogSanitizer.sanitize(agentId));
                 }
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                markDeploymentRecordsUndeployed(agentId);
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
                 if (shouldDelete) {
@@ -777,6 +780,28 @@ public class GroupLifecycleOps {
         } catch (Exception e) {
             LOGGER.warnf("Ephemeral agent cleanup failed for group conversation %s: %s",
                     LogSanitizer.sanitize(gc.getId()), e.getMessage());
+        }
+    }
+
+    /**
+     * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
+     * REST undeploy does. The deployment sweep deploys what is recorded and no
+     * longer served, so a record left saying deployed would undo this undeploy
+     * within about ten seconds. Never fatal.
+     */
+    private void markDeploymentRecordsUndeployed(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
+                if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
+                    deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Ephemeral cleanup: could not mark the deployment record(s) of agent '%s' undeployed: %s", LogSanitizer.sanitize(agentId),
+                    e.getMessage());
         }
     }
 

@@ -56,7 +56,9 @@ class AgentCompatibilityLintTest {
         var json = mock(IJsonSerialization.class);
         when(json.serialize(any())).thenAnswer(inv -> mapper.writeValueAsString(inv.getArgument(0)));
         when(json.deserialize(anyString(), eq(Map.class))).thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), Map.class));
-        lint = new AgentCompatibilityLint(agentStore, workflowStore, resources, new TemplatingEngine(Engine.builder().addDefaults().build()),
+        lint = new AgentCompatibilityLint(agentStore, workflowStore, resources,
+                new TemplatingEngine(
+                        Engine.builder().addDefaults().build()),
                 json);
 
         var agent = new AgentConfiguration();
@@ -111,6 +113,16 @@ class AgentCompatibilityLintTest {
 
         assertEquals(1, warnings.size(), warnings.toString());
         assertTrue(warnings.get(0).startsWith("[TEMPLATE_DOES_NOT_PARSE] llm task 'chat'.parameters.systemMessage"), warnings.get(0));
+    }
+
+    @Test
+    @DisplayName("a system prompt that documents a ${vault:...} reference renders at runtime and is not reported")
+    void promptMentioningVaultReferenceIsClean() throws Exception {
+        workflowWith(LLM_URI);
+        when(resources.getResource(URI.create(LLM_URI), LlmConfiguration.class))
+                .thenReturn(llm("openai", Map.of("systemMessage", "Store it as a `${vault:...}` reference. Hello {properties.name}")));
+
+        assertEquals(List.of(), lint.lint(AGENT, 1));
     }
 
     @Test

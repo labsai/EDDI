@@ -23,6 +23,7 @@ import { PauseChangedError, type ShownPause } from "@/lib/hitl-pause-binding";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import { OPERATOR_PROBE_USER_ID, type OperatorConfig } from "@/lib/api/operator";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { abortableSleep } from "@/lib/abortable-sleep";
 
 /**
  * Chat state for the Platform Operator.
@@ -342,17 +343,6 @@ const RESOLVE_EXECUTING_TIMEOUT_MS = 300_000;
 /** How often to poll while waiting for a resumed turn to settle. */
 const RESOLVE_POLL_INTERVAL_MS = 1_500;
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new DOMException("Aborted", "AbortError"));
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      reject(new DOMException("Aborted", "AbortError"));
-    });
-  });
-}
-
 /**
  * Polls the conversation until the decision we just submitted has been acted on.
  *
@@ -427,7 +417,7 @@ async function pollUntilSettled(
         "Timed out waiting for the resumed turn to finish. It may still complete — refresh in a moment.",
       );
     }
-    await sleep(RESOLVE_POLL_INTERVAL_MS, signal);
+    await abortableSleep(RESOLVE_POLL_INTERVAL_MS, signal);
   }
 }
 
@@ -549,7 +539,13 @@ function hasLiveTranscript(state: OperatorChatState): boolean {
 }
 
 /**
- * The operator's most recent still-usable conversation, or null.
+ * The caller's own most recent still-usable operator conversation, or null.
+ *
+ * Own only (`mine`): the operator is an admin's tool, and an admin's listing
+ * holds every user's conversations — without it a fresh tab restored ANOTHER
+ * admin's newest investigation, pending approval included, and the next
+ * message went into it. The probe filter below stays: with authorization off
+ * the backend ignores `mine`, and activation's probes must still be skipped.
  *
  * Used only when this tab has NO stored id — a browser restart, or a first
  * visit in a new tab. Recovering by lookup rather than moving
@@ -579,7 +575,16 @@ async function findLatestOperatorConversation(agentId: string): Promise<string |
   // actually holds under either sort.
   const candidates = [];
   for (let page = 0; page < RECOVERY_MAX_PAGES; page++) {
-    const descriptors = await getConversationDescriptors(RECOVERY_PAGE_SIZE, page, "", agentId);
+    const descriptors = await getConversationDescriptors(
+      RECOVERY_PAGE_SIZE,
+      page,
+      "",
+      agentId,
+      undefined,
+      undefined,
+      undefined,
+      { mine: true },
+    );
     candidates.push(
       ...descriptors.filter(
         (d) => RESUMABLE_STATES.has(d.conversationState) && !isOperatorProbeConversation(d),
@@ -617,10 +622,10 @@ export function isOperatorProbeConversation(descriptor: { userId?: string }): bo
 /**
  * How recent a conversation is, for "restore my last one".
  *
- * One definition, shared with the History list's own ordering — two copies of
- * this expression let the conversation the tab restores and the row the list
- * shows first disagree about which is newest, which is exactly the silent
- * mismatch the sorting exists to prevent.
+ * One definition, shared with the History list's own ordering
+ * (operator-history.tsx) — two copies of this expression let the conversation
+ * the tab restores and the row the list shows first disagree about which is
+ * newest, which is exactly the silent mismatch the sorting exists to prevent.
  */
 export function conversationRecency(descriptor: {
   lastModifiedOn?: number;
@@ -1580,11 +1585,16 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       // (`use-hitl.ts`).
       const reviewedPauseId = pauseIdFrom(shown?.pauseId, displayedPausedAt, decidedPausedAt);
       if (reviewedPauseId === null) throw new PauseChangedError();
+      // The plan the reviewer was shown goes along too (`planHash`), so an agent
+      // that requires plan binding accepts the decision and any other plan is
+      // refused. Only the card's own value: the store's displayed pause has none.
+      const reviewedPlanHash = shown?.planHash?.trim();
       await resumeConversation(conversationId, {
         verdict,
         note,
         toolDecisions,
         ...(reviewedPauseId ? { pauseId: reviewedPauseId } : {}),
+        ...(reviewedPlanHash ? { planHash: reviewedPlanHash } : {}),
       });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads
