@@ -917,22 +917,40 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.16</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
-                     Excludes CDI bootstrap wiring, external integration adapters,
-                     REST client libraries, and import/export services that require
-                     a running Quarkus container (@QuarkusTest ITs cover these). -->
+                     Excluded wholesale by package pattern, so each pattern also removes any
+                     logic-bearing class that later landed in that package from the coverage
+                     numbers (see the per-pattern notes). The patterns were added together in
+                     6f48a5e4ea ("CDI-wiring exclusions"); the per-class reasons were not
+                     recorded beyond the one-line comments below. -->
                 <configuration>
                     <excludes>
-                        <!-- CDI bootstrap producers: @Produces methods that wire beans,
-                             zero business logic, verified by container startup in @QuarkusTest ITs -->
+                        <!-- Every package named "bootstrap": the modules/*/bootstrap/*Module
+                             classes that register lifecycle tasks and wire CDI beans, plus
+                             datastore/bootstrap/PersistenceModule, engine/lifecycle/bootstrap,
+                             modules/nlp/bootstrap and engine/httpclient/bootstrap/HttpClientModule.
+                             Mostly wiring; HttpClientModule is large (a few hundred lines) and is
+                             excluded with the rest. Container startup exercises these; the
+                             rationale for excluding rather than unit-testing is not recorded. -->
                         <exclude>**/bootstrap/**</exclude>
-                        <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
+                        <!-- Package engine/runtime/client: the hand-written resource and REST
+                             client libraries (ResourceClientLibrary, RestInterfaceFactory,
+                             LoopbackCallerAuthFilter, agent/workflow store client libraries).
+                             These are NOT generated and are not pure proxy interfaces; they
+                             have their own unit tests under src/test/java. Reason for the
+                             exclusion not recorded. -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
-                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
-                             cannot be tested without live API keys. -->
+                        <!-- Package modules/llm/impl/builder: the ILanguageModelBuilder
+                             implementations (one per provider: OpenAI, Anthropic, Bedrock, ...)
+                             that wrap an external SDK constructor, so most of it cannot be tested
+                             without live API keys. The package also holds logic-bearing helpers
+                             (ModelParameterCatalog, ModelParameterValues, BoundedJdkHttpClient,
+                             JlamaRuntimeSupport, OpenAiCompatibleProviders) that are excluded too. -->
                         <exclude>**/llm/impl/builder/**</exclude>
-                        <!-- Slack integration adapter: requires live Slack webhook API,
-                             not testable without external service -->
+                        <!-- Package integrations/slack and its subpackages (event handler,
+                             interactivity, HITL, signature verification, REST webhook, ...).
+                             The Slack Web API calls need a live Slack workspace, but the package
+                             also contains pure logic (e.g. SlackSignatureVerifier, SlackMrkdwn)
+                             that has unit tests yet is excluded from the coverage numbers. -->
                         <exclude>**/integrations/slack/**</exclude>
                     </excludes>
                 </configuration>

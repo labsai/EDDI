@@ -12,8 +12,18 @@ on:
 # three CodeQL builds — with the superseded ones never cancelled, so an older
 # run could report onto a commit that is no longer the head. Pushes to main and
 # tag pushes are NOT cancelled: a release must never be interrupted mid-publish.
+#
+# Only a pull request shares a group per ref. A push (to main or a tag) adds the
+# commit SHA to the key, so every pushed commit gets its own group and its own run.
+# With one group per ref and cancel-in-progress false, GitHub keeps one running and
+# ONE pending run and replaces the pending one when a newer run queues — so when
+# several PRs merged in quick succession the intermediate commits never ran: a
+# commit that broke main got no result of its own, and its `-b<run_number>` image
+# was never published. That is safe to lift: the only moving image tags (:latest and
+# the major/minor aliases) are pushed for stable release tags, which already have a
+# group each (their ref), and a main push publishes a unique `<pom>-b<run_number>` tag.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}${{ github.event_name != 'pull_request' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
