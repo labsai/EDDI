@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { CommandPalette } from "@/components/shared/command-palette";
 import { NavigationGuardDialog } from "@/components/shared/navigation-guard-dialog";
 import { WorkforceLayout } from "@/components/workforce/workforce-layout";
+import { AuthorRoute } from "@/components/workforce/author-route";
 import { LandingPage } from "@/pages/landing-page";
 import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
@@ -151,12 +152,12 @@ export function App() {
           {/* Workforce — standalone app, no Manager chrome */}
           <Route path="/workforce" element={<WorkforceLayout />}>
             <Route index element={<WorkforceDashboard />} />
-            <Route path="new" element={<WorkforceWizard />} />
-            <Route path="analytics" element={<WorkforceAnalytics />} />
+            <Route path="new" element={<AuthorRoute><WorkforceWizard /></AuthorRoute>} />
+            <Route path="analytics" element={<AuthorRoute><WorkforceAnalytics /></AuthorRoute>} />
             <Route path="chat" element={<WorkforceChat />} />
             <Route path=":boardId" element={<WorkforceBoard />} />
             <Route path=":boardId/thread/:memberId" element={<WorkforceThread />} />
-            <Route path=":boardId/settings" element={<WorkforceSettings />} />
+            <Route path=":boardId/settings" element={<AuthorRoute><WorkforceSettings /></AuthorRoute>} />
             <Route path=":boardId/history" element={<WorkforceHistory />} />
             <Route path="*" element={<NotFoundPage scope="workforce" />} />
           </Route>

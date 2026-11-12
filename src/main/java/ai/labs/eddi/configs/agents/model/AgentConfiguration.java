@@ -68,6 +68,23 @@ public class AgentConfiguration {
     private String description;
 
     /**
+     * Whether this agent appears in the end-user catalog
+     * ({@code GET /catalog/agents}) that Workforce and other end-user apps list for
+     * the people allowed to use it.
+     * <p>
+     * <strong>Opt-in, default {@code false}</strong>: upgrading a deployment lists
+     * nothing, so the Platform Operator, test agents and internal helpers are never
+     * shown to every signed-in user by accident. Listing only decides what is
+     * <em>offered</em> — whether a caller may actually talk to the agent is still
+     * the USE check, and an unlisted agent stays reachable by anyone who has its id
+     * and may use it. With workspaces enforced, {@code published} and
+     * {@code internal} visibility count as listed too.
+     *
+     * @since 6.7.0
+     */
+    private Boolean listed = false;
+
+    /**
      * Which versions of this agent a running conversation may move between. Two
      * versions with the same generation are compatible, and a conversation follows
      * the newest deployed version of its generation from its next turn; a different
@@ -182,6 +199,14 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Boolean getListed() {
+        return listed;
+    }
+
+    public void setListed(Boolean listed) {
+        this.listed = listed;
     }
 
     public Integer getCompatibilityGeneration() {

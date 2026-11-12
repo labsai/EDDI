@@ -31,7 +31,8 @@ import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { parseTranscriptContent, formatMarkdownText } from "@/components/groups/group-utils";
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
-import { useGroup, useResolvedGroupVersion } from "@/hooks/use-groups";
+import { useWorkforceGroup } from "@/hooks/use-workforce-group";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { isImeComposing } from "@/lib/ime";
 import {
   startConversation,
@@ -656,15 +657,16 @@ function WorkforceThread() {
   const [searchParams] = useSearchParams();
   // Resolved, not defaulted to 1: the links into a thread carry no version, and
   // version 1 is the group's FIRST — its original roster and name.
-  const resolvedVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  // The group store for an author, the catalog entry for an end user.
+  const { version: resolvedVersion, data: groupConfig } = useWorkforceGroup(boardId, searchParams.get("version"));
   const version = resolvedVersion ?? 1;
+  const { canAuthor } = useWorkforceAccess();
 
   // Group context from router state (passed by advisor-response-card)
   const groupContext = isGroupContext(location.state) ? location.state : null;
   const hasGroupContext = groupContext?.fromGroup === true;
 
   // Fetch board config to resolve member display name & role
-  const { data: groupConfig } = useGroup(resolvedVersion ? boardId : "", resolvedVersion);
   const member = groupConfig?.members.find((m) => m.agentId === memberId);
   const memberRole = member?.role ?? null;
 
@@ -673,7 +675,8 @@ function WorkforceThread() {
   const { data: descriptorResults } = useQuery({
     queryKey: agentKeys.descriptor(memberId),
     queryFn: () => getAgentDescriptors(1, 0, memberId),
-    enabled: !!memberId && !member,
+    // The agent store answers authors only; an end user sees the member's id.
+    enabled: canAuthor && !!memberId && !member,
     staleTime: 60_000,
   });
   const memberName = member?.displayName || descriptorResults?.[0]?.name || memberId;
@@ -1224,7 +1227,9 @@ function WorkforceThread() {
               <MessageSquarePlus className="h-4 w-4" />
             )}
           </button>
-          {/* Details panel toggle */}
+          {/* Details panel toggle — the panel reads the agent and deployment
+              stores, which answer authors only. */}
+          {canAuthor && (
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
@@ -1247,6 +1252,7 @@ function WorkforceThread() {
               <PanelRightOpen className="h-4 w-4" />
             )}
           </button>
+          )}
         </div>
       {/* Context card — shown when navigating from a group discussion */}
       {hasGroupContext && groupContext && (
@@ -1579,7 +1585,7 @@ function WorkforceThread() {
       </div>
 
       {/* Right details panel */}
-      {showDetails && (
+      {canAuthor && showDetails && (
         <AgentDetailsPanel
           agentId={memberId}
           agentName={memberName}

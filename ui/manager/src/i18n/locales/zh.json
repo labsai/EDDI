@@ -5543,7 +5543,18 @@
       "useStarterPrompt": "插入起始提示词",
       "yourAdvisors": "您的顾问"
     },
-    "workforce": "团队"
+    "workforce": "团队",
+    "operatorLink": "平台运维助手",
+    "catalog": {
+      "emptyTitle": "这里还没有内容",
+      "emptyAuthorHint": "最终用户只能看到已上架的智能体和团队。在管理器中打开一个智能体或群组并开启“在目录中上架”——或者在启用工作区时将其设为公开或内部。使用它仍需要访问权限。",
+      "openAgents": "在管理器中打开智能体",
+      "emptyUserHint": "目前还没有向你开放任何智能体或团队。请稍后再来查看。",
+      "agents": "智能体",
+      "teams": "团队",
+      "previewTitle": "最终用户看到的内容",
+      "previewCounts": "已向有权使用的人员提供 {{agents}} 个上架智能体和 {{teams}} 个上架团队。"
+    }
   },
   "operator": {
     "title": "平台操作员",
@@ -7672,6 +7683,13 @@
       "lte": "至多为",
       "contains": "包含"
     }
+  },
+  "catalogListing": {
+    "label": "在目录中上架",
+    "agentDescription": "在 Workforce 中向最终用户提供此智能体。只有有权使用的人才能看到它，且仅在部署后可见。启用工作区时，公开和内部的智能体无论如何都会上架。",
+    "groupDescription": "在 Workforce 中向最终用户提供此团队。只有有权使用的人才能看到它。启用工作区时，公开和内部的团队无论如何都会上架。",
+    "listedToast": "已在目录中上架",
+    "unlistedToast": "已从目录中移除"
   },
   "groupLearning": {
     "betToggle": "作为押注创建",

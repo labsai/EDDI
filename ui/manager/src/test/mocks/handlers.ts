@@ -8,6 +8,9 @@ import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
 import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
+import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
+
+export { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS };
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
 // discovers every handler array this module exports, checks it too.
@@ -1067,6 +1070,10 @@ export const handlers = [
     HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
   ),
   http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
+
+  // The end-user catalog (IRestCatalog) — what Workforce reads for an eddi-user.
+  http.get("*/catalog/agents", () => HttpResponse.json(MOCK_CATALOG_AGENTS)),
+  http.get("*/catalog/groups", () => HttpResponse.json(MOCK_CATALOG_GROUPS)),
 
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {

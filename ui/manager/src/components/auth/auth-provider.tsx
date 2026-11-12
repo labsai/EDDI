@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { getAuthConfig, type AuthConfig } from "@/lib/auth-config";
 import { api } from "@/lib/api-client";
 import { clearWorkforcePins } from "@/lib/workforce-pins";
+import { mockRolesOverride } from "@/lib/mock-roles";
 import {
   AuthContext,
   GUEST_CONTEXT,
@@ -32,10 +33,19 @@ export function AuthProvider({ children, configOverride }: AuthProviderProps) {
     [configOverride]
   );
 
+  // Dev + mock API only (see `mockRolesOverride`): lets the MSW E2E tier run as
+  // a given role. Reported as "keycloak" so role checks apply instead of the
+  // auth-disabled "everything is allowed".
+  const mockRoles = useMemo(() => (config.method === "none" ? mockRolesOverride() : null), [config.method]);
+  const mockContext = useMemo<AuthContextValue | null>(
+    () => (mockRoles ? { ...GUEST_CONTEXT, roles: mockRoles, method: "keycloak" } : null),
+    [mockRoles],
+  );
+
   // When auth is disabled, render children immediately
   if (config.method === "none") {
     return (
-      <AuthContext.Provider value={GUEST_CONTEXT}>
+      <AuthContext.Provider value={mockContext ?? GUEST_CONTEXT}>
         {children}
       </AuthContext.Provider>
     );

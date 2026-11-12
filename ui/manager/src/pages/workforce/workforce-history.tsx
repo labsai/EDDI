@@ -11,9 +11,8 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/api-client";
+import { useWorkforceGroup } from "@/hooks/use-workforce-group";
 import {
-  useResolvedGroupVersion,
-  useGroup,
   useGroupConversations,
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
@@ -253,11 +252,11 @@ function WorkforceHistory() {
   // its original name. The current version used to be learned from the
   // enriched descriptor listing, which fetches every listed group's full
   // config (up to 201 requests) to find one number; `currentversion` is one.
-  const boardVersion = useResolvedGroupVersion(boardId, searchParams.get("version"));
+  // The group store for an author, the catalog entry for an end user.
+  const { data: boardConfig } = useWorkforceGroup(boardId, searchParams.get("version"));
   // Left unfetched until the version is known. Falling back to 1 reads the
   // group's FIRST version, so the export would be titled with the name the
   // group was created under until the lookup lands.
-  const { data: boardConfig } = useGroup(boardVersion ? (boardId ?? "") : "", boardVersion);
   const { data: conversations, isLoading, isError } = useGroupConversations(
     boardId ?? "",
     PAGE_SIZE * (page + 1),
