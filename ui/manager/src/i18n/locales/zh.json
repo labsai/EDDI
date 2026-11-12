@@ -538,6 +538,32 @@
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
     },
+    "presentation": {
+      "title": "展示与标题",
+      "description": "聊天窗口如何显示此代理。所有项均为可选；留空的字段保持默认值。",
+      "displayName": "显示名称",
+      "accentColor": "强调色 (#rrggbb)",
+      "avatar": "头像（https URL 或小型 data:image URI）",
+      "starters": "对话开场白（每行一条，最多 {{count}} 条）",
+      "controls": "聊天控件",
+      "control": {
+        "undo": "撤销",
+        "redo": "重做",
+        "attachments": "附件",
+        "rating": "评分",
+        "quickReplies": "快捷回复",
+        "streaming": "流式输出",
+        "rawHtml": "在回复中渲染 HTML"
+      },
+      "rawHtmlNote": "默认关闭。聊天组件仅从其读取对话控制设置的版本起才应用此设置；在此之前，它会为所有代理渲染 HTML。请现在就为回复本应包含 HTML 的代理开启它。",
+      "titles": "对话标题",
+      "titlesEnable": "让模型撰写对话标题",
+      "titlesNote": "否则以对话的第一条消息作为标题。模型每个对话在后台运行一次，费用计入成本预算。用户设置的标题永远不会被替换。",
+      "titlesProvider": "提供商",
+      "titlesModel": "模型",
+      "titlesMaxLength": "标题最大长度",
+      "titlesCredentials": "凭据放在代理文档的 titleGeneration.parameters 中（例如引用 vault 密钥的 apiKey）；请参阅代理配置文档。"
+    },
     "copyUrl": "复制 URL",
     "liveElsewhere": "生效中：v{{live}} · 正在查看 v{{viewing}}（未部署）",
     "removeWorkflow": "从智能体中移除工作流",

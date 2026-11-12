@@ -480,10 +480,17 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
     "viewState": "UNSEEN",
     "conversationStepSize": 5,
     "environment": "production",
-    "conversationState": "READY"
+    "conversationState": "READY",
+    "title": "What is the weather in Vienna?",
+    "titleSource": "AUTO",
+    "pinned": false
   }
 ]
 ```
+
+`title` is the first user message that was not secret, truncated (`titleSource`
+`AUTO`), a model-written one for an agent with `titleGeneration` (`LLM`), or the
+owner's (`USER`); absent until the first such message.
 
 | Parameter | Meaning |
 | --- | --- |
@@ -511,6 +518,7 @@ listed.
 | --- | --- |
 | `GET …/simple/{conversationId}` | Same snapshot as `GET /agents/{conversationId}`, with the same query parameters |
 | `GET …/{conversationId}` | The stored conversation memory document, every step and key |
+| `PATCH …/{conversationId}` | Owner (or admin): rename and/or pin, body `{"title": "…", "pinned": true}` (either field). `200` with the updated descriptor; `400` for an empty body or a blank or longer-than-200-character title; `404` for a deleted conversation. A title set here is never replaced by a generated one — see [Conversation titles](agent-config-authoring.md#conversation-titles-titlegeneration) |
 | `DELETE …/{conversationId}` | `204`. `?deletePermanently=true` removes the document instead of marking it deleted |
 | `DELETE …/?deleteOlderThanDays=N` | Admin only: permanently delete every **ended** conversation older than `N` days (`N ≥ 1`) |
 | `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent, `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |

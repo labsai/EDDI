@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.agents.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.agents.AgentPresentationValidator;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
@@ -63,6 +64,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
         validateContinuation(agentConfiguration);
+        AgentPresentationValidator.validate(agentConfiguration);
         // Store-owned: whatever the body claims is replaced. A new agent — including a
         // duplicate or an import — starts its own chain, compatible with nothing.
         agentConfiguration.setCompatibilityGeneration(FIRST_COMPATIBILITY_GENERATION);
@@ -86,6 +88,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
         validateContinuation(agentConfiguration);
+        AgentPresentationValidator.validate(agentConfiguration);
         // Only the current version can be updated (the historized store refuses any
         // other), so the version replaced here always carries the agent's highest
         // generation and this rule keeps generations monotonic without looking at

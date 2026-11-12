@@ -98,3 +98,13 @@ Under the widget's original policy, `img-src 'self' data: blob:`, the browser re
 | `'self'` | None beyond EDDI itself (the old behaviour). An empty value falls back to the default |
 
 **The trade-off.** Markdown images in model-written text are never rendered as `<img>`: the widget turns them into links, so a model cannot make the browser fetch a URL of its choosing, whatever this setting says. What `https:` gives up is `img-src` as a second line of defence. If some other flaw let markup into the page, an injected `<img>` could send data to any https host. If you know where your designers' images live, list those hosts. The setting applies to `/chat` only. The Manager and Swagger UI keep their own `img-src`.
+
+## 4. Agent appearance and controls
+
+What the widget shows for an agent — display name, avatar, accent colour, conversation starters — and which controls it offers (undo, redo, attachments, rating, quick replies, streaming, HTML in replies) are set on the agent, in `appearance` and `conversationControls` ([agent-config-authoring.md](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)). `GET /agents/{agentId}/profile` serves both, for the deployed version, to anyone who may use the agent, so an embedding needs no extra parameters for them. The URL colour parameters and `/branding/brand.css` keep working as before; they style the deployment, `appearance` styles one agent.
+
+## Upgrading: HTML in replies is off by default
+
+`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until now the widget rendered HTML for every agent; the Manager never did.
+
+The profile reports the setting from 6.7.0 on. The widget follows it from the release that ships its side of the change (the frontend unification plan, decision D9), and until then keeps rendering HTML, so nothing changes before agents can opt in. **If an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it now**; otherwise, once the widget follows the setting, its replies show the markup as text. Agents whose replies are plain text or markdown need nothing.

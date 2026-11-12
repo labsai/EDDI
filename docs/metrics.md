@@ -409,6 +409,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_conversation_titles_total{outcome}     # Conversation titles: auto / auto_skipped (already titled) / llm / llm_skipped (owner renamed meanwhile) / llm_empty / llm_busy / llm_refused_budget / llm_refused_unpriced / llm_error / error
 eddi_tenant_cost_reservation_total{outcome} # Hard-ceiling reservations (opt-in): reserved / refused / unavailable / release_failed
 eddi_tenant_cost_reservation_usd_total{direction} # USD held (held) and given back (released) by those reservations
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it

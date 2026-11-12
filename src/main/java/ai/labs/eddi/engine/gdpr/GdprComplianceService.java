@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -1099,6 +1100,25 @@ public class GdprComplianceService {
     }
 
     /**
+     * The conversation's descriptor for export — the live one, else the archived
+     * copy a soft delete leaves (it still holds the title) — or null when neither
+     * can be read. A missing descriptor only drops the title from the entry; the
+     * conversation itself is still exported.
+     */
+    private ConversationDescriptor exportableDescriptor(String conversationId) {
+        if (conversationDescriptorStore == null) {
+            return null;
+        }
+        try {
+            // Live first, then the history collection a soft delete archives into.
+            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0);
+        } catch (Exception e) {
+            LOGGER.debugf("[GDPR] No descriptor for conversation %s; exported without a title", conversationId);
+            return null;
+        }
+    }
+
+    /**
      * Export all user data (GDPR Art. 15/20).
      *
      * @param userId
@@ -1164,12 +1184,17 @@ public class GdprComplianceService {
                 var snapshot = conversationMemoryStore
                         .loadConversationMemorySnapshot(convId);
                 if (snapshot != null) {
+                    // The title is derived conversation content, so it travels with the
+                    // conversation it names (and is erased with its descriptor).
+                    ConversationDescriptor descriptor = exportableDescriptor(convId);
                     conversations.add(new UserDataExport.ConversationExportEntry(
                             convId,
                             snapshot.getAgentId(),
                             snapshot.getAgentVersion(),
                             snapshot.getConversationState(),
-                            snapshot.getConversationOutputs()));
+                            snapshot.getConversationOutputs(),
+                            descriptor != null ? descriptor.getTitle() : null,
+                            descriptor != null && descriptor.isPinned()));
                 } else {
                     // The id came from this same store moments ago, so an absent
                     // document is a conversation lost between the two reads, not an

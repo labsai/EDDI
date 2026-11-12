@@ -65,6 +65,50 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a provider key pasted into a model field is still caught by the shape rules")
+    void scrubJson_keyInAModelFieldIsRedacted() throws Exception {
+        String json = """
+                {
+                    "parameters": { "modelName": "sk-ant-api03-AbCdEfGh1234567890XyZ" },
+                    "titleGeneration": { "llmModel": "sk-proj-AbCdEfGh1234567890XyZw" }
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("AbCdEfGh1234567890XyZ"), "the structural exemption skips only the entropy check: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("a vault reference whose key name looks like a credential is not rewritten by the shape rules")
+    void scrubJson_vaultReferenceSurvivesShapeScan() throws Exception {
+        String json = """
+                {
+                    "modelName": "${vault:sk-prod-support-model-name}",
+                    "description": "routes through ${vault:sk-prod-support-model-name} for support"
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("\"modelName\" : \"${vault:sk-prod-support-model-name}\"")
+                || scrubbed.contains("\"modelName\":\"${vault:sk-prod-support-model-name}\""), scrubbed);
+        assertTrue(scrubbed.contains("routes through ${vault:sk-prod-support-model-name} for support"), "prose keeps its reference: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("a vault reference in a connection string's password slot survives the shape scan")
+    void scrubJson_vaultReferenceInConnectionStringSurvives() throws Exception {
+        String json = """
+                { "connectionString": "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi" }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertTrue(scrubbed.contains("jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi"), scrubbed);
+    }
+
+    @Test
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {
