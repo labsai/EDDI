@@ -1153,8 +1153,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         if: steps.lookup.outputs.cache-hit != 'true'
@@ -1267,8 +1269,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       - name: Build and test
         # -DskipUi=true is belt and braces: `test` stops before prepare-package, where
@@ -1388,8 +1392,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       # Build & Test already ran the unit tests on this commit (this job `needs` it).
       # Their coverage data and reports are restored instead of re-running ~20k tests,
@@ -1536,8 +1542,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
@@ -1903,8 +1911,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -2006,8 +2016,10 @@ jobs:
         with:
           path: ~/.m2/repository
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
-          restore-keys: |
-            maven-v1-${{ runner.os }}-
+          # Prefix fallback only off tags: a release build restores its exact key or
+          # starts empty, so a cache saved under a looser key by an earlier run (a PR,
+          # a fork-triggered workflow) cannot flow into the published image.
+          restore-keys: ${{ !startsWith(github.ref, 'refs/tags/') && format('maven-v1-{0}-', runner.os) || '' }}
 
       - name: Compute Docker tags
         id: meta
