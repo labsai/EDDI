@@ -54,6 +54,7 @@ for anything this page does not cover.
 | `POST /agents/{conversationId}/resume` | Submit a human decision for a paused turn | `200` |
 | `GET /agents/{conversationId}/approval-status` | Pause details of a conversation | `200` |
 | `GET /agents/pending-approvals` | Conversations awaiting a human decision | `200` list |
+| `GET /me/events` | The caller's event stream: approvals, team progress, finished jobs, notifications — ids only (see [Your event stream](#your-event-stream)) | `200` `text/event-stream` |
 | `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` (a compare-and-set from the state it read: `409` when the state changed meanwhile or cannot be reset) | `200` |
 | `GET /conversationstore/conversations` | List conversations (paged, filterable) | `200` list |
 | `GET /conversationstore/conversations/search?q=` | Search **my** conversations by title (paged; see [Searching my conversations](#searching-my-conversations)) | `200` list |
@@ -401,6 +402,28 @@ and `toolDecisions` for per-tool-call gates. `?detail=full` on
 | `409 Conversation is not in a resumable state (current state: READY) — …` | Nothing is paused (already resumed, cancelled, timed out, or the agent is not deployed) |
 | `409` naming `pauseId no longer current` | The pause changed after the decision was made |
 
+### Your event stream
+
+Instead of polling `pending-approvals`, a client can hold `GET /me/events` open:
+a Server-Sent Event stream that says, for the signed-in user only, when an
+approval they may decide is waiting (`approval.pending`) or was decided
+(`approval.decided`), and when a team discussion, a long job or a notification
+concerns them. Payloads carry ids and kinds, never content — fetch the details
+here. There is no replay: on (re)connect, refetch. One stream per tab, at most
+8 per user by default (`429` past it); `401` without a sign-in.
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" "$EDDI/me/events"
+# event: ready
+# data: {"v":1,"heartbeatSeconds":20}
+#
+# event: approval.pending
+# data: {"id":"…","kind":"approval.pending","ts":1793961600000,"surface":"regular","conversationId":"6abf…","agentId":"66a0…"}
+```
+
+Every kind, who receives it, the limits and the cluster behaviour:
+[User Events](user-events.md).
+
 ## Resetting a stuck conversation
 
 `PATCH /agents/{conversationId}/state?state=READY` (admin only) moves a
@@ -556,6 +579,7 @@ For symptoms and fixes beyond the status code, see
 
 - [Conversations](conversations.md) — how conversation state, memory and windowing work
 - [Human-in-the-Loop](hitl.md) — pause configuration, timeouts, per-tool-call gates
+- [User Events](user-events.md) — `GET /me/events`, the per-user event stream
 - [Group Conversations](group-conversations.md) — the `/groups/{groupId}/conversations` API
 - [OpenAI-compatible API](open-webui-integration.md) — `/v1/chat/completions` on top of the same engine
 - [MCP Server](mcp-server.md) — the same operations as MCP tools

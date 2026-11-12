@@ -1193,6 +1193,30 @@ your tool schemas do not cover it, not as a routine first step:
   the tools, since neither undoes what a tool did. The cards are live only: a
   reload, a conversation opened later, or a turn answered without streaming
   shows none. The embeddable chat widget shows no tool activity.
+- GET /me/events (not one of your tools; it is a stream) is each signed-in
+  user's server-sent event stream: approval.pending and approval.decided (to
+  the conversation's owner and every eddi-admin and eddi-approver; for a 1:1
+  pause the owner only while they may still USE the agent),
+  team.started, team.waiting_for_human and team.ended (to a discussion's owner
+  and its HUMAN members), job.finished, job.run_completed and job.failed (to
+  the conversation's owner), notification.created (to the recipient, an update
+  notice to every admin). Payloads carry ids and kinds, never content, and
+  scoping is decided on the server per connection from that request's own
+  identity. Events are hints: no replay, no Last-Event-ID; a client refetches
+  on reconnect. approval.decided comes with the hitl.approval audit entry, so
+  with eddi.audit.enabled=false it is never sent. Limits, all per node:
+  eddi.user-events.max-connections-per-user (8, one stream per tab, 429 past
+  it), eddi.user-events.max-connections (10000), buffer-size (64 unacknowledged
+  frames, then the stream is closed as a slow consumer and the client
+  reconnects), dispatch-queue-size (10000), heartbeat-interval (20s),
+  max-connection-age (1h; also closed at token expiry); eddi.user-events.enabled
+  =false answers 404. With authorization off every tab shares one bucket and
+  gets every event; the per-user cap does not apply to it, only the node cap. In a cluster (eddi.messaging.type=nats) events cross pods on
+  the cluster event bus with principals hashed; with in-memory messaging only
+  the local node delivers. Metrics: eddi_user_events_connections,
+  eddi_user_events_delivered_total{kind}, eddi_user_events_dropped_total{reason
+  slow_consumer|dispatch_queue_full}, eddi_user_events_rejected_total{reason
+  user_limit|node_limit}. The chat widget never opens it.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

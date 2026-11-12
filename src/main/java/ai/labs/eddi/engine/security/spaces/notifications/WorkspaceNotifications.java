@@ -13,6 +13,9 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -93,6 +96,14 @@ public class WorkspaceNotifications {
     private final UserDirectory directory;
     private final ManagedExecutor executor;
     private final ConfigResourceTypes configTypes;
+
+    /**
+     * Announces a delivered notification on the recipient's event stream.
+     * Field-injected so the constructor keeps its signature; {@code null} in tests
+     * that build this class by hand.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     @Inject
     public WorkspaceNotifications(IWorkspaceNotificationStore store, IDocumentDescriptorStore descriptorStore, ResourceAccessGuard accessGuard,
@@ -365,7 +376,30 @@ public class WorkspaceNotifications {
             // Pruning is housekeeping: the notice is stored.
             LOGGER.warnf("Could not prune the inbox of '%s': %s", sanitize(notification.recipient()), e.getMessage());
         }
+        announce(notification);
         return true;
+    }
+
+    /**
+     * Tells the recipient's open tabs ({@code GET /me/events}) that their inbox has
+     * something new: the notification's id and type, nothing it says. A notice for
+     * {@link #SYSTEM_ADMINS} goes to every administrator, who read that inbox. Best
+     * effort, like the delivery itself.
+     */
+    private void announce(WorkspaceNotification notification) {
+        UserEventPublisher publisher = userEventPublisher;
+        if (publisher == null) {
+            return;
+        }
+        try {
+            UserEventAudience audience = SYSTEM_ADMINS.equals(notification.recipient())
+                    ? UserEventAudience.administrators()
+                    : UserEventAudience.principal(notification.recipient());
+            publisher.publish(UserEvent.of(UserEvent.KIND_NOTIFICATION_CREATED).withNotification(notification.id(),
+                    notification.type() != null ? notification.type().name() : null), audience);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not announce a %s notification: %s", notification.type(), e.getMessage());
+        }
     }
 
     private static String resourceUri(DocumentDescriptor descriptor) {

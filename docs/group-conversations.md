@@ -1288,6 +1288,14 @@ speaker and phase pairs.
 | `group_complete` | Terminal — carries the final state and the synthesized answer |
 | `group_error` | Terminal failure, with a curated (never raw) message |
 
+These events belong to the stream of the request that started or continued the
+discussion. To learn about a discussion without holding that stream open — it
+started, it ended, it waits for a human member (`yourTurn: true` for the person
+it waits for), or it paused at an approval gate — the owner and the `HUMAN`
+members can hold the per-user stream [`GET /me/events`](user-events.md) instead:
+`team.started`, `team.waiting_for_human`, `team.ended` and `approval.pending`,
+with ids only.
+
 ## MCP Tools
 
 Group-related tools live in two classes: the group tools below, plus six

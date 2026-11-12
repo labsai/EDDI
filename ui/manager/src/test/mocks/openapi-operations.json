@@ -197,6 +197,7 @@
     "GET /mcpcallsstore/mcpcalls/jsonSchema",
     "GET /mcpcallsstore/mcpcalls/{id}",
     "GET /mcpcallsstore/mcpcalls/{id}/currentversion",
+    "GET /me/events",
     "GET /outputstore/actions",
     "GET /outputstore/outputsets/descriptors",
     "GET /outputstore/outputsets/jsonSchema",

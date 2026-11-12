@@ -21,6 +21,9 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.ClientContextGuard;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -154,6 +157,14 @@ public class ConversationContinuations {
     private final IScheduleStore scheduleStore;
     private final MeterRegistry meterRegistry;
     private final Clock clock;
+
+    /**
+     * Tells the owner's tabs when a job's last turn ran ({@code GET /me/events}).
+     * Field-injected so the constructors keep their signatures; {@code null} in
+     * tests that build this class by hand, which then announce nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     @Inject
     public ConversationContinuations(IScheduleStore scheduleStore, MeterRegistry meterRegistry) {
@@ -326,6 +337,7 @@ public class ConversationContinuations {
                 // The last continuation turn of a job arms nothing: prune here, or the
                 // continuation before it would stay behind for good.
                 pruneUsedUp(conversationId);
+                announceFinished(conversationId, memory, step);
             }
             return false;
         }
@@ -367,6 +379,29 @@ public class ConversationContinuations {
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * The job ended: this continuation turn committed and asks for no successor —
+     * it finished its work, reached its limit or its cost ceiling. Raises
+     * {@code job.finished} for the conversation's owner, with the refusal reason as
+     * its state when there is one ({@code limit}, {@code cost_ceiling}, …) and
+     * {@code done} otherwise. Never throws.
+     */
+    private void announceFinished(String conversationId, IConversationMemory memory, IWritableConversationStep step) {
+        UserEventPublisher publisher = userEventPublisher;
+        if (publisher == null) {
+            return;
+        }
+        try {
+            IData<Object> refused = step.getData(STEP_REFUSED);
+            String reason = refused != null && refused.getResult() instanceof String r && !r.isBlank() ? r : null;
+            publisher.publish(UserEvent.of(UserEvent.KIND_JOB_FINISHED).withSurface(UserEvent.SURFACE_REGULAR)
+                    .withConversation(conversationId, memory.getAgentId()).withJob(UserEvent.JOB_CONTINUATION, null)
+                    .withState(reason != null ? reason : "done"), UserEventAudience.principal(memory.getUserId()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not announce the end of the job of conversation %s: %s", sanitize(conversationId), e.getMessage());
         }
     }
 

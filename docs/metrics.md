@@ -345,6 +345,27 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### User Event Stream Metrics
+
+The per-user stream `GET /me/events` (see [User Events](user-events.md)). Charted
+in the **User event stream** row of the Full Metrics Reference. Every value is
+per node: in a cluster, sum across pods.
+
+```text
+eddi_user_events_connections                # Open /me/events streams on this node (gauge)
+eddi_user_events_delivered_total            # Events written to a stream; tag: kind
+eddi_user_events_dropped_total              # Events or streams dropped; tag: reason
+eddi_user_events_rejected_total             # Streams refused at a cap (429); tag: reason
+```
+
+`kind` is the event kind (`approval.pending`, `team.ended`, …). `dropped` has two
+reasons: `slow_consumer` (a stream more than `eddi.user-events.buffer-size` frames
+behind was closed — its client reconnects) and `dispatch_queue_full` (an event
+found the node's fan-out queue full and nobody on this node got it). `rejected`
+is `user_limit` (`eddi.user-events.max-connections-per-user`) or `node_limit`
+(`eddi.user-events.max-connections`). A steady `user_limit` rate usually means a
+client that opens a stream per component instead of one per tab.
+
 ### Self-continuation Metrics
 
 Turns an agent starts itself with the reserved `CONTINUE_CONVERSATION` action
