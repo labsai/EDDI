@@ -755,10 +755,12 @@ NGINX_TMPL
     -e "s|__KC_PORT__|\${KC_PORT}|g" \\
     /tmp/nginx-eddi.tmpl > /etc/nginx/sites-available/eddi
 
-  rm -f /etc/nginx/sites-enabled/eddi-acme
-  ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi
-  nginx -t && systemctl reload nginx
-  echo "nginx configured for HTTPS."
+  # The public site (443) is NOT enabled here. It goes live only after the
+  # eddi-frontend Keycloak client has lost its loopback redirects and "+" web origin
+  # (below): until then nginx keeps serving only the ACME/"being configured" site on
+  # :80, so a failure in between never leaves a public login that still accepts
+  # http(s)://localhost:* redirects.
+  echo "nginx HTTPS site rendered (not yet enabled)."
 
   # ── docker-compose override: point Keycloak URLs to HTTPS domains ─────────────
   EDDI_CONFIG="\${EDDI_DIR}/.eddi-config"
@@ -805,7 +807,7 @@ OVERRIDE_EOF
   # Wait for EDDI to be healthy after restart
   echo "Waiting for EDDI to restart..."
   for i in \$(seq 1 60); do
-    if curl -sf --connect-timeout 3 "http://localhost:${p_port}/q/health/ready" &>/dev/null; then
+    if curl -sf --connect-timeout 3 --max-time 5 "http://localhost:${p_port}/q/health/ready" &>/dev/null; then
       echo "EDDI is healthy after restart."
       break
     fi
@@ -813,6 +815,9 @@ OVERRIDE_EOF
   done
 
   # ── Update Keycloak client with HTTPS redirect URIs ───────────────────────────
+  # KC_CLIENT_RESTRICTED turns true only when the PUT answered 204; the public nginx
+  # site is enabled on that alone.
+  KC_CLIENT_RESTRICTED=false
   echo "Updating Keycloak eddi-frontend client..."
   KC_TOKEN=""
   # install.sh recorded this in .env (adopted from the file above). The
@@ -879,6 +884,7 @@ OVERRIDE_EOF
           "\${KC_BASE}/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" \\
           -d "\${UPDATED_CLIENT}" 2>/dev/null) || STATUS="000"
         if [[ "\${STATUS}" == "204" ]]; then
+          KC_CLIENT_RESTRICTED=true
           echo "Keycloak client updated with HTTPS origins."
         else
           echo "WARNING: Keycloak client update returned HTTP \${STATUS}"
@@ -893,12 +899,33 @@ OVERRIDE_EOF
   echo "0 12 * * * root certbot renew --quiet --deploy-hook 'systemctl reload nginx'" \\
     > /etc/cron.d/certbot-renew
 
-  echo ""
-  echo "=== HTTPS Setup Complete ==="
-  echo "  EDDI:      https://\${EDDI_DOMAIN}/manage"
-  echo "  Keycloak:  https://\${KC_DOMAIN}"
-  echo "  API Docs:  https://\${EDDI_DOMAIN}/q/swagger-ui"
-  echo "  MCP:       https://\${EDDI_DOMAIN}/mcp"
+  if [[ "\${KC_CLIENT_RESTRICTED}" == "true" ]]; then
+    rm -f /etc/nginx/sites-enabled/eddi-acme
+    ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi
+    if ! { nginx -t && systemctl reload nginx; }; then
+      echo "ERROR: nginx rejected the HTTPS site; it was NOT enabled. Fix it with: nginx -t" >&2
+      exit 1
+    fi
+    echo "nginx configured for HTTPS."
+    echo ""
+    echo "=== HTTPS Setup Complete ==="
+    echo "  EDDI:      https://\${EDDI_DOMAIN}/manage"
+    echo "  Keycloak:  https://\${KC_DOMAIN}"
+    echo "  API Docs:  https://\${EDDI_DOMAIN}/q/swagger-ui"
+    echo "  MCP:       https://\${EDDI_DOMAIN}/mcp"
+  else
+    echo "" >&2
+    echo "ERROR: the eddi-frontend Keycloak client could NOT be restricted to the public origin" >&2
+    echo "       (admin API unreachable, or the update was not accepted), so the public HTTPS site" >&2
+    echo "       was NOT enabled. The VM is left with: EDDI and Keycloak running on the loopback," >&2
+    echo "       nginx serving only the ACME/'being configured' page on :80, nothing on 443." >&2
+    echo "       Reach EDDI over an SSH tunnel. To retry: remove the http(s)://localhost:* redirect" >&2
+    echo "       URIs and the '+' web origin from the eddi-frontend client in the eddi realm, add" >&2
+    echo "       https://\${EDDI_DOMAIN}/* and https://\${EDDI_DOMAIN}, then:" >&2
+    echo "         ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi" >&2
+    echo "         rm -f /etc/nginx/sites-enabled/eddi-acme && nginx -t && systemctl reload nginx" >&2
+    exit 1
+  fi
 else
   echo "[6/6] Skipping HTTPS config (not requested or cert failed)."
 fi
@@ -989,6 +1016,9 @@ wait_for_eddi() {
   # restart cycle after EDDI itself is up. Without HTTPS the direct port is polled.
   local max_wait=720
   local elapsed=0
+  # Wall-clock, not a sum of sleeps: a probe that takes its full --max-time must
+  # not stretch the budget.
+  local started=$SECONDS
   local health_url="http://${EXTERNAL_IP}:${EDDI_PORT}/q/health/ready"
   local note="~3-5 min"
   [[ "$WITH_AUTH" == "true" ]] && note="~5-8 min (Keycloak adds startup time)"
@@ -1007,16 +1037,16 @@ wait_for_eddi() {
   echo -ne "  "
 
   while [[ $elapsed -lt $max_wait ]]; do
-    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+    if curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1; then
       echo ""
       echo ""
       info "EDDI is healthy! (ready in ${elapsed}s)"
       return 0
     fi
     sleep 10
-    elapsed=$((elapsed + 10))
+    elapsed=$((SECONDS - started))
     echo -ne "."
-    if (( elapsed % 60 == 0 )); then
+    if (( elapsed % 60 < 10 )); then
       echo -ne "\n  "
     fi
   done
@@ -1055,6 +1085,13 @@ print_success() {
     echo ""
     echo -e "  ${DIM}EDDI listens on the VM's loopback only and no direct port is open: nginx on 443${RESET}"
     echo -e "  ${DIM}is the one way in. There is deliberately no plain-http URL.${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}If the HTTPS URLs do not answer${RESET} (certificate not issued, or the Keycloak client"
+    echo -e "  ${DIM}could not be restricted, in which case the VM deliberately keeps 443 closed), EDDI is${RESET}"
+    echo -e "  ${DIM}still running on the VM's loopback. Reach it over an SSH tunnel, then open${RESET}"
+    echo -e "  ${DIM}http://localhost:${EDDI_PORT}/manage:${RESET}"
+    echo -e "    ${CYAN}gcloud compute ssh ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT} -- -L ${EDDI_PORT}:localhost:${EDDI_PORT} -L 8180:localhost:8180${RESET}"
+    echo -e "  ${DIM}Diagnose with:  $(basename "$0") logs ${VM_NAME}${RESET}"
   else
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
     echo -e "  ${BOLD}API Docs${RESET}     ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/q/swagger-ui${RESET}"
@@ -1339,12 +1376,13 @@ REMOTE_SCRIPT
   local health_url="http://${external_ip}:${EDDI_PORT}/q/health/ready"
   local https_base="https://${external_ip//./-}.sslip.io"
   local elapsed=0
+  local started=$SECONDS
   echo -ne "  "
   while [[ $elapsed -lt 120 ]]; do
     local base=""
-    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+    if curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1; then
       base="http://${external_ip}:${EDDI_PORT}"
-    elif curl -sf --connect-timeout 5 "${https_base}/q/health/ready" &>/dev/null 2>&1; then
+    elif curl -sf --connect-timeout 5 --max-time 10 "${https_base}/q/health/ready" &>/dev/null 2>&1; then
       base="$https_base"
     fi
     if [[ -n "$base" ]]; then
@@ -1357,7 +1395,7 @@ REMOTE_SCRIPT
       return 0
     fi
     sleep 5
-    elapsed=$((elapsed + 5))
+    elapsed=$((SECONDS - started))
     echo -ne "."
   done
   echo ""
@@ -1429,8 +1467,8 @@ cmd_status() {
   local https_health="https://${ip_dashes}.sslip.io/q/health/ready"
   local health_url="http://${external_ip}:${EDDI_PORT}/q/health/ready"
   local https_ok="false" http_ok="false"
-  curl -sf --connect-timeout 5 "$https_health" &>/dev/null 2>&1 && https_ok="true"
-  curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1 && http_ok="true"
+  curl -sf --connect-timeout 5 --max-time 10 "$https_health" &>/dev/null 2>&1 && https_ok="true"
+  curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1 && http_ok="true"
 
   echo -ne "  EDDI health (HTTPS): "
   if [[ "$https_ok" == "true" ]]; then
@@ -1444,7 +1482,7 @@ cmd_status() {
     echo ""
     echo -ne "  Deployed agents: "
     local agent_count
-    agent_count=$(curl -sf --connect-timeout 5 \
+    agent_count=$(curl -sf --connect-timeout 5 --max-time 10 \
       "http://${external_ip}:${EDDI_PORT}/administration/production/deploymentstatus" \
       2>/dev/null | grep -o '"agentId"' | wc -l | tr -d ' ') || agent_count="0"
     echo -e "${BOLD}${agent_count}${RESET}"
