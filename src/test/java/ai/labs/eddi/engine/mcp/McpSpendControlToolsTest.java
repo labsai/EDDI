@@ -162,6 +162,33 @@ class McpSpendControlToolsTest {
     }
 
     @Test
+    @DisplayName("withdrawing another's or an unknown change, and an unknown status filter, are caller errors; APPLYING and FAILED filter")
+    void withdrawAndList() throws Exception {
+        var admin = tools(Set.of("eddi-admin"));
+        assertEquals("NOT_FOUND", json(admin.withdrawSpendControlChange("nope", "r")).get("errorCode").asText());
+
+        String lower = "[{\"provider\":\"openai\",\"model\":\"gpt-4o\",\"inputPricePer1M\":0,\"outputPricePer1M\":0,"
+                + "\"source\":\"https://openai.com/api/pricing\"}]";
+        String id = json(admin.updateModelPrices(2L, lower, null, null, "free")).get("change").get("changeId").asText();
+        SpendControlChange mine = created.get(0);
+        when(store.read(id)).thenReturn(Optional.of(mine));
+        SpendControlChange othersChange = new SpendControlChange("other", mine.kind(), mine.status(), null, mine.baseRevision(), null,
+                mine.proposedCatalog(), null, mine.changes(), mine.loosening(), "r", "someone-else", "mcp", mine.proposedAtMillis(),
+                mine.expiresAtMillis(), null, null, null, null, "h");
+        when(store.read("other")).thenReturn(Optional.of(othersChange));
+        assertEquals("NOT_FOUND", json(admin.withdrawSpendControlChange("other", "r")).get("errorCode").asText());
+        verify(store, never()).compareAndSetStatus(eq("other"), any(), any());
+
+        when(store.compareAndSetStatus(eq(id), eq(SpendControlChange.Status.PENDING), any())).thenReturn(true);
+        assertEquals("WITHDRAWN", json(admin.withdrawSpendControlChange(id, "not needed")).get("status").asText());
+
+        assertTrue(json(admin.listSpendControlChanges("applying", null)).has("changes"));
+        assertTrue(json(admin.listSpendControlChanges("FAILED", 5)).has("changes"));
+        assertEquals("BAD_REQUEST", json(admin.listSpendControlChanges("SOMETIMES", null)).get("errorCode").asText());
+        verify(catalogService, never()).replace(anyLong(), any(), anyString());
+    }
+
+    @Test
     @DisplayName("no MCP tool approves, rejects or applies a spend-control change")
     void noApprovalTool() {
         List<String> names = Arrays.stream(McpSpendControlTools.class.getDeclaredMethods()).filter(m -> m.isAnnotationPresent(Tool.class))
