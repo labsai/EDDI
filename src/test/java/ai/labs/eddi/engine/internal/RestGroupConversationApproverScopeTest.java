@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -89,7 +90,7 @@ class RestGroupConversationApproverScopeTest {
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, mock(IConversationDescriptorStore.class),
                 mock(IConversationService.class), groupService);
         rest = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
 
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
