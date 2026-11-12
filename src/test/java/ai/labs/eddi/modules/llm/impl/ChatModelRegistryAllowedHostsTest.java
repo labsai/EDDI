@@ -136,6 +136,17 @@ class ChatModelRegistryAllowedHostsTest {
     }
 
     @Test
+    @DisplayName("an endpoint key outside the old fixed list (apiBase, hostname, proxyUrl) is checked too")
+    void endpointKeysBeyondTheOldListAreChecked() throws Exception {
+        registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "apiBase", "https://a.example/v1", "hostname", "b.example",
+                "proxyUrl", "https://c.example"));
+
+        verify(allowlist).requireAllowed(anyMap(), eq("https://a.example/v1"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(anyMap(), eq("b.example"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(anyMap(), eq("https://c.example"), eq("LLM provider 'openai'"));
+    }
+
+    @Test
     @DisplayName("a builder whose default an editor can steer (a region) is checked against that default")
     void steerableDefaultEndpointIsChecked() throws Exception {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();

@@ -289,6 +289,13 @@ context. Four layers apply, none of which you configure to get:
 `directiveAction` is `warn`, `redact` (default) or `block`. An unrecognised value
 degrades to `warn` — a typo must not silently start blocking every tool result.
 
+The whole result is screened before `toolResponseLimits` cuts it. Later pages of a
+paginated result come back through the built-in `fetch_page`, so a guardrail
+narrowed to `["mcp", "a2a", "http"]` would never see them on the way out; they are
+stored already screened, under the MCP server's source. The same holds for the text
+the `summarize` strategy sends to its summarizer, and the summary is screened again.
+`block` therefore also fires on a directive in the part a cut would have dropped.
+
 This governs what comes **out** of a tool. What goes **in** — the arguments of a
 call, such as the body of a comment about to be posted — is screened by
 [`toolCallGuardrails`](tool-call-guardrails.md).

@@ -575,7 +575,30 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > skips the private-address check but never the cloud-metadata check, and
 > redirects stay off. A templated host can then only resolve to a listed host or
 > a public one. The allow-list applies to httpCalls; MCP servers and A2A peers
-> are validated as before.
+> are validated as before. httpCalls have **no self exception**: an httpCall to
+> EDDI's own address (`127.0.0.1:7070`, or whatever `eddi.self.base-url` names —
+> the Platform Operator's tools, for one) must be on this list unless that
+> address resolves publicly.
+>
+> **A literal target the check refuses fails at deploy.** With protection on, an
+> httpCall whose `targetServerUrl`, or an absolute `request.path`, names a host
+> the execution-time check would refuse (loopback, private, `localhost`,
+> `*.internal`, not on the allow-list) fails to deploy with a message naming the
+> host and the allow-list entry that admits it, rather than deploying and failing
+> the first conversation. A cloud-metadata target fails to deploy whatever the
+> flag. Deploy and execution share one decision
+> (`ApiCallExecutor.checkOutboundTarget`). A templated or `${vars:…}` host is
+> left to the check at execution, and so is a host that does not resolve at
+> deploy — a failed lookup then is as likely a transient DNS problem as a wrong
+> name, so it is logged, not fatal; each call to it is refused until it resolves.
+>
+> **Lookups are bounded.** The DNS lookup behind this check (deploy and every
+> call) gives up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`)
+> and counts as "does not resolve", so a slow or black-holed name server cannot
+> hold a deploying or conversation thread for the OS resolver's default. It fails
+> closed: with protection on the call is refused. Lookups share a small bounded
+> pool (`BoundedHostResolver`); when it is full of stuck lookups, further ones are
+> refused at once.
 >
 > **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
 > WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
@@ -684,6 +707,7 @@ The checks above resolve the host; the HTTP client then resolves it **again** to
 | Path | Guard | What is left |
 | --- | --- | --- |
 | httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. With protection off, a redirect hop may connect to a private or loopback peer only when the hop before it connected to that same class (or the host is allow-listed) — the "no step into a more private class" rule, applied to the connected peer as well as the name. | Nothing for the address check |
+| `OutboundHttp` on the Vert.x engine (`eddi.http.outbound.<profile>.engine=vertx`; the `apicalls` profile's default, which nothing sends through yet) | As on the JDK engine below, **plus** the address the connection actually reached is checked before a byte of the request is written, on every hop and every pooled connection: a `STRICT` hop refuses a loopback, private, link-local or metadata peer, a `METADATA_ONLY` hop a metadata or link-local one (`ConnectedPeers`). The request fails and its connection is closed, which evicts it from the pool, so no later request is sent over it; a pooled connection is checked again by each request it is handed to. | Nothing for the address check — except through a forward proxy, whose connection's peer is the proxy; there only the post-exchange recheck applies |
 | `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
 | LLM providers and embedding models (langchain4j JDK client, `BoundedJdkHttpClient`) | Models are cached for as long as they are used, so the endpoint is validated when the model is built **and** again before every request the cached client sends (OpenAI, OpenAI-compatible presets, Ollama, Anthropic, Gemini, Mistral; OpenAI, Ollama, Gemini and Mistral embeddings; the Chroma vector store). | The same cache-expiry window as any pre-connect check. Providers built on their own SDK transport (Azure, Bedrock, Vertex, Oracle, Hugging Face; the other embedding providers) and the other vector stores are checked at build time only. A MongoDB Atlas store's checks cover the hosts its connection string names and its `proxyHost`; replica-set members the driver discovers from those seeds are not re-checked, so list only seeds you trust |
 | MCP servers (langchain4j transport on `BoundedJdkHttpClient`, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again by the transport's HTTP client before each request — handshake, `tools/list`, every tool call — is sent. The same client caps each response at `eddi.llm.max-response-bytes`, and a paginated listing at `eddi.mcp.list.max-pages` pages, `eddi.mcp.list.max-items` entries and `eddi.mcp.list.deadline-ms` (see [MCP Client](mcp-client.md#what-is-governed)). | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
@@ -774,8 +798,10 @@ authentication settings, never `*.ssl.trust`, socket-factory, proxy or SOCKS pro
 The mail core it serves (`engine/mail`) treats every message as untrusted: size, header, nesting, part and
 attachment limits are enforced before the work they bound, executables never carry content, archives are never
 expanded, HTML is converted with hidden content removed (`display:none`, `hidden`, zero opacity, zero-size or
-transparent text, text the colour of its background, off-screen positioning, `<style>` hiding rules, comments —
-`HiddenContentFilter` in mail mode; web and file ingestion use its conservative page mode, which keeps
+transparent text, text the colour of its background, off-screen positioning, comments, and `<style>` hiding
+rules, including those inside `@layer`, `@supports` and screen-wide `@media` blocks but not those behind a media
+feature such as `(max-width:600px)`, where responsive mail hides its alternate copy — `HiddenContentFilter` in
+mail mode; web and file ingestion use its conservative page mode, which keeps
 script-revealed content and drops only comments, 1px text, transparent text and explicitly same-coloured text),
 a `multipart/alternative` whose plain and HTML parts say different things is flagged `ALTERNATIVES_DIVERGE`, and
 the plain-text renderer refuses any header value containing a line break. Every one of these passes is linear in

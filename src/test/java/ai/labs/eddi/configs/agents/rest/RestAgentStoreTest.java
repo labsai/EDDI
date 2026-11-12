@@ -864,8 +864,8 @@ class RestAgentStoreTest {
         }
 
         /**
-         * A rotated identity whose declared versions skip a number, as rotateKey
-         * allows.
+         * A rotated identity whose declared versions skip a number, which nothing
+         * forbids.
          */
         private AgentConfiguration agentWithRotatedKeys() {
             var config = new AgentConfiguration();

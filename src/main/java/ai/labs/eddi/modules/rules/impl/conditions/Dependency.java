@@ -47,6 +47,19 @@ public class Dependency implements IRuleCondition {
         }
     }
 
+    /**
+     * Without a {@code reference} the condition can only ever fail, so the rule
+     * that carries it never fires. Refused when the ruleset is read, naming the
+     * rule.
+     */
+    @Override
+    public void validateConfiguration() {
+        if (reference == null || reference.isBlank()) {
+            throw new IllegalArgumentException(String.format("'%s' requires a '%s' config value naming the behavior rule it depends on.", ID,
+                    referenceQualifier));
+        }
+    }
+
     @Override
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
@@ -58,7 +71,9 @@ public class Dependency implements IRuleCondition {
         List<Rule> filteredRules = new LinkedList<>();
         for (RuleGroup behaviorGroup : behaviorSet.getRuleGroups()) {
             for (Rule behaviorRule : behaviorGroup.getRules()) {
-                if (behaviorRule.getName().equals(reference)) {
+                // Rule names are optional: an unnamed rule anywhere in the set must not
+                // turn every dependency lookup into a NullPointerException.
+                if (reference.equals(behaviorRule.getName())) {
                     filteredRules.add(behaviorRule);
                 }
             }

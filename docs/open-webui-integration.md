@@ -4,6 +4,18 @@ EDDI can present its deployed agents as **OpenAI models**. Any client that speak
 
 The adapter lives at `/v1` and is **disabled by default**.
 
+> **Only want a chat front end for your agents? Use Open WebUI.** If your users need a generic, ChatGPT-style chat with EDDI agents behind it, Open WebUI over `/v1` does that well today, and EDDI does not try to out-build it on generic chat. What the OpenAI protocol cannot carry is EDDI's own interaction model, so over `/v1` your users go without:
+>
+> - **Approvals in the flow.** A paused turn arrives as a text notice; nobody can approve or reject in the chat, it happens out of band ([HITL](#hitl)).
+> - **Quick replies and `inputField`.** They are flattened to Markdown to read and retype, not buttons or a form ([§7.2](#72-structured-outputs)).
+> - **Secret input.** There is no masked field, so an agent asking for a password gets it in the clear in the client's history.
+> - **Ratings and review notices.** No thumbs or rating card, and no "replies are reviewed" notice from the agent's profile.
+> - **Group discussions.** Teams of agents are not models ([§10](#10-known-gaps)).
+> - **Memory transparency.** No view of what an agent remembers about the user, and no way to delete it there.
+> - **Branding.** Open WebUI shows its own brand, not the deployment's white-label name, logo and colours, and no per-agent appearance.
+>
+> Those are what EDDI's own surfaces exist for: the embeddable [Chat UI](chat-ui-embedding.md) at `/chat`, and the Manager and Workforce.
+
 ---
 
 ## Contents
@@ -259,7 +271,7 @@ Because every message goes through `IConversationService`, the whole pipeline ap
 | `eddi.openai-compat.environment` | `production` | Which deployment environment's agents are exposed. |
 | `eddi.openai-compat.request-timeout-seconds` | `120` | Per-turn wait before returning `504`. |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | In-flight completions; excess gets `429`. |
-| `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. |
+| `eddi.openai-compat.model-cache-seconds` | `30` | Model catalogue TTL. A failed agent listing is not cached: the next request retries it. |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Enable stateless requests — lists the `:stateless` ids and accepts the `stateless` body field. Disabling blocks both. |
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let a chat mapped under the raw `X-OpenWebUI-User-Id` (before ids were namespaced) keep its conversation. Enable only if `/v1` never ran with `http-policy=authenticated` — see §4. |
 | `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat is mapped: `history` keys it by its opening messages (one conversation per client-side chat); `shared` keeps one conversation per user and agent, as earlier releases did. See §2. |
@@ -275,7 +287,10 @@ Every property has an environment-variable form: `eddi.openai-compat.api-key` �
 
 ### Two modes
 
-**`http-policy=permit` (default).** Quarkus lets `/v1/*` through and the adapter enforces the shared API key itself, with a constant-time comparison. This mode exists because Open WebUI sends an opaque `sk-…` secret, which Quarkus OIDC would reject as a malformed JWT before any application code ran.
+**`http-policy=permit` (default).** Quarkus lets `/v1/*` through and the adapter enforces the shared API key itself, with a constant-time comparison. This mode exists because Open WebUI sends an opaque `sk-…` secret, which Quarkus OIDC would reject as a malformed JWT before any application code ran. It works the same with OIDC on (`quarkus.oidc.tenant-enabled=true`, e.g. `docker-compose.auth.yml`), which is how Keycloak and Open WebUI run together: on `/v1` — and only there — EDDI keeps the OIDC mechanism from verifying the bearer value at all, so the key reaches the adapter. A Keycloak token sent in this mode is not the key, and gets the adapter's `401 invalid_api_key`; every other path still requires a valid OIDC token.
+
+> [!NOTE]
+> Up to 6.6, the `permit` permission did not achieve this when OIDC was on. Quarkus authenticates proactively, so the OIDC mechanism still received the key, failed to verify it and answered `401` with a `WWW-Authenticate: Bearer` challenge before the adapter ran; only requests without an `Authorization` header got through. `OpenAiPermitModeAuthMechanism` now runs ahead of OIDC and gives `/v1` requests the anonymous identity while `eddi.openai-compat.http-policy` and the `/v1/*` permission are both `permit`. It needs inclusive authentication off (`quarkus.http.auth.inclusive`, the default); if that or the permission is changed, EDDI logs a warning at startup that the key cannot get past OIDC.
 
 **`http-policy=authenticated`.** Quarkus OIDC validates a real bearer token first; the adapter reads the resulting principal as the EDDI userId and ignores both the API key and the user headers. With `authorization.enabled=true` (it follows `quarkus.oidc.tenant-enabled`), the token must carry one of the EDDI roles that may converse — `eddi-admin`, `eddi-editor` or `eddi-user`, the same tier `POST /agents/{id}/start` and A2A require; any other token gets `403` (`insufficient_permissions`). With authorization disabled no role is checked. Up to 6.5 any token the realm issued was served. Suited to SDK/LangChain/LiteLLM clients — Open WebUI cannot currently mint per-user OIDC tokens for upstream connections.
 
@@ -317,6 +332,8 @@ namespaced id could export or erase another user's data.
 ### Startup guard
 
 EDDI **refuses to start** when the adapter is enabled, `http-policy=permit`, no API key is set, and `authorization.enabled=true`. That combination would expose conversation creation to anyone who can reach the port, and nothing about the running system would look wrong afterwards. Fix it by setting an API key, switching to `authenticated`, or disabling the adapter.
+
+It **warns** (and still starts) when OIDC is on, the adapter is in key mode, and OIDC cannot be kept off `/v1` — inclusive authentication is on, `quarkus.http.auth.permission.openai-compat.policy` was overridden to something other than `permit`, or `http-policy` is neither `permit` nor `authenticated`. Every request carrying the key would then get `401` from OIDC.
 
 ### What the adapter does not do
 
@@ -520,7 +537,7 @@ The conversation id is also on every response as `X-EDDI-Conversation-Id`.
 | **Two SDK chats without a chat id** | Two conversations, one per chat (§2) — unless both open with the same system and first user message *at the same time*. |
 | **A failing agent** | An OpenAI error (`500`, `code: agent_error`, the failing task's sanitized reason as `message`) — on a stream, an error event. Never a reply with `finish_reason: "stop"`. |
 | **Token counts** | Reported as `usage` for agents that call a model, summed across cascade steps and tool round-trips. Rule-based agents spend no tokens, so the field is omitted rather than zero-filled. On streams it needs `stream_options.include_usage` (§7.1). |
-| **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. |
+| **Two requests in one chat at once** | The second is dropped by `ConversationCoordinator` and returns `429`; clients retry. If the chat's conversation has ended, both requests (Open WebUI's completion and title request, say) move to the same new conversation rather than one each. |
 
 ### 7.1 Token usage
 
@@ -623,6 +640,8 @@ A failed turn (conversation state `ERROR`) carries the failing task's digest as 
 **Chat titles appear in the conversation.** Point Open WebUI's title/tag model at a `:stateless` variant or a separate connection (§5).
 
 **Streaming looks like a hang behind a proxy.** The adapter sets `X-Accel-Buffering: no`, but some proxies need explicit configuration to stop buffering `text/event-stream`.
+
+**401 for the shared key under OIDC.** In `permit` mode an adapter `401` carries an OpenAI error body (`invalid_api_key`): the key is wrong or missing. A `401` with an empty body and `WWW-Authenticate: Bearer` comes from OIDC instead — check the startup log for the warning described under [Startup guard](#startup-guard), and that the request path is `/v1/...` with `GET`, `POST` or `OPTIONS`.
 
 **401 with a valid-looking token under OIDC.** In `http-policy=authenticated` mode the token must be a real OIDC token for your realm; an `sk-…` string is not. It must also carry the **audience** EDDI requires — `quarkus.oidc.token.audience` defaults to `eddi-backend`, and Keycloak emits `aud` only through an explicit `oidc-audience-mapper` on the client that minted the token. A token from a client without that mapper authenticates everywhere else and is refused here. See [Security → Configuration Properties](security.md#configuration-properties).
 
