@@ -1053,6 +1053,11 @@ load_release_checksums() {
     return 0
   fi
   if ! sha256_of /dev/null &>/dev/null; then
+    # Same rule as `eddi update`: a release that publishes a signed SHA256SUMS is
+    # refused, not installed unchecked, when nothing can hash the downloads.
+    if release_is_signed "$EDDI_BRANCH"; then
+      fail "Release ${EDDI_BRANCH} publishes SHA256SUMS, but neither sha256sum nor shasum is installed to check the downloads against it.\n     Nothing was downloaded. Install one of them and retry."
+    fi
     warn "Neither sha256sum nor shasum is installed — downloaded files are not checksum-verified."
     return 0
   fi
@@ -2656,6 +2661,12 @@ _load_release_checksums() {
     return 0
   fi
   if ! _sha256_of /dev/null >/dev/null 2>&1; then
+    # From the first signed release on, every release publishes a SHA256SUMS, so
+    # being unable to hash is a refusal, not a warning (cosign or not).
+    if _release_is_signed "$EDDI_BRANCH"; then
+      echo "Release ${EDDI_BRANCH} publishes SHA256SUMS but neither sha256sum nor shasum is installed to check against it. Nothing was changed; install one of them and retry." >&2
+      exit 1
+    fi
     echo "WARNING: neither sha256sum nor shasum is installed; downloaded files are not checksum-verified." >&2
     return 0
   fi
@@ -2786,8 +2797,9 @@ case "${1:-help}" in
         echo "Invalid --eddi-version: $NEW_VERSION (expected an image tag such as 6.5.0 or latest)" >&2
         exit 1
       fi
-      echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
-      _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
+      # Recorded in .env only AFTER the compose files below are verified and in
+      # place: a refused update must leave the recorded tag and ref as they were.
+      echo "Will pin EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE} once the new files are verified..."
     fi
 
     # Fetch the compose files from the git ref that matches the image about to be
@@ -2838,9 +2850,8 @@ case "${1:-help}" in
       exit 1
     fi
     COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
-    # Persist so `eddi start`/`restart`/`update` know which ref the files are from.
-    _set_kv EDDI_BRANCH "$EDDI_BRANCH" "$CONFIG_FILE"
-    _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
+    # The ref is persisted (for `eddi start`/`restart`/`update`) only after the
+    # files from it are verified and in place; see below.
     echo "Compose files from: ${EDDI_BRANCH} (${EDDI_BRANCH_SOURCE})"
 
     # Same checks as a fresh install: the list is fetched (and, with cosign,
@@ -2870,7 +2881,100 @@ case "${1:-help}" in
         echo "⚠️  (keeping existing file)"
       fi
     done
+    # Everything below is STAGED first: the compose files above (verified, still
+    # as <file>.tmp) and the monitoring assets they bind-mount. Nothing is replaced
+    # until BOTH groups passed, so a refused asset cannot leave new compose files
+    # beside old or missing assets.
+    _discard_staged() {
+      for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+      for s in ${asset_targets[@]+"${asset_targets[@]}"}; do rm -f "${s}.tmp"; done
+    }
+
+    # Refreshing the compose files can introduce new file-type bind mounts. When a
+    # bind-mount source is missing Docker creates a *directory* at that path, which
+    # either silently drops the dashboard or fails the mount outright depending on
+    # what the grafana-data volume already holds, so any monitoring asset added
+    # upstream has to be on disk BEFORE `up -d`. The list is read out of the NEW
+    # (staged) monitoring compose file, so the next asset added to
+    # docker-compose.monitoring.yml needs no change to this wrapper. Only file-type
+    # mounts are fetched; the grafana-provisioning/* mounts are directories.
+    monitoring_compose=""
+    for f in "${COMPOSE_FILE_LIST[@]}"; do
+      if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
+        monitoring_compose="$f"
+      fi
+    done
+    asset_targets=()
+    if [[ -n "$monitoring_compose" ]]; then
+      asset_source="${monitoring_compose}.tmp"
+      [[ -f "$asset_source" ]] || asset_source="$monitoring_compose"
+    fi
+
+    if [[ -n "$monitoring_compose" && -f "$asset_source" ]]; then
+      echo ""
+      echo "Fetching monitoring assets..."
+      compose_dir=$(cd "$(dirname "$monitoring_compose")" && pwd)
+      missing_assets=""
+      while read -r rel_path; do
+        [[ -n "$rel_path" ]] || continue
+        asset="${rel_path#./}"
+        target="${compose_dir}/${asset}"
+        mkdir -p "$(dirname "$target")"
+        tmp_asset="${target}.tmp"
+        echo -n "  Fetching ${asset}... "
+        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
+          asset_targets+=("$target")
+          if ! _verify_download "$asset" "$tmp_asset"; then
+            echo "❌"
+            _discard_staged
+            echo "Aborting: nothing was changed (no compose file, asset, version or ref was replaced)." >&2
+            exit 1
+          fi
+          echo "✅"
+        elif [[ -f "$target" ]]; then
+          rm -f "$tmp_asset"
+          echo "⚠️  (keeping existing file)"
+        else
+          rm -f "$tmp_asset"
+          echo "❌"
+          missing_assets="${missing_assets} ${asset}"
+        fi
+      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$asset_source" | sort -u || true)
+
+      if [[ -n "$missing_assets" ]]; then
+        _discard_staged
+        echo ""
+        echo "Aborting before anything was replaced. These files are bind-mounted by" >&2
+        echo "docker-compose.monitoring.yml but are not on disk and could not be" >&2
+        echo "downloaded:" >&2
+        for a in $missing_assets; do echo "  - $a" >&2; done
+        echo "Starting now would leave Grafana unable to mount them, so the" >&2
+        echo "running stack and every installed file were left untouched. Re-run once" >&2
+        echo "GitHub is reachable, or re-run the install script." >&2
+        exit 1
+      fi
+    fi
+
+    # Every group passed: replace.
     for s in ${staged[@]+"${staged[@]}"}; do mv -f "${s}.tmp" "$s"; done
+    for t in ${asset_targets[@]+"${asset_targets[@]}"}; do
+      # -rf, not -f: what is in the way is most likely a DIRECTORY left behind by
+      # an earlier failed mount, and `rm -f` cannot remove one. Done only now,
+      # after the replacement was downloaded and verified.
+      if [[ -d "$t" ]]; then
+        rm -rf "$t"
+      fi
+      mv -f "${t}.tmp" "$t"
+      echo "  Updated ${t#"${compose_dir}"/}"
+    done
+
+    # Record the version and ref the files now in place belong to.
+    if [[ -n "$NEW_VERSION" ]]; then
+      echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
+      _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
+    fi
+    _set_kv EDDI_BRANCH "$EDDI_BRANCH" "$CONFIG_FILE"
+    _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
 
     # An install from before docker-compose.postgres-only.yml required
     # POSTGRES_PASSWORD has none in .env, and its data volume was initialised with
@@ -2887,76 +2991,6 @@ case "${1:-help}" in
           break
         fi
       done
-    fi
-
-    # Refreshing the compose files above can introduce new file-type bind
-    # mounts. When a bind-mount source is missing Docker creates a *directory*
-    # at that path, which either silently drops the dashboard or fails the mount
-    # outright depending on what the grafana-data volume already holds — and in
-    # the first case leaves a stale directory inside the volume that keeps
-    # failing the mount even after the host file is restored. So any monitoring
-    # asset added upstream has to be on disk BEFORE `up -d`: refreshing the
-    # compose files on their own is what breaks a previously working Grafana.
-    #
-    # The list is read out of the refreshed compose file instead of hardcoded
-    # here, so the next asset added to docker-compose.monitoring.yml needs no
-    # change to this wrapper. Only file-type mounts are fetched; the
-    # grafana-provisioning/* mounts are directories, which cannot be downloaded
-    # and do not fail the mount when their contents are stale.
-    monitoring_compose=""
-    for f in "${COMPOSE_FILE_LIST[@]}"; do
-      if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
-        monitoring_compose="$f"
-      fi
-    done
-
-    if [[ -n "$monitoring_compose" && -f "$monitoring_compose" ]]; then
-      echo ""
-      echo "Refreshing monitoring assets..."
-      compose_dir=$(cd "$(dirname "$monitoring_compose")" && pwd)
-      missing_assets=""
-      while read -r rel_path; do
-        [[ -n "$rel_path" ]] || continue
-        asset="${rel_path#./}"
-        target="${compose_dir}/${asset}"
-        mkdir -p "$(dirname "$target")"
-        # -rf, not -f: what is in the way is most likely a DIRECTORY left behind
-        # by an earlier failed mount, and `rm -f` cannot remove one.
-        if [[ -d "$target" ]]; then
-          rm -rf "$target"
-        fi
-        tmp_asset="${target}.tmp"
-        echo -n "  Updating ${asset}... "
-        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
-          if ! _verify_download "$asset" "$tmp_asset"; then
-            echo "❌"
-            rm -f "$tmp_asset"
-            echo "Aborting before restart: the running stack was left untouched." >&2
-            exit 1
-          fi
-          mv -f "$tmp_asset" "$target"
-          echo "✅"
-        elif [[ -f "$target" ]]; then
-          rm -f "$tmp_asset"
-          echo "⚠️  (keeping existing file)"
-        else
-          rm -f "$tmp_asset"
-          echo "❌"
-          missing_assets="${missing_assets} ${asset}"
-        fi
-      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$monitoring_compose" | sort -u || true)
-
-      if [[ -n "$missing_assets" ]]; then
-        echo ""
-        echo "Aborting before restart. These files are bind-mounted by" >&2
-        echo "docker-compose.monitoring.yml but are not on disk and could not be" >&2
-        echo "downloaded:" >&2
-        for a in $missing_assets; do echo "  - $a" >&2; done
-        echo "Starting now would leave Grafana unable to mount them, so the" >&2
-        echo "running stack has been left untouched. Re-run once GitHub is" >&2
-        echo "reachable, or re-run the install script." >&2
-        exit 1
-      fi
     fi
 
     echo ""

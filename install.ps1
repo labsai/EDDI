@@ -1228,6 +1228,9 @@ function Initialize-SensitiveFile([string]$SecurePath) {
         if ($LASTEXITCODE -ne 0) {
             [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
             & chmod 600 $SecurePath 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Fail "Could not restrict $SecurePath to its owner (chmod 600 failed). It will hold the vault master key and admin passwords, so the install stops here. Use an install directory on a filesystem that supports POSIX permissions."
+            }
         }
         return
     }
@@ -1241,6 +1244,12 @@ function Initialize-SensitiveFile([string]$SecurePath) {
 function Protect-SensitiveFile([string]$SecurePath) {
     if (-not $IsWindows -and $null -ne $IsWindows) {
         & chmod 600 $SecurePath 2>$null
+        # A mount without POSIX modes (some network and Windows-backed shares) accepts
+        # the call and changes nothing, or refuses it: either way the file would stay
+        # readable by others, and it holds the vault key and the admin passwords.
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Could not restrict $SecurePath to its owner (chmod 600 failed). It holds the vault master key and admin passwords, so the install stops here. Use an install directory on a filesystem that supports POSIX permissions."
+        }
         return
     }
     try {
@@ -1965,27 +1974,53 @@ if defined LATEST_TAG (
 :update_ref_set
 call :check_ref || exit /b 1
 set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
-rem Persist so start/restart/update know which ref the files came from.
-findstr /v /b /c:"EDDI_BRANCH=" /c:"EDDI_BRANCH_SOURCE=" "%CONFIG_FILE%" > "%CONFIG_FILE%.tmp"
->> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH=!EDDI_BRANCH!
->> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH_SOURCE=!CFG_SOURCE!
-type "%CONFIG_FILE%.tmp" > "%CONFIG_FILE%"
-del "%CONFIG_FILE%.tmp" >nul 2>nul
+rem The ref is persisted for start/restart/update only AFTER the files from it were
+rem verified and moved into place (see below): a refused update must leave the
+rem recorded ref as it was.
+set "PERSIST_REF=1"
 :update_ref_done
 echo Compose files from: !EDDI_BRANCH!
 echo Refreshing compose files from GitHub...
 rem The files are checked against the SHA256SUMS of the release, and the list's cosign
 rem signature when cosign is installed, exactly as install.ps1 does for a fresh install:
-rem eddi-fetch.ps1 (written next to this file) does the download and the check, and
-rem moves nothing into place unless every file passed.
+rem eddi-fetch.ps1 (written next to this file) does the download and the check. It gets
+rem the compose files AND the monitoring assets in ONE call and moves nothing into place
+rem unless every one of them passed.
 if not exist "%EDDI_DIR%\eddi-fetch.ps1" (
     echo eddi-fetch.ps1 is missing from %EDDI_DIR%: re-run install.ps1 to restore it. Nothing was changed.
     exit /b 1
 )
 set "FETCH_ITEMS="
 for %%F in (%COMPOSE_FILES%) do set FETCH_ITEMS=!FETCH_ITEMS! "%%~nxF|%%~fF"
+rem The monitoring assets have to be on disk BEFORE the containers are recreated:
+rem Docker creates a directory at a missing bind-mount path, which either silently
+rem drops the dashboard or fails the mount depending on the grafana-data volume's
+rem contents. (No backticks in this here-string: PowerShell would eat them.)
+set "MON_COMPOSE="
+for %%F in (%COMPOSE_FILES%) do (
+    if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
+)
+if defined MON_COMPOSE (
+    for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
+    set FETCH_ITEMS=!FETCH_ITEMS! "::assets::"
+    for %%A in ($monAssets) do (
+        set "REL=%%A"
+        set "RELWIN=!REL:/=\!"
+        set FETCH_ITEMS=!FETCH_ITEMS! "%%A|!MON_DIR!!RELWIN!"
+    )
+)
+echo Fetching and verifying...
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" !FETCH_ITEMS!
+if "!errorlevel!"=="3" goto update_assets_missing
 if errorlevel 1 goto update_refused
+
+if defined PERSIST_REF (
+    findstr /v /b /c:"EDDI_BRANCH=" /c:"EDDI_BRANCH_SOURCE=" "%CONFIG_FILE%" > "%CONFIG_FILE%.tmp"
+    >> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH=!EDDI_BRANCH!
+    >> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH_SOURCE=!CFG_SOURCE!
+    type "%CONFIG_FILE%.tmp" > "%CONFIG_FILE%"
+    del "%CONFIG_FILE%.tmp" >nul 2>nul
+)
 
 rem An install from before docker-compose.postgres-only.yml required POSTGRES_PASSWORD
 rem has none in .env, and its data volume was initialised with the old hardcoded
@@ -1999,32 +2034,6 @@ if defined NEED_PG (
         echo Note: no POSTGRES_PASSWORD in .env, kept the legacy value eddi so the existing
         echo       database volume still accepts it. Rotate it when convenient.
     )
-)
-
-rem Refreshing the compose files above can introduce new file-type bind mounts, so
-rem the monitoring assets have to be on disk BEFORE the containers are recreated.
-rem Refreshing compose on its own is what breaks a previously working Grafana:
-rem Docker creates a directory at the missing mount path, which either silently
-rem drops the dashboard or fails the mount outright depending on the grafana-data
-rem volume's contents. (No backticks in this here-string: PowerShell would eat
-rem them as escape characters.)
-set "MON_COMPOSE="
-for %%F in (%COMPOSE_FILES%) do (
-    if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
-)
-if defined MON_COMPOSE (
-    echo.
-    echo Refreshing monitoring assets...
-    for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
-    set "FETCH_ITEMS="
-    for %%A in ($monAssets) do (
-        set "REL=%%A"
-        set "RELWIN=!REL:/=\!"
-        set FETCH_ITEMS=!FETCH_ITEMS! "%%A|!MON_DIR!!RELWIN!"
-    )
-    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" -Assets !FETCH_ITEMS!
-    if "!errorlevel!"=="3" goto update_assets_missing
-    if errorlevel 1 goto update_refused
 )
 
 echo.
@@ -2065,9 +2074,9 @@ exit /b 1
 echo.
 echo Aborting before restart. The files listed above are bind-mounted by
 echo docker-compose.monitoring.yml but are not on disk and could not be downloaded.
-echo Starting now would leave Grafana unable to mount them, so the running stack
-echo has been left untouched. Re-run once GitHub is reachable, or re-run the
-echo install script.
+echo Starting now would leave Grafana unable to mount them, so nothing was replaced
+echo and the running stack was left untouched. Re-run once GitHub is reachable, or
+echo re-run the install script.
 exit /b 1
 
 :update_refused
@@ -2126,7 +2135,6 @@ goto :eof
 param(
     [Parameter(Mandatory)][string]$Ref,
     [Parameter(Mandatory)][string]$BaseUrl,
-    [switch]$Assets,
     [Parameter(ValueFromRemainingArguments)][string[]]$Item
 )
 $ErrorActionPreference = 'Stop'
@@ -2141,17 +2149,20 @@ function Write-Fail($msg) { [Console]::Error.WriteLine($msg); throw $msg }
 '@
     $fetchMain = @'
 
+# Items before the `::assets::` marker are compose files, the rest monitoring assets
+# that must be on disk before the containers are recreated. EVERYTHING is staged and
+# verified first; nothing is replaced unless every item passed.
 $staged = @()
 $missing = @()
+$inAssets = $false
 try {
     Initialize-ReleaseChecksums
     foreach ($entry in $Item) {
+        if ($entry -eq '::assets::') { $inAssets = $true; continue }
         $rel, $target = $entry -split '\|', 2
         if (-not $rel -or -not $target) { continue }
+        $Assets = $inAssets
         if ($Assets) {
-            # What is in the way is most likely a DIRECTORY left behind by an earlier
-            # failed mount; Docker made it where the file should be.
-            if (Test-Path -LiteralPath $target -PathType Container) { Remove-Item -LiteralPath $target -Recurse -Force }
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
         }
         $temporary = "$target.download"
@@ -2163,7 +2174,7 @@ try {
         catch { $downloaded = $false }
         if ($downloaded) {
             Confirm-DownloadChecksum -RelativePath $rel -Path $temporary
-            $staged += , @($temporary, $target, $rel)
+            $staged += , @($temporary, $target, $rel, $Assets)
         }
         else {
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
@@ -2179,6 +2190,13 @@ try {
             }
         }
     }
+    if ($missing.Count -gt 0) { throw "monitoring assets missing" }
+    # Every item passed. A DIRECTORY where an asset belongs is what Docker leaves
+    # behind after a failed mount; only an EMPTY one is removed (non-recursive, so a
+    # directory with content throws and ends the update with nothing replaced yet).
+    foreach ($s in $staged) {
+        if ($s[3] -and (Test-Path -LiteralPath $s[1] -PathType Container)) { Remove-Item -LiteralPath $s[1] -Force }
+    }
     foreach ($s in $staged) {
         Move-Item -LiteralPath $s[0] -Destination $s[1] -Force
         Write-Host "  Updated $($s[2])"
@@ -2186,12 +2204,12 @@ try {
     $staged = @()
 }
 catch {
-    exit 2
+    $failed = $true
 }
 finally {
     foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
 }
-if ($missing.Count -gt 0) { exit 3 }
+if ($failed) { if ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
 exit 0
 '@
     $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum') | ForEach-Object {
