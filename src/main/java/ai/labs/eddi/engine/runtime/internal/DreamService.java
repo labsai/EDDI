@@ -242,7 +242,16 @@ public class DreamService {
         // spend the schedule's retry budget and dead-letter it, so consolidation would
         // not resume once the restriction is lifted. A flag that cannot be read skips
         // the cycle as well (fail closed, see below).
-        if (gdprComplianceService != null && gdprComplianceService.isResolvable()) {
+        // GdprComplianceService is an unconditional @ApplicationScoped bean, so under CDI
+        // the Instance always resolves; unresolvable means a broken bean graph, and is
+        // treated like an unreadable flag. Null is only a test constructing the service
+        // with new and no GDPR wiring.
+        if (gdprComplianceService != null && !gdprComplianceService.isResolvable()) {
+            LOGGER.warnf("[DREAM] Dream cycle of agent '%s' skipped: the GDPR processing-restriction check is not available; "
+                    + "nothing was processed", LogSanitizer.sanitize(agentId));
+            return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
+        }
+        if (gdprComplianceService != null) {
             try {
                 if (gdprComplianceService.get().isProcessingRestricted(userId)) {
                     // No user id in this line: the GDPR code names users by pseudonym only.

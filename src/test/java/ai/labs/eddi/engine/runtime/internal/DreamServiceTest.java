@@ -1716,6 +1716,21 @@ class DreamServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void processScheduledFire_unresolvableRestrictionCheck_processesNothing() throws Exception {
+        Instance<GdprComplianceService> unresolvable = mock(Instance.class);
+        when(unresolvable.isResolvable()).thenReturn(false);
+        dreamService.gdprComplianceService = unresolvable;
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "skipped, not failed: " + result.error());
+        verify(agentStore, never()).read(anyString(), anyInt());
+        verify(store, never()).getAllEntries(anyString());
+        verifyNoInteractions(summarizationService);
+    }
+
+    @Test
     void processScheduledFire_runsForAnUnrestrictedUser() throws Exception {
         var gdpr = mock(GdprComplianceService.class);
         when(gdpr.isProcessingRestricted("user-1")).thenReturn(false);
