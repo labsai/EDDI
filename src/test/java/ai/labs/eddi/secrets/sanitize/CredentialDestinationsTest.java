@@ -76,8 +76,23 @@ class CredentialDestinationsTest {
     @DisplayName("apiEndpoint added beside a key is a change; the same origin on another path is not")
     void apiEndpointChange() {
         assertEquals("apiEndpoint", CredentialDestinations.changedDestinationField(Map.of("apiKey", "k", "apiEndpoint", "evil.example:443"),
-                Map.of("apiKey", "k"), value -> false));
+                Map.of("apiKey", "k"), (source, target) -> false));
         assertNull(CredentialDestinations.changedDestinationField(Map.of("baseUrl", "https://a.example/v2"),
-                Map.of("baseUrl", "https://A.example:443/v1"), value -> false));
+                Map.of("baseUrl", "https://A.example:443/v1"), (source, target) -> false));
+    }
+
+    @Test
+    @DisplayName("a 'bound' source value the target has no string for is compared, not skipped")
+    void boundSourceWithoutATargetValueIsADestinationChange() {
+        // The caller would replace a bound value by the target's — but there is none,
+        // so the source URL stays and decides where the request goes.
+        var source = Map.of("apiKey", "${vault:REDACTED}", "baseUrl", "https://attacker.example/v1?ref=${vault:openai}");
+        var target = Map.of("apiKey", "sk-live");
+
+        assertEquals("baseUrl", CredentialDestinations.changedDestinationField(source, target, (s, t) -> s.contains("${vault:")));
+        // Where the target does hold a string the caller replaces it with, it is the
+        // target's destination and not a change.
+        assertNull(CredentialDestinations.changedDestinationField(Map.of("baseUrl", "${vault:REDACTED}"),
+                Map.of("baseUrl", "https://llm.internal.example"), (s, t) -> s.contains("${vault:")));
     }
 }

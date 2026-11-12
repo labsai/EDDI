@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 
 /**
  * Decides whether an edited configuration object sends its requests to a
@@ -39,8 +39,8 @@ public final class CredentialDestinations {
     /**
      * {@link #changedDestinationField} as a yes/no answer.
      */
-    public static boolean changesDestination(Map<?, ?> sourceMap, Map<?, ?> targetMap, Predicate<String> boundToTarget) {
-        return changedDestinationField(sourceMap, targetMap, boundToTarget) != null;
+    public static boolean changesDestination(Map<?, ?> sourceMap, Map<?, ?> targetMap, BiPredicate<String, String> replacedByTarget) {
+        return changedDestinationField(sourceMap, targetMap, replacedByTarget) != null;
     }
 
     /**
@@ -62,19 +62,27 @@ public final class CredentialDestinations {
      * same destination. A destination that is not a string — a number where a host
      * belongs — is the same only when it is equal on both sides.
      *
-     * @param boundToTarget
-     *            a source value the caller will itself replace by the target's —
-     *            such a field does not count as a change. {@code v -> false} when
-     *            nothing is.
+     * @param replacedByTarget
+     *            given a source string and the target's value under the same key,
+     *            whether the caller will itself replace the source string by that
+     *            target string — such a field does not count as a change, because
+     *            the request then goes where the target's does. It is consulted
+     *            only when the target holds a string there: a source value with
+     *            nothing to be replaced by is kept as it is, so it is compared like
+     *            any other (a {@code baseUrl} the target lacks, carrying a
+     *            {@code ${vault:…}} fragment, used to be skipped and then kept).
+     *            {@code (source, target) -> false} when nothing is replaced.
      */
-    public static String changedDestinationField(Map<?, ?> sourceMap, Map<?, ?> targetMap, Predicate<String> boundToTarget) {
+    public static String changedDestinationField(Map<?, ?> sourceMap, Map<?, ?> targetMap,
+                                                 BiPredicate<String, String> replacedByTarget) {
         Set<String> keys = new LinkedHashSet<>();
         sourceMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
         targetMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
         for (String key : keys) {
             Object sourceValue = sourceMap.get(key);
             Object targetValue = targetMap.get(key);
-            if (sourceValue instanceof String bound && boundToTarget.test(bound)) {
+            if (sourceValue instanceof String bound && targetValue instanceof String replacement
+                    && replacedByTarget.test(bound, replacement)) {
                 continue;
             }
             String sourceText = sourceValue instanceof String text ? text : null;

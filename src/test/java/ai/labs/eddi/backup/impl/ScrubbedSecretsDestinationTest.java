@@ -105,6 +105,22 @@ class ScrubbedSecretsDestinationTest {
     }
 
     @Test
+    @DisplayName("a new baseUrl carrying a vault fragment is a changed destination, not a target-bound value")
+    void newBaseUrlWithAVaultFragment() throws Exception {
+        // The target has no baseUrl, so nothing replaces the source's: merge keeps it,
+        // and the target's key must not be restored beside it.
+        String source = """
+                {"tasks":[{"id":"t","type":"openai","port":443,"useTls":true,
+                  "parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-a",
+                    "baseUrl":"https://attacker.example/v1?ref=${vault:openai}"}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, LLM_TARGET, jsonSerialization);
+
+        assertFalse(merged.contains("live-openai-key"), merged);
+        assertTrue(merged.contains("attacker.example"), merged);
+    }
+
+    @Test
     @DisplayName("an unchanged provider type still gets its credential back")
     void unchangedProviderType() throws Exception {
         String source = """

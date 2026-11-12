@@ -273,7 +273,7 @@ public class ConfigJsonPatcher {
             if (!beforeNode.isObject() || !afterNode.isObject()) {
                 return toPointer;
             }
-            String key = CredentialDestinations.changedDestinationField(asMap(afterNode), asMap(beforeNode), value -> false);
+            String key = CredentialDestinations.changedDestinationField(fieldsOf(afterNode), fieldsOf(beforeNode), (source, target) -> false);
             if (key != null) {
                 return afterPointer + "/" + CredentialMask.escape(key);
             }
@@ -281,9 +281,32 @@ public class ConfigJsonPatcher {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asMap(JsonNode object) {
-        return PLAIN.convertValue(object, Map.class);
+    /**
+     * The direct fields of one object, without converting what lies below them: a
+     * scalar as its Java value, a nested object or array as the node itself (only
+     * compared, by structural equality, if it sits under a destination-named key).
+     * Converting each ancestor whole repeated a walk of the entire document for
+     * every restored credential.
+     */
+    private static Map<String, Object> fieldsOf(JsonNode object) {
+        Map<String, Object> fields = new HashMap<>();
+        for (Map.Entry<String, JsonNode> field : object.properties()) {
+            JsonNode value = field.getValue();
+            Object plain;
+            if (value.isTextual()) {
+                plain = value.asText();
+            } else if (value.isNumber()) {
+                plain = value.numberValue();
+            } else if (value.isBoolean()) {
+                plain = value.booleanValue();
+            } else if (value.isNull() || value.isMissingNode()) {
+                plain = null;
+            } else {
+                plain = value;
+            }
+            fields.put(field.getKey(), plain);
+        }
+        return fields;
     }
 
     /** The reference tokens of a JSON pointer, still escaped. */

