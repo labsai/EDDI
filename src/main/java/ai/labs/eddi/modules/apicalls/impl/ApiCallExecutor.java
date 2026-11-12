@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.net.BoundedHostResolver;
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
@@ -50,6 +51,7 @@ import java.net.URISyntaxException;
 import java.net.URLDecoder;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -200,6 +202,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     @Inject
     AgentCallMarker agentCallMarker;
+
+    /**
+     * Deadline of one DNS lookup made to check a target (deploy and per call).
+     * Field-injected for the same reason as above; the default applies in
+     * direct-construction tests.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.security.ssrf-protection.dns-timeout", defaultValue = "5s")
+    Duration dnsTimeout = Duration.ofMillis(BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+
+    /**
+     * The JDK resolver, bounded so a black-holed name server cannot hold a thread.
+     */
+    private UrlValidationUtils.HostResolver boundedResolver() {
+        return BoundedHostResolver.jdk(dnsTimeout != null ? dnsTimeout.toMillis() : BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+    }
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -1580,7 +1598,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // redirect-following so a 3xx cannot bounce the request to an internal host.
         // Off by default to preserve calls to internal/private APIs. The decision
         // itself is checkOutboundTarget, which the deploy-time check shares.
-        checkOutboundTarget(targetUri, InetAddress::getAllByName);
+        checkOutboundTarget(targetUri, boundedResolver());
 
         // Locale.ROOT is defensive rather than a live fix: no current Method
         // constant contains an 'i', so no locale changes the result today. It would
@@ -2165,7 +2183,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     @Override
     public void rejectRefusedLiteralTarget(String targetDestination) {
-        rejectRefusedLiteralTarget(targetDestination, InetAddress::getAllByName);
+        rejectRefusedLiteralTarget(targetDestination, boundedResolver());
     }
 
     /**

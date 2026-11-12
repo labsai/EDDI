@@ -290,3 +290,27 @@ None of these changes behaviour until configured; each has its own page.
 
 6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
 Manager and Chat UI. Nothing to do besides pulling the new image.
+
+## Changes after 6.7.0
+
+### An httpcall whose literal target is refused now fails at deploy
+
+With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an
+absolute `request.path`, names a host the SSRF check refuses (loopback such as `http://127.0.0.1:7070`, a
+private address, `localhost`, `*.internal`, `*.local`, not on `eddi.security.ssrf-protection.allowed-hosts`)
+used to save and deploy, and only failed when the first conversation reached the call. It now fails the
+deployment. Independent of the flag, a target that is a cloud instance-metadata address fails to deploy too (it
+already failed on every call).
+
+Who is affected: deployments with protection on that have agents calling internal APIs, or EDDI itself (the
+Platform Operator's tools, for one), without listing the host. What you will see: the deploy request fails
+(and an auto-deploy at startup logs the failure for that agent) with a message naming the host and the exact
+`host:port` entry to add. To keep the agent working, add that entry to
+`eddi.security.ssrf-protection.allowed-hosts`, or point the call at a public address. Templated and
+`${vars:...}` hosts, and hosts that do not resolve at deploy (logged as a WARN), are still only checked per call.
+There is no switch to restore the old deploy-then-fail behaviour.
+
+DNS lookups made by this check now give up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`) and
+count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
+refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
+See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).

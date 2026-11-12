@@ -591,6 +591,14 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > deploy — a failed lookup then is as likely a transient DNS problem as a wrong
 > name, so it is logged, not fatal; each call to it is refused until it resolves.
 >
+> **Lookups are bounded.** The DNS lookup behind this check (deploy and every
+> call) gives up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`)
+> and counts as "does not resolve", so a slow or black-holed name server cannot
+> hold a deploying or conversation thread for the OS resolver's default. It fails
+> closed: with protection on the call is refused. Lookups share a small bounded
+> pool (`BoundedHostResolver`); when it is full of stuck lookups, further ones are
+> refused at once.
+>
 > **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
 > WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
 > `false`. The default stays `false` because configured targets legitimately reach

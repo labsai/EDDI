@@ -33,6 +33,17 @@ hosts.
   startup) as a wrong name, and an unresolvable name cannot be reached anyway.
   A blocked name (`localhost`, `*.internal`, `*.local`) is refused without a
   lookup, as at execution.
+- **DNS lookups are bounded.** The check resolves the host (deploy and, as
+  before, every call), and `InetAddress.getAllByName` has no timeout: a
+  black-holed name server would hold the deploying or turn thread for the OS
+  default. Both now go through `BoundedHostResolver` (small bounded daemon pool,
+  deadline `eddi.security.ssrf-protection.dns-timeout`, default `5s`). A timeout
+  or a full pool is an `UnknownHostException`, i.e. "does not resolve": refused
+  at execution with protection on, logged at deploy, never allowed. No default
+  of any security flag changes. New property documented in
+  `configuration-reference.md`; `BoundedHostResolverTest` covers fast, slow,
+  failing and saturated.
+- **Upgrade note** added to `upgrading-from-6.5.md` (Changes after 6.7.0).
 - **No self exception for httpcalls — documented, not changed.** The
   `application.properties` comment on `eddi.self.base-url` claimed loopback was
   always refused with protection on; it now says that `OutboundTargetPolicy`
@@ -48,6 +59,7 @@ already reads.
 
 **Files:** [`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java),
 [`IApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/IApiCallExecutor.java),
+[`BoundedHostResolver.java`](../../src/main/java/ai/labs/eddi/engine/net/BoundedHostResolver.java),
 [`ApiCallsTask.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallsTask.java),
 [`OutboundTargetPolicy.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/OutboundTargetPolicy.java),
 [`HttpCallToolsProvider.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/HttpCallToolsProvider.java),
