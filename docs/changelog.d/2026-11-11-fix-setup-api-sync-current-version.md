@@ -27,18 +27,29 @@ that could not do without it.
 to the store's own `GET /{id}/currentversion` endpoint over HTTP, with the same loopback caller filter, and every
 other method goes to the client unchanged. The endpoint keeps its role check and the store's VIEW check, so
 nothing is authorized that was not before; one place fixes every caller, and a new caller cannot fall into it
-again. The `currentversion` client is built once per store address and shared, since callers never close the clients the factory hands out (the filter reads the caller per request, so sharing is safe); only loopback clients share it, since a cache keyed by arbitrary `serverUrl`s would be unbounded. `redirectToLatestVersion` is not routed (a 303 a client would follow; no in-process caller uses it). The
+again.
+
+The `currentversion` client is shared: callers never close the clients the factory hands out, so building one per
+call would leave one more behind each time. The loopback factory method (`get(Class)`) builds it once per store
+address and trust level (with or without the caller credential) and reuses it; this is safe because the filter
+reads the caller per request, not when the client is built. The two-argument method (`get(Class, serverUrl)`)
+does not cache, since a cache keyed by arbitrary `serverUrl`s would be unbounded. `redirectToLatestVersion` is not
+routed (it answers a 303 that a client would follow, and no in-process caller uses it). The
 wrapper is a `java.lang.reflect.Proxy`, which a future native image build has to register.
 
 **Files:** [`CurrentVersionRouting.java`](../../src/main/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRouting.java),
 [`RestInterfaceFactory.java`](../../src/main/java/ai/labs/eddi/engine/runtime/client/factory/RestInterfaceFactory.java),
-[`CurrentVersionRoutingTest.java`](../../src/test/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRoutingTest.java)
+[`CurrentVersionRoutingTest.java`](../../src/test/java/ai/labs/eddi/engine/runtime/client/factory/CurrentVersionRoutingTest.java),
+[`LoopbackCurrentVersionIT.java`](../../src/test/java/ai/labs/eddi/integration/LoopbackCurrentVersionIT.java)
 
-### Not verified here
+### Verification
 
-The unit test reproduces the refusal on a client-like store and checks the routing. The loopback HTTP call itself
-needs a running EDDI: check `setup-api/sync` with `dryRun: true` and `read_workflow` without a version on staging
-after the release.
+The unit test reproduces the refusal on a client-like store and checks the routing. `LoopbackCurrentVersionIT`
+(integration phase, CI only) makes the real call: the injected factory resolves the latest version of a stored
+resource against the running application, and a JDK `HttpServer` on an ephemeral loopback port shows the request
+is `GET /{id}/currentversion`, carries the caller's bearer token on the loopback client and none on a named remote
+instance. It was not run locally. After the release, check `setup-api/sync` with `dryRun: true` and `read_workflow`
+without a version on staging.
 
 ```regression-note
 | 2026-11-11 | `setup-api/sync` HTTP 500 and MCP "latest version" reads refused with "does not define how its version info is authorized" | REST client proxies run `IRestVersionInfo.getCurrentVersion` (a default method) locally, where the fail-closed `requireCurrentVersionAccess` default refuses | `RestInterfaceFactory` routes `getCurrentVersion` to the `/{id}/currentversion` endpoint over HTTP | `fix/setup-api-sync-current-version` |
