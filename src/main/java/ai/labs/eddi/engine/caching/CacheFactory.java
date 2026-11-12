@@ -17,6 +17,8 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
@@ -368,8 +370,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         // per-entry TTLs of ICache.put(key, value, lifespan, unit). Entries written
         // without a lifespan still never expire on their own.
         Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(name,
-                n -> Caffeine.newBuilder()
-                        .maximumSize(maximumSizeFor(n, null))
+                n -> bounded(Caffeine.newBuilder(), n, maximumSizeFor(n, null))
                         .expireAfter(WriteExpiry.<Object, Object>never())
                         .recordStats()
                         .build());
@@ -401,11 +402,52 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         // per-entry override available. Entries written without their own lifespan
         // expire after ttl exactly as expireAfterWrite would have expired them.
         Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(cacheKey,
-                n -> Caffeine.newBuilder()
-                        .maximumSize(maximumSizeFor(name, ttl))
+                n -> bounded(Caffeine.newBuilder(), name, maximumSizeFor(name, ttl))
                         .expireAfter(WriteExpiry.<Object, Object>of(ttl))
                         .recordStats()
                         .build());
         return clusterAware(name, cacheKey, ttl, new CacheImpl<>(name, cache));
+    }
+
+    /**
+     * Caches bounded by the characters they hold rather than by entry count, with
+     * the property that sets the bound. A tool result is whatever the tool returned
+     * — a web-scraper page is up to 5 MB — so ten thousand of them were bounded in
+     * number and not in size: a few large results pinned as much heap as they liked
+     * for their TTL.
+     */
+    static final String TOOL_RESULTS_MAX_CHARS_PROPERTY = "eddi.tools.cache.max-total-chars";
+    static final long DEFAULT_TOOL_RESULTS_MAX_CHARS = 64L * 1024 * 1024;
+
+    @ConfigProperty(name = TOOL_RESULTS_MAX_CHARS_PROPERTY, defaultValue = "67108864")
+    long toolResultsMaxChars = DEFAULT_TOOL_RESULTS_MAX_CHARS;
+
+    /** The weight bound of {@code cacheName}, or 0 when it is bounded by count. */
+    long maximumWeightFor(String cacheName) {
+        if (!"tool-results".equals(cacheName)) {
+            return 0;
+        }
+        return toolResultsMaxChars > 0 ? toolResultsMaxChars : DEFAULT_TOOL_RESULTS_MAX_CHARS;
+    }
+
+    /**
+     * Applies the cache's bound: its entry count, or for a weighed cache its total
+     * characters. A weighed entry is charged at least {@code maxWeight / maxSize},
+     * so the entry count stays bounded by {@code maxSize} as before and only large
+     * values are held to fewer.
+     */
+    private Caffeine<Object, Object> bounded(Caffeine<Object, Object> builder, String cacheName, long maxSize) {
+        long maxWeight = maximumWeightFor(cacheName);
+        if (maxWeight <= 0) {
+            return builder.maximumSize(maxSize);
+        }
+        int minWeight = (int) Math.min(Integer.MAX_VALUE, Math.max(1, maxWeight / Math.max(1, maxSize)));
+        return builder.maximumWeight(maxWeight).<Object, Object>weigher((key, value) -> weightOf(key, value, minWeight));
+    }
+
+    /** What one entry of a weighed cache is charged. */
+    static int weightOf(Object key, Object value, int minWeight) {
+        long weight = (key instanceof String text ? text.length() : 0L) + (value instanceof IWeighedValue weighed ? weighed.weight() : 0L);
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(minWeight, weight));
     }
 }
