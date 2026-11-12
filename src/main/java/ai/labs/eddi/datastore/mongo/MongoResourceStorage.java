@@ -19,6 +19,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Updates;
 import org.bson.BsonDocument;
@@ -662,6 +663,18 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      * resource moved on, the flag is taken off again — that version is ordinary
      * history of a live resource — and the caller gets a conflict.
      *
+     * <p>
+     * Known limit: unlike the PostgreSQL backend, a {@link #removeAllPermanently}
+     * that runs to completion after the caller read the resource but before the
+     * tombstone is written is not detected — without a transaction the tombstone
+     * write and the check that the row is still there cannot be one step, and "the
+     * row is gone" looks the same whether a concurrent delete or an erasure removed
+     * it. The tombstone is then an orphan history row carrying the erased
+     * resource's data; a repeated erasure removes it. On one node
+     * {@code HistorizedResourceStore}'s per-id lock keeps the two calls apart; a
+     * delete and an erasure of the same id on two different nodes can still meet
+     * here.
+     *
      * @see #storeHistoryAndUpdate(IHistoryResource, IResource, int) for why this is
      *      not a session transaction
      */
@@ -808,13 +821,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         if (!isStorableId(id)) {
             return null;
         }
-        Document query = historyRowsOf(id);
-
-        if (historyCollection.countDocuments(query) == 0) {
-            return null;
-        }
-
-        Document doc = historyCollection.find(query).sort(new Document(HISTORY_NESTED_VERSION_FIELD, -1)).limit(1).first();
+        // The limit-1 find answers null on its own when there is no history row.
+        Document doc = historyCollection.find(historyRowsOf(id)).sort(new Document(HISTORY_NESTED_VERSION_FIELD, -1)).limit(1).first();
         if (doc == null) {
             return null;
         }
@@ -843,7 +851,7 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             return -1;
         }
         Document query = new Document(ID_FIELD, new ObjectId(id));
-        Document one = currentCollection.find(query).first();
+        Document one = currentCollection.find(query).projection(Projections.include(VERSION_FIELD)).first();
         if (one == null) {
             return -1;
         }
@@ -870,7 +878,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document filter = new Document(jsonPath, new Document("$in", Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new LinkedList<>();
-        currentCollection.find(filter).forEach(doc -> {
+        // _id is returned unless excluded, so these two fields are all that is fetched.
+        currentCollection.find(filter).projection(Projections.include(VERSION_FIELD)).forEach(doc -> {
             String docId = doc.getObjectId(ID_FIELD).toString();
             Integer version = doc.getInteger(VERSION_FIELD);
             results.add(createResourceId(docId, version));
@@ -883,7 +892,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document filter = new Document(jsonPath, new Document("$in", Collections.singletonList(value)));
 
         List<IResourceStore.IResourceId> results = new LinkedList<>();
-        historyCollection.find(filter).forEach(doc -> {
+        // The composite _id holds both the id and the version.
+        historyCollection.find(filter).projection(Projections.include(ID_FIELD)).forEach(doc -> {
             Object idObject = doc.get(ID_FIELD);
             if (idObject instanceof Document idDoc) {
                 String docId = idDoc.getObjectId(ID_FIELD).toString();
@@ -935,7 +945,12 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 
-        var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
+        // Only the (id, version) pairs are returned. Listings read the documents again
+        // by id and the erasure loops need only the ids, so fetching whole documents
+        // here sent every match over the wire for nothing. Filter and sort still run
+        // on the full documents, on the server.
+        var iterable = currentCollection.find(query.toBsonDocument()).projection(Projections.include(VERSION_FIELD)).sort(sort).limit(effectiveLimit)
+                .skip(skip > 0 ? skip : 0);
 
         List<IResourceStore.IResourceId> results = new LinkedList<>();
         iterable.forEach(doc -> {

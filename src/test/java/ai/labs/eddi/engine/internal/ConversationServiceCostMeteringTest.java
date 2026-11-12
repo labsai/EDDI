@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.pricing.SpendSinks;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.TurnCostMeter;
@@ -151,7 +152,7 @@ class ConversationServiceCostMeteringTest {
         conversationService.turnIdempotency = new TurnIdempotencyService(600, 30, new SimpleMeterRegistry(), now::get);
         doReturn("default").when(tenantQuotaService).getDefaultTenantId();
         doReturn(QuotaCheckResult.OK).when(tenantQuotaService).recordCost(anyString(), anyDouble());
-        conversationService.turnCostMeter = new TurnCostMeter(tenantQuotaService, new SimpleMeterRegistry());
+        conversationService.turnCostMeter = new TurnCostMeter(tenantQuotaService, new SimpleMeterRegistry(), SpendSinks.NONE);
     }
 
     @Test

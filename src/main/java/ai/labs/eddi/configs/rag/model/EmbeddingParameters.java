@@ -4,7 +4,8 @@
  */
 package ai.labs.eddi.configs.rag.model;
 
-import java.util.Locale;
+import ai.labs.eddi.utils.EndpointParameters;
+
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -33,13 +34,6 @@ public final class EmbeddingParameters {
 
     public static final String MODEL = "model";
     public static final String MODEL_NAME = "modelName";
-
-    /**
-     * Keys that name an endpoint. Compared case-insensitively, so that
-     * {@code baseURL} is caught as surely as {@code baseUrl}.
-     */
-    static final Set<String> ENDPOINT_KEYS = Set.of("baseurl", "endpoint", "url", "serverurl", "host", "apibase", "base_url",
-            "api_base", "apiurl");
 
     private static final Map<String, Set<String>> HONOURED = Map.of(
             "openai", Set.of(MODEL, MODEL_NAME, "apiKey", "baseUrl", "timeout", "organizationId", "projectId", "dimensions",
@@ -70,8 +64,9 @@ public final class EmbeddingParameters {
     }
 
     /**
-     * An endpoint-like parameter the provider would ignore, described, or
-     * {@code null}. An unknown provider is reported elsewhere.
+     * An endpoint parameter ({@link EndpointParameters#isEndpointKey}, so
+     * {@code baseURL} as surely as {@code baseUrl}) the provider would ignore,
+     * described, or {@code null}. An unknown provider is reported elsewhere.
      */
     public static String findIgnoredEndpointParameter(String provider, Map<String, String> params) {
         if (params == null || provider == null || !HONOURED.containsKey(provider.trim())) {
@@ -82,7 +77,7 @@ public final class EmbeddingParameters {
             if (entry == null || honoured.contains(entry)) {
                 continue;
             }
-            if (ENDPOINT_KEYS.contains(entry.toLowerCase(Locale.ROOT))) {
+            if (EndpointParameters.isEndpointKey(entry)) {
                 return "embeddingParameters." + entry + " is not supported by embedding provider '" + provider.trim()
                         + "', so documents and queries would go to the provider's default endpoint instead. Supported parameters: "
                         + new TreeSet<>(honoured);
