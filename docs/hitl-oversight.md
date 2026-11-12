@@ -240,7 +240,8 @@ Neither an agent nor a model can influence its own promotion:
 - **The agent store refuses it too, on arrival.** A `PUT /agentstore/agents/{id}` carrying `X-EDDI-Agent-Call` that
   changes the stored `hitlConfig.oversight` — lowers a rate, loosens a policy, adds the block or drops it — answers 403,
   whether or not the call needed approval. A write that leaves the block as stored passes, and an unmarked request (a
-  human's edit) is unaffected. No MCP tool writes an existing agent's `hitlConfig`: `update_agent` changes the
+  human's edit) is unaffected. A marked merge import or upgrade/sync (`/backup/import`) whose agent would change an
+  existing agent's oversight block is refused the same way, before any workflow or extension is written. No MCP tool writes an existing agent's `hitlConfig`: `update_agent` changes the
   descriptor only, and `update_resource` has no agent type.
 - **The overlay field is transient** (`@JsonIgnore`): configuration can neither pre-set nor clear a suspension.
 - **Apply** re-checks the evidence server-side, requires the reviewed agent version, validates, writes through the agent
