@@ -973,33 +973,6 @@ class AgentSigningServiceTest {
     }
 
     /**
-     * Writes a signing key into the vault in the one shape this service reads: an
-     * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
-     * {@code agent-signing-key:{agentId}}. Nothing in EDDI writes one, so the test
-     * stands in for whatever provisions it. Writing it again replaces the key.
-     *
-     * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
-     */
-    private String provisionKey(String tenantId, String agentId) throws Exception {
-        return storeNewKey(tenantId, "agent-signing-key:" + agentId, agentId);
-    }
-
-    /**
-     * As {@link #provisionKey(String, String)}, for a rotated key under
-     * {@code agent-signing-key:{agentId}:v{version}}.
-     */
-    private String provisionKey(String tenantId, String agentId, int version) throws Exception {
-        return storeNewKey(tenantId, "agent-signing-key:" + agentId + ":v" + version, agentId);
-    }
-
-    private String storeNewKey(String tenantId, String keyName, String agentId) throws Exception {
-        KeyPair keyPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-        secretProvider.store(new SecretReference(tenantId, keyName), Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded()),
-                "Ed25519 signing key for agent " + agentId, List.of(agentId));
-        return Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
-    }
-
-    /**
      * Simple in-memory secret provider for testing.
      */
     private static class InMemorySecretProvider implements ISecretProvider {
