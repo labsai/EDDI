@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -191,5 +192,53 @@ class DelegationCostCeilingTest {
 
         assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST));
         assertFalse(budget.remainingUsd().isPresent(), "no ceiling configured");
+    }
+
+    @Test
+    @DisplayName("spend delegated in this turn lowers what is left of the allowance — the baseline does not rise with it")
+    void nestedDelegationLowersTheAllowance() {
+        var callee = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        callee.getCurrentStep().storeData(new Data<>("context:" + ClientContextGuard.KEY_DELEGATION_MAX_COST,
+                new Context(Context.ContextType.string, "0.25")));
+        new MemoryDelegationBudget(callee).charge(0.2);
+
+        assertEquals(0.05, new MemoryDelegationBudget(callee).remainingUsd().getAsDouble(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("a skipped message on a continued conversation is not charged")
+    void skippedContinuationIsNotCharged() throws Exception {
+        var owned = new ConversationMemorySnapshot();
+        owned.setUserId("user-1");
+        when(conversationService.getConversationMemorySnapshot("conv-b")).thenReturn(owned);
+        calleeTurn.setConversationCost(0.4);
+        doAnswer(invocation -> {
+            IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onSkipped(calleeTurn);
+            return null;
+        }).when(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        tool().converseWithAgent("agent-b", "again", "conv-b");
+
+        assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST));
+    }
+
+    @Test
+    @DisplayName("the start turn and the message turn share one allowance")
+    void startAndMessageShareTheAllowance() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.75);
+        var started = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        started.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.2));
+        when(conversationService.getConversationMemorySnapshot("conv-b"))
+                .thenReturn(ConversationMemoryUtilities.convertConversationMemory(started));
+
+        tool().converseWithAgent("agent-b", "hello", null);
+
+        var input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+        double messageAllowance = Double
+                .parseDouble(String.valueOf(input.getValue().getContext().get(ClientContextGuard.KEY_DELEGATION_MAX_COST).getValue()));
+        assertEquals(0.05, messageAllowance, 1e-9);
     }
 }

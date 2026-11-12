@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.security.ClientContextGuard;
@@ -65,6 +67,31 @@ public interface DelegationBudget {
         if (remaining != null && remaining.isPresent()) {
             context.put(ClientContextGuard.KEY_DELEGATION_MAX_COST,
                     new Context(Context.ContextType.string, String.valueOf(remaining.getAsDouble())));
+        }
+    }
+
+    /**
+     * What is left of {@code allowance} once a conversation's start turn spent
+     * {@code startCost} — never negative; empty stays empty.
+     */
+    static OptionalDouble remainderAfter(OptionalDouble allowance, double startCost) {
+        if (allowance == null || allowance.isEmpty()) {
+            return OptionalDouble.empty();
+        }
+        double spent = Double.isFinite(startCost) && startCost > 0.0 ? startCost : 0.0;
+        return OptionalDouble.of(Math.max(0.0, allowance.getAsDouble() - spent));
+    }
+
+    /**
+     * The spend a conversation has recorded so far. When it cannot be read,
+     * {@code ifUnknown} — the caller passes the whole allowance, so an unreadable
+     * start turn leaves nothing for the next turn (fail closed).
+     */
+    static double costOf(IConversationService conversationService, String conversationId, double ifUnknown) {
+        try {
+            return ConversationMemoryUtilities.totalCost(conversationService.getConversationMemorySnapshot(conversationId));
+        } catch (Exception e) {
+            return ifUnknown;
         }
     }
 

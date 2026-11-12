@@ -170,4 +170,16 @@ class StandaloneDynamicAgentsTest {
         info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
         return info;
     }
+
+    @Test
+    @DisplayName("an agent whose origin cannot be read makes the cap refuse, rather than leaving it out of the count")
+    void capFailsClosedOnUnreadableAgent() throws Exception {
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("a1")));
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(agentStore.getCurrentResourceId("a1")).thenReturn(current);
+        when(agentStore.read("a1", 1)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        assertNotNull(service(20).capRefusal("user-1"));
+    }
 }

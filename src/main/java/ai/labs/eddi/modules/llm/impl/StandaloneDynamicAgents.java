@@ -23,7 +23,6 @@ import org.jboss.logging.Logger;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -115,9 +114,31 @@ public class StandaloneDynamicAgents {
                 agentIds.add(info.getAgentId());
             }
         }
-        return agentIds.stream().map(this::originOf).filter(Objects::nonNull)
-                .filter(origin -> origin.getCreatedInGroupConversationId() == null && userId.equals(origin.getCreatedForUserId()))
-                .count();
+        long live = 0;
+        for (String agentId : agentIds) {
+            // Not originOf: its fail-safe null would leave an unreadable agent out of
+            // the count and admit a creation over the cap.
+            DynamicOrigin origin = originForCount(agentId);
+            if (origin != null && origin.getCreatedInGroupConversationId() == null && userId.equals(origin.getCreatedForUserId())) {
+                live++;
+            }
+        }
+        return live;
+    }
+
+    /**
+     * The agent's {@code dynamicOrigin} for the cap: {@code null} when it has none
+     * or no longer exists (a stale deployment record), and a failure to read it
+     * propagates, so {@link #capRefusal} refuses.
+     */
+    private DynamicOrigin originForCount(String agentId) throws IResourceStore.ResourceStoreException {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            return configuration != null ? configuration.getDynamicOrigin() : null;
+        } catch (IResourceStore.ResourceNotFoundException gone) {
+            return null;
+        }
     }
 
     /**

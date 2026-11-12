@@ -1205,8 +1205,11 @@ ceilings:
   once it is over. The tenant's monthly counter is not charged again: the
   callee's own turn already was.
 
-A delegation that times out is not charged back (its spend is unknown when the
-caller gives up), but it ran under the ceiling passed down.
+A new callee conversation's start turn and its message turn share one allowance:
+what the start turn spent is subtracted before the message turn is sent. A message
+that is skipped on a continued conversation is not charged. A delegation that
+times out is not charged back (its spend is unknown when the caller gives up), but
+it ran under the ceiling passed down.
 
 #### Sub-agents outside a group discussion
 

@@ -831,6 +831,7 @@ class ConversationStepRunner {
                                     return;
                                 }
                                 settleCancelledTurn(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                                 return;
                             }
                             boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
@@ -1035,6 +1036,7 @@ class ConversationStepRunner {
                                 // way out, and for a /cancel or GDPR stop of a say turn nothing
                                 // else records a state (the say path never persists IN_PROGRESS).
                                 settleCancelledTurn(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                             }
                         } else if (t instanceof IConversation.ConversationNotReadyException) {
                             String msg = "Conversation not ready! (conversationId=%s)";
@@ -1117,6 +1119,24 @@ class ConversationStepRunner {
      * persisted state is still READY — so without this a cancelled turn that failed
      * left the conversation READY, and one that completed was handled here already.
      */
+    /**
+     * A cancelled turn whose conversation was really ended (an explicit end raises
+     * the same cancel flag): the sub-agents it created exist only in this live
+     * memory, which is never stored, so the end's own cleanup — which reads the
+     * stored snapshot — cannot see them. Tear them down from here, now that the
+     * turn has stopped creating any. A plain cancel leaves the conversation open
+     * and its agents in place.
+     */
+    void tearDownSubAgentsIfEnded(String conversationId, IConversationMemory conversationMemory) {
+        try {
+            if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED) {
+                conversationService.tearDownStandaloneSubAgents(conversationId, conversationMemory);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not tear down the sub-agents of ended conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
     void settleCancelledTurn(String conversationId) {
         try {
             ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);

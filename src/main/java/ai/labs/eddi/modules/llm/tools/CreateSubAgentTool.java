@@ -445,10 +445,24 @@ public class CreateSubAgentTool {
                             DEFAULT_ENV, agentId, userId, ceilingContext.isEmpty() ? Collections.emptyMap() : ceilingContext);
                     conversationId = convResult.conversationId();
 
+                    // One allowance for both turns: the start turn's spend is not handed to
+                    // the message turn again.
+                    OptionalDouble messageAllowance = remaining;
+                    if (remaining.isPresent()) {
+                        double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
+                        messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
+                        if (!(messageAllowance.getAsDouble() > 0.0)) {
+                            budget.charge(startCost);
+                            throw new IllegalStateException("this conversation's cost ceiling was reached while the sub-agent started");
+                        }
+                    }
+
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
                     if (!ceilingContext.isEmpty()) {
-                        inputData.setContext(new HashMap<>(ceilingContext));
+                        Map<String, Context> messageContext = new HashMap<>(ceilingContext);
+                        DelegationBudget.addCeiling(messageContext, messageAllowance);
+                        inputData.setContext(messageContext);
                     }
 
                     CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();

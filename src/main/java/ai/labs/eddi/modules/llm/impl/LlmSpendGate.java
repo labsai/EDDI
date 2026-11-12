@@ -467,11 +467,24 @@ public class LlmSpendGate {
         }
     }
 
-    /** What the current step has spent so far — its {@code audit:cost}. */
+    /**
+     * What the current step has spent so far — its {@code audit:cost} and the
+     * {@code audit:delegated_cost} charged back onto it. Both belong to this turn,
+     * so neither may raise the baseline a per-turn allowance is added to: a callee
+     * that delegated $0.20 of a $0.25 allowance has $0.05 left, not $0.25.
+     */
     private static double currentStepCost(IConversationMemory memory) {
         var step = memory.getCurrentStep();
-        IData<Object> cost = step == null ? null : step.getData(MemoryKeys.AUDIT_COST);
-        return cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : 0.0;
+        if (step == null) {
+            return 0.0;
+        }
+        return positive(step.getData(MemoryKeys.AUDIT_COST)) + positive(step.getData(MemoryKeys.AUDIT_DELEGATED_COST));
+    }
+
+    private static double positive(IData<Object> cost) {
+        return cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0.0
+                ? n.doubleValue()
+                : 0.0;
     }
 
     /**

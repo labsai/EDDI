@@ -41,11 +41,12 @@ class ConversationStepRunnerEndedStateTest {
     private IConversationMemoryStore store;
     private ICache<String, ConversationState> stateCache;
     private ConversationStepRunner runner;
+    private ConversationService service;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
-        ConversationService service = mock(ConversationService.class);
+        service = mock(ConversationService.class);
         Field logger = ConversationService.class.getDeclaredField("contextLogger");
         logger.setAccessible(true);
         logger.set(service, mock(IContextLogger.class));
@@ -106,5 +107,20 @@ class ConversationStepRunnerEndedStateTest {
         verify(store).compareAndSetState(eq(ID), eq(ConversationState.READY), eq(ConversationState.ERROR));
         verify(store, never()).setConversationState(anyString(), any());
         verify(stateCache).put(ID, ConversationState.ENDED);
+    }
+
+    @Test
+    @DisplayName("a cancelled turn of an ended conversation tears down its sub-agents from the live memory; a plain cancel does not")
+    void cancelledTurnOfEndedConversationTearsDownSubAgents() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(store.getConversationState(ID)).thenReturn(ConversationState.ENDED);
+
+        runner.tearDownSubAgentsIfEnded(ID, memory);
+        verify(service).tearDownStandaloneSubAgents(ID, memory);
+
+        IConversationMemory other = mock(IConversationMemory.class);
+        when(store.getConversationState("other")).thenReturn(ConversationState.EXECUTION_INTERRUPTED);
+        runner.tearDownSubAgentsIfEnded("other", other);
+        verify(service, never()).tearDownStandaloneSubAgents("other", other);
     }
 }

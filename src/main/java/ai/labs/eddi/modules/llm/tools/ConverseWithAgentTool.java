@@ -325,11 +325,14 @@ public class ConverseWithAgentTool {
             DelegationBudget.addCeiling(delegationContext, remaining);
 
             // --- Start new conversation if no conversationId provided ---
+            boolean startedHere = false;
+            OptionalDouble messageAllowance = remaining;
             if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
                             DEFAULT_ENV, agentId, userId, delegationContext);
                     conversationId = convResult.conversationId();
+                    startedHere = true;
                     LOGGER.debugf("[CONVERSE] Started new conversation '%s' with agent '%s'",
                             conversationId, agentId);
                 } catch (Exception e) {
@@ -337,6 +340,17 @@ public class ConverseWithAgentTool {
                             agentId, e.getMessage());
                     return "❌ Failed to start conversation with agent '%s': %s"
                             .formatted(agentId, e.getMessage());
+                }
+                // One allowance for both turns: what the start turn spent is not handed
+                // to the message turn again.
+                if (remaining.isPresent()) {
+                    double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
+                    messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
+                    if (!(messageAllowance.getAsDouble() > 0.0)) {
+                        budget.charge(startCost);
+                        return "⚠️ This conversation's cost ceiling was reached while agent '%s' started, so the message was not sent."
+                                .formatted(agentId);
+                    }
                 }
             }
 
@@ -350,6 +364,7 @@ public class ConverseWithAgentTool {
             // Own copy: the map above is shared with the startConversation call, and
             // downstream turn processing may add context entries of its own.
             inputData.setContext(new HashMap<>(delegationContext));
+            DelegationBudget.addCeiling(inputData.getContext(), messageAllowance);
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final AtomicBoolean skipped = new AtomicBoolean();
@@ -380,7 +395,11 @@ public class ConverseWithAgentTool {
             // Charge-back: the callee's spend this turn (a new conversation's start
             // included) counts against the caller's ceilings. A turn that timed out is
             // not charged here — it was held to the ceiling passed down above.
-            budget.charge(DelegationBudget.spentSince(costBefore, snapshot));
+            // A skipped message ran nothing for this call; only a conversation started
+            // here still owes its start turn.
+            if (!skipped.get() || startedHere) {
+                budget.charge(DelegationBudget.spentSince(costBefore, snapshot));
+            }
 
             // Finding 25: the delegated conversation paused for human approval on
             // this turn. Return a structured, actionable result so the delegating
