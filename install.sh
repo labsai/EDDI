@@ -2837,7 +2837,7 @@ case "${1:-help}" in
           || _is_release_tag "$EDDI_BRANCH"; then
         echo "Could not look up the newest EDDI release, and this install is pinned to a release (${EDDI_BRANCH})." >&2
         echo "Not falling back to 'main': its compose files are not checksum-verified. Nothing was changed." >&2
-        echo "Retry later, or name the release: eddi update <version>. To use main on purpose: EDDI_BRANCH=main eddi update" >&2
+        echo "Retry later, or name the release: eddi update --eddi-version=<version>. To use main on purpose: EDDI_BRANCH=main eddi update" >&2
         exit 1
       fi
       EDDI_BRANCH="main"
@@ -2877,8 +2877,14 @@ case "${1:-help}" in
         staged+=("$f")
         echo "✅"
       else
+        # Every compose file is REQUIRED: keeping the old one and recording the new
+        # version would start the new image with an old compose file. A file that
+        # cannot be fetched refuses the whole update; nothing is replaced or recorded.
+        echo "❌"
         rm -f "$tmp_file"
-        echo "⚠️  (keeping existing file)"
+        for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+        echo "Aborting: ${local_name} could not be downloaded from ${EDDI_BRANCH}. Nothing was changed (no file, version or ref was replaced or recorded). Retry once GitHub is reachable." >&2
+        exit 1
       fi
     done
     # Everything below is STAGED first: the compose files above (verified, still
@@ -2931,10 +2937,9 @@ case "${1:-help}" in
             exit 1
           fi
           echo "✅"
-        elif [[ -f "$target" ]]; then
-          rm -f "$tmp_asset"
-          echo "⚠️  (keeping existing file)"
         else
+          # Required too, even when an older copy is on disk: the new compose file
+          # may mount a changed asset, and the recorded version must match the files.
           rm -f "$tmp_asset"
           echo "❌"
           missing_assets="${missing_assets} ${asset}"
@@ -2945,8 +2950,7 @@ case "${1:-help}" in
         _discard_staged
         echo ""
         echo "Aborting before anything was replaced. These files are bind-mounted by" >&2
-        echo "docker-compose.monitoring.yml but are not on disk and could not be" >&2
-        echo "downloaded:" >&2
+        echo "docker-compose.monitoring.yml and could not be downloaded:" >&2
         for a in $missing_assets; do echo "  - $a" >&2; done
         echo "Starting now would leave Grafana unable to mount them, so the" >&2
         echo "running stack and every installed file were left untouched. Re-run once" >&2
@@ -2968,7 +2972,9 @@ case "${1:-help}" in
       echo "  Updated ${t#"${compose_dir}"/}"
     done
 
-    # Record the version and ref the files now in place belong to.
+    # Record the version and ref the files now in place belong to. Reached only when
+    # every compose file and asset was fetched, verified and replaced: a file that
+    # cannot be downloaded aborts above, so these always match what is on disk.
     if [[ -n "$NEW_VERSION" ]]; then
       echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
       _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
