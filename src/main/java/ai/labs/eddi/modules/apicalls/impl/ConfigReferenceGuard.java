@@ -349,6 +349,8 @@ public final class ConfigReferenceGuard {
     private static String tenantId(Map<String, Property> conversationProperties) {
         Property tenant = conversationProperties.get("tenantId");
         String tenantId = tenant != null ? tenant.getValueString() : null;
-        return tenantId != null && !tenantId.isBlank() ? tenantId : SecretReference.DEFAULT_TENANT;
+        // Trimmed, as SecretPropertyVault trims it when it picks the tenant to write
+        // to.
+        return tenantId != null && !tenantId.isBlank() ? tenantId.trim() : SecretReference.DEFAULT_TENANT;
     }
 }

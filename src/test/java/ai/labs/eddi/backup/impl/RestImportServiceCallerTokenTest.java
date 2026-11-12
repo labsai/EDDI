@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.VaultReferencePlacementGuard;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
@@ -169,6 +170,26 @@ class RestImportServiceCallerTokenTest {
         doThrow(new ForbiddenException("cannot restore")).when(policy).requireMayRestore(same(stored), anyString());
 
         importExpectingForbidden("merge");
+
+        verify(restApiCallsStore, never()).updateApiCalls(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a merge that would replace a version breaking the vault-reference placement rule is refused before writing")
+    void mergeOverAMisplacedReferenceVersionIsRefusedBeforeTheUpdate() throws Exception {
+        String localId = "eeee11112222333344445556";
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/" + localId + "?version=1"));
+        when(documentDescriptorStore.findByOriginId(HTTPCALLS_ID)).thenReturn(List.of(descriptor));
+        var stored = new ApiCallsConfiguration();
+        when(apiCallsStore.read(localId, 1)).thenReturn(stored);
+        // The compensation would write `stored` back through the store, which refuses
+        // a document breaking the rule: the merge must stop before replacing it.
+        var placementGuard = mock(VaultReferencePlacementGuard.class);
+        doThrow(new BadRequestException("misplaced reference")).when(placementGuard).requireNone(same(stored));
+        importService.useVaultReferencePlacementGuard(placementGuard);
+
+        importExpecting(BadRequestException.class, "merge");
 
         verify(restApiCallsStore, never()).updateApiCalls(anyString(), any(), any());
     }

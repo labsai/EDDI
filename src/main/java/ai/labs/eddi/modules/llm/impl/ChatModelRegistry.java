@@ -16,6 +16,7 @@ import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.VaultReferencePlacement;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -271,23 +272,66 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Remembers the plaintext of every vault reference in {@code unresolved} — the
-     * credentials about to be handed to a client — so the task-error and fallback
-     * paths can scrub a provider error of them by value. See
-     * {@link ResolvedCredentials}.
+     * Remembers the plaintext of every vault reference that the build's own
+     * resolution put into {@code resolved} — the credentials handed to the client —
+     * so the task-error and fallback paths can scrub a provider error of them by
+     * value. See {@link ResolvedCredentials}.
+     * <p>
+     * Taken from the resolved values themselves, never from a second resolution: a
+     * secret rotated in between would otherwise leave the scrubber with the new
+     * plaintext while the client holds the old one. Only what replaced a reference
+     * is recorded, not the whole value, so the text around a reference (the rest of
+     * a JSON header, say) is not treated as a secret.
      */
-    private void recordCredentials(Map<String, String> unresolved) {
-        if (resolvedCredentials == null) {
+    private void recordCredentials(Map<String, String> unresolved, Map<String, String> resolved) {
+        if (resolvedCredentials == null || resolved == null) {
             return;
         }
         List<String> plaintexts = new ArrayList<>();
-        for (String reference : VaultHostAllowlist.referencesIn(unresolved.values())) {
-            String plaintext = secretResolver.resolveValue(reference);
-            if (plaintext != null && !plaintext.equals(reference)) {
-                plaintexts.add(plaintext);
-            }
+        for (var entry : unresolved.entrySet()) {
+            plaintexts.addAll(substitutedPlaintexts(entry.getValue(), resolved.get(entry.getKey())));
         }
         resolvedCredentials.record(plaintexts);
+    }
+
+    /**
+     * The text that replaced each vault reference of {@code unresolved} in
+     * {@code resolved}, found by walking the literal text between the references.
+     * Adjacent references, with nothing between them, are taken together. A value
+     * whose text around the references changed in resolution yields nothing.
+     */
+    static List<String> substitutedPlaintexts(String unresolved, String resolved) {
+        List<String> plaintexts = new ArrayList<>();
+        if (unresolved == null || resolved == null || unresolved.equals(resolved)) {
+            return plaintexts;
+        }
+        List<ReferenceScanner.Match> references = SecretReference.scanner().findAll(unresolved);
+        if (references.isEmpty()) {
+            return plaintexts;
+        }
+        String prefix = unresolved.substring(0, references.getFirst().start());
+        if (!resolved.startsWith(prefix)) {
+            return plaintexts;
+        }
+        int position = prefix.length();
+        for (int i = 0; i < references.size(); i++) {
+            ReferenceScanner.Match reference = references.get(i);
+            boolean last = i == references.size() - 1;
+            String following = last ? unresolved.substring(reference.end()) : unresolved.substring(reference.end(), references.get(i + 1).start());
+            if (!last && following.isEmpty()) {
+                continue; // Taken together with the next reference.
+            }
+            int end = last ? resolved.length() - following.length() : resolved.indexOf(following, position);
+            if (end < position || (last && !resolved.endsWith(following))) {
+                return plaintexts;
+            }
+            String plaintext = resolved.substring(position, end);
+            if (!plaintext.equals(reference.text())) {
+                plaintexts.add(plaintext);
+            }
+            position = end + following.length();
+        }
+        return plaintexts;
     }
 
     /**
@@ -400,7 +444,7 @@ public class ChatModelRegistry {
         requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
         var unresolvedParams = resolvedParams;
         resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-        recordCredentials(unresolvedParams);
+        recordCredentials(unresolvedParams, resolvedParams);
         resolvedParams = adaptToModel(type, resolvedParams);
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
@@ -459,7 +503,7 @@ public class ChatModelRegistry {
             requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
             var unresolvedParams = resolvedParams;
             resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-            recordCredentials(unresolvedParams);
+            recordCredentials(unresolvedParams, resolvedParams);
             resolvedParams = adaptToModel(type, resolvedParams);
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);

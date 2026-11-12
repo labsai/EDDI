@@ -95,7 +95,9 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public String defaultEndpoint(Map<String, String> parameters) {
         Map<String, String> p = parameters == null ? Map.of() : parameters;
-        if (!isNullOrEmpty(p.get(KEY_API_ENDPOINT))) {
+        // Read as applyTo reads it: a whitespace-only apiEndpoint is not set, and the
+        // client then uses the regional default, which must be checked.
+        if (stringValue(p, KEY_API_ENDPOINT) != null) {
             return null;
         }
         String location = !isNullOrEmpty(p.get(KEY_LOCATION)) ? p.get(KEY_LOCATION) : p.get(KEY_PUBLISHER);

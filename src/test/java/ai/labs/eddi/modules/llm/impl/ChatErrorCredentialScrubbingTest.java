@@ -25,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -63,9 +65,9 @@ class ChatErrorCredentialScrubbingTest {
             resolved.replaceAll((k, v) -> v.replace("${vault:gateway-key}", GATEWAY_VALUE));
             return resolved;
         });
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> "${vault:gateway-key}".equals(inv.getArgument(0))
-                ? GATEWAY_VALUE
-                : inv.getArgument(0));
+        // A second resolution would see a rotated value: the scrubber must record what
+        // the build itself resolved, so it must not ask again.
+        when(secretResolver.resolveValue(anyString())).thenReturn("rotated" + "r".repeat(12));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         var registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
@@ -76,6 +78,23 @@ class ChatErrorCredentialScrubbingTest {
         String scrubbed = registry.resolvedCredentials.scrub("401: " + GATEWAY_VALUE + " is not valid for this deployment");
         assertFalse(scrubbed.contains(GATEWAY_VALUE), scrubbed);
         assertTrue(scrubbed.contains("is not valid"), scrubbed);
+        // Only what replaced the reference: the JSON around it is not a secret.
+        assertEquals("{\"api-key\":", registry.resolvedCredentials.scrub("{\"api-key\":"));
+        verify(secretResolver, never()).resolveValue(anyString());
+    }
+
+    @Test
+    @DisplayName("the plaintext of each reference is read off the resolved value, text around it excluded")
+    void substitutedPlaintexts() {
+        assertEquals(List.of(GATEWAY_VALUE),
+                ChatModelRegistry.substitutedPlaintexts("{\"k\":\"${vault:a}\"}", "{\"k\":\"" + GATEWAY_VALUE + "\"}"));
+        assertEquals(List.of("first-plain", "second-plain"),
+                ChatModelRegistry.substitutedPlaintexts("${vault:a} and ${vault:b}", "first-plain and second-plain"));
+        // Adjacent references are taken together.
+        assertEquals(List.of("onetwo"), ChatModelRegistry.substitutedPlaintexts("${vault:a}${vault:b}", "onetwo"));
+        // An unresolved reference is not a plaintext.
+        assertEquals(List.of(), ChatModelRegistry.substitutedPlaintexts("x ${vault:a}", "x ${vault:a}"));
+        assertEquals(List.of(), ChatModelRegistry.substitutedPlaintexts("plain", "plain"));
     }
 
     @Test

@@ -128,7 +128,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
      * The guardrail's own keys (and the generic ones of every guardrail), which are
      * not passed to the provider builder.
      */
-    static final Set<String> OWN_PARAMETERS = Set.of(PARAM_PROVIDER, PARAM_RISK, PARAM_PROMPT_TEMPLATE, PARAM_UNSAFE_LABEL, PARAM_SAFE_LABEL,
+    public static final Set<String> OWN_PARAMETERS = Set.of(PARAM_PROVIDER, PARAM_RISK, PARAM_PROMPT_TEMPLATE, PARAM_UNSAFE_LABEL, PARAM_SAFE_LABEL,
             PARAM_LABEL_PATTERN, PARAM_TIMEOUT_MS, PARAM_INCLUDE_CONTEXT, PARAM_INPUT_PRICE, PARAM_OUTPUT_PRICE, "failMode", "repromptMessage");
 
     /** A risk name short and plain enough to put into an audit reason. */

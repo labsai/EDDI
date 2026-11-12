@@ -47,6 +47,30 @@ class LlmTaskVaultPlacementDeployTest {
     }
 
     @Test
+    @DisplayName("a model-backed guardrail is judged against its own provider's credential keys")
+    void guardrailParametersAreChecked() {
+        var classifier = new LlmConfiguration.GuardrailConfig();
+        classifier.setType("classifier");
+        classifier.setParameters(Map.of("provider", "openai", "apiKey", "${vault:k}", "modelName", "${vault:any-secret}"));
+        var config = config(Map.of("apiKey", "${vault:k}"));
+        config.tasks().getFirst().setOutputGuardrails(List.of(classifier));
+
+        var refusal = assertThrows(WorkflowConfigurationException.class, () -> LlmTask.validateVaultReferencePlacement(guard, config));
+        assertTrue(refusal.getMessage().contains("tasks[0].outputGuardrails[0].parameters"), refusal.getMessage());
+        assertTrue(refusal.getMessage().contains("'modelName'"), refusal.getMessage());
+
+        // The credential, and the type's own keys, are not refused; a type that builds
+        // no
+        // model is not judged at all.
+        classifier.setParameters(Map.of("provider", "openai", "apiKey", "${vault:k}", "promptTemplate", "Rate ${vault:x} text"));
+        var regex = new LlmConfiguration.GuardrailConfig();
+        regex.setType("regex-filter");
+        regex.setParameters(Map.of("pattern", "${vault:not-a-model}"));
+        config.tasks().getFirst().setInputGuardrails(List.of(regex));
+        assertDoesNotThrow(() -> LlmTask.validateVaultReferencePlacement(guard, config));
+    }
+
+    @Test
     @DisplayName("references in credential parameters, customQueryParams included, deploy")
     void credentialReferencesDeploy() {
         assertDoesNotThrow(() -> LlmTask.validateVaultReferencePlacement(guard,

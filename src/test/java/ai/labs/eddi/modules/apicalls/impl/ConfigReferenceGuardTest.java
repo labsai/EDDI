@@ -159,6 +159,14 @@ class ConfigReferenceGuardTest {
     }
 
     @Test
+    @DisplayName("the tenantId property is trimmed, as the vault trims it when it writes the reference")
+    void tenantIdIsTrimmed() {
+        Map<String, Property> padded = properties(unmarked("tenantId", " acme "), autoVaulted("apiKey", "${vault:acme/agent1.apiKey}"));
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:acme/agent1.apiKey}", "header", DATA, padded));
+    }
+
+    @Test
     @DisplayName("a default-tenant slot is allowed where the tenantId property asked for another tenant (the vault's fallback)")
     void defaultTenantFallbackIsAllowed() {
         // SecretPropertyVault ignores a tenantId that is not the agent's own space's

@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.model.StoreParameters;
 import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.modules.llm.guardrails.impl.ClassifierGuardrail;
+import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.VaultReferencePlacement;
@@ -23,6 +25,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -103,6 +106,8 @@ public class VaultReferencePlacementGuard {
             }
             String path = "tasks[" + i + "]";
             check(path + ".parameters", task.getType(), modelParameters(task.getParameters()), problems);
+            checkGuardrails(path + ".inputGuardrails", task.getInputGuardrails(), problems);
+            checkGuardrails(path + ".outputGuardrails", task.getOutputGuardrails(), problems);
             LlmConfiguration.ModelCascadeConfig cascade = task.getModelCascade();
             if (cascade == null) {
                 continue;
@@ -122,6 +127,46 @@ public class VaultReferencePlacementGuard {
                 check(path + ".modelCascade.judgeModel.parameters", judge.getType(), judge.getParameters(), problems);
             }
         }
+    }
+
+    /**
+     * The model-backed guardrails ({@code classifier}, {@code judge}) build a chat
+     * model of the provider their {@code provider} parameter names, from every
+     * parameter but the type's own — so those are judged against that provider's
+     * credential keys, not the task's. Other guardrail types build no model.
+     */
+    private void checkGuardrails(String path, List<LlmConfiguration.GuardrailConfig> guardrails, List<String> problems) {
+        if (guardrails == null) {
+            return;
+        }
+        for (int g = 0; g < guardrails.size(); g++) {
+            LlmConfiguration.GuardrailConfig guardrail = guardrails.get(g);
+            Set<String> ownParameters = guardrail == null ? null : modelGuardrailOwnParameters(guardrail.getType());
+            if (ownParameters == null || guardrail.getParameters() == null) {
+                continue;
+            }
+            Map<String, String> model = new HashMap<>(guardrail.getParameters());
+            ownParameters.forEach(model::remove);
+            check(path + "[" + g + "].parameters", guardrail.getParameters().get(GUARDRAIL_PROVIDER), model, problems);
+        }
+    }
+
+    /** The parameter a model-backed guardrail names its provider in. */
+    static final String GUARDRAIL_PROVIDER = "provider";
+
+    /**
+     * The keys a model-backed guardrail type keeps from its builder, or null for a
+     * type that builds none.
+     */
+    static Set<String> modelGuardrailOwnParameters(String type) {
+        if (type == null) {
+            return null;
+        }
+        return switch (type.trim().toLowerCase(Locale.ROOT)) {
+            case ClassifierGuardrail.TYPE -> ClassifierGuardrail.OWN_PARAMETERS;
+            case JudgeGuardrail.TYPE -> JudgeGuardrail.OWN_PARAMETERS;
+            default -> null;
+        };
     }
 
     /** The parameters that reach a builder: the prompts are never resolved. */

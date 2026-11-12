@@ -114,8 +114,11 @@ class SpaceReferenceGuardUseTest {
             grantedTo(AGENT_A);
 
             var refused = assertThrows(ForbiddenException.class, () -> guard.requireMayUse(config, "knowledge base"));
-            assertTrue(refused.getMessage().contains("${vault:agent-a-key}"), refused.getMessage());
+            assertTrue(refused.getMessage().contains("1 vault secret(s)"), refused.getMessage());
+            // Neither the agents on the grant nor the reference: it may have been reached
+            // through a variable the caller cannot read.
             assertFalse(refused.getMessage().contains(AGENT_A), refused.getMessage());
+            assertFalse(refused.getMessage().contains("agent-a-key"), refused.getMessage());
         }
 
         @Test

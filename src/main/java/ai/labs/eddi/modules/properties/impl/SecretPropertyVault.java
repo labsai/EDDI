@@ -246,8 +246,8 @@ public class SecretPropertyVault {
         if (requested.equals(own)) {
             return requested;
         }
-        LOGGER.warnf("Agent '%s' asks for auto-vaulted secrets in vault tenant '%s' (conversation property 'tenantId'), which is not "
-                + "the tenant of the agent's own space; writing to the '%s' tenant instead.", sanitize(agentId), sanitize(requested),
+        LOGGER.warnf("Agent '%s' asks for auto-vaulted secrets in a vault tenant (conversation property 'tenantId') that is not "
+                + "the tenant of the agent's own space; writing to the '%s' tenant instead.", sanitize(agentId),
                 SecretReference.DEFAULT_TENANT);
         return SecretReference.DEFAULT_TENANT;
     }

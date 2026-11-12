@@ -71,6 +71,19 @@ class KnowledgeBaseFailureRedactorTest {
     }
 
     @Test
+    @DisplayName("an unlabelled literal credential is removed; non-credential literals are not")
+    void literalCredentialIsRemoved() {
+        String literalKey = "literal" + "k".repeat(12);
+        var config = knowledgeBase();
+        config.setEmbeddingParameters(Map.of("apiKey", literalKey, "model", "text-embedding-model-large"));
+
+        String redacted = redactor.redact(config, "rejected " + literalKey + " for text-embedding-model-large");
+
+        assertFalse(redacted.contains(literalKey), redacted);
+        assertTrue(redacted.contains("text-embedding-model-large"), redacted);
+    }
+
+    @Test
     @DisplayName("a message without secrets is kept")
     void plainMessageIsKept() {
         assertEquals("connection refused", redactor.redact(knowledgeBase(), "connection refused"));

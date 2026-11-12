@@ -1538,6 +1538,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // of leaving a rollback that cannot run.
                 callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
             }
+            if (vaultReferencePlacementGuard != null) {
+                // Likewise a stored document that breaks the vault-reference placement
+                // rule: the store would refuse it on the way back.
+                vaultReferencePlacementGuard.requireNone(previous);
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",

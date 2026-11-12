@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.rag;
 
+import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.model.StoreParameters;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -28,8 +30,9 @@ import java.util.Set;
  * out — but the message is the provider's, and a provider may quote what it was
  * sent. {@code VaultReferencePlacement} keeps a secret out of every parameter
  * but the credential; this is the second layer, for whatever a provider still
- * echoes: every plaintext the knowledge base's own vault references resolve to
- * is removed by value, then credential shapes are redacted.
+ * echoes: the literal value of each credential parameter, and every plaintext
+ * the knowledge base's own vault references resolve to is removed by value,
+ * then credential shapes are redacted.
  * <p>
  * Resolving the references here releases nothing: the plaintexts are used only
  * to find and remove them, and the same references were resolved a moment ago
@@ -77,13 +80,17 @@ public class KnowledgeBaseFailureRedactor {
             return plaintexts;
         }
         List<Map<String, String>> parameterMaps = new ArrayList<>();
+        List<Set<String>> credentialKeys = new ArrayList<>();
         if (config.getEmbeddingParameters() != null) {
             parameterMaps.add(config.getEmbeddingParameters());
+            credentialKeys.add(EmbeddingParameters.credentialParameters(config.getEmbeddingProvider()));
         }
         if (config.getStoreParameters() != null) {
             parameterMaps.add(config.getStoreParameters());
+            credentialKeys.add(StoreParameters.credentialParameters(config.getStoreType()));
         }
-        for (Map<String, String> parameters : parameterMaps) {
+        for (int i = 0; i < parameterMaps.size(); i++) {
+            Map<String, String> parameters = parameterMaps.get(i);
             Map<String, String> expanded = parameters;
             if (globalVariableResolver != null) {
                 try {
@@ -93,6 +100,7 @@ public class KnowledgeBaseFailureRedactor {
                     // not have been resolved into the failing request either.
                 }
             }
+            addLiteralCredentials(expanded, credentialKeys.get(i), plaintexts);
             for (String reference : VaultHostAllowlist.referencesIn(expanded.values())) {
                 try {
                     String plaintext = secretResolver.resolveValue(reference);
@@ -107,4 +115,23 @@ public class KnowledgeBaseFailureRedactor {
         }
         return plaintexts;
     }
+
+    /**
+     * The literal values of the credential parameters — a key written into the
+     * configuration rather than vaulted. Only the keys the provider or store takes
+     * as a credential count, so a host or a model name is never scrubbed as one;
+     * values shorter than {@link #MIN_LITERAL_LENGTH} (pgvector's default
+     * {@code user}, {@code eddi}) would shred unrelated text and are left out.
+     */
+    private static void addLiteralCredentials(Map<String, String> parameters, Set<String> credentialKeys, Set<String> plaintexts) {
+        for (String key : credentialKeys) {
+            String value = parameters.get(key);
+            if (value != null && !value.contains("${") && value.trim().length() >= MIN_LITERAL_LENGTH) {
+                plaintexts.add(value.trim());
+            }
+        }
+    }
+
+    /** The shortest literal credential value scrubbed everywhere it occurs. */
+    static final int MIN_LITERAL_LENGTH = 8;
 }

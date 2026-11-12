@@ -107,6 +107,24 @@ class LanguageModelBuilderCredentialsTest {
         }
 
         @Test
+        @DisplayName("Azure with nonAzureApiKey goes to OpenAI even when an endpoint is configured, a whitespace key included")
+        void azureNonAzureKeyOverridesTheEndpoint() {
+            var azure = new AzureOpenAiLanguageModelBuilder();
+            assertEquals("https://api.openai.com/v1",
+                    azure.defaultEndpoint(Map.of("endpoint", "https://r.openai.azure.com/", "nonAzureApiKey", "${vault:k}")));
+            assertEquals("https://api.openai.com/v1",
+                    azure.defaultEndpoint(Map.of("endpoint", "https://r.openai.azure.com/", "nonAzureApiKey", " ")));
+            assertNull(azure.defaultEndpoint(Map.of("endpoint", "https://r.openai.azure.com/", "apiKey", "${vault:k}")));
+        }
+
+        @Test
+        @DisplayName("a whitespace-only Vertex apiEndpoint is not set: the regional default is checked")
+        void vertexBlankApiEndpointFallsBackToTheRegionalHost() {
+            assertEquals("https://europe-west4-aiplatform.googleapis.com",
+                    new VertexGeminiLanguageModelBuilder().defaultEndpoint(Map.of("apiEndpoint", "  ", "location", "europe-west4")));
+        }
+
+        @Test
         void azureWithoutEndpointGoesToOpenAi() {
             assertEquals("https://api.openai.com/v1", new AzureOpenAiLanguageModelBuilder().defaultEndpoint(Map.of("nonAzureApiKey", "k")));
         }

@@ -106,8 +106,21 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
         return Set.of(KEY_API_KEY, KEY_NON_AZURE_API_KEY, KEY_CUSTOM_HEADERS);
     }
 
+    /**
+     * OpenAI's API whenever {@code nonAzureApiKey} is set — the client's
+     * {@code nonAzureApiKey(...)} replaces a configured {@code endpoint} with it,
+     * so an allowed Azure {@code endpoint} must not stand in for where the key goes
+     * — and also when no {@code endpoint} is set, the only destination such a
+     * configuration can have. Otherwise the configured {@code endpoint}, which the
+     * registry checks as an endpoint key.
+     */
     @Override
     public String defaultEndpoint(Map<String, String> parameters) {
+        // The same test read() applies before calling nonAzureApiKey(...): a
+        // whitespace-only value still switches the client to OpenAI.
+        if (parameters != null && !isNullOrEmpty(parameters.get(KEY_NON_AZURE_API_KEY))) {
+            return NON_AZURE_ENDPOINT;
+        }
         return ILanguageModelBuilder.unlessSet(parameters, KEY_ENDPOINT, NON_AZURE_ENDPOINT);
     }
 

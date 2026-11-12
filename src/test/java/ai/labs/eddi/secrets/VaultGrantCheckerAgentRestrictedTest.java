@@ -94,11 +94,14 @@ class VaultGrantCheckerAgentRestrictedTest {
     @DisplayName("a reference behind a global variable is found")
     void variableIndirectionIsFollowed() throws Exception {
         grant("agent-a-key", List.of("agentA"));
+        when(agentStore.getCurrentResourceId("agentA")).thenReturn(mock(IResourceStore.IResourceId.class));
         when(globalVariableResolver.resolveValue(eq("${vars:kb-key}"), anyString())).thenReturn("${vault:agent-a-key}");
 
-        assertEquals(List.of("${vault:agent-a-key}"),
-                checker.findAgentRestrictedReferences(knowledgeBase("${vars:kb-key}")).stream().map(VaultGrantChecker.RestrictedReference::reference)
-                        .toList());
+        var restricted = checker.findAgentRestrictedReferences(knowledgeBase("${vars:kb-key}"));
+        assertEquals(List.of("${vault:agent-a-key}"), restricted.stream().map(VaultGrantChecker.RestrictedReference::reference).toList());
+        // The granted agent survives the indirection: an editor of agentA is let
+        // through.
+        assertEquals(List.of("agentA"), restricted.getFirst().grantedAgents());
     }
 
     @Test

@@ -73,6 +73,22 @@ so the fallback stays usable.
   the deploy naming the field instead of the first turn.
 - The refusal now says that references are only resolved in credential parameters and where to move one.
 
+### Code-review follow-ups
+
+- The standalone-RAG refusal names neither the reference nor the granted agents: a reference may have been
+  reached through a variable the caller cannot read. The log line keeps them.
+- `azure-openai` reports OpenAI's API as its destination whenever `nonAzureApiKey` is set (the client then
+  sends there even with an `endpoint`), and a whitespace-only Vertex `apiEndpoint` falls back to the regional
+  host check, as the builder treats it.
+- The chat-error scrubber records the plaintexts the build's own resolution produced, read off the resolved
+  values, instead of resolving the references a second time.
+- The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
+  the guardrail's own `provider`.
+- `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters).
+- The vault-tenant warning no longer logs the requested tenant value, and `ConfigReferenceGuard` trims the
+  `tenantId` property as `SecretPropertyVault` does.
+- A merge import over a stored version that breaks the placement rule is refused before it writes, since the
+  rollback could not restore it.
 ### Upgrade note
 
 Configurations saved before this change that hold a `${vault:…}` (or a `${vars:…}` expanding to one) outside a

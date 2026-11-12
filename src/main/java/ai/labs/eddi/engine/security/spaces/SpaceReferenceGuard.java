@@ -180,9 +180,14 @@ public class SpaceReferenceGuard {
         }
         LOGGER.warnf("Use of a %s refused: '%s' may edit none of the agents granted the vault secret(s) %s", sanitize(what),
                 sanitize(accessGuard.currentPrincipal()), sanitize(names));
-        throw new ForbiddenException("This " + what + " uses vault secret(s) whose grant (allowedAgents) names particular agents: " + names
-                + ". Run here, outside any agent, it may be used only by someone who may edit one of those agents, or by an administrator. "
-                + "Ask one to run it, grant the secret to every agent (allowedAgents [\"*\"]), or use a secret meant for this " + what + ".");
+        // The refusal names no reference: one may have been reached through a global
+        // variable or a connection the caller cannot read, and its expanded form names
+        // a secret (and a tenant) the caller would otherwise never learn. The log line
+        // above, read by an operator, carries them.
+        throw new ForbiddenException("This " + what + " uses " + restricted.size() + " vault secret(s) whose grant (allowedAgents) names "
+                + "particular agents, or whose grant could not be read. Run here, outside any agent, it may be used only by someone who "
+                + "may edit one of those agents, or by an administrator. Ask one to run it, grant the secret to every agent "
+                + "(allowedAgents [\"*\"]), or use a secret meant for this " + what + ".");
     }
 
     /**
