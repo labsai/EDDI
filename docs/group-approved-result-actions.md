@@ -78,7 +78,7 @@ only as **template data** — never as template source:
 | `{task.id}`, `{task.subject}`, `{task.description}` | The task |
 | `{task.approvedBy}`, `{task.edited}` | Who approved it, and whether they edited it |
 | `{group.id}`, `{group.conversationId}` | The group configuration and the discussion |
-| `{action.idempotencyKey}` | 32 hex chars, stable per task — send it to a target that deduplicates. A standing team's backlog task is keyed by the backlog task, so it keeps its key across every discussion that works it; any other task is keyed by discussion and task (see [Standing teams](#standing-teams-cadence-writeback)) |
+| `{action.idempotencyKey}` | 32 hex chars, stable per task — send it to a target that deduplicates. A standing team's backlog task is keyed by the backlog task, so it keeps its key across every discussion that works it, when its subject matches exactly one pulled backlog task and exactly one task of the discussion; any other task is keyed by discussion and task (see [Standing teams](#standing-teams-cadence-writeback)) |
 
 The call's path, query, headers and body are its author's templates, rendered
 by the restricted runtime engine. A result that contains `{...}`, `{#eval}` or
@@ -209,8 +209,13 @@ the record of the earlier one. `responseUrl` is the response's `html_url` (else
   enabled.
 - A record the store settles because the discussion ended (`NOT_SENT`, or
   `OUTCOME_UNKNOWN` for an orphaned claim) has no audit entry and no metric
-  increment — no leg is running to emit them. It is logged at INFO and shows on
-  the discussion document.
+  increment — no leg is running to emit them. It shows on the discussion
+  document. Its `finishedAt` is the discussion's own `lastModified` (when it
+  ended), or — without one — the record's claim or approval time, never the
+  time of the read: a read settles without writing, so an ended discussion that
+  is never written again is settled anew on every read, and must show the same
+  record each time. The write that persists it logs at INFO; a read logs at
+  DEBUG only.
 
 ## Cost and quotas
 
@@ -233,9 +238,14 @@ What stays the same is the key: a task pulled from the backlog is keyed by the
 standing team and the **backlog task** (found the way writeback matches it —
 by subject, among the tasks the workspace's running discussion pulled), so
 every discussion that works it offers the same `{action.idempotencyKey}`, and
-a target that deduplicates on it publishes once. A task that is not a backlog
-task — or whose workspace cannot be read at approval time — is keyed by
-discussion and task, and a later discussion gets a different key.
+a target that deduplicates on it publishes once. The backlog key is used only
+when that subject match is unambiguous: exactly one pulled backlog task has the
+subject, **and** exactly one task in the discussion's task list has it. Two
+tasks sharing a subject on either side would otherwise share a key, and a
+target that deduplicates on it would drop a legitimate publish. A task that is
+not a backlog task, whose subject is ambiguous, or whose workspace cannot be
+read at approval time is keyed by discussion and task, and a later discussion
+gets a different key.
 
 ## Example — a content team that posts approved GitHub comments
 

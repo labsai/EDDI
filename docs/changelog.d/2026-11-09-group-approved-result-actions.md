@@ -72,7 +72,10 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   RUNNING claim becomes OUTCOME_UNKNOWN. In the store because it is the one place every ending passes — the leg's own
   terminal writes, cancels by another pod, cadence reclaims and crash recovery (#1326) — on MongoDB and PostgreSQL
   alike. Never sent afterwards: a crash must not turn an approval into a publish nobody watched. No audit entry or
-  metric for these (no leg is running); logged at INFO. Rejected: auto-sending on recovery (breaks at most once);
+  metric for these (no leg is running). A read settles without persisting, so an ended document that is never
+  written again is settled anew on every read: the finish time is the discussion's own `lastModified` (falling back
+  to the record's claim or approval time), never `now()`, so every read — and the write that finally persists it —
+  shows the same record; a read logs at DEBUG (the Manager polls), a write at INFO. Rejected: auto-sending on recovery (breaks at most once);
   calling a settle hook at each of the nine terminal-transition sites (one missed site, or #1326's, leaves it stuck).
 - **Re-approval owes a new attempt only when nothing was published.** `recordApprovedAction` replaces a record whose
   status `allowsNewAttempt()` — FAILED, SKIPPED, NOT_SENT — and keeps every other: PENDING/RUNNING (still owed or in
@@ -85,8 +88,11 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   is keyed `sha256("backlog/" + groupId + "/" + backlogTaskId)` — the backlog task found the way writeback matches it
   (by subject among the workspace's `pulledTaskIds`, while `runningDiscussionId` is this discussion) — so a task that
   returns to the backlog after a FAILED or OUTCOME_UNKNOWN publish offers the target the same key in its next
-  discussion. Other tasks (and an unreadable workspace) keep `sha256(conversationId + "/" + taskId)`. At most once
-  remains per discussion; across discussions only a deduplicating target makes it once (documented).
+  discussion. Only when the subject match is unambiguous on both sides — exactly one pulled backlog task and exactly
+  one task of the discussion have it — since two publishes sharing a key would let a deduplicating target drop one.
+  Other tasks (an ambiguous subject, an unreadable workspace) keep `sha256(conversationId + "/" + taskId)`. The
+  workspace is read once per approval decision, and only when it records a task. At most once remains per
+  discussion; across discussions only a deduplicating target makes it once (documented).
 - **"Approved by a person"** is one private helper, `approvedByPerson`, whose comment names the sibling PR #1374's
   `TaskApproval.byPerson()`: whichever merges second unifies the two.
 - **Only human approvals publish.** A `system:*` approval (timeout `AUTO_APPROVE`) records SKIPPED.
@@ -117,5 +123,5 @@ never sends one twice.
 | 2026-11-09 | A `system:*` (AUTO_APPROVE) approval records SKIPPED instead of running the action | The feature exists to publish only human-approved text | A `runOnAutoApprove` switch |
 | 2026-11-11 | An approved action still owed when its discussion ends is settled NOT_SENT by the discussion store, never sent | Every ending (cancel, crash recovery, cadence reclaim) passes the store; at most once forbids sending after a crash | Auto-send on recovery; a settle call at each terminal-transition site |
 | 2026-11-11 | A re-approval after retry/rework owes a new attempt only if the earlier one ended FAILED, SKIPPED or NOT_SENT | A failed publish must be recoverable by the user; a SUCCEEDED or OUTCOME_UNKNOWN one must never be sent twice | `putIfAbsent` per task (silently dropped the re-approval) |
-| 2026-11-11 | A standing team's backlog task keys its idempotency key on the backlog task id | The task is re-run in new discussions; a per-discussion key let the target receive the same publish twice | Keying on the subject; adding a backlog id to every discussion task |
+| 2026-11-11 | A standing team's backlog task keys its idempotency key on the backlog task id, when its subject matches exactly one pulled backlog task and one discussion task | The task is re-run in new discussions; a per-discussion key let the target receive the same publish twice | Keying on the subject; adding a backlog id to every discussion task |
 ```

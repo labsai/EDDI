@@ -1002,15 +1002,20 @@ public class SharedTaskList {
      * ends — crash recovery and a cancel stored by another pod included — on
      * MongoDB and PostgreSQL alike.
      *
+     * @param ended
+     *            the finish time to stamp — the discussion's own end time, so a
+     *            read that settles without persisting shows the same time every
+     *            time; {@code null} uses each record's own claim or approval time
      * @return the ids of the tasks whose records were settled
      */
-    public synchronized List<String> settleOwedApprovedActions(String reason, Instant now) {
+    public synchronized List<String> settleOwedApprovedActions(String reason, Instant ended) {
         List<String> settled = new ArrayList<>();
         for (var entry : approvedActions.entrySet()) {
             ApprovedActionRecord record = entry.getValue();
             if (record == null) {
                 continue;
             }
+            Instant now = ended != null ? ended : record.startedAt() != null ? record.startedAt() : record.approvedAt();
             if (record.status() == ApprovedActionStatus.PENDING) {
                 entry.setValue(record.finished(ApprovedActionStatus.NOT_SENT, now, null, null, reason));
                 settled.add(entry.getKey());

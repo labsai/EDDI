@@ -77,7 +77,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             }
             GroupConversation conversation = resource.getData();
             conversation.setId(id);
-            settleOwedApprovedActionsIfEnded(conversation);
+            settleOwedApprovedActionsIfEnded(conversation, false);
             return conversation;
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read group conversation: " + e.getMessage(), e);
@@ -86,7 +86,7 @@ public class GroupConversationStore implements IGroupConversationStore {
 
     @Override
     public void update(GroupConversation conversation) throws IResourceStore.ResourceStoreException {
-        settleOwedApprovedActionsIfEnded(conversation);
+        settleOwedApprovedActionsIfEnded(conversation, true);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(conversation.getId(), SINGLE_VERSION, conversation);
             // A replace that matches an existing row only. Every document is written at
@@ -184,7 +184,7 @@ public class GroupConversationStore implements IGroupConversationStore {
     @Override
     public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
-        settleOwedApprovedActionsIfEnded(gc);
+        settleOwedApprovedActionsIfEnded(gc, true);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             storage.storeIfFieldEquals(resource, "state", expectedState.name());
@@ -206,7 +206,7 @@ public class GroupConversationStore implements IGroupConversationStore {
             updateIfState(gc, expectedState);
             return;
         }
-        settleOwedApprovedActionsIfEnded(gc);
+        settleOwedApprovedActionsIfEnded(gc, true);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             try {
@@ -233,17 +233,34 @@ public class GroupConversationStore implements IGroupConversationStore {
      * terminal state — one place for every way a discussion ends, crash recovery
      * and a cancel stored by another pod included, on both databases. Never sends:
      * a crash must not turn into a publish nobody watched.
+     * <p>
+     * A read does not persist what it settles, so an ended document that is never
+     * written again is settled anew on each read. The finish time is therefore the
+     * discussion's own {@code lastModified} (stamped when it reached its terminal
+     * state), falling back to each record's own claim or approval time — never
+     * {@code now()} — so every read, and the write that finally persists it, shows
+     * the same time. A read logs at DEBUG (the Manager polls); a write, which
+     * settles once, logs at INFO.
+     *
+     * @param persisting
+     *            whether the caller is about to write the document
      */
-    static void settleOwedApprovedActionsIfEnded(GroupConversation gc) {
+    static void settleOwedApprovedActionsIfEnded(GroupConversation gc, boolean persisting) {
         if (gc == null || gc.getTaskList() == null || gc.getTaskList().getApprovedActions().isEmpty() || !isEnded(gc.getState())) {
             return;
         }
         List<String> settled = gc.getTaskList().settleOwedApprovedActions(
                 "Not sent: the discussion ended (" + gc.getState() + ") before the action ran — post it by hand if it is still "
                         + "wanted",
-                Instant.now());
-        if (!settled.isEmpty()) {
+                gc.getLastModified());
+        if (settled.isEmpty()) {
+            return;
+        }
+        if (persisting) {
             LOGGER.infof("Group conversation %s ended (%s) owing %d approved-result action(s); settled them without sending",
+                    gc.getId(), gc.getState(), settled.size());
+        } else {
+            LOGGER.debugf("Group conversation %s ended (%s) owing %d approved-result action(s); read them as settled (not persisted)",
                     gc.getId(), gc.getState(), settled.size());
         }
     }

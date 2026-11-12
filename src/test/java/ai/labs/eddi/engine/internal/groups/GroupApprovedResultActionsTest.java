@@ -627,6 +627,90 @@ class GroupApprovedResultActionsTest {
             assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()),
                     gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey());
         }
+
+        /** Adds a second task to the discussion, approved alongside the first. */
+        private TaskItem addApproved(GroupConversation gc, String subject) {
+            var task = gc.getTaskList().addTask(new TaskItem(subject, "d", 0));
+            gc.getTaskList().assignTask(task.id(), "writer", "Writer");
+            gc.getTaskList().startTask(task.id());
+            gc.getTaskList().submitForApproval(task.id(), "text");
+            gc.getTaskList().approveTask(task.id());
+            return task;
+        }
+
+        private String keyOf(GroupConversation gc, TaskItem task) {
+            return gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey();
+        }
+
+        private GroupConversation runningDiscussionWith(TaskItem task) {
+            workspace.setRunningDiscussionId("gc-1");
+            workspace.setPulledTaskIds(workspace.getBacklog().all().stream().map(TaskItem::id).toList());
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            return gc;
+        }
+
+        @Test
+        void aSubjectTwoPulledBacklogTasksShare_isAmbiguous_soEachTaskKeepsItsOwnPerDiscussionKey() {
+            workspace.getBacklog().addTask(new TaskItem("Post", "a second weekly note", 0));
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Post");
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", first.id()), keyOf(gc, first));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", second.id()), keyOf(gc, second));
+            assertNotEquals(keyOf(gc, first), keyOf(gc, second), "two publishes never share a key");
+        }
+
+        @Test
+        void aSubjectTwoPulledBacklogTasksShare_isAmbiguousEvenForASingleDiscussionTask() {
+            workspace.getBacklog().addTask(new TaskItem("Post", "a second weekly note", 0));
+            var task = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(task);
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()), keyOf(gc, task));
+        }
+
+        @Test
+        void aSubjectTwoDiscussionTasksShare_isAmbiguous_soTheyDoNotBothTakeTheBacklogKey() {
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Post");
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", first.id()), keyOf(gc, first));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", second.id()), keyOf(gc, second));
+            assertNotEquals(keyOf(gc, first), keyOf(gc, second));
+        }
+
+        @Test
+        void manyApprovedTasks_readTheWorkspaceOnce() throws Exception {
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Other");
+            var third = addApproved(gc, "Third");
+
+            assertEquals(3, withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id(), third.id()), "alice"));
+
+            verify(workspaceStore, times(1)).find("group-1");
+            assertEquals(GroupApprovedResultActions.backlogIdempotencyKey("group-1", backlogTask.id()), keyOf(gc, first),
+                    "the unambiguous backlog match still gets the backlog key");
+        }
+
+        @Test
+        void noTaskToRecord_readsNoWorkspace() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text"); // still awaiting approval: owes nothing
+
+            assertEquals(0, withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+
+            verify(workspaceStore, never()).find(anyString());
+        }
     }
 
     @Test

@@ -160,16 +160,23 @@ public class GroupApprovedResultActions {
         String target = action.uri() + "#" + action.call();
         Instant now = Instant.now();
         int added = 0;
+        boolean workspaceRead = false;
+        GroupWorkspace workspace = null;
         for (String taskId : candidateTaskIds) {
             TaskItem task = taskList.findById(taskId);
             if (task == null || task.status() != TaskStatus.COMPLETED) {
                 continue; // rejected, reset for retry, or still waiting: owes nothing
             }
+            if (!workspaceRead) {
+                // once per decision, and only when there is a task to record
+                workspace = readWorkspace(gc);
+                workspaceRead = true;
+            }
             boolean edited = taskList.getReviewerEdits().containsKey(taskId);
             ApprovedActionRecord previous = taskList.getApprovedActions().get(taskId);
             var record = new ApprovedActionRecord(ApprovedActionStatus.PENDING, phase.name(), phaseIndex, target,
                     phase.onApproved().onFailure(), approvedBy != null ? approvedBy : "unknown", edited,
-                    idempotencyKeyFor(gc, task), now, null, null, null, null, null);
+                    idempotencyKeyFor(gc, task, workspace), now, null, null, null, null, null);
             if (taskList.recordApprovedAction(taskId, record)) {
                 added++;
                 if (previous != null) {
@@ -457,35 +464,60 @@ public class GroupApprovedResultActions {
      * discussion offers the target the same key. Every other task is keyed by
      * discussion and task id. The backlog task is found the way cadence writeback
      * matches it: among the backlog ids the workspace's running discussion (this
-     * one) pulled, by subject. A workspace that cannot be read falls back to the
-     * per-discussion key.
+     * one) pulled, by subject — and only when that match is unambiguous on both
+     * sides: exactly one pulled backlog task has the subject, and exactly one task
+     * in this discussion's task list has it. Otherwise two different publishes
+     * could share a key, and a target that deduplicates on it would silently drop
+     * one, so an ambiguous subject — like a workspace that cannot be read — falls
+     * back to the per-discussion key.
      */
     String idempotencyKeyFor(GroupConversation gc, TaskItem task) {
-        String backlogTaskId = backlogTaskId(gc, task);
+        return idempotencyKeyFor(gc, task, readWorkspace(gc));
+    }
+
+    /**
+     * As {@link #idempotencyKeyFor(GroupConversation, TaskItem)}, with the
+     * workspace already read ({@code null}: none, or not readable).
+     */
+    String idempotencyKeyFor(GroupConversation gc, TaskItem task, GroupWorkspace workspace) {
+        String backlogTaskId = backlogTaskId(gc, task, workspace);
         return backlogTaskId != null ? backlogIdempotencyKey(gc.getGroupId(), backlogTaskId) : idempotencyKey(gc.getId(), task.id());
     }
 
-    private String backlogTaskId(GroupConversation gc, TaskItem task) {
-        if (workspaceStore == null || gc.getGroupId() == null || gc.getId() == null || task.subject() == null) {
+    /**
+     * The standing team's workspace when this discussion is its running one, else
+     * {@code null}. Read once per {@link #recordApprovals} call.
+     */
+    private GroupWorkspace readWorkspace(GroupConversation gc) {
+        if (workspaceStore == null || gc.getGroupId() == null || gc.getId() == null) {
             return null;
         }
         try {
             GroupWorkspace workspace = workspaceStore.find(gc.getGroupId());
-            if (workspace == null || !gc.getId().equals(workspace.getRunningDiscussionId())) {
-                return null;
-            }
-            for (String pulledId : workspace.getPulledTaskIds()) {
-                TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
-                if (backlogTask != null && task.subject().equals(backlogTask.subject())) {
-                    return backlogTask.id();
-                }
-            }
-            return null;
+            return workspace != null && gc.getId().equals(workspace.getRunningDiscussionId()) ? workspace : null;
         } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
             LOGGER.debugf("Could not read the workspace of group %s for an idempotency key: %s", LogSanitizer.sanitize(gc.getGroupId()),
                     e.getMessage());
             return null;
         }
+    }
+
+    private static String backlogTaskId(GroupConversation gc, TaskItem task, GroupWorkspace workspace) {
+        if (workspace == null || task.subject() == null || gc.getTaskList() == null) {
+            return null;
+        }
+        String subject = task.subject();
+        List<String> matches = workspace.getPulledTaskIds().stream()
+                .distinct()
+                .map(pulledId -> workspace.getBacklog().findById(pulledId))
+                .filter(backlogTask -> backlogTask != null && subject.equals(backlogTask.subject()))
+                .map(TaskItem::id)
+                .toList();
+        if (matches.size() != 1) {
+            return null; // no backlog task, or several with this subject: ambiguous
+        }
+        long sameSubjectInDiscussion = gc.getTaskList().getTasks().stream().filter(t -> subject.equals(t.subject())).count();
+        return sameSubjectInDiscussion == 1 ? matches.getFirst() : null;
     }
 
     /**

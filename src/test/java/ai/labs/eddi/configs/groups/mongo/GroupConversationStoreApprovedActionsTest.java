@@ -21,6 +21,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,9 +49,21 @@ class GroupConversationStoreApprovedActionsTest {
         store = new GroupConversationStore(storageFactory, documentBuilder);
     }
 
+    private static final Instant APPROVED_AT = Instant.parse("2026-11-01T10:00:00Z");
+    private static final Instant ENDED_AT = Instant.parse("2026-11-01T11:00:00Z");
+
     private static ApprovedActionRecord record(ApprovedActionStatus status) {
         return new ApprovedActionRecord(status, "Draft", 0, "eddi://ai.labs.apicalls/apicallstore/apicalls/x?version=1#post",
-                ApprovedActionFailurePolicy.FAIL_TASK, "alice", false, "key", Instant.now(), null, null, null, null, null);
+                ApprovedActionFailurePolicy.FAIL_TASK, "alice", false, "key", APPROVED_AT, null, null, null, null, null);
+    }
+
+    /** Every read deserializes a fresh document, as the database does. */
+    private void storedAs(Supplier<GroupConversation> document) throws Exception {
+        when(storage.read("gc-1", 1)).thenAnswer(inv -> {
+            IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+            when(resource.getData()).thenReturn(document.get());
+            return resource;
+        });
     }
 
     private static GroupConversation gcWith(GroupConversationState state) {
@@ -126,6 +139,51 @@ class GroupConversationStoreApprovedActionsTest {
         store.update(gc);
 
         assertEquals(ApprovedActionStatus.PENDING, gc.getTaskList().getApprovedActions().get("pending").status());
+    }
+
+    @Test
+    void twoReadsOfAnEndedDiscussion_showTheSameFinishTime_theDiscussionsEnd() throws Exception {
+        storedAs(() -> {
+            var gc = gcWith(GroupConversationState.CANCELLED);
+            gc.setLastModified(ENDED_AT);
+            return gc;
+        });
+
+        ApprovedActionRecord first = store.read("gc-1").getTaskList().getApprovedActions().get("pending");
+        ApprovedActionRecord second = store.read("gc-1").getTaskList().getApprovedActions().get("pending");
+
+        assertEquals(ApprovedActionStatus.NOT_SENT, first.status());
+        assertEquals(ENDED_AT, first.finishedAt(), "stamped with the discussion's end, not the time of the read");
+        assertEquals(first.finishedAt(), second.finishedAt());
+        assertEquals(ENDED_AT, store.read("gc-1").getTaskList().getApprovedActions().get("running").finishedAt());
+    }
+
+    @Test
+    void anEndedDiscussionWithoutLastModified_fallsBackToTheRecordsOwnTime() throws Exception {
+        storedAs(() -> gcWith(GroupConversationState.COMPLETED));
+
+        ApprovedActionRecord first = store.read("gc-1").getTaskList().getApprovedActions().get("pending");
+        ApprovedActionRecord second = store.read("gc-1").getTaskList().getApprovedActions().get("pending");
+
+        assertEquals(APPROVED_AT, first.finishedAt());
+        assertEquals(first.finishedAt(), second.finishedAt());
+    }
+
+    @Test
+    void theWritePersistsTheSettledRecord_soTheNextReadHasNothingLeftToSettle() throws Exception {
+        var gc = gcWith(GroupConversationState.CANCELLED);
+        gc.setLastModified(ENDED_AT);
+        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenReturn(mock(IResourceStorage.IResource.class));
+
+        store.update(gc);
+
+        assertTrue(gc.getTaskList().settleOwedApprovedActions("unused", Instant.now()).isEmpty(),
+                "the document as written owes nothing, so a later read has nothing left to settle");
+        // the document as written is what the next read deserializes
+        storedAs(() -> gc);
+        GroupConversation readBack = store.read("gc-1");
+        assertEquals(ApprovedActionStatus.NOT_SENT, readBack.getTaskList().getApprovedActions().get("pending").status());
+        assertEquals(ENDED_AT, readBack.getTaskList().getApprovedActions().get("pending").finishedAt());
     }
 
     @Test
