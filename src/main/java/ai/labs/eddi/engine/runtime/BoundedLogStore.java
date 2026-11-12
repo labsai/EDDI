@@ -385,14 +385,35 @@ public class BoundedLogStore {
      * Publish a log entry to the ring buffer and notify listeners.
      */
     public void publish(LogEntry entry) {
-        entry = scrub(entry);
-        // Add to ring buffer
+        // The scrub runs under the same write lock that adds the entry to the buffer
+        // and the DB queue. An erasure puts its mark into the map first and only then
+        // takes this lock to rewrite the buffer, so for any entry published at the same
+        // moment one of two orders holds: this critical section ran first — the raw
+        // entry is in the buffer when the rewrite reads it, and in the DB queue, which
+        // every flush starting after the mark scrubs on the way out (the mark waits for
+        // a flush already running) — or it ran after, and scrub() sees the mark.
+        // Scrubbing before taking the lock left a gap between the two in which a raw
+        // entry could land after the rewrite. scrub() hashes nothing while no erasure
+        // is recent, so the critical section stays as cheap as the plain add.
+        LogEntry published;
         lock.writeLock().lock();
         try {
+            published = scrub(entry);
             if (buffer.size() >= bufferSize) {
                 buffer.pollFirst(); // evict oldest
             }
-            buffer.addLast(entry);
+            buffer.addLast(published);
+
+            // Enqueue for DB persistence
+            if (dbEnabled && meetsMinLevel(published.level())) {
+                if (dbQueued.incrementAndGet() <= maxDbQueue) {
+                    dbQueue.offer(published);
+                } else {
+                    // Not logged here: this runs inside the logging pipeline.
+                    dbQueued.decrementAndGet();
+                    dbDropped.incrementAndGet();
+                }
+            }
         } finally {
             lock.writeLock().unlock();
         }
@@ -400,20 +421,9 @@ public class BoundedLogStore {
         // Notify SSE listeners (non-blocking)
         for (Consumer<LogEntry> listener : listeners.values()) {
             try {
-                listener.accept(entry);
+                listener.accept(published);
             } catch (Exception _) {
                 // Don't let a bad listener break logging
-            }
-        }
-
-        // Enqueue for DB persistence
-        if (dbEnabled && meetsMinLevel(entry.level())) {
-            if (dbQueued.incrementAndGet() <= maxDbQueue) {
-                dbQueue.offer(entry);
-            } else {
-                // Not logged here: this runs inside the logging pipeline.
-                dbQueued.decrementAndGet();
-                dbDropped.incrementAndGet();
             }
         }
     }
