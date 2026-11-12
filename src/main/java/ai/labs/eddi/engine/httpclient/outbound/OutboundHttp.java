@@ -16,7 +16,9 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.tls.TlsConfiguration;
 import io.quarkus.tls.TlsConfigurationRegistry;
+import io.quarkus.tls.runtime.config.TlsConfigUtils;
 import io.vertx.core.Context;
+import io.vertx.core.Vertx;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -39,6 +41,7 @@ import java.nio.file.StandardOpenOption;
 import java.security.Security;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -63,7 +66,9 @@ import java.util.function.UnaryOperator;
  * request's {@link SsrfPolicy} says — before the hop is sent, and again once
  * its response headers are in, so a name that rebinds to a refused address
  * between the check and the connection gets no response back
- * ({@link #recheckAfterExchange}).</li>
+ * ({@link #recheckAfterExchange}). On an engine that can see the connection
+ * (Vert.x), the address it reached is checked too, before the request is
+ * written ({@link ConnectedPeers}).</li>
  * <li><b>Redirects</b> — never followed by the engine. Followed here hop by
  * hop, up to the policy's limit, with the method rewritten as its
  * {@link MethodRule} says.</li>
@@ -164,15 +169,15 @@ public class OutboundHttp {
 
     @Inject
     public OutboundHttp(Config config, Instance<TlsConfigurationRegistry> tlsRegistry, Instance<SecretResolver> secretResolver,
-            MeterRegistry meterRegistry) {
-        this(OutboundSettings.fromConfig(config), tlsRegistry, secretResolver,
+            Instance<Vertx> vertx, MeterRegistry meterRegistry) {
+        this(OutboundSettings.fromConfig(config), tlsRegistry, secretResolver, vertx,
                 config.getOptionalValue("eddi.security.ssrf-protection.enabled", Boolean.class).orElse(false), meterRegistry);
     }
 
     private OutboundHttp(OutboundSettings settings, Instance<TlsConfigurationRegistry> tlsRegistry,
-            Instance<SecretResolver> secretResolver, boolean ssrfProtectionEnabled, MeterRegistry meterRegistry) {
-        this(settings, new JdkOutboundEngine(settings, tlsContexts(tlsRegistry), secrets(secretResolver)),
-                ssrfProtectionEnabled, meterRegistry);
+            Instance<SecretResolver> secretResolver, Instance<Vertx> vertx, boolean ssrfProtectionEnabled,
+            MeterRegistry meterRegistry) {
+        this(settings, engines(settings, tlsRegistry, secrets(secretResolver), vertx), ssrfProtectionEnabled, meterRegistry);
         if (positiveDnsCacheDisabled(Security.getProperty(DNS_CACHE_TTL_PROPERTY), System.getProperty(LEGACY_DNS_CACHE_TTL_PROPERTY))) {
             LOGGER.warnf("The JVM's positive DNS cache is disabled (%s=0). The SSRF checks of outbound requests resolve a host "
                     + "and the HTTP client resolves it again to connect; without the cache the two lookups can return different "
@@ -236,9 +241,32 @@ public class OutboundHttp {
                 false, new SimpleMeterRegistry());
     }
 
+    /**
+     * The engine each profile is configured for. The Vert.x engine is built only
+     * when a profile uses it, on the Quarkus-managed {@link Vertx}.
+     */
+    private static OutboundEngine engines(OutboundSettings settings, Instance<TlsConfigurationRegistry> tlsRegistry,
+                                          UnaryOperator<String> secrets, Instance<Vertx> vertx) {
+        OutboundEngine jdk = new JdkOutboundEngine(settings, tlsContexts(tlsRegistry), secrets);
+        if (!settings.usesVertx()) {
+            return jdk;
+        }
+        if (!vertx.isResolvable()) {
+            throw new IllegalStateException("eddi.http.outbound.*.engine=vertx needs the Quarkus Vert.x instance, "
+                    + "which is not available");
+        }
+        OutboundEngine vertxEngine = new VertxOutboundEngine(vertx.get(), settings, vertxTlsOptions(tlsRegistry), secrets);
+        Map<Profile, OutboundEngine> byProfile = new EnumMap<>(Profile.class);
+        for (Profile profile : Profile.values()) {
+            byProfile.put(profile, settings.profile(profile).vertx() ? vertxEngine : jdk);
+        }
+        return new ProfileRoutedEngine(byProfile);
+    }
+
     @PreDestroy
     void shutdown() {
         watchdog.shutdownNow();
+        engine.close();
     }
 
     /**
@@ -283,9 +311,11 @@ public class OutboundHttp {
             throw e;
         } finally {
             String profile = request.profile().key();
+            String engineName = settings.profile(request.profile()).engine();
             Counter.builder("eddi.http.outbound.requests")
                     .description("Outbound HTTP exchanges, redirects followed counted once")
                     .tag("profile", profile)
+                    .tag("engine", engineName)
                     .tag("method", TAGGED_METHODS.contains(request.method()) ? request.method() : "OTHER")
                     .tag("status", status == 0 ? "none" : (status / 100) + "xx")
                     .tag("outcome", outcome)
@@ -294,6 +324,7 @@ public class OutboundHttp {
             sample.stop(Timer.builder("eddi.http.outbound.duration")
                     .description("Outbound HTTP exchange time, to the end of a buffered body or the headers of a streamed one")
                     .tag("profile", profile)
+                    .tag("engine", engineName)
                     .tag("outcome", outcome)
                     .register(meterRegistry));
         }
@@ -339,6 +370,7 @@ public class OutboundHttp {
 
         TargetValidator check = initialCheck(ssrf);
         validate(check, request.uri());
+        OutboundEngine.PeerCheck peerCheck = ConnectedPeers.forPolicy(ssrf, false);
 
         String method = request.method();
         URI uri = request.uri();
@@ -349,7 +381,7 @@ public class OutboundHttp {
         int hops = 0;
 
         while (true) {
-            Received received = engine.send(new Hop(request.profile(), method, uri, headers, body, hopTimeout, deadlineNanos));
+            Received received = engine.send(new Hop(request.profile(), method, uri, headers, body, hopTimeout, deadlineNanos, peerCheck));
             recheckAfterExchange(check, uri, received);
             int status = received.status();
             if (!(redirects instanceof RedirectPolicy.Follow follow) || !REDIRECT_CODES.contains(status)) {
@@ -383,6 +415,9 @@ public class OutboundHttp {
             // Prevents SSRF via 302 → internal.
             check = hopCheck(ssrf, request.hopValidator());
             validate(check, target);
+            // A caller's own hop validator decides what a hop may reach, at the address
+            // level too: the peer check follows the policy only when none was given.
+            peerCheck = request.hopValidator() != null ? null : ConnectedPeers.forPolicy(ssrf, true);
             // Both URIs come from the server (Location): sanitized so a crafted header
             // cannot forge log lines.
             LOGGER.debugf("Following redirect %d/%d: %s → %s", hops, follow.maxHops(), LogSanitizer.sanitize(withoutQuery(uri)),
@@ -775,6 +810,15 @@ public class OutboundHttp {
                 throw new IllegalStateException("TLS configuration '" + name + "' cannot create an SSL context", e);
             }
         };
+    }
+
+    private static VertxOutboundEngine.TlsOptions vertxTlsOptions(Instance<TlsConfigurationRegistry> registry) {
+        if (!registry.isResolvable()) {
+            return VertxOutboundEngine.TlsOptions.NONE;
+        }
+        return (options, name) -> TlsConfigUtils.configure(options, registry.get().get(name)
+                .orElseThrow(() -> new IllegalStateException("No TLS configuration named '" + name
+                        + "' (quarkus.tls." + name + ".*) for eddi.http.outbound.*.tls.configuration-name")));
     }
 
     private static UnaryOperator<String> secrets(Instance<SecretResolver> resolver) {
