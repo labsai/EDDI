@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.deploy;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MappingIterator;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -23,6 +26,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * their text: each one fails if the weaker construct comes back.
  */
 class DeploymentHardeningTest {
+
+    private static final YAMLMapper YAML = new YAMLMapper();
+
+    /**
+     * The NetworkPolicy called {@code name} among the documents of {@code file}.
+     */
+    private static JsonNode networkPolicy(String file, String name) throws IOException {
+        try (MappingIterator<JsonNode> documents = YAML.readerFor(JsonNode.class).readValues(read(file))) {
+            while (documents.hasNext()) {
+                JsonNode document = documents.next();
+                if ("NetworkPolicy".equals(document.path("kind").asText()) && name.equals(document.path("metadata").path("name").asText())) {
+                    return document;
+                }
+            }
+        }
+        throw new AssertionError("no NetworkPolicy " + name + " in " + file);
+    }
+
+    private static void assertIsolatesTheEddiPod(JsonNode policy, String where) {
+        JsonNode spec = policy.path("spec");
+        assertEquals("{\"app.kubernetes.io/name\":\"eddi\",\"app.kubernetes.io/component\":\"server\"}",
+                spec.path("podSelector").path("matchLabels").toString(), where + ": must select the EDDI server pod");
+        assertEquals("[\"Ingress\"]", spec.path("policyTypes").toString(), where + ": ingress only");
+        assertEquals(1, spec.path("ingress").size(), where + ": exactly one ingress rule");
+        JsonNode rule = spec.path("ingress").get(0);
+        assertEquals("[{\"podSelector\":{}}]", rule.path("from").toString(),
+                where + ": the only peer is a bare podSelector, i.e. the policy's own namespace");
+        assertEquals("[{\"protocol\":\"TCP\",\"port\":7070}]", rule.path("ports").toString(), where + ": TCP 7070 only");
+    }
 
     private static String read(String file) throws IOException {
         return Files.readString(Path.of(file), StandardCharsets.UTF_8).replace("\r\n", "\n");
@@ -44,17 +76,11 @@ class DeploymentHardeningTest {
         @Test
         @DisplayName("the unauthenticated base and quickstart isolate the EDDI pod to its own namespace")
         void eddiPodHasAnIngressPolicy() throws IOException {
-            String base = read("k8s/base/eddi-networkpolicy.yaml");
-            assertTrue(base.contains("kind: NetworkPolicy"));
-            assertTrue(base.contains("app.kubernetes.io/name: eddi"), "must select the EDDI pod");
-            assertTrue(base.contains("- podSelector: {}"), "same-namespace pods only, following kustomize's namespace");
-            assertFalse(base.contains("namespaceSelector: {}"), "an empty namespaceSelector admits every namespace");
+            assertIsolatesTheEddiPod(networkPolicy("k8s/base/eddi-networkpolicy.yaml", "eddi-ingress"), "k8s/base");
             assertTrue(read("k8s/base/kustomization.yaml").contains("- eddi-networkpolicy.yaml"));
 
             String quickstart = read("k8s/quickstart.yaml");
-            String policy = between(quickstart, "# --- EDDI NetworkPolicy ---", "# --- EDDI Service ---");
-            assertTrue(policy.contains("name: eddi-ingress"));
-            assertTrue(policy.contains("- podSelector: {}"));
+            assertIsolatesTheEddiPod(networkPolicy("k8s/quickstart.yaml", "eddi-ingress"), "k8s/quickstart.yaml");
             assertTrue(quickstart.contains("enforces NetworkPolicy"), "the quickstart must say the policy needs an enforcing CNI");
         }
 
@@ -82,16 +108,19 @@ class DeploymentHardeningTest {
         @DisplayName("the secret helpers print the vault key only to a terminal")
         void vaultKeyIsNotPrintedToAPipe() throws IOException {
             String sh = read("k8s/create-secrets.sh");
-            String box = between(sh, "# The key is printed only to a terminal.", "Next steps:");
-            int tty = box.indexOf("if [[ -t 1 ]]; then");
-            assertTrue(tty > 0, "the key box must be guarded by a terminal test");
-            assertTrue(box.indexOf("${VAULT_KEY}") > tty, "the key may only appear inside the terminal branch");
+            String box = between(sh, "# The key is printed only on request", "Next steps:");
+            int optIn = box.indexOf("if [[ \"$SHOW_KEY\" == \"true\" ]]; then");
+            assertTrue(optIn > 0, "the key box must be guarded by an explicit opt-in");
+            assertFalse(box.contains("[[ -t 1 ]]"), "a terminal test cannot tell a log from a screen (tee, script, ptys)");
+            assertTrue(box.indexOf("${VAULT_KEY}") > optIn, "the key may only appear inside the opt-in branch");
             assertTrue(box.contains("NOT printed"));
 
             String ps = read("k8s/create-secrets.ps1");
-            int redirected = ps.indexOf("[Console]::IsOutputRedirected -or -not [Environment]::UserInteractive");
-            assertTrue(redirected > 0, "the PowerShell twin needs the same guard");
-            assertTrue(ps.lastIndexOf("$VaultKey\"") > redirected, "the key may only be written after the guard");
+            assertTrue(ps.contains("[switch]$ShowKey"));
+            assertFalse(ps.contains("IsOutputRedirected"), "`*>` and `6>` leave that false while the key is logged");
+            int guard = ps.indexOf("if (-not $ShowKey) {");
+            assertTrue(guard > 0, "the PowerShell twin needs the same opt-in");
+            assertTrue(ps.lastIndexOf("$VaultKey\"") > guard, "the key may only be written in the opt-in branch");
         }
     }
 
@@ -121,6 +150,15 @@ class DeploymentHardeningTest {
             assertTrue(configmap.contains(
                     "{{- if and .Values.ingress.enabled .Values.eddi.oidc.enabled (not .Values.ingress.tls) (not .Values.ingress.allowPlainHttp) }}"));
             assertTrue(configmap.contains("over plain HTTP"));
+            // A non-empty string is truthy in a Go template: "false" must not switch the
+            // refusal off.
+            String strict = "{{- if and (not (kindIs \"invalid\" .Values.ingress.allowPlainHttp)) (not (kindIs \"bool\" .Values.ingress.allowPlainHttp)) }}";
+            int typeCheck = configmap.indexOf(strict);
+            assertTrue(typeCheck > 0, "allowPlainHttp must be rejected unless it is a real boolean");
+            assertTrue(typeCheck < configmap.indexOf("(not .Values.ingress.allowPlainHttp) }}"),
+                    "the type check must come before the guard it protects");
+            assertTrue(configmap.contains("eddi.security.ssrfProtection.enabled must be true, false or empty"),
+                    "a string such as \"no\" must not silently pick a side");
             assertTrue(read("helm/eddi/values.yaml").contains("allowPlainHttp: false"), "the acknowledgement defaults to off");
         }
     }
@@ -141,9 +179,19 @@ class DeploymentHardeningTest {
             assertTrue(verify > 0 && move > verify, "nothing is moved into place before every file passed");
             assertFalse(update.contains("mv -f \"$tmp_file\" \"$f\""), "the unverified in-place move is gone");
 
-            String assets = between(sh, "Refreshing monitoring assets...", "Pulling images...");
+            // Both groups are verified before either is replaced.
+            String assets = between(sh, "Fetching monitoring assets...", "Pulling images...");
             assertTrue(assets.contains("_verify_download \"$asset\" \"$tmp_asset\""));
-            assertTrue(assets.indexOf("_verify_download") < assets.indexOf("mv -f \"$tmp_asset\" \"$target\""));
+            int assetCheck = assets.indexOf("_verify_download \"$asset\"");
+            assertTrue(assetCheck > 0 && assetCheck < assets.indexOf("mv -f \"${s}.tmp\" \"$s\""),
+                    "compose files may only be replaced after the monitoring assets were verified too");
+            assertTrue(assets.indexOf("mv -f \"${s}.tmp\" \"$s\"") < assets.indexOf("_set_kv EDDI_VERSION"),
+                    "the recorded tag may only change after the files are in place");
+            assertTrue(assets.indexOf("mv -f \"${s}.tmp\" \"$s\"") < assets.indexOf("_set_kv EDDI_BRANCH \"$EDDI_BRANCH\""),
+                    "the recorded ref may only change after the files are in place");
+            String beforeFiles = sh.substring(sh.indexOf("  update)\n"), sh.indexOf("    # Same checks as a fresh install:"));
+            assertFalse(beforeFiles.contains("_set_kv EDDI_VERSION \"$NEW_VERSION\""), "persisted before verification");
+            assertFalse(beforeFiles.contains("_set_kv EDDI_BRANCH \"$EDDI_BRANCH\""), "persisted before verification");
         }
 
         @Test
@@ -155,6 +203,17 @@ class DeploymentHardeningTest {
             assertTrue(fallback.contains("_is_release_tag \"$EDDI_BRANCH\""));
             assertTrue(fallback.contains("exit 1"));
             assertTrue(fallback.indexOf("exit 1") < fallback.indexOf("EDDI_BRANCH=\"main\""), "the refusal comes before the fallback");
+        }
+
+        @Test
+        @DisplayName("a signed release is refused, not used unverified, when no SHA-256 utility exists")
+        void missingHashUtilityFailsClosedForSignedReleases() throws IOException {
+            String sh = read("install.sh");
+            String cli = between(sh, "_load_release_checksums() {", "local sums bundle");
+            assertTrue(cli.contains("if _release_is_signed \"$EDDI_BRANCH\"; then"));
+            assertTrue(cli.indexOf("exit 1") < cli.indexOf("downloaded files are not checksum-verified"));
+            String installer = between(sh, "if ! sha256_of /dev/null &>/dev/null; then", "local sums\n");
+            assertTrue(installer.contains("release_is_signed \"$EDDI_BRANCH\"") && installer.contains("fail \""));
         }
 
         @Test
@@ -173,12 +232,39 @@ class DeploymentHardeningTest {
             assertFalse(cmd.contains("curl -fsSL"), "the update path must not download with plain curl");
             assertTrue(cmd.contains("eddi-fetch.ps1"));
             assertTrue(cmd.contains("goto update_refused"));
+            // One call stages compose files and assets; the ref is recorded only after it
+            // succeeded.
+            assertTrue(cmd.contains("\"::assets::\""), "the assets must travel in the same call as the compose files");
+            assertFalse(cmd.contains("-Assets"), "a second helper call would replace the compose files before the assets pass");
+            assertTrue(cmd.indexOf("eddi-fetch.ps1\" -Ref") < cmd.indexOf("if defined PERSIST_REF ("),
+                    "the recorded ref may only change after the files are in place");
+            assertTrue(cmd.indexOf("set \"PERSIST_REF=1\"") < cmd.indexOf("if defined PERSIST_REF ("));
+            assertFalse(cmd.substring(0, cmd.indexOf("eddi-fetch.ps1\" -Ref")).contains("echo EDDI_BRANCH=!EDDI_BRANCH!"),
+                    ".eddi-config must not be rewritten before the fetch");
             assertTrue(cmd.contains("if defined PINNED ("), "a release-pinned install must not fall back to main");
             assertTrue(cmd.indexOf("if defined PINNED (") < cmd.indexOf("set \"EDDI_BRANCH=main\""));
 
             // The helper embeds the installer's own verification, so the two cannot drift.
             assertTrue(ps.contains("'Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum'"));
             assertTrue(ps.contains("$script:FirstSignedRelease = [version]\"6.6.0\""));
+
+            // The helper never removes a directory recursively, and only after
+            // verification.
+            String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
+            assertFalse(helper.contains("-Recurse"), "a directory at an asset path may hold content");
+            assertTrue(helper.indexOf("Remove-Item -LiteralPath $s[1] -Force") > helper.indexOf("if ($missing.Count -gt 0) { throw"),
+                    "an empty directory is removed only once every item passed");
+        }
+
+        @Test
+        @DisplayName("install.ps1 stops when chmod 600 fails on a POSIX filesystem")
+        void windowsInstallerChecksChmod() throws IOException {
+            String ps = read("install.ps1");
+            String protect = between(ps, "function Protect-SensitiveFile", "try {");
+            assertTrue(protect.contains("& chmod 600 $SecurePath 2>$null") && protect.contains("$LASTEXITCODE -ne 0"));
+            String initialise = between(ps, "function Initialize-SensitiveFile",
+                    "[System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())\n    Protect-SensitiveFile");
+            assertTrue(initialise.indexOf("chmod 600") < initialise.lastIndexOf("$LASTEXITCODE -ne 0"));
         }
 
         @Test
@@ -248,6 +334,40 @@ class DeploymentHardeningTest {
             assertTrue(block.indexOf("ACTUAL_SHA") < block.indexOf("bash \"\\${INSTALL_SH}\""));
             assertTrue(read(".github/workflows/ci.yml").contains("'docs/monitoring' 'install.sh'"),
                     "the release job must list install.sh in SHA256SUMS");
+        }
+
+        @Test
+        @DisplayName("the public nginx site goes live only after the Keycloak client was restricted")
+        void publicSiteWaitsForTheClientUpdate() throws IOException {
+            String sh = read("gcp/provision-vm.sh");
+            int enable = sh.indexOf("ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi\n    if !");
+            assertTrue(enable > 0, "the site must be enabled behind the KC_CLIENT_RESTRICTED check");
+            assertTrue(sh.indexOf("KC_CLIENT_RESTRICTED=true") < enable);
+            assertTrue(sh.indexOf("if [[ \"\\${KC_CLIENT_RESTRICTED}\" == \"true\" ]]; then") < enable);
+            assertFalse(
+                    sh.substring(0, sh.indexOf("KC_CLIENT_RESTRICTED=false"))
+                            .contains("ln -sf /etc/nginx/sites-available/eddi /etc/nginx/sites-enabled/eddi"),
+                    "nginx must not publish 443 before the client update");
+        }
+
+        @Test
+        @DisplayName("every health probe has a total timeout and the wait loops count wall-clock time")
+        void healthProbesAreBounded() throws IOException {
+            String sh = read("gcp/provision-vm.sh");
+            for (String line : sh.split("\n")) {
+                if (line.contains("curl -sf --connect-timeout")) {
+                    assertTrue(line.contains("--max-time"), "unbounded health probe: " + line.strip());
+                }
+            }
+            assertFalse(sh.contains("elapsed=$((elapsed + 10))"), "a slow probe would stretch the budget");
+            assertTrue(sh.contains("elapsed=$((SECONDS - started))"));
+        }
+
+        @Test
+        @DisplayName("print_success gives tunnel commands for an HTTPS setup that is not reachable")
+        void httpsBannerHasRecoveryGuidance() throws IOException {
+            String sh = read("gcp/provision-vm.sh");
+            assertTrue(sh.contains("If the HTTPS URLs do not answer"));
         }
 
         @Test

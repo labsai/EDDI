@@ -104,9 +104,10 @@ fi
 kubectl apply -k k8s/overlays/mongodb/
 ```
 
-The helper scripts print the generated vault master key only to a terminal. With
-stdout redirected (a CI job, a pipe) they withhold it, so it does not land in a log, and
-name the Secret instead; read it back from a terminal with
+The helper scripts do not print the generated vault master key unless asked
+(`--show-key` / `-ShowKey`): whether output is "redirected" cannot be told reliably
+(`tee`, `script`, `*>`, transcripts, CI ptys), so by default the key stays in the Secret
+and the scripts name it instead. Read it back from a terminal with
 `kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data.application-secrets\.properties}' | base64 -d`.
 
 PowerShell — **PowerShell 7 (`pwsh`)**, not the Windows PowerShell 5.1 that
@@ -776,7 +777,7 @@ helm install eddi ./helm/eddi \
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
 | `eddi.security.ssrfProtection.enabled` | `""` | `EDDI_SECURITY_SSRF_PROTECTION_ENABLED`. Empty follows the install: `true` when `eddi.oidc.enabled` or `ingress.enabled` is true, otherwise `false` (chart 2.15.0). Set `true`/`false` to override. With it on, an httpCall to an in-cluster Service is refused unless listed below |
-| `eddi.security.ssrfProtection.allowedHosts` | `["127.0.0.1:7070"]` | Internal `host` or `host:port` entries that stay reachable with protection on (a list or one comma-separated string). The default keeps the Platform Operator's calls to EDDI's own API; the cloud-metadata check still applies. [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `eddi.security.ssrfProtection.allowedHosts` | `["127.0.0.1:7070", "localhost:7070"]` | Internal `host` or `host:port` entries that stay reachable with protection on (a list or one comma-separated string), compared as exact host text. The default keeps the Platform Operator's calls to EDDI's own API (`127.0.0.1:7070`) and the shipped rule-based reference agent, whose httpCalls target `http://localhost:7070`; the cloud-metadata check still applies. [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `ingress.allowPlainHttp` | `false` | With `ingress.enabled` and `eddi.oidc.enabled` the chart refuses to render an Ingress with no `ingress.tls` entry, because bearer tokens, secret values and vault master keys would cross it in cleartext. `true` acknowledges that TLS is terminated in front of the Ingress (chart 2.15.0) |
 | `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %). `targetMemoryUtilizationPercentage` is `null` since chart 2.14.0: a JVM keeps the heap it grew to, so a memory target ratcheted the HPA up to `maxReplicas` |
 | `autoscaling.extraMetrics` / `autoscaling.behavior` | `[]` / `{}` | Further `autoscaling/v2` metrics and scaling behavior, as given. CPU is a weak signal for a node that mostly waits on LLMs; scale on in-flight turns instead — see [Clustering → Autoscaling](clustering.md#autoscaling). A target set to `null` drops that metric |

@@ -801,9 +801,11 @@ class DeploymentManifestsTest {
                             + "AlreadyExists is what makes the normal path safe. " + absent);
             // The run is captured, so stdout is not a terminal: the key is withheld (it
             // would land in a CI log) and the Secret that holds it is named instead.
-            assertFalse(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_SH + " printed the vault master key to a stdout that is not a terminal, "
-                            + "which is how it ended up in CI logs. " + absent);
+            assertTrue(absent.generatedKey().length() >= 16, "the stub did not capture the generated key. " + absent);
+            assertFalse(absent.output().contains(absent.generatedKey()),
+                    CREATE_SECRETS_SH + " printed the vault master key itself without being asked "
+                            + "(--show-key), which is how it ended up in CI logs. " + absent);
+            assertFalse(absent.output().contains("Save this key"), absent.toString());
             assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
                     CREATE_SECRETS_SH + " withheld the key without saying where it is: unprinted and "
                             + "unlocated, it is unrecoverable. " + absent);
@@ -815,6 +817,19 @@ class DeploymentManifestsTest {
          * still deletes. Run against a cluster that HAS a Secret, which is the only
          * situation rotation is for.
          */
+        @Test
+        @DisplayName("the generators print the key only when --show-key / -ShowKey asks for it")
+        void generatorsPrintTheKeyOnlyOnRequest() throws Exception {
+            GeneratorRun shell = runShellGeneratorShowingKey();
+            assertEquals(0, shell.exitCode(), shell.toString());
+            assertTrue(shell.generatedKey().length() >= 16 && shell.output().contains(shell.generatedKey()),
+                    CREATE_SECRETS_SH + " --show-key must print the key it installed. " + shell);
+            GeneratorRun powerShell = runPowerShellGeneratorShowingKey();
+            assertEquals(0, powerShell.exitCode(), powerShell.toString());
+            assertTrue(powerShell.generatedKey().length() >= 16 && powerShell.output().contains(powerShell.generatedKey()),
+                    CREATE_SECRETS_PS1 + " -ShowKey must print the key it installed. " + powerShell);
+        }
+
         @Test
         @DisplayName("create-secrets.sh deletes only on the explicit --force rotation")
         void shellGeneratorDeletesOnlyWhenForced() throws Exception {
@@ -882,8 +897,11 @@ class DeploymentManifestsTest {
                             + "belongs to -Force alone. " + absent);
             // The run is captured, so output is redirected: the key is withheld (it would
             // land in a log) and the Secret that holds it is named instead.
-            assertFalse(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_PS1 + " printed the vault master key to redirected output. " + absent);
+            assertTrue(absent.generatedKey().length() >= 16, "the stub did not capture the generated key. " + absent);
+            assertFalse(absent.output().contains(absent.generatedKey()),
+                    CREATE_SECRETS_PS1 + " printed the vault master key itself without being asked "
+                            + "(-ShowKey), which is how it ended up in logs. " + absent);
+            assertFalse(absent.output().contains("Save this key"), absent.toString());
             assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
                     CREATE_SECRETS_PS1 + " withheld the key without saying where it is. " + absent);
         }
@@ -5068,7 +5086,7 @@ class DeploymentManifestsTest {
      * the part no source-text assertion can reach — which kubectl calls it actually
      * made, in order.
      */
-    private record GeneratorRun(int exitCode, String output, List<String> kubectlCalls) {
+    private record GeneratorRun(int exitCode, String output, List<String> kubectlCalls, String generatedKey) {
 
         boolean issued(String call) {
             return kubectlCalls.stream().anyMatch(issued -> issued.startsWith(call));
@@ -5092,6 +5110,31 @@ class DeploymentManifestsTest {
 
     private static GeneratorRun runShellGenerator(String stubMode) throws IOException, InterruptedException {
         return runShellGenerator(stubMode, false);
+    }
+
+    /** The opt-in path: {@code --show-key} prints the key. */
+    private static GeneratorRun runShellGeneratorShowingKey() throws IOException, InterruptedException {
+        Path bash = locateBash();
+        assumeTrue(bash != null, "no non-WSL bash available to run " + CREATE_SECRETS_SH);
+        Path stubDirectory = kubectlStub("sh", false);
+        Path log = freshLog("sh-showkey");
+        String command = "cd \"" + slashed(stubDirectory) + "\" && chmod +x kubectl && "
+                + "PATH=\"$PWD:$PATH\" bash \"" + slashed(CREATE_SECRETS_SH.toAbsolutePath())
+                + "\" --auto --show-key --namespace=eddi-stub";
+        return execute(List.of(bash.toString(), "-c", command), log,
+                Map.of("KUBECTL_STUB_MODE", "notfound", "KUBECTL_LOG", slashed(log)));
+    }
+
+    private static GeneratorRun runPowerShellGeneratorShowingKey() throws IOException, InterruptedException {
+        Path pwsh = locateOnPath(WINDOWS ? "pwsh.exe" : "pwsh");
+        assumeTrue(pwsh != null, "no PowerShell 7 available to run " + CREATE_SECRETS_PS1);
+        Path stubDirectory = kubectlStub("pwsh", WINDOWS);
+        Path log = freshLog("pwsh-showkey");
+        List<String> command = List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-File",
+                CREATE_SECRETS_PS1.toAbsolutePath().toString(), "-Auto", "-ShowKey", "-Namespace", "eddi-stub");
+        return execute(command, log, Map.of("KUBECTL_STUB_MODE", "notfound",
+                "KUBECTL_LOG", log.toAbsolutePath().toString(),
+                "PATH", stubDirectory.toAbsolutePath() + File.pathSeparator + System.getenv("PATH")));
     }
 
     private static GeneratorRun runShellGenerator(String stubMode, boolean force)
@@ -5162,7 +5205,14 @@ class DeploymentManifestsTest {
         List<String> calls = Files.exists(log)
                 ? Files.readAllLines(log, StandardCharsets.UTF_8).stream().map(String::strip).toList()
                 : List.of();
-        return new GeneratorRun(process.exitValue(), output, calls);
+        // The kubectl stub copies the properties file handed to `create secret` beside
+        // the log, so the key the script generated is known to the test.
+        Path keyFile = Path.of(log.toAbsolutePath() + ".key");
+        String key = "";
+        if (Files.exists(keyFile)) {
+            key = Files.readString(keyFile, StandardCharsets.UTF_8).strip().replaceFirst("^eddi\\.vault\\.master-key=", "");
+        }
+        return new GeneratorRun(process.exitValue(), output, calls, key);
     }
 
     /**
@@ -5187,6 +5237,9 @@ class DeploymentManifestsTest {
             Files.writeString(directory.resolve("kubectl.cmd"), """
                     @echo off
                     >>"%KUBECTL_LOG%" echo %*
+                    echo %*| "%SystemRoot%\\System32\\find.exe" "create secret generic eddi-secrets" >nul
+                    if not errorlevel 1 for %%A in (%*) do set "LASTARG=%%~A"
+                    if defined LASTARG copy /y "%LASTARG%" "%KUBECTL_LOG%.key" >nul
                     echo %*| "%SystemRoot%\\System32\\find.exe" "get secret eddi-secrets" >nul
                     if errorlevel 1 goto ok
                     if "%KUBECTL_STUB_MODE%"=="exists" goto exists
@@ -5215,6 +5268,11 @@ class DeploymentManifestsTest {
                 #!/usr/bin/env bash
                 echo "$*" >> "$KUBECTL_LOG"
                 case "$*" in
+                  "create secret generic eddi-secrets"*)
+                    # the last argument is --from-file=application-secrets.properties=<path>
+                    last="${@: -1}"
+                    cp "${last#--from-file=application-secrets.properties=}" "$KUBECTL_LOG.key" 2>/dev/null
+                    ;;
                   "get secret eddi-secrets"*)
                     case "$KUBECTL_STUB_MODE" in
                       exists)

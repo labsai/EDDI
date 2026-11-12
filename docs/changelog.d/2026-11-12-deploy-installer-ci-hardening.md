@@ -68,6 +68,22 @@ moved `src/main/resources/application-test.properties` and `src/test/**` from th
 **Docs.** `.env.example` no longer claims the compose file supplies a demo vault key:
 an empty `EDDI_VAULT_MASTER_KEY` disables the vault, and the compose files say so.
 
+### Review follow-ups
+
+`eddi update` (bash and Windows) now stages the compose files **and** the monitoring
+assets, verifies both, and only then replaces anything; the recorded `EDDI_VERSION` and
+`EDDI_BRANCH` change after the files are in place, and a directory at an asset path is
+removed only when empty and only after verification. A signed release is refused when no
+SHA-256 utility exists (installer and CLI). `install.ps1` stops when `chmod 600` fails.
+The Helm chart rejects a non-boolean `ingress.allowPlainHttp` and an unrecognised
+`eddi.security.ssrfProtection.enabled` (a quoted "false" is truthy to a Go template); the
+SSRF allow-list default gains `localhost:7070` (exact host text; the reference agent's
+httpCalls use it). The secret generators print the key only with `--show-key` / `-ShowKey`
+(a TTY or `IsOutputRedirected` test cannot tell a log from a screen). On the GCP VM the
+public nginx site is enabled only after the Keycloak client update returned 204 (otherwise
+the setup stops with 443 closed and says how to retry), health probes have `--max-time`,
+and the HTTPS banner shows tunnel commands for a VM whose HTTPS is not up.
+
 ### Not changed
 
 `io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform

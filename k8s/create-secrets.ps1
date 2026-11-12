@@ -33,6 +33,7 @@
 #    pwsh -File .\k8s\create-secrets.ps1                 # interactive
 #    pwsh -File .\k8s\create-secrets.ps1 -Auto           # auto-generate
 #    pwsh -File .\k8s\create-secrets.ps1 -Key "my-key"   # use a specific key
+#    pwsh -File .\k8s\create-secrets.ps1 -Auto -ShowKey  # also print the generated key
 # ─────────────────────────────────────────────────────────────
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -41,6 +42,9 @@ param(
     # Replace an existing eddi-secrets. DESTROYS the current master key —
     # everything encrypted with it is then unrecoverable.
     [switch]$Force,
+    # Print the generated key. Off by default: it then lives only in the Secret, so it
+    # cannot reach a log through `*>`, `6>`, Start-Transcript or a CI runner.
+    [switch]$ShowKey,
     [string]$Key = "",
     [string]$Namespace = "eddi",
     [switch]$Help
@@ -56,6 +60,7 @@ if ($Help) {
     Write-Information -MessageData "Options:" -InformationAction Continue
     Write-Information -MessageData "  -Auto                  Auto-generate key, no prompts" -InformationAction Continue
     Write-Information -MessageData "  -Force                 Replace an existing eddi-secrets (DESTROYS the current key)" -InformationAction Continue
+    Write-Information -MessageData "  -ShowKey               Print the generated key (off by default: it stays in the Secret)" -InformationAction Continue
     Write-Information -MessageData "  -Key <key>             Use a specific vault key (min 16 chars)" -InformationAction Continue
     Write-Information -MessageData "  -Namespace <ns>        Kubernetes namespace (default: eddi)" -InformationAction Continue
     Write-Information -MessageData "" -InformationAction Continue
@@ -295,11 +300,13 @@ if (-not $secretInstalled) {
 }
 
 Write-Information -MessageData "" -InformationAction Continue
-# The key is printed only to an interactive console. Redirected output (a CI job, a
-# transcript, a log collector) would keep it in a log that more people can read than
-# should hold the vault master key, so it is withheld and the Secret is named instead.
-if ([Console]::IsOutputRedirected -or -not [Environment]::UserInteractive) {
-    Write-Information -MessageData "  Vault master key: NOT printed (output is redirected, so it would end up in a log)." -InformationAction Continue
+# The key is printed only on request (-ShowKey). Whether output is "redirected" cannot
+# be told reliably from inside the process: `*> file` and `6>` capture the information
+# stream while the console handle still looks interactive, and a transcript or a CI
+# runner keeps whatever is written. By default the key lives in the Secret only, and
+# the Secret is named instead.
+if (-not $ShowKey) {
+    Write-Information -MessageData "  Vault master key: NOT printed (pass -ShowKey to print it, e.g. at a terminal that keeps no log)." -InformationAction Continue
     Write-Information -MessageData "  It is stored in Secret eddi-secrets in namespace $Namespace, key application-secrets.properties." -InformationAction Continue
     Write-Information -MessageData "  Back it up from a terminal:" -InformationAction Continue
     Write-Information -MessageData "    kubectl get secret eddi-secrets -n $Namespace -o jsonpath='{.data.application-secrets\.properties}' | base64 -d" -InformationAction Continue
