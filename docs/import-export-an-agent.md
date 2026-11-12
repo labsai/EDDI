@@ -555,6 +555,15 @@ what the rollback writes back. If the read fails, the merge stops there — befo
 that resource — and fails with `500` naming it, and everything it had already written is
 rolled back as above. Retry once the store is readable again.
 
+A store can also **refuse** an update: a dictionary whose regular expression does not compile,
+or httpcalls whose batch settings exceed this deployment's ceiling, is answered `400` with the
+reason. The merge then fails with that same status and body, rolled back as above, and the
+refused resource keeps its current version. It never creates a second copy instead: the import
+used to do that, storing the refused document unchecked next to the original, with the same
+origin, and pointing the workflow at it. The resource the store refused is named in a `WARN`
+line in the server log. A prompt snippet is the exception, as for every snippet failure: a
+refused snippet update costs that snippet, logged at `WARN`, and the agent is still imported.
+
 ### Archive limits
 
 An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,

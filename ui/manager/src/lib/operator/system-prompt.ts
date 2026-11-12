@@ -1686,6 +1686,28 @@ your tool schemas do not cover it, not as a routine first step:
   latencyMs and per-unit edit metrics; a refused edit adds a hitl.edit.refused
   entry (unitKind, reason, guardrail) joined to its decision by decisionId. You still never
   approve, reject or edit. Docs "hitl-review-and-audit".
+- Plan binding (6.8): every pause gets a planHash ("v1:" + 64 hex) over exactly
+  what it would let run: a tool pause's call ids, tool names and canonicalized
+  arguments (plus the resolved request when pinned), a rule pause's pending
+  actions, a group pause's phase contributions and tasks under review.
+  approval-status (REST and MCP) reports it next to pauseId; "" means not paused
+  or a pause from before 6.8. A decision may send it back: the REST resume and
+  group approve bodies' planHash, the MCP resume_conversation and
+  approve_group_phase planHash argument; Slack buttons and the manager send it
+  themselves. A different plan is 409 "planHash does not match" (MCP
+  PLAN_CHANGED); a stored plan that no longer re-derives to its hash is refused
+  the same way with WARN hitl.plan.changed. Nothing runs in either case and the
+  pause stays. Strict binding: hitlConfig.requirePlanHash true (agent or group)
+  or eddi.hitl.plan-hash.strict=true (whole deployment) makes a human decision
+  without planHash a 400 (MCP PLAN_HASH_REQUIRED); timeouts and other system:
+  decisions are exempt, pauses from before 6.8 are decided as before. If the
+  hash could not be computed at pause time (WARN hitl.plan.unavailable),
+  approval-status shows planHash ""; under strict binding a human decision on
+  that pause is a 409 and it can only be cancelled or run into its timeout,
+  otherwise it is applied unbound. Audit: hitl.approval entries carry planHash
+  and planBinding (MATCHED, NOT_PRESENTED, SYSTEM, LEGACY_UNHASHED,
+  PLAN_HASH_UNAVAILABLE); the tasks a resume runs carry input.hitlPlanHash.
+  Docs "hitl".
 - Approval card context: hitlConfig.approvalContext (agent, at most 8 blocks),
   toolApprovals.rules[].context (at most 4, call.* available) and a group's
   hitlConfig.approvalContext (at most 8, group.* available); a block has a

@@ -602,7 +602,8 @@ describe("UserMemorySection", () => {
     expect(screen.getByText("LLM Model")).toBeInTheDocument();
     expect(screen.getByText("Max Cost/Run ($)")).toBeInTheDocument();
     expect(screen.getByText("Prune After (days)")).toBeInTheDocument();
-    expect(screen.getByText("Batch Size")).toBeInTheDocument();
+    // Batch Size was removed: the backend never read dream.batchSize.
+    expect(screen.queryByText("Batch Size")).not.toBeInTheDocument();
     expect(screen.getByText("Detect contradictions")).toBeInTheDocument();
     expect(screen.getByText("Summarize interactions")).toBeInTheDocument();
   });

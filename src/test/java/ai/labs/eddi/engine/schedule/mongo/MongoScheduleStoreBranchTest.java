@@ -26,7 +26,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -179,7 +181,7 @@ class MongoScheduleStoreBranchTest {
                 .find(any(Bson.class));
 
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> store.findDueSchedules(Instant.now(), Instant.now(), 3));
+                () -> store.findDueSchedules(Instant.now(), Duration.ZERO, 3));
     }
 
     // ==================== tryClaim error path ====================
@@ -188,21 +190,87 @@ class MongoScheduleStoreBranchTest {
     @DisplayName("tryClaim wraps exception in ResourceStoreException")
     void tryClaimException() throws Exception {
         doThrow(new RuntimeException("db error")).when(scheduleCollection)
-                .findOneAndUpdate(any(Bson.class), any(Bson.class));
+                .findOneAndUpdate(any(Bson.class), anyList());
 
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300)));
+                () -> store.tryClaim("s1", "inst1", Instant.now(), Duration.ofMinutes(5)));
     }
 
     @Test
     @DisplayName("tryClaim re-checks enabled: a schedule disabled after the poll's read cannot be claimed")
     void tryClaimRequiresEnabled() throws Exception {
-        store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300));
+        store.tryClaim("s1", "inst1", Instant.now(), Duration.ofMinutes(5));
+
+        String rendered = renderedClaimFilter();
+        assertTrue(rendered.contains("\"enabled\": true"), "the claim filter must require enabled=true: " + rendered);
+    }
+
+    /**
+     * A poll batch is read once and claimed row by row; a row another instance
+     * claimed, fired and re-armed in between is PENDING again with a future
+     * nextFire, and a claim on state alone fired it a second time.
+     */
+    @Test
+    @DisplayName("tryClaim re-checks due-ness: a schedule re-armed after the poll's read cannot be claimed")
+    void tryClaimRequiresTheScheduleToStillBeDue() throws Exception {
+        Instant now = Instant.parse("2030-01-01T00:00:00Z");
+        store.tryClaim("s1", "inst1", now, Duration.ofMinutes(5));
+
+        String rendered = renderedClaimFilter();
+        assertTrue(rendered.contains("\"nextFire\": {\"$lte\": " + now.toEpochMilli() + "}"),
+                "the poller's claim must require nextFire <= now: " + rendered);
+    }
+
+    @Test
+    @DisplayName("tryClaimAnyTime has no due check: Fire now may fire before the next fire time")
+    void tryClaimAnyTimeHasNoDueCheck() throws Exception {
+        store.tryClaimAnyTime("s1", "inst1", Instant.now(), Duration.ofMinutes(5));
+
+        String rendered = renderedClaimFilter();
+        assertFalse(rendered.contains("nextFire"), "a manual fire's claim must not depend on nextFire: " + rendered);
+        assertTrue(rendered.contains("\"enabled\": true"), "every other claim condition still applies: " + rendered);
+    }
+
+    /**
+     * claimedAt is written by one instance and compared by another; on the
+     * claimers' own clocks, an instance running fast stole a live claim. Both the
+     * write and the expiry test must use the database's clock.
+     */
+    @Test
+    @DisplayName("tryClaim writes claimedAt and judges the lease on the database's clock")
+    void tryClaimUsesTheDatabaseClockForTheLease() throws Exception {
+        store.tryClaim("s1", "inst1", Instant.now(), Duration.ofMinutes(10));
+
+        String filter = renderedClaimFilter();
+        assertTrue(filter.contains("\"$$NOW\"") && filter.contains(String.valueOf(Duration.ofMinutes(10).toMillis())),
+                "the lease must be measured against the database's clock: " + filter);
+        assertFalse(filter.contains("\"claimedAt\": {\"$lte\""), "no lease bound computed on this instance's clock: " + filter);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Bson>> update = ArgumentCaptor.forClass(List.class);
+        verify(scheduleCollection).findOneAndUpdate(any(Bson.class), update.capture());
+        String set = update.getValue().getFirst().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(set.contains("\"claimedAt\": {\"$toLong\": \"$$NOW\"}"), "claimedAt must come from the database's clock: " + set);
+    }
+
+    @Test
+    @DisplayName("findDueSchedules judges an expired lease on the database's clock")
+    void findDueSchedulesUsesTheDatabaseClockForTheLease() throws Exception {
+        doThrow(new RuntimeException("stop once the filter is built")).when(scheduleCollection).find(any(Bson.class));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.findDueSchedules(Instant.now(), Duration.ofMinutes(10), 3));
 
         ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
-        verify(scheduleCollection).findOneAndUpdate(filter.capture(), any(Bson.class));
+        verify(scheduleCollection).find(filter.capture());
         String rendered = filter.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
-        assertTrue(rendered.contains("\"enabled\": true"), "the claim filter must require enabled=true: " + rendered);
+        assertTrue(rendered.contains("\"$$NOW\""), "the lease must be measured against the database's clock: " + rendered);
+        assertFalse(rendered.contains("\"claimedAt\": {\"$lte\""), "no lease bound computed on this instance's clock: " + rendered);
+    }
+
+    private String renderedClaimFilter() {
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).findOneAndUpdate(filter.capture(), anyList());
+        return filter.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
     }
 
     // ==================== markCompleted error path ====================

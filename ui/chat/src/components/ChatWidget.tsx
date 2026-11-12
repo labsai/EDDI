@@ -6,10 +6,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
-import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
 import { t } from "@/i18n";
+import { useChatRoute } from "@/location";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
@@ -345,8 +345,11 @@ export function ChatWidget() {
   const state = useChatState();
   const dispatch = useChatDispatch();
 
-  const { environment, agentId, userId: userIdParam, intent } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    params: { environment, agentId, userId: userIdParam, intent },
+    searchParams,
+    replaceSearch,
+  } = useChatRoute();
   /**
    * `?token=` is read ONCE and then removed from the address bar. Left there,
    * a bearer token sat in the visible URL, the history entry, and anything the
@@ -375,15 +378,10 @@ export function ChatWidget() {
   }, [tokenReady]);
   useEffect(() => {
     if (!searchParams.has("token")) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("token");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, setSearchParams]);
+    const next = new URLSearchParams(searchParams);
+    next.delete("token");
+    replaceSearch(next);
+  }, [searchParams, replaceSearch]);
 
   const userId =
     userIdParam ?? searchParams.get("userId") ?? undefined;

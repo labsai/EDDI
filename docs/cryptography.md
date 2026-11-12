@@ -40,6 +40,7 @@ Two attacks follow from that:
 | Slack request verification | `HmacSHA256` (scheme defined by Slack) | `integrations/slack/SlackSignatureVerifier` | ✅ |
 | Inbound mail sender authentication: DKIM signature **verification** only (EDDI never signs mail) | RSA-SHA256 (`Signature` `SHA256withRSA`, keys from `KeyFactory` `RSA`, at least 1024 bits; `rsa-sha1` refused) and **Ed25519** (RFC 8463), body hash `SHA-256` | `engine/mail/DkimVerifier` | ❌ Classical signature, chosen by the sending domain rather than by EDDI |
 | Content hashes, cache keys, idempotency and dedup keys | `SHA-256` | `MessageDigest` call sites across the codebase | ✅ Not used for secrecy |
+| HITL plan binding — the `planHash` a decision must match (integrity of what an approval lets run, not secrecy) | `SHA-256` over a canonical JSON document; a tool-call plan includes a 128-bit per-pause nonce from `SecureRandom`, never served, so the published hash is no guessing oracle over the raw arguments | `engine/hitl/HitlPlanHash` | ✅ |
 | NATS client TLS context | `SSLContext` `TLS` with the JDK's default trust and key managers | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
 | OIDC / JWT verification | RS256, ES256 and similar, as chosen by the issuer (for example Keycloak) | `quarkus-oidc` configuration | ❌ Classical signature, decided by the identity provider rather than by EDDI |
 | Inbound TLS (HTTP server) | JDK JSSE through Vert.x | `quarkus.http.ssl*` configuration, or a reverse proxy | ❌ Classical key exchange |

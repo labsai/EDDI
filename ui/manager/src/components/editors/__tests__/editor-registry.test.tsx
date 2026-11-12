@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
-import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
+import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
+import { getResourceSlugForStep } from "@/lib/api/extensions";
 import { RulesEditor } from "@/components/editors/rules-editor";
 import { ApiCallsEditor } from "@/components/editors/apicalls-editor";
 import { LlmEditor } from "@/components/editors/llm-editor";
@@ -75,28 +76,73 @@ describe("editor-registry", () => {
     });
   });
 
-  describe("EXTENSION_TO_SLUG", () => {
-    it("maps every workflow-step resource type's own extension back to its slug", () => {
-      for (const rt of RESOURCE_TYPES) {
-        expect(EXTENSION_TO_SLUG[`eddi://${rt.extension}`]).toBe(rt.slug);
-      }
+  describe("getResourceSlugForStep — every step type the backend registers opens an editor", () => {
+    /*
+     * The step types the backend's bootstrap modules put into the
+     * @LifecycleExtensions map (modules/<area>/bootstrap/*Module), each with a
+     * config URI in the store its task reads, and the editor slug it must open.
+     * Aliases are listed separately because workflows carry either spelling:
+     * ApiCallsTask.ID is "ai.labs.httpcalls" (apicalls is the alias),
+     * RulesEvaluationTask.ID is "ai.labs.behavior" (rules is the alias), and
+     * LlmModule still registers "ai.labs.langchain".
+     */
+    const STORE_BACKED: Array<[string, string, string]> = [
+      ["eddi://ai.labs.httpcalls", "eddi://ai.labs.apicalls/apicallstore/apicalls/a1?version=1", "apicalls"],
+      ["eddi://ai.labs.apicalls", "eddi://ai.labs.apicalls/apicallstore/apicalls/a1?version=1", "apicalls"],
+      ["eddi://ai.labs.behavior", "eddi://ai.labs.behavior/rulestore/rulesets/r1?version=1", "rules"],
+      ["eddi://ai.labs.rules", "eddi://ai.labs.rules/rulestore/rulesets/r1?version=1", "rules"],
+      ["eddi://ai.labs.llm", "eddi://ai.labs.llm/llmstore/llms/l1?version=1", "llm"],
+      ["eddi://ai.labs.langchain", "eddi://ai.labs.langchain/llmstore/llms/l1?version=1", "llm"],
+      ["eddi://ai.labs.property", "eddi://ai.labs.property/propertysetterstore/propertysetters/p1?version=1", "propertysetter"],
+      ["eddi://ai.labs.output", "eddi://ai.labs.output/outputstore/outputsets/o1?version=1", "output"],
+      ["eddi://ai.labs.mcpcalls", "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/m1?version=1", "mcpcalls"],
+      ["eddi://ai.labs.rag", "eddi://ai.labs.rag/ragstore/rags/g1?version=1", "rag"],
+      ["eddi://ai.labs.parser", "eddi://ai.labs.parser/parserstore/parsers/s1?version=1", "parser"],
+    ];
+
+    it.each(STORE_BACKED)("%s with a config URI opens the %s editor", (type, uri, slug) => {
+      expect(getResourceSlugForStep({ type, config: { uri } })).toBe(slug);
+      expect(EDITOR_MAP).toHaveProperty(slug);
     });
 
-    it("only ever resolves to a slug that has an editor", () => {
-      for (const slug of Object.values(EXTENSION_TO_SLUG)) {
-        expect(EDITOR_MAP).toHaveProperty(slug);
+    it("decides by the URI's store, whichever spelling the step type has", () => {
+      // An httpcalls step pointing at apicallstore, under a URI host that
+      // names the alias — the store is the truth.
+      expect(
+        getResourceSlugForStep({
+          type: "eddi://ai.labs.httpcalls",
+          config: { uri: "eddi://ai.labs.apicalls/apicallstore/apicalls/6aed18496ddb7a7697be8?version=4" },
+        }),
+      ).toBe("apicalls");
+      // An old-style type name whose URI points at the output store.
+      expect(
+        getResourceSlugForStep({
+          type: "eddi://ai.labs.output.template",
+          config: { uri: "eddi://ai.labs.output/outputstore/outputsets/o1?version=1" },
+        }),
+      ).toBe("output");
+    });
+
+    it("falls back to the step type when the URI has no store segment", () => {
+      expect(
+        getResourceSlugForStep({ type: "eddi://ai.labs.httpcalls", config: { uri: "eddi://ai.labs.httpcalls/a1?version=1" } }),
+      ).toBe("apicalls");
+      expect(getResourceSlugForStep({ type: "ai.labs.langchain", config: { uri: "a1" } })).toBe("llm");
+    });
+
+    it("resolves every store in RESOURCE_TYPES to its own slug", () => {
+      for (const rt of RESOURCE_TYPES) {
+        const uri = `eddi://${rt.extension}/${rt.store}/${rt.plural}/x1?version=1`;
+        expect(getResourceSlugForStep({ type: "eddi://ai.labs.whatever", config: { uri } })).toBe(rt.slug);
       }
     });
 
     it.each([
-      ["eddi://ai.labs.behavior", "rules"],
-      ["eddi://ai.labs.output.template", "output"],
-    ])("maps the alias %s to %s", (extension, slug) => {
-      expect(EXTENSION_TO_SLUG[extension]).toBe(slug);
-    });
-
-    it("returns undefined for unknown types", () => {
-      expect(EXTENSION_TO_SLUG["eddi://ai.labs.unknown"]).toBeUndefined();
+      ["templating (inline, no resource)", { type: "eddi://ai.labs.templating", config: {} }],
+      ["a parser with an embedded config", { type: "eddi://ai.labs.parser", config: { appendExpressions: true } }],
+      ["an unknown type and store", { type: "eddi://ai.labs.unknown", config: { uri: "eddi://ai.labs.unknown/unknownstore/items/i1" } }],
+    ])("has no editor slug for %s", (_name, step) => {
+      expect(getResourceSlugForStep(step)).toBeUndefined();
     });
   });
 });
