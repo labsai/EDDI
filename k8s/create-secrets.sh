@@ -236,14 +236,26 @@ echo -e "${GREEN}✅${RESET}"
 # was printed for a Secret that was never made. If a dry-run mode is ever added
 # here, gate this block on the create having happened.
 echo ""
-echo -e "  ${YELLOW}┌─ 🔑 Vault Master Key ──────────────────────────────┐${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${BOLD}${VAULT_KEY}${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${DIM}⚠️  Save this key! If lost, encrypted secrets${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${DIM}   (API keys) are UNRECOVERABLE.${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
+# The key is printed only to a terminal. With stdout redirected (a CI job, a pipe,
+# a log collector) it would land in a log that more people can read than should
+# hold the vault master key, so it is withheld and the Secret is named instead —
+# the same rule install.sh applies to its generated passwords.
+if [[ -t 1 ]]; then
+  echo -e "  ${YELLOW}┌─ 🔑 Vault Master Key ──────────────────────────────┐${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${BOLD}${VAULT_KEY}${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${DIM}⚠️  Save this key! If lost, encrypted secrets${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${DIM}   (API keys) are UNRECOVERABLE.${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
+else
+  echo "  Vault master key: NOT printed (stdout is not a terminal, so it would end up in a log)."
+  echo "  It is stored in Secret eddi-secrets in namespace ${NAMESPACE}, key application-secrets.properties."
+  echo "  Back it up from a terminal:"
+  echo "    kubectl get secret eddi-secrets -n ${NAMESPACE} -o jsonpath='{.data.application-secrets\.properties}' | base64 -d"
+  echo "  If lost, encrypted secrets (API keys) are UNRECOVERABLE."
+fi
 echo ""
 echo -e "  Secret created in namespace: ${CYAN}${NAMESPACE}${RESET}"
 echo ""

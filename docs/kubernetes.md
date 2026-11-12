@@ -104,6 +104,11 @@ fi
 kubectl apply -k k8s/overlays/mongodb/
 ```
 
+The helper scripts print the generated vault master key only to a terminal. With
+stdout redirected (a CI job, a pipe) they withhold it, so it does not land in a log, and
+name the Secret instead; read it back from a terminal with
+`kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data.application-secrets\.properties}' | base64 -d`.
+
 PowerShell — **PowerShell 7 (`pwsh`)**, not the Windows PowerShell 5.1 that
 `powershell.exe` starts. The script declares `#Requires -Version 7` and refuses
 to run under 5.1, whose .NET Framework has no `RandomNumberGenerator.Fill` to

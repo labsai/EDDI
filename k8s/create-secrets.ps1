@@ -295,14 +295,26 @@ if (-not $secretInstalled) {
 }
 
 Write-Information -MessageData "" -InformationAction Continue
-Write-Information -MessageData "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐" -InformationAction Continue
-Write-Information -MessageData "  │                                                    │" -InformationAction Continue
-Write-Information -MessageData "  │  $VaultKey" -InformationAction Continue
-Write-Information -MessageData "  │                                                    │" -InformationAction Continue
-Write-Information -MessageData "  │  ⚠️  Save this key! If lost, encrypted secrets     │" -InformationAction Continue
-Write-Information -MessageData "  │     (API keys) are UNRECOVERABLE.                  │" -InformationAction Continue
-Write-Information -MessageData "  │                                                    │" -InformationAction Continue
-Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
+# The key is printed only to an interactive console. Redirected output (a CI job, a
+# transcript, a log collector) would keep it in a log that more people can read than
+# should hold the vault master key, so it is withheld and the Secret is named instead.
+if ([Console]::IsOutputRedirected -or -not [Environment]::UserInteractive) {
+    Write-Information -MessageData "  Vault master key: NOT printed (output is redirected, so it would end up in a log)." -InformationAction Continue
+    Write-Information -MessageData "  It is stored in Secret eddi-secrets in namespace $Namespace, key application-secrets.properties." -InformationAction Continue
+    Write-Information -MessageData "  Back it up from a terminal:" -InformationAction Continue
+    Write-Information -MessageData "    kubectl get secret eddi-secrets -n $Namespace -o jsonpath='{.data.application-secrets\.properties}' | base64 -d" -InformationAction Continue
+    Write-Information -MessageData "  If lost, encrypted secrets (API keys) are UNRECOVERABLE." -InformationAction Continue
+}
+else {
+    Write-Information -MessageData "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐" -InformationAction Continue
+    Write-Information -MessageData "  │                                                    │" -InformationAction Continue
+    Write-Information -MessageData "  │  $VaultKey" -InformationAction Continue
+    Write-Information -MessageData "  │                                                    │" -InformationAction Continue
+    Write-Information -MessageData "  │  ⚠️  Save this key! If lost, encrypted secrets     │" -InformationAction Continue
+    Write-Information -MessageData "  │     (API keys) are UNRECOVERABLE.                  │" -InformationAction Continue
+    Write-Information -MessageData "  │                                                    │" -InformationAction Continue
+    Write-Information -MessageData "  └────────────────────────────────────────────────────┘" -InformationAction Continue
+}
 Write-Information -MessageData "" -InformationAction Continue
 Write-Information -MessageData "  Secret created in namespace: $Namespace" -InformationAction Continue
 Write-Information -MessageData "" -InformationAction Continue
