@@ -129,7 +129,16 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   the engine's own (`system`, with the member as its target). The rework note (*"Returned for
   rework (1/2): <subject> — the verifier's feedback is on the task"*) no longer quotes the
   verifier: every member is shown it as the engine's, and the feedback reaches the reworking member
-  through the task, whose note the records trace to the verifier's entry.
+  through the task, whose note the records trace to the verifier's entry. The rework and
+  task-failure notes name the task's subject as the group's records count it
+  (`TaskForceEngine.noteSubject`, via `GroupSigningGuard.recordedTask`): once a reader verifies, a
+  subject from a plan or task tool that does not verify for every reader is
+  `[withheld: this text could not be verified]` in the stored note, since a verifying member is
+  shown the note as the engine's text; a group nobody in which verifies gets the subject as
+  before. `recordTaskFailure` takes the group configuration for that (the old signature passes
+  none, which counts as a verifying reader). A verifying facilitator's briefing no longer quotes
+  the latest convergence note: it is recorded under the engine's name, but its text is the
+  judge's reply, written from what the judge was shown.
 - **Deleted facilitators.** A `FACILITATION` note under an agent id counts as an agent's
   (`GroupSigningGuard.writtenAsAnAgent`), so a facilitator that was never a member, and runs its
   turns under a key of its own, keeps its unsigned notes withheld after it is deleted. That was the
@@ -217,8 +226,8 @@ makes, which cannot sign.
 
 ### Not done
 
-- Engine notes still quote a few short pieces of agent text (a task subject, the convergence
-  check's reason). Listed in the docs.
+- The note that a HUMAN-assigned task is not reworked (`GroupHumanTasks.withoutHumanAssignees`)
+  still quotes the task's subject as stored. Listed in the docs.
 - The cadence question quotes the pulled tasks under the user's name, and `onDecision` handoffs
   and inbox items a person accepted name no agent; documented, with `REVIEW` intake recommended.
 - A key revoked between a cadence pull and the task's turn still fails that task once (and charges

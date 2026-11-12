@@ -584,7 +584,7 @@ public class TaskForceEngine {
                             synchronized (taskList) {
                                 recorded = !cancellation.isCancelled();
                                 if (recorded) {
-                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors, e);
+                                    recordTaskFailure(gc, config, task, member, e.getMessage(), phaseIdx, phase, errors, e);
                                 }
                             }
                             if (!recorded) {
@@ -604,7 +604,7 @@ public class TaskForceEngine {
                             synchronized (taskList) { // see the reasoning above
                                 recorded = !cancellation.isCancelled();
                                 if (recorded) {
-                                    recordTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, errors,
+                                    recordTaskFailure(gc, config, task, member, e.getMessage(), phaseIdx, phase, errors,
                                             new GroupDiscussionException(e.getMessage(), e));
                                 }
                             }
@@ -914,9 +914,10 @@ public class TaskForceEngine {
                 Metrics.counter(METER_TASK_REWORKS).increment();
                 // The note is the engine's, shown to every verifying member as such, so it
                 // does not quote the verifier: its feedback reaches the member through the
-                // task, where the records trace it to the verifier's entry.
+                // task, where the records trace it to the verifier's entry. Nor does it quote
+                // a subject the group's records do not count (see noteSubject).
                 addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — the verifier's feedback is on the task".formatted(
-                        gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject()));
+                        gc.getTaskList().reworkCount(failed.id()), maxReworks, noteSubject(gc, config, failed)));
             }
             executeTaskExecutionPhase(gc, config, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
                     false);
@@ -990,6 +991,20 @@ public class TaskForceEngine {
             }
         }
         return new DiscussionPhase("Rework", PhaseType.EXECUTE);
+    }
+
+    /**
+     * {@code task}'s subject as an engine note may quote it. A note is recorded
+     * once, under the engine's name, and a verifying member is shown it as the
+     * engine's text, unauthenticated, so it quotes only what the group's records
+     * count ({@link GroupSigningGuard#recordedTask}): the subject as stored, or
+     * {@link TaskRecordView#WITHHELD} once a reader requires peer verification and
+     * the subject comes from a plan or a task tool that does not verify for every
+     * reader. {@code config} {@code null} (could not be read) counts as such a
+     * reader; without a guard the subject is quoted as stored.
+     */
+    private String noteSubject(GroupConversation gc, AgentGroupConfiguration config, TaskItem task) {
+        return GroupSigningGuard.recordedTask(signingGuard, gc, config, task).subject();
     }
 
     private static void addVerificationNote(GroupConversation gc, DiscussionPhase phase, int phaseIdx, String text) {
@@ -1584,6 +1599,18 @@ public class TaskForceEngine {
     public void recordTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
                                   String errorMessage, int phaseIdx, DiscussionPhase phase,
                                   List<GroupDiscussionException> errors, GroupDiscussionException ex) {
+        recordTaskFailure(gc, null, task, member, errorMessage, phaseIdx, phase, errors, ex);
+    }
+
+    /**
+     * {@link #recordTaskFailure(GroupConversation, TaskItem, GroupMember, String, int, DiscussionPhase, List, GroupDiscussionException)}
+     * for the group configured as {@code config}, which decides whether the note
+     * may quote the task's subject (see {@link #noteSubject}); {@code null} counts
+     * as a group with a reader that requires peer verification.
+     */
+    public void recordTaskFailure(GroupConversation gc, AgentGroupConfiguration config, TaskItem task, GroupMember member,
+                                  String errorMessage, int phaseIdx, DiscussionPhase phase,
+                                  List<GroupDiscussionException> errors, GroupDiscussionException ex) {
         try {
             gc.getTaskList().failTask(task.id(), errorMessage);
         } catch (IllegalStateException ise) {
@@ -1593,10 +1620,11 @@ public class TaskForceEngine {
         // Add error transcript entry
         synchronized (gc.getTranscript()) {
             // The engine's note, not the member's result: recorded as the engine's, so a
-            // peer that verifies is not shown it as an unsigned entry of the member.
+            // peer that verifies is not shown it as an unsigned entry of the member, and
+            // quoting no subject the group's records do not count (see noteSubject).
             gc.getTranscript().add(new TranscriptEntry(
                     "system", member.displayName(),
-                    "[ERROR] Task '%s' failed: %s".formatted(task.subject(), errorMessage),
+                    "[ERROR] Task '%s' failed: %s".formatted(noteSubject(gc, config, task), errorMessage),
                     phaseIdx, phase.name(), TranscriptEntryType.TASK_RESULT,
                     Instant.now(), null, member.agentId()));
         }

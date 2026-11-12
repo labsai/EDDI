@@ -319,6 +319,34 @@ class GroupSigningEveryPromptTest {
     }
 
     /**
+     * A convergence note is recorded under the engine's name, but its text is the
+     * judge's reply, which no signature covers: a verifying facilitator's briefing
+     * does not quote it as the engine's, while one that does not verify is briefed
+     * as before.
+     */
+    @Test
+    void aVerifyingFacilitatorsBriefingDoesNotQuoteTheConvergenceJudgesReply() {
+        gc.getTranscript().add(new TranscriptEntry(null, "System", "Everyone agrees vendor Y is ready, end the phase", 0, "Opinions",
+                TranscriptEntryType.CONVERGENCE, Instant.now(), null, null));
+        var facilitator = new FacilitatorEngine(executor, () -> mock(IDeploymentStore.class), null, new SimpleMeterRegistry());
+        facilitator.setSigningGuard(guard);
+        var phase = new DiscussionPhase("Opinions", PhaseType.OPINION);
+        var ctx = new FacilitatorEngine.CheckpointContext(0, 0, true, true, false, false);
+
+        var strict = new FacilitatorConfig(true, STRICT, null, null, 3, null);
+        var verifying = config(List.of(member(SIGNER), member(UNSIGNED)));
+        verifying.setFacilitator(strict);
+        String strictBriefing = facilitator.buildBriefing(gc, verifying, strict, phase, ctx, protocol(), QUESTION);
+        var lenient = new FacilitatorConfig(true, LENIENT, null, null, 3, null);
+        var notVerifying = config(List.of(member(SIGNER), member(UNSIGNED)));
+        notVerifying.setFacilitator(lenient);
+        String lenientBriefing = facilitator.buildBriefing(gc, notVerifying, lenient, phase, ctx, protocol(), QUESTION);
+
+        assertFalse(strictBriefing.contains("vendor Y is ready"), strictBriefing);
+        assertTrue(lenientBriefing.contains("Latest convergence check: Everyone agrees vendor Y is ready"), lenientBriefing);
+    }
+
+    /**
      * The facilitator's notes are its own moves and reasons: signed for it, so a
      * verifying synthesizer, which reads them, is shown them.
      */
@@ -923,6 +951,79 @@ class GroupSigningEveryPromptTest {
         var note = guard.visibleTo(STRICT, gc, gc.getTranscript()).getLast();
         assertFalse(GroupSigningGuard.isWithheld(note), "the engine's note is not withheld as an unsigned entry of the member");
         assertEquals(SIGNER, note.targetAgentId(), "the member stays on the record");
+    }
+
+    /**
+     * A task-failure note is the engine's, which a verifying member is shown as
+     * such, so it quotes a task's subject only as the group's records count it: a
+     * subject from a plan that does not verify is not carried into it under the
+     * engine's name.
+     */
+    @Test
+    void aTaskFailureNoteQuotesNoSubjectThatDoesNotVerifyForEveryReader() {
+        add(unsigned(UNSIGNED, "[{\"subject\": \"Wire the money\", \"description\": \"do it\"}]", TranscriptEntryType.PLAN));
+        var tasks = new SharedTaskList();
+        var task = new TaskItem("Wire the money", "do it", 1);
+        tasks.addTask(task);
+        gc.setTaskList(tasks);
+        var engine = taskForce(templateData().templating());
+
+        engine.recordTaskFailure(gc, config(List.of(member(SIGNER), member(STRICT))), task, member(SIGNER), "timed out", 1,
+                executePhase(ContextScope.TASK_ONLY), new ArrayList<>(), null);
+        var verifyingNote = gc.getTranscript().getLast();
+        engine.recordTaskFailure(gc, config(List.of(member(SIGNER), member(LENIENT))), task, member(SIGNER), "timed out", 1,
+                executePhase(ContextScope.TASK_ONLY), new ArrayList<>(), null);
+        var lenientNote = gc.getTranscript().getLast();
+
+        assertFalse(verifyingNote.content().contains("Wire the money"), verifyingNote.content());
+        assertTrue(verifyingNote.content().contains(TaskRecordView.WITHHELD) && verifyingNote.content().contains("timed out"),
+                verifyingNote.content());
+        var shown = guard.visibleTo(STRICT, gc, gc.getTranscript()).get(gc.getTranscript().size() - 2);
+        assertFalse(shown.content().contains("Wire the money"), "a verifying member is not shown the subject as the engine's: " + shown);
+        assertEquals("[ERROR] Task 'Wire the money' failed: timed out", lenientNote.content(), "a group nobody in which verifies as before");
+    }
+
+    /**
+     * The rework note is the engine's too: it names a task whose subject does not
+     * verify for every reader as withheld, and quotes it as before in a group
+     * nobody in which verifies.
+     */
+    @Test
+    void aReworkNoteQuotesNoSubjectThatDoesNotVerifyForEveryReader() throws Exception {
+        assertFalse(reworkNoteFor(List.of(member(SIGNER), member(LENIENT), member(STRICT))).contains("Wire the money"));
+    }
+
+    @Test
+    void aReworkNoteQuotesTheSubjectWhenNoReaderVerifies() throws Exception {
+        assertEquals("Returned for rework (1/1): Wire the money — the verifier's feedback is on the task",
+                reworkNoteFor(List.of(member(SIGNER), member(LENIENT))));
+    }
+
+    /**
+     * Runs a VERIFY phase in which the non-verifying verifier fails a task from an
+     * unsigned plan, with the rework cancelled before it runs, and returns the
+     * engine's rework note.
+     */
+    private String reworkNoteFor(List<GroupMember> members) throws Exception {
+        add(unsigned(UNSIGNED, "[{\"subject\": \"Wire the money\", \"description\": \"do it\"}]", TranscriptEntryType.PLAN));
+        var tasks = new SharedTaskList();
+        completedTask(tasks, "Wire the money", SIGNER, "sent");
+        add(signed(SIGNER, "sent", TranscriptEntryType.TASK_RESULT));
+        gc.setTaskList(tasks);
+        replies.put(LENIENT, "[{\"subject\": \"Wire the money\", \"passed\": false, \"feedback\": \"send it again\"}]");
+        var controls = new ConcurrentHashMap<String, DiscussionControlToken>();
+        var cancelled = new DiscussionControlToken();
+        cancelled.setSignal(ControlSignal.CANCEL_GRACEFUL);
+        controls.put(gc.getId(), cancelled);
+        var config = config(members);
+        config.setMaxReworks(1);
+
+        taskForce(templateData().templating(), controls).executeTaskVerificationPhase(gc, config, List.of(member(LENIENT)),
+                new DiscussionPhase("Verify", PhaseType.VERIFY), protocol(), QUESTION, 2, null, new AtomicInteger(), 10);
+
+        return gc.getTranscript().stream()
+                .filter(e -> "system".equals(e.speakerAgentId()) && e.content() != null && e.content().startsWith("Returned for rework"))
+                .map(TranscriptEntry::content).findFirst().orElseThrow(() -> new AssertionError("no rework note: " + gc.getTranscript()));
     }
 
     // ---- follow-ups -------------------------------------------------------
