@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -357,7 +358,8 @@ public class UserMemoryTool {
             }
 
             store.deleteEntry(target.id());
-            LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s'", userId, key);
+            int linked = forgetSupersessionChain(key, target);
+            LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s', linkedVersions=%d", userId, key, linked);
 
             return "✅ Forgotten: %s".formatted(key);
 
@@ -365,6 +367,59 @@ public class UserMemoryTool {
             LOGGER.errorf("[MEMORY] Failed to forget fact: %s", e.getMessage());
             return "❌ Failed to forget memory: " + e.getMessage();
         }
+    }
+
+    /**
+     * Deletes the other versions of a forgotten fact: every entry under the same
+     * key that is linked to {@code forgotten} through {@code supersededBy} — the
+     * older entries it replaced, the newer one that replaced it, and so on along
+     * the chain. Without this, forgetting the newest version left the
+     * {@code SUPERSEDED} one behind, and the loader serves a superseded entry again
+     * once it is the reader's only entry for the key — the user asked to forget the
+     * fact and got its older value back.
+     * <p>
+     * Only entries this agent may see and delete, by the same two checks as the
+     * entry itself, are touched: a version that belongs to another agent or scope
+     * is left alone, and the chain is not followed through it. Each delete is
+     * conditional on the entry being unchanged since it was read, so a version
+     * rewritten meanwhile (which clears its {@code supersededBy}) survives. The
+     * walk is bounded: every pass adds at least one entry or ends.
+     *
+     * @return how many linked versions were deleted
+     */
+    private int forgetSupersessionChain(String key, UserMemoryEntry forgotten) throws IResourceStore.ResourceStoreException {
+        List<UserMemoryEntry> candidates = new ArrayList<>(store.getAllEntries(userId).stream()
+                .filter(e -> e != null && e.id() != null && key.equals(e.key()) && !e.id().equals(forgotten.id()))
+                .filter(this::isVisibleToThisAgent).filter(this::mayDelete).toList());
+        Set<String> chainIds = new HashSet<>(Set.of(forgotten.id()));
+        Set<String> replacements = new HashSet<>();
+        if (forgotten.supersededBy() != null) {
+            replacements.add(forgotten.supersededBy());
+        }
+        List<UserMemoryEntry> chain = new ArrayList<>();
+        boolean grew = true;
+        while (grew && !candidates.isEmpty()) {
+            grew = false;
+            for (var it = candidates.iterator(); it.hasNext();) {
+                UserMemoryEntry e = it.next();
+                if ((e.supersededBy() != null && chainIds.contains(e.supersededBy())) || replacements.contains(e.id())) {
+                    it.remove();
+                    chain.add(e);
+                    chainIds.add(e.id());
+                    if (e.supersededBy() != null) {
+                        replacements.add(e.supersededBy());
+                    }
+                    grew = true;
+                }
+            }
+        }
+        int deleted = 0;
+        for (UserMemoryEntry e : chain) {
+            if (store.deleteEntryIfUnchanged(e.id(), e.updatedAt())) {
+                deleted++;
+            }
+        }
+        return deleted;
     }
 
     /**

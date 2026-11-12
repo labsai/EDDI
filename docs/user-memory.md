@@ -188,6 +188,8 @@ Returns: matching entries formatted as bullet list
 
 Delete a specific memory by key. Only a memory this agent can see is deleted, and a `global` memory only when this agent owns it — unless `allowGlobalKeyOverwrite` is on, the same rule `rememberFact` applies, since deleting another agent's global key and writing it again would replace its value.
 
+Forgetting a fact removes all of its versions: every entry under the same key that is linked to the deleted one through `supersededBy` (see [Contradiction resolution](#contradiction-resolution)) — the older entries it superseded and the newer one that superseded it, along the whole chain — is deleted with it, so an older value cannot come back once it is the reader's only entry for the key. The same two checks apply to each version: one this agent cannot see or may not delete (another agent's `self` memory, a foreign `global` one) stays, and the chain is not followed through it.
+
 ```
 Parameters:
   key - The key name to forget (e.g. "favorite_color")

@@ -461,6 +461,77 @@ class UserMemoryToolTest {
         verify(store).deleteEntry("entry-g");
     }
 
+    private static UserMemoryEntry version(String id, String value, Visibility visibility, String owner, List<String> groups, String supersededBy,
+                                           Instant at) {
+        return new UserMemoryEntry(id, "user-1", "tz", value, "fact", visibility, owner, groups, "conv-0", false, 0, at, at,
+                supersededBy != null ? UserMemoryEntry.Assessment.SUPERSEDED : UserMemoryEntry.Assessment.ACCEPTED, supersededBy);
+    }
+
+    /**
+     * Forgetting the newest version of a fact that superseded older ones: the
+     * superseded versions go too, along the whole chain — otherwise the loader
+     * serves the older value again once it is the reader's only entry for the key.
+     * Another agent's version in the chain, and an entry under another key, stay.
+     */
+    @Test
+    void forgetFact_deletesEverySupersededVersionOfTheFact() throws Exception {
+        var groupTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of("g1"), config);
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var newest = version("v3", "JST", Visibility.global, "agent-1", List.of(), null, t.plusSeconds(30));
+        var middle = version("v2", "PST", Visibility.self, "agent-1", List.of(), "v3", t.plusSeconds(20));
+        var oldest = version("v1", "CET", Visibility.group, "agent-1", List.of("g1"), "v2", t.plusSeconds(10));
+        var foreign = version("f1", "EST", Visibility.self, "agent-2", List.of(), "v3", t);
+        var otherKey = new UserMemoryEntry("k1", "user-1", "city", "Graz", "fact", Visibility.self, "agent-1", List.of(), "conv-0", false, 0, t, t,
+                UserMemoryEntry.Assessment.SUPERSEDED, "v3");
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(newest));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(oldest, foreign, otherKey, middle, newest));
+        when(store.deleteEntryIfUnchanged(any(), any())).thenReturn(true);
+
+        assertTrue(groupTool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v3");
+        verify(store).deleteEntryIfUnchanged("v2", middle.updatedAt());
+        verify(store).deleteEntryIfUnchanged("v1", oldest.updatedAt());
+        verify(store, never()).deleteEntryIfUnchanged(eq("f1"), any());
+        verify(store, never()).deleteEntryIfUnchanged(eq("k1"), any());
+        verify(store, never()).deleteEntry("f1");
+        verify(store, never()).deleteEntry("k1");
+    }
+
+    /**
+     * The store's first match can be the superseded version: forgetting it also
+     * removes the newer one that replaced it, unless that one is another agent's.
+     */
+    @Test
+    void forgetFact_ofASupersededVersionAlsoDeletesItsOwnReplacement() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var replacement = version("v2", "JST", Visibility.global, "agent-1", List.of(), null, t.plusSeconds(20));
+        var superseded = version("v1", "CET", Visibility.self, "agent-1", List.of(), "v2", t);
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(superseded));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(superseded, replacement));
+        when(store.deleteEntryIfUnchanged(any(), any())).thenReturn(true);
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v1");
+        verify(store).deleteEntryIfUnchanged("v2", replacement.updatedAt());
+    }
+
+    @Test
+    void forgetFact_leavesAnotherAgentsGlobalReplacementAlone() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var foreignReplacement = version("g2", "JST", Visibility.global, "agent-2", List.of(), null, t.plusSeconds(20));
+        var superseded = version("v1", "CET", Visibility.self, "agent-1", List.of(), "g2", t);
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(superseded));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(superseded, foreignReplacement));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v1");
+        verify(store, never()).deleteEntry("g2");
+        verify(store, never()).deleteEntryIfUnchanged(eq("g2"), any());
+    }
+
     /**
      * An erasure that deleted the entry between this update's read and its write:
      * the update-only write matches nothing, the inserting fallback recreates the
