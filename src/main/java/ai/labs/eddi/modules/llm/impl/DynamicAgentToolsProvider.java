@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
+import ai.labs.eddi.modules.llm.tools.DelegationBudget;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
 import ai.labs.eddi.modules.llm.tools.RecruitAgentTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
@@ -45,6 +46,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -139,6 +141,12 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * construction in tests — CDI always supplies one).
      */
     private final BiPredicate<String, String> useCheck;
+
+    /**
+     * The per-user cap on standalone sub-agents. Set by {@code AgentOrchestrator};
+     * {@code null} (direct construction) applies no cap.
+     */
+    StandaloneDynamicAgents standaloneAgents;
 
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -298,12 +306,22 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         String callerConversationId = memory.getConversationId();
         String userId = memory.getUserId();
         DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
+        // The caller's cost ceilings reach the conversations it delegates to, and
+        // their spend is charged back onto this one.
+        DelegationBudget delegationBudget = new MemoryDelegationBudget(memory);
 
         boolean anyDynamicToolAdded = false;
         if (allows(whitelist, whitelistOmitted, "create_sub_agent") && agentSetupService != null && conversationService != null) {
+            // Outside a discussion nothing else bounds how many agents one user keeps
+            // deployed across conversations, so the per-user cap applies there; a
+            // discussion's agents are bounded and cleaned up by the group engine.
+            StandaloneDynamicAgents standalone = standaloneAgents;
+            Supplier<String> creationGate = groupConversationId == null && standalone != null
+                    ? () -> standalone.capRefusal(userId)
+                    : null;
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId, delegationBudget, creationGate));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;
@@ -329,7 +347,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                             && createdHere(agentId, callerConversationId, groupConversationId))
                             || useCheck.test(agentId, principal);
             tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
-                    resolveDelegationCeiling(memory)));
+                    resolveDelegationCeiling(memory), delegationBudget));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }

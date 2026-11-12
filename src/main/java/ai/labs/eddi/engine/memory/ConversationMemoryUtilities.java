@@ -313,6 +313,19 @@ public class ConversationMemoryUtilities {
         return combineCost(conversationCost(steps), conversationCost(redoCache));
     }
 
+    /**
+     * The total a snapshot of {@code snapshot} would report as its
+     * {@code conversationCost} — {@code 0.0} for a snapshot that is null or carries
+     * no cost.
+     */
+    public static double totalCost(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return 0.0;
+        }
+        Double total = conversationCost(snapshot.getConversationSteps(), snapshot.getRedoCache());
+        return total != null && Double.isFinite(total) && total > 0.0 ? total : 0.0;
+    }
+
     /** The live and the undone spend added up — {@code null} only when both are. */
     static Double combineCost(Double live, Double undone) {
         if (live == null) {
@@ -343,7 +356,7 @@ public class ConversationMemoryUtilities {
     }
 
     private static boolean isSpendKey(String key) {
-        return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
+        return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key) || AUDIT_DELEGATED_COST.equals(key);
     }
 
     private static boolean isSensitiveDetailedKey(String key) {
@@ -1257,7 +1270,7 @@ public class ConversationMemoryUtilities {
         Double conversationCost() {
             double total = 0.0;
             boolean found = false;
-            for (String key : List.of(AUDIT_COST, AUDIT_DISCARDED_COST)) {
+            for (String key : List.of(AUDIT_COST, AUDIT_DISCARDED_COST, AUDIT_DELEGATED_COST)) {
                 for (IData<Object> data : steps.<Object>getExactDataPerStep(key)) {
                     if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
                             && cost.doubleValue() >= 0.0) {

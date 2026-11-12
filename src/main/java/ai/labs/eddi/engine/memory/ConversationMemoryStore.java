@@ -725,7 +725,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      */
     private static Document spendValuesExpression(String path) {
         var spendEntries = new Document("$filter", new Document("input", arrayOrEmpty("$$this.lifecycleTasks")).append("as", "entry")
-                .append("cond", new Document("$in", Arrays.asList("$$entry.key", List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST)))));
+                .append("cond", new Document("$in", Arrays.asList("$$entry.key",
+                        List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_DELEGATED_COST)))));
         var perWorkflow = new Document("$map", new Document("input", spendEntries).append("as", "entry").append("in", "$$entry.result"));
         var perStep = new Document("$reduce", new Document("input", arrayOrEmpty("$$this.workflows")).append("initialValue", List.of())
                 .append("in", new Document("$concatArrays", Arrays.asList("$$value", perWorkflow))));

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -23,12 +24,15 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Objects;
@@ -66,6 +70,10 @@ public class CreateSubAgentTool {
     private final String callerConversationId;
     /** The group discussion that conversation belongs to, or null. */
     private final String groupConversationId;
+    /** The creating conversation's cost ceiling. Never null. */
+    private final DelegationBudget budget;
+    /** Asked before setup; a non-null answer refuses. May be null. */
+    private final Supplier<String> creationGate;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -95,6 +103,49 @@ public class CreateSubAgentTool {
             Set<String> retainedAgentIds,
             String callerConversationId,
             String groupConversationId) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, null);
+    }
+
+    /**
+     * @param budget
+     *            the creating conversation's cost ceiling, applied to the initial
+     *            message's turn ({@link DelegationBudget}); {@code null} means none
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, null);
+    }
+
+    /**
+     * @param creationGate
+     *            asked before an agent is set up: a refusal the model is shown, or
+     *            {@code null} to proceed — the per-user cap on standalone
+     *            sub-agents ({@code StandaloneDynamicAgents#capRefusal}).
+     *            {@code null} asks nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate) {
+        this.creationGate = creationGate;
+        this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
         this.callerConversationId = callerConversationId;
         this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
@@ -168,13 +219,18 @@ public class CreateSubAgentTool {
             // AgentSetupService#resolveParentLlmProfile.
             var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
             boolean inherit = config.isInheritParentModel() && parentProfile != null;
+            // Without an allowedModels policy the sub-agent runs on the parent's own
+            // provider and model: nothing else was authorised, and a free choice let a
+            // steered model put a sub-agent on the provider's most expensive model.
+            boolean modelPolicy = config.getAllowedModels() != null && !config.getAllowedModels().isEmpty();
+            boolean defaultToParent = parentProfile != null && (inherit || !modelPolicy);
 
             // TRIMMED before anything compares it. AgentSetupService.resolveParams
             // trims, so " openai " is accepted downstream as openai while an untrimmed
             // guardrail here would reject it against allowedProviders=["openai"] and
             // fail to match the parent for credential inheritance — the policy and the
             // deployment disagreeing about the same string.
-            String requestedProvider = (provider == null || provider.isBlank()) && inherit
+            String requestedProvider = (provider == null || provider.isBlank()) && defaultToParent
                     ? parentProfile.provider()
                     : provider;
             requestedProvider = requestedProvider != null ? requestedProvider.trim() : null;
@@ -204,7 +260,7 @@ public class CreateSubAgentTool {
             // with the parent's Claude model — and because Ollama needs no key, nothing
             // downstream rejects it and the failure surfaces only at model load.
             String requestedModel = model;
-            if ((requestedModel == null || requestedModel.isBlank()) && inherit
+            if ((requestedModel == null || requestedModel.isBlank()) && defaultToParent
                     && resolvedProvider.equalsIgnoreCase(parentProfile.provider())) {
                 requestedModel = parentProfile.model();
             }
@@ -220,7 +276,10 @@ public class CreateSubAgentTool {
             // A vault reference names ONE provider's secret. Handing the parent's
             // anthropic reference to an openai sub-agent both breaks it at model load
             // and writes a reference to the parent's secret into an unrelated config.
-            String inheritedApiKey = parentProfile != null
+            // And only when inheritance is on: inheritParentModel=false used to hand
+            // over the parent's key all the same whenever the provider matched, so the
+            // switch that reads as "do not inherit" still spent the parent's key.
+            String inheritedApiKey = inherit
                     && resolvedProvider.equalsIgnoreCase(parentProfile.provider())
                             ? parentProfile.apiKeyReference()
                             : null;
@@ -251,7 +310,23 @@ public class CreateSubAgentTool {
             // resolvedModel always carries a value now (the effective default when the
             // caller named none), so there is no "no model requested" escape from this
             // guard any more.
-            if (config.getAllowedModels() != null && !config.getAllowedModels().isEmpty()) {
+            if (!modelPolicy) {
+                // No allowedModels: the parent's own provider and model, or nothing. A
+                // parent whose configuration could not be read leaves only the defaults
+                // — which carry no inherited key — so an explicit choice is refused.
+                if (parentProfile != null) {
+                    if (!resolvedProvider.equalsIgnoreCase(parentProfile.provider()) || parentProfile.model() == null
+                            || !resolvedModel.equalsIgnoreCase(parentProfile.model())) {
+                        return ("⚠️ Without an allowedModels policy a sub-agent runs on the parent's own model ('%s' on '%s'). "
+                                + "Omit provider and model, or ask an administrator to list '%s' for '%s' in dynamicAgents.allowedModels.")
+                                .formatted(parentProfile.model(), parentProfile.provider(), resolvedModel, resolvedProvider);
+                    }
+                } else if ((provider != null && !provider.isBlank()) || (model != null && !model.isBlank())) {
+                    return "⚠️ The parent agent's LLM configuration could not be read, and without an allowedModels policy a "
+                            + "sub-agent may only run on the parent's own model. Omit provider and model, or ask an administrator "
+                            + "to configure dynamicAgents.allowedModels.";
+                }
+            } else {
                 List<String> allowedForProvider = allowedModelsFor(resolvedProvider);
 
                 if (requestedProvider != null && !requestedProvider.isBlank()) {
@@ -280,6 +355,13 @@ public class CreateSubAgentTool {
                     return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
                             .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                 }
+            }
+
+            // --- Guardrail: the per-user cap on standalone sub-agents ---
+            // Last, after every cheap check: it counts deployments.
+            String gateRefusal = creationGate != null ? creationGate.get() : null;
+            if (gateRefusal != null) {
+                return gateRefusal;
             }
 
             // --- Build and execute setup ---
@@ -339,14 +421,26 @@ public class CreateSubAgentTool {
             // --- Optional: send initial message ---
             String conversationId = null;
             String response = null;
-            if (initialMessage != null && !initialMessage.isBlank()) {
+            OptionalDouble remaining = budget.remainingUsd();
+            if (initialMessage != null && !initialMessage.isBlank() && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+                // The sub-agent exists; its first turn would spend past the creating
+                // conversation's ceiling, so it is not sent.
+                response = "[Initial message not sent: this conversation's cost ceiling is reached]";
+            } else if (initialMessage != null && !initialMessage.isBlank()) {
                 try {
+                    // The creating conversation's remaining allowance holds the sub-agent's
+                    // first turn (and its start), as for converse_with_agent.
+                    Map<String, Context> ceilingContext = new HashMap<>();
+                    DelegationBudget.addCeiling(ceilingContext, remaining);
                     ConversationResult convResult = conversationService.startConversation(
-                            DEFAULT_ENV, agentId, userId, Collections.emptyMap());
+                            DEFAULT_ENV, agentId, userId, ceilingContext.isEmpty() ? Collections.emptyMap() : ceilingContext);
                     conversationId = convResult.conversationId();
 
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
+                    if (!ceilingContext.isEmpty()) {
+                        inputData.setContext(new HashMap<>(ceilingContext));
+                    }
 
                     CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
                     final AtomicBoolean skipped = new AtomicBoolean();
@@ -371,6 +465,9 @@ public class CreateSubAgentTool {
                             });
 
                     var snapshot = responseFuture.get(60, TimeUnit.SECONDS);
+                    // Charge-back: the new conversation's whole spend so far is this
+                    // tool's doing.
+                    budget.charge(DelegationBudget.spentSince(0.0, snapshot));
                     // Finding 25: a sub-agent that pauses for approval on its first
                     // message must report the pending approval, not "[no response]".
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {

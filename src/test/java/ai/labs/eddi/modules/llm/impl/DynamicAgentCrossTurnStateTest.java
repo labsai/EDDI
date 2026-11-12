@@ -156,7 +156,9 @@ class DynamicAgentCrossTurnStateTest {
         var converse = tools.stream().filter(ConverseWithAgentTool.class::isInstance).map(ConverseWithAgentTool.class::cast).findFirst()
                 .orElseThrow();
 
-        String created = create.createSubAgent("Analyst", "You analyse", "anthropic", "m", "Here is your briefing", null);
+        // Provider and model omitted: without an allowedModels policy only the parent's
+        // own model may be chosen, and this parent's configuration is not readable.
+        String created = create.createSubAgent("Analyst", "You analyse", null, null, "Here is your briefing", null);
         assertTrue(created.contains("conv-briefing"), created);
         String followUp = converse.converseWithAgent("sub-1", "follow-up", "conv-briefing");
 

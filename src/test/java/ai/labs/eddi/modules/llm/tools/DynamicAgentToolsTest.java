@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
@@ -83,6 +84,8 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_success() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
                             "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null, null));
@@ -100,6 +103,8 @@ class DynamicAgentToolsTest {
         void createSubAgent_stampsDynamicOrigin() throws Exception {
             var stampingTool = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
                     createdAgentIds, retainedAgentIds, "conv-parent", "gc-7");
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
                             "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null, null));
@@ -131,6 +136,8 @@ class DynamicAgentToolsTest {
         @Test
         @DisplayName("a named OpenAI-compatible provider without a model gets its own default, not the Claude one")
         void createSubAgent_compatibleProviderDefaultModel() throws Exception {
+            // Another provider than the parent's needs an allowedModels entry.
+            config.setAllowedModels(Map.of("xai", List.of("grok-4.7")));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "xai", "grok-4.7", true, "ready", null, null, null, null, null, null));
@@ -331,6 +338,7 @@ class DynamicAgentToolsTest {
         @Test
         @DisplayName("the parent's vault reference is not handed to a different provider")
         void createSubAgent_credentialDoesNotCrossProviders() throws Exception {
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o")));
             // A vault reference names ONE provider's secret. Passing the parent's
             // anthropic reference into an openai config both breaks the sub-agent at
             // model load and stores a reference to the parent's secret in an unrelated
@@ -379,6 +387,7 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_withInitialMessage_success() throws Exception {
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null, null));
@@ -469,6 +478,8 @@ class DynamicAgentToolsTest {
         void createSubAgent_emptyProviderAllowList() throws Exception {
             // Empty (not null) allow list should not restrict
             config.setAllowedProviders(List.of());
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
 
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
@@ -480,15 +491,126 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_emptyModelAllowList() throws Exception {
-            // Empty (not null) model allow list should not restrict
+            // BEHAVIOUR CHANGE (deliberate). An empty model allow-list is no policy, and
+            // without a policy a sub-agent runs on the parent's model only — it used to
+            // accept any model, so a steered model could pick the provider's most
+            // expensive one on the parent's key.
             config.setAllowedModels(Map.of());
-
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
-                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
-                            null, "any-model", true, "ready", null, null, null, null, null, null));
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
 
             String result = tool.createSubAgent("Test", "prompt", null, "any-model", null, null);
-            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("parent's own model"), result);
+            verify(agentSetupService, never()).setupAgent(any(), any());
+        }
+
+        @Test
+        @DisplayName("without allowedModels, an omitted model is the parent's model and a different one is refused")
+        void createSubAgent_noModelPolicy_defaultsToParentModel() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            String expensive = tool.createSubAgent("Test", "prompt", "anthropic", "claude-opus-4-1", null, null);
+            assertTrue(expensive.contains("⚠️"), expensive);
+            assertTrue(expensive.contains("allowedModels"), expensive);
+            String otherProvider = tool.createSubAgent("Test", "prompt", "openai", null, null, null);
+            assertTrue(otherProvider.contains("⚠️"), otherProvider);
+            verify(agentSetupService, never()).setupAgent(any(), any());
+
+            tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            var captor = ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture(), any());
+            assertEquals("anthropic", captor.getValue().provider());
+            assertEquals("claude-sonnet-4-6", captor.getValue().model());
+        }
+
+        @Test
+        @DisplayName("without allowedModels and an unreadable parent, an explicit model is refused")
+        void createSubAgent_noModelPolicy_unreadableParentRefusesExplicitModel() throws Exception {
+            String result = tool.createSubAgent("Test", "prompt", "bedrock", "some-large-model", null, null);
+
+            assertTrue(result.contains("⚠️"), result);
+            assertTrue(result.contains("could not be read"), result);
+            verify(agentSetupService, never()).setupAgent(any(), any());
+        }
+
+        @Test
+        @DisplayName("an explicit allowedModels entry still permits another model")
+        void createSubAgent_explicitAllowListStillWorks() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            config.setAllowedModels(Map.of("anthropic", List.of("claude-sonnet-4-6", "claude-haiku-4-5")));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            String result = tool.createSubAgent("Test", "prompt", "anthropic", "claude-haiku-4-5", null, null);
+
+            assertTrue(result.contains("✅"), result);
+        }
+
+        @Test
+        @DisplayName("inheritParentModel=false hands over no key, even for the parent's provider")
+        void createSubAgent_noInheritance_noKey() throws Exception {
+            config.setInheritParentModel(false);
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Test", "prompt", "anthropic", "claude-sonnet-4-6", null, null);
+
+            var captor = ArgumentCaptor.forClass(SetupAgentRequest.class);
+            verify(agentSetupService).setupAgent(captor.capture(), any());
+            assertNull(captor.getValue().apiKey(), "the parent's key must not be inherited when inheritance is off");
+            assertEquals("claude-sonnet-4-6", captor.getValue().model());
+        }
+
+        @Test
+        @DisplayName("the initial message carries the creator's remaining allowance and its spend is charged back")
+        void createSubAgent_initialMessage_ceilingAndChargeBack() throws Exception {
+            var budget = new RecordingBudget(0.25);
+            var budgeted = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-parent", null, budget);
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-agent-1").build());
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenReturn(new ConversationResult("conv-123", null));
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationCost(0.1);
+            var input = ArgumentCaptor.forClass(InputData.class);
+            doAnswer(invocation -> {
+                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+
+            budgeted.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertEquals("0.25", input.getValue().getContext().get(ClientContextGuard.KEY_DELEGATION_MAX_COST).getValue());
+            assertEquals(0.1, budget.charged, 1e-9);
+        }
+
+        @Test
+        @DisplayName("with the creator's ceiling reached, the initial message is not sent")
+        void createSubAgent_initialMessage_notSentPastCeiling() throws Exception {
+            var budgeted = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-parent", null, new RecordingBudget(0.0));
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-agent-1").build());
+
+            String result = budgeted.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertTrue(result.contains("cost ceiling"), result);
+            verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
         }
 
         @Test
@@ -1440,6 +1562,26 @@ class DynamicAgentToolsTest {
             gc.setRetainedAgentIds(null);
             assertNotNull(gc.getRetainedAgentIds());
             assertTrue(gc.getRetainedAgentIds().isEmpty());
+        }
+    }
+
+    /** A budget with a fixed remainder that records what is charged to it. */
+    static final class RecordingBudget implements DelegationBudget {
+        private final double remaining;
+        double charged;
+
+        RecordingBudget(double remaining) {
+            this.remaining = remaining;
+        }
+
+        @Override
+        public OptionalDouble remainingUsd() {
+            return OptionalDouble.of(remaining);
+        }
+
+        @Override
+        public void charge(double usd) {
+            charged += usd;
         }
     }
 }

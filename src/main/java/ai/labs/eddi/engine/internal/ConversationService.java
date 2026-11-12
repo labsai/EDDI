@@ -67,6 +67,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.llm.impl.StandaloneDynamicAgents;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
 import ai.labs.eddi.engine.model.TurnError;
@@ -1084,7 +1085,32 @@ public class ConversationService implements IConversationService, UserErasurePar
             LOGGER.warnf("Conversation %s was ended by %s while awaiting human approval — the pending approval is terminated",
                     conversationId, endedBy);
         }
+        tearDownStandaloneSubAgents(conversationId);
         recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
+    }
+
+    /**
+     * Sub-agents {@code create_sub_agent} deployed in this conversation outside a
+     * group discussion, and did not retain, are torn down once it ends — see
+     * {@link StandaloneDynamicAgents}. Optional, so a hand-built service has none.
+     */
+    @Inject
+    Instance<StandaloneDynamicAgents> standaloneDynamicAgents;
+
+    void tearDownStandaloneSubAgents(String conversationId) {
+        if (standaloneDynamicAgents != null && standaloneDynamicAgents.isResolvable()) {
+            standaloneDynamicAgents.get().cleanup(conversationId);
+        }
+    }
+
+    /**
+     * As {@link #tearDownStandaloneSubAgents(String)}, from the live memory of the
+     * turn that ended it.
+     */
+    void tearDownStandaloneSubAgents(String conversationId, IConversationMemory memory) {
+        if (standaloneDynamicAgents != null && standaloneDynamicAgents.isResolvable()) {
+            standaloneDynamicAgents.get().cleanup(conversationId, memory);
+        }
     }
 
     /**

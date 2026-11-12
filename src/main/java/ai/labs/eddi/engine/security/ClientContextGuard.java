@@ -62,6 +62,11 @@ public class ClientContextGuard {
      * ({@code CONTINUE_CONVERSATION}) and carries its number.
      */
     public static final String KEY_SELF_CONTINUATION = "selfContinuation";
+    /**
+     * Written by the delegation tools; what the delegating conversation had left
+     * under its cost ceiling, in USD — the callee's turn is held to it.
+     */
+    public static final String KEY_DELEGATION_MAX_COST = "delegationMaxCostUsd";
 
     /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
@@ -71,7 +76,8 @@ public class ClientContextGuard {
      * {@link #shadowsReserved(String)}.
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
-            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION);
+            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION,
+            KEY_DELEGATION_MAX_COST);
 
     private final Set<String> permittedReservedKeys;
 

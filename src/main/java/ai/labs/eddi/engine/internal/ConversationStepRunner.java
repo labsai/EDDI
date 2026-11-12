@@ -930,6 +930,11 @@ class ConversationStepRunner {
                                 conversationService.decideContinuation(conversationMemory);
                                 storeConversationMemory(conversationMemory, environment);
                                 conversationService.armContinuation(conversationId, conversationMemory, environment);
+                                if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+                                    // The turn ended the conversation (CONVERSATION_END): its
+                                    // standalone sub-agents go with it, as on an explicit end.
+                                    conversationService.tearDownStandaloneSubAgents(conversationId, conversationMemory);
+                                }
                             }
                         } catch (ConversationFencedException e) {
                             // Cluster mode: another node took the conversation over while this

@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -399,11 +400,14 @@ public class LlmSpendGate {
      * {@link #conversationCost} total, undone and discarded steps included, less
      * the current step's own {@code audit:cost} — plus the allowance, so the
      * allowance is per fire even on a persistent conversation; the tighter of the
-     * two wins. The tool loop asks the same question between rounds.
+     * two wins. A turn reached by delegation carries the delegating conversation's
+     * remaining allowance ({@link #delegationAllowance}), read the same way; with
+     * both present the smaller allowance applies. The tool loop asks the same
+     * question between rounds.
      */
     static OptionalDouble effectiveCeiling(IConversationMemory memory) {
         OptionalDouble agentCeiling = memory.getConversationCostCeilingUsd();
-        double allowance = maxCostPerFire(memory);
+        double allowance = tighterAllowance(maxCostPerFire(memory), delegationAllowance(memory));
         if (!(allowance > 0)) {
             return agentCeiling;
         }
@@ -421,9 +425,36 @@ public class LlmSpendGate {
      * that set it, not to later turns of the same conversation.
      */
     static double maxCostPerFire(IConversationMemory memory) {
+        return contextAllowance(memory, ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+    }
+
+    /**
+     * The allowance a delegating conversation handed this turn — what it had left
+     * under its own ceiling when it delegated (context
+     * {@value ClientContextGuard#KEY_DELEGATION_MAX_COST}, written by
+     * {@code converse_with_agent} and {@code create_sub_agent}; reserved, so a
+     * client cannot set it). {@code 0} when the turn was not reached by a capped
+     * delegation. Same per-turn reading as {@link #maxCostPerFire}.
+     */
+    static double delegationAllowance(IConversationMemory memory) {
+        return contextAllowance(memory, ClientContextGuard.KEY_DELEGATION_MAX_COST);
+    }
+
+    /** The tighter of two allowances, where {@code 0} (or less) means none. */
+    private static double tighterAllowance(double first, double second) {
+        if (!(first > 0)) {
+            return second;
+        }
+        if (!(second > 0)) {
+            return first;
+        }
+        return Math.min(first, second);
+    }
+
+    private static double contextAllowance(IConversationMemory memory, String contextKey) {
         try {
             var step = memory.getCurrentStep();
-            IData<Object> data = step == null ? null : step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+            IData<Object> data = step == null ? null : step.getData("context:" + contextKey);
             if (data == null || !(data.getResult() instanceof Context context) || context.getValue() == null) {
                 return 0.0;
             }
@@ -431,7 +462,7 @@ public class LlmSpendGate {
             double allowance = value instanceof Number n ? n.doubleValue() : Double.parseDouble(String.valueOf(value));
             return Double.isFinite(allowance) ? allowance : 0.0;
         } catch (RuntimeException e) {
-            LOGGER.debugf("maxCostPerFire context could not be read: %s", e.getMessage());
+            LOGGER.debugf("%s context could not be read: %s", contextKey, e.getMessage());
             return 0.0;
         }
     }
@@ -447,7 +478,8 @@ public class LlmSpendGate {
      * The spend keys {@link #conversationCost} sums — the two {@code recordedSpend}
      * sums.
      */
-    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST);
+    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST,
+            MemoryKeys.AUDIT_DELEGATED_COST);
 
     /**
      * The conversation's priced spend so far — monotonic: an undo cannot lower it.

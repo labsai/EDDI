@@ -1,0 +1,83 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.llm.tools;
+
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.security.ClientContextGuard;
+
+import java.util.Map;
+import java.util.OptionalDouble;
+
+/**
+ * The delegating conversation's cost ceiling, as the delegation tools see it
+ * ({@link ConverseWithAgentTool}, {@link CreateSubAgentTool}).
+ * <p>
+ * A delegated turn runs in a conversation of its own, so without this its spend
+ * reached none of the caller's ceilings — {@code maxCostPerConversationUsd}, a
+ * schedule's {@code maxCostPerFire} — and only the tenant's monthly budget
+ * stopped a model that kept delegating. Two halves:
+ * <ul>
+ * <li><b>Before</b> the turn, {@link #remainingUsd} is handed to the callee as
+ * the reserved context {@value ClientContextGuard#KEY_DELEGATION_MAX_COST},
+ * which its own spend gate takes as a ceiling for that turn (the tighter of it
+ * and the callee's own wins). A caller with nothing left does not
+ * delegate.</li>
+ * <li><b>After</b> the turn, {@link #charge} adds what the callee's
+ * conversation spent onto the caller's current step, where the caller's
+ * ceilings count it.</li>
+ * </ul>
+ */
+public interface DelegationBudget {
+
+    /** No ceiling to pass down and nowhere to charge — direct construction. */
+    DelegationBudget UNLIMITED = new DelegationBudget() {
+        @Override
+        public OptionalDouble remainingUsd() {
+            return OptionalDouble.empty();
+        }
+
+        @Override
+        public void charge(double usd) {
+            // nothing to charge
+        }
+    };
+
+    /**
+     * What the caller may still spend this turn under its effective ceiling, never
+     * negative; empty when no ceiling applies.
+     */
+    OptionalDouble remainingUsd();
+
+    /**
+     * Records {@code usd} the callee spent against the caller. Non-finite and
+     * non-positive amounts are ignored.
+     */
+    void charge(double usd);
+
+    /**
+     * Adds the remaining allowance to a delegation's context, when a ceiling
+     * applies.
+     */
+    static void addCeiling(Map<String, Context> context, OptionalDouble remaining) {
+        if (remaining != null && remaining.isPresent()) {
+            context.put(ClientContextGuard.KEY_DELEGATION_MAX_COST,
+                    new Context(Context.ContextType.string, String.valueOf(remaining.getAsDouble())));
+        }
+    }
+
+    /**
+     * What the callee's conversation spent between {@code costBefore} and the
+     * snapshot its turn returned — {@code 0} when either is unknown or the total
+     * did not grow.
+     */
+    static double spentSince(double costBefore, SimpleConversationMemorySnapshot after) {
+        if (after == null || after.getConversationCost() == null) {
+            return 0.0;
+        }
+        double delta = after.getConversationCost() - costBefore;
+        return Double.isFinite(delta) && delta > 0.0 ? delta : 0.0;
+    }
+}

@@ -1013,7 +1013,7 @@ public class Conversation implements IConversation {
 
     /** Spend and usage records the secret-context scrub leaves alone. */
     private static final Set<String> ACCOUNTING_KEYS = Set.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_METERED_COST,
-            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
+            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_DELEGATED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
 
     private boolean isSecretContextKey(String dataKey) {
         return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));

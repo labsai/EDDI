@@ -229,14 +229,16 @@ public class ConversationMemory implements IConversationMemory {
     /**
      * The priced spend a step records: its own {@link MemoryKeys#AUDIT_COST} plus
      * the {@link MemoryKeys#AUDIT_DISCARDED_COST} it inherited from an abandoned
-     * timeline. Non-finite and negative values count as nothing — one NaN would
+     * timeline and the {@link MemoryKeys#AUDIT_DELEGATED_COST} its delegations were
+     * charged back. Non-finite and negative values count as nothing — one NaN would
      * otherwise disable every ceiling compared against the total.
      */
     public static double recordedSpend(IConversationStep step) {
         if (step == null) {
             return 0.0;
         }
-        return nonNegative(step.getData(MemoryKeys.AUDIT_COST)) + nonNegative(step.getData(MemoryKeys.AUDIT_DISCARDED_COST));
+        return nonNegative(step.getData(MemoryKeys.AUDIT_COST)) + nonNegative(step.getData(MemoryKeys.AUDIT_DISCARDED_COST))
+                + nonNegative(step.getData(MemoryKeys.AUDIT_DELEGATED_COST));
     }
 
     private static double nonNegative(IData<Object> data) {

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -25,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalDouble;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -101,6 +103,12 @@ public class ConverseWithAgentTool {
      */
     private final BiPredicate<String, String> useCheck;
 
+    /**
+     * The delegating conversation's cost ceiling: passed down to the callee before
+     * the turn, and charged the callee's spend after it. Never null.
+     */
+    private final DelegationBudget budget;
+
     public ConverseWithAgentTool(IConversationService conversationService, String userId) {
         this(conversationService, userId, permissiveDefault(), 0);
     }
@@ -163,6 +171,18 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, null);
+    }
+
+    /**
+     * @param budget
+     *            the delegating conversation's cost ceiling
+     *            ({@link DelegationBudget}); {@code null} means none — no ceiling
+     *            is passed down and nothing is charged back
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, DelegationBudget budget) {
+        this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
         this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
         this.conversationService = conversationService;
@@ -223,6 +243,17 @@ public class ConverseWithAgentTool {
                         + "Answer directly instead of delegating further.").formatted(maxDepth, currentDepth);
             }
 
+            // --- Guardrail: the caller's cost ceiling ---
+            // A delegated turn spends in a conversation of its own. What the caller has
+            // left under its ceiling is handed down as the callee's ceiling for the turn,
+            // and a caller with nothing left does not delegate at all. Before the
+            // per-task counter, so a refusal burns no slot.
+            OptionalDouble remaining = budget.remainingUsd();
+            if (remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+                LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the conversation's cost ceiling is reached", sanitize(agentId));
+                return "⚠️ This conversation's cost ceiling is reached, so no other agent can be consulted. Answer directly.";
+            }
+
             // --- Guardrail: delegations per task (finding I4) ---
             if (delegationCount.incrementAndGet() > config.getMaxDelegationsPerTask()) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: maxDelegationsPerTask=%d exhausted",
@@ -240,11 +271,15 @@ public class ConverseWithAgentTool {
             // bounded by the allowDelegation / allowedDelegationTargets guardrails
             // above. Internal group-orchestrator callers use IConversationService
             // directly and never pass through this tool.
+            // What the callee's conversation had spent before this turn — the base the
+            // charge-back below is measured from. Zero for a conversation started here.
+            double costBefore = 0.0;
             if (conversationId != null && !conversationId.isBlank()) {
-                String ownershipRefusal = refuseIfNotOwnedByBoundUser(conversationId);
-                if (ownershipRefusal != null) {
-                    return ownershipRefusal;
+                OwnershipCheck ownership = checkOwnedByBoundUser(conversationId);
+                if (ownership.refusal() != null) {
+                    return ownership.refusal();
                 }
+                costBefore = ownership.costBefore();
             }
 
             // Propagate the hop count so the callee's own converse_with_agent knows how
@@ -257,9 +292,12 @@ public class ConverseWithAgentTool {
             // per-turn context the callee always resolves depth 0 and the cycle guard below
             // can never fire. Continuing an existing conversation (conversationId supplied)
             // never goes through startConversation at all and needs it for the same reason.
-            Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
+            Map<String, Context> delegationContext = new HashMap<>(Map.of(CONTEXT_DELEGATION_DEPTH,
                     new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)),
-                    CONTEXT_DELEGATION_DEPTH_MAX, new Context(Context.ContextType.string, String.valueOf(maxDepth)));
+                    CONTEXT_DELEGATION_DEPTH_MAX, new Context(Context.ContextType.string, String.valueOf(maxDepth))));
+            // The caller's remaining allowance rides the same way, on both the start and
+            // the message turn: the callee's spend gate holds the turn to it.
+            DelegationBudget.addCeiling(delegationContext, remaining);
 
             // --- Start new conversation if no conversationId provided ---
             if (conversationId == null || conversationId.isBlank()) {
@@ -284,9 +322,8 @@ public class ConverseWithAgentTool {
             // all.
             InputData inputData = new InputData();
             inputData.setInput(message);
-            // Mutable copy: the immutable Map.of above is shared with the
-            // startConversation call, and downstream turn processing may add context
-            // entries of its own.
+            // Own copy: the map above is shared with the startConversation call, and
+            // downstream turn processing may add context entries of its own.
             inputData.setContext(new HashMap<>(delegationContext));
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
@@ -314,6 +351,11 @@ public class ConverseWithAgentTool {
 
             int timeoutSeconds = config.getDelegationTimeoutSeconds();
             SimpleConversationMemorySnapshot snapshot = responseFuture.get(timeoutSeconds, TimeUnit.SECONDS);
+
+            // Charge-back: the callee's spend this turn (a new conversation's start
+            // included) counts against the caller's ceilings. A turn that timed out is
+            // not charged here — it was held to the ceiling passed down above.
+            budget.charge(DelegationBudget.spentSince(costBefore, snapshot));
 
             // Finding 25: the delegated conversation paused for human approval on
             // this turn. Return a structured, actionable result so the delegating
@@ -414,6 +456,14 @@ public class ConverseWithAgentTool {
                 .toList();
     }
 
+    private record OwnershipCheck(String refusal, double costBefore) {
+        static OwnershipCheck refused(String refusal) {
+            return new OwnershipCheck(refusal, 0.0);
+        }
+    }
+
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     /**
      * Refuses when a model-supplied {@code conversationId} belongs to a user other
      * than the one this tool is bound to.
@@ -427,12 +477,10 @@ public class ConverseWithAgentTool {
      * verification failure — including a conversation that records no owner — fails
      * closed: the conversation is not driven unless ownership could be confirmed.
      *
-     * @return a user-facing refusal string, or {@code null} when the conversation
-     *         may be driven
+     * @return a user-facing refusal (null when the conversation may be driven), and
+     *         the conversation's spend so far — the base of the charge-back
      */
-    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
-
-    private String refuseIfNotOwnedByBoundUser(String conversationId) {
+    private OwnershipCheck checkOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
             // Fail closed: with no bound identity there is nothing to compare the
             // owner against, and the agent-id say(...) overload checks only the agent
@@ -440,7 +488,7 @@ public class ConverseWithAgentTool {
             // continue any user's conversation by id.
             LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': no bound user to verify ownership against",
                     conversationId);
-            return OWNERSHIP_UNVERIFIED.formatted(conversationId);
+            return OwnershipCheck.refused(OWNERSHIP_UNVERIFIED.formatted(conversationId));
         }
         try {
             var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
@@ -451,19 +499,19 @@ public class ConverseWithAgentTool {
                 // (legacy) conversation would otherwise be drivable by any bound user.
                 LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s': ownership could not be established",
                         conversationId);
-                return OWNERSHIP_UNVERIFIED.formatted(conversationId);
+                return OwnershipCheck.refused(OWNERSHIP_UNVERIFIED.formatted(conversationId));
             }
             if (!owner.equals(userId)) {
                 LOGGER.warnf("[CONVERSE] Refused continuation of conversation '%s' owned by another user", conversationId);
-                return "⚠️ Conversation '%s' does not belong to you and cannot be continued.".formatted(conversationId);
+                return OwnershipCheck.refused("⚠️ Conversation '%s' does not belong to you and cannot be continued.".formatted(conversationId));
             }
-            return null;
+            return new OwnershipCheck(null, ConversationMemoryUtilities.totalCost(snapshot));
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Unknown conversation — let the downstream say(...) path surface it.
-            return null;
+            return new OwnershipCheck(null, 0.0);
         } catch (Exception e) {
             LOGGER.warnf("[CONVERSE] Could not verify ownership of conversation '%s': %s", conversationId, e.getMessage());
-            return "⚠️ Could not verify access to conversation '%s'.".formatted(conversationId);
+            return OwnershipCheck.refused("⚠️ Could not verify access to conversation '%s'.".formatted(conversationId));
         }
     }
 
