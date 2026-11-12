@@ -726,6 +726,8 @@ public class ConversationMemory implements IConversationMemory {
     private transient PendingToolCallBatch hitlPendingToolCalls;
     // Approval-card context rendered at pause commit; persisted like the bookmark.
     private transient RenderedApprovalContext hitlApprovalContext;
+    // The current pause's plan hash (HitlPlanHash); persisted like the bookmark.
+    private transient String hitlPlanHash;
     // The agent-level tool-approval config, carried onto memory at conversation
     // start; NOT persisted (re-resolved from the pinned agent config each turn).
     private transient ToolApprovalsConfig agentToolApprovalsConfig;
@@ -820,6 +822,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlApprovalContext(RenderedApprovalContext context) {
         this.hitlApprovalContext = context;
+    }
+
+    @Override
+    public String getHitlPlanHash() {
+        return hitlPlanHash;
+    }
+
+    @Override
+    public void setHitlPlanHash(String planHash) {
+        this.hitlPlanHash = planHash;
     }
 
     @Override

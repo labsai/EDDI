@@ -65,7 +65,8 @@ public final class HitlDecisionRecords {
                 .channel(decision.getChannel())
                 .timeoutPolicy(facts.timeoutPolicy())
                 .reasonCode(decision.getReasonCode())
-                .note(decision.getNote());
+                .note(decision.getNote())
+                .plan(decision.getCommittedPlanHash(), decision.getPlanBinding());
         if (toolCallPause) {
             record.legacy("pauseType", "TOOL_CALL").legacy("toolDecisions", legacyToolDecisions);
             addToolCallUnits(record, decision, batch);
@@ -195,6 +196,7 @@ public final class HitlDecisionRecords {
                 .timeoutPolicy(pause != null ? pause.timeoutPolicy() : null)
                 .reasonCode(decision.getReasonCode())
                 .note(decision.getNote())
+                .plan(decision.getCommittedPlanHash(), decision.getPlanBinding())
                 .legacy("phaseName", phaseName);
         if ("TASK".equals(pauseType)) {
             var category = ApprovalCategories.forGroupTask(hitlConfig, groupId, phaseName);

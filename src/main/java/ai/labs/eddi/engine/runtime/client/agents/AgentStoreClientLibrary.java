@@ -12,7 +12,6 @@ import ai.labs.eddi.modules.llm.impl.TurnBudgetValidator;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.IWorkflowFactory;
 import ai.labs.eddi.engine.runtime.internal.Agent;
-import ai.labs.eddi.engine.runtime.internal.AgentFactory;
 import ai.labs.eddi.engine.runtime.service.IAgentStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
@@ -33,7 +32,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
     private final IWorkflowFactory workflowFactory;
     /** Deploy-time turn budget warning; absent in directly constructed tests. */
     private final TurnBudgetValidator turnBudgetValidator;
-    private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
+    private static final Logger LOGGER = Logger.getLogger(AgentStoreClientLibrary.class);
 
     @Inject
     public AgentStoreClientLibrary(IAgentStoreService agentStoreService, IWorkflowFactory workflowFactory,
