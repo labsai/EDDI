@@ -9,6 +9,10 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDescribedTask;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.inject.Inject;
@@ -92,6 +96,11 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
     int maxQueuedTurnsPerConversation = 20;
 
     private static final Logger log = Logger.getLogger(AbstractQueuedConversationCoordinator.class);
+
+    /**
+     * Writes the ring entries' payloads; JetStreamDeadLetterStore does the same.
+     */
+    private static final ObjectMapper PAYLOAD_JSON = new ObjectMapper();
 
     /**
      * Overrides {@code eddi.conversation.max-queued-turns-per-conversation} for a
@@ -277,10 +286,12 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * @return the id of the entry recorded
      */
     protected final String recordLocalDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
-        String error = failure.getMessage() != null ? failure.getMessage() : "unknown";
+        // An exception message routinely carries a resolved URL or a provider's error
+        // body, and this entry is served by the dead-letter REST endpoints: credential
+        // shapes are redacted with the rules the logs use.
+        String error = failure.getMessage() != null ? SecretRedactionFilter.redact(failure.getMessage()) : "unknown";
         long timestamp = System.currentTimeMillis();
-        String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId, error.replace("\"", "\\\""),
-                timestamp);
+        String payload = deadLetterPayload(conversationId, error, timestamp);
 
         totalDeadLettered.incrementAndGet();
 
@@ -310,6 +321,27 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
             }
         }
         return id;
+    }
+
+    /**
+     * The ring entry's inspection payload,
+     * {@code {"conversationId":…,"error":…,"timestamp":…}}. Serialized by Jackson:
+     * it was a {@code String.format} that escaped only double quotes, so a message
+     * with a backslash or a newline produced invalid JSON, and one ending in a
+     * backslash escaped the closing quote and let the rest of the message add
+     * fields of its own.
+     */
+    static String deadLetterPayload(String conversationId, String error, long timestamp) {
+        ObjectNode payload = PAYLOAD_JSON.createObjectNode();
+        payload.put("conversationId", conversationId);
+        payload.put("error", error);
+        payload.put("timestamp", timestamp);
+        try {
+            return PAYLOAD_JSON.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            // A tree of strings and a long cannot fail to serialize.
+            throw new IllegalStateException("Could not serialize the dead-letter payload", e);
+        }
     }
 
     /** The node recorded on a ring-buffer entry; {@code null} on a single node. */
