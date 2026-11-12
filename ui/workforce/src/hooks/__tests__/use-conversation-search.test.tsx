@@ -158,9 +158,39 @@ describe("useConversationSearch", () => {
 
     act(() => result.current.loadMore());
     expect(calls[2]!.index).toBe(2);
+    // A short but non-empty page is not the end: the server drops unreadable rows after paging.
     await answer(calls[2]!, [descriptor("c4", "Trip 4")]);
     expect(result.current.results).toHaveLength(4);
+    expect(result.current.hasMore).toBe(true);
+
+    act(() => result.current.loadMore());
+    expect(calls[3]!.index).toBe(3);
+    await answer(calls[3]!, []);
+    expect(result.current.results).toHaveLength(4);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it("hasMore at the page boundaries: empty ends it, a short page and a full page do not", async () => {
+    const empty = setup("trip", 2);
+    await settleDebounce();
+    await answer(calls[0]!, []);
+    expect(empty.result.current.hasMore).toBe(false);
+    empty.unmount();
+
+    calls.length = 0;
+    const exact = setup("trip", 2);
+    await settleDebounce();
+    await answer(calls[0]!, [descriptor("c1", "Trip 1"), descriptor("c2", "Trip 2")]);
+    expect(exact.result.current.hasMore).toBe(true);
+    exact.unmount();
+
+    calls.length = 0;
+    const short = setup("trip", 2);
+    await settleDebounce();
+    await answer(calls[0]!, [descriptor("c1", "Trip 1")]);
+    expect(short.result.current.hasMore).toBe(true);
+    act(() => short.result.current.loadMore());
+    expect(calls[1]!.index).toBe(1);
   });
 
   it("reports a failed search and retries it", async () => {

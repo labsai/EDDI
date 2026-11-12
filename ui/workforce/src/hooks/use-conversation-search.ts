@@ -32,7 +32,11 @@ export interface ConversationSearch {
   query: string;
   status: SearchStatus;
   results: ConversationDescriptor[];
-  /** The last page was full, so there may be another. */
+  /**
+   * The last page held any match, so there may be another. Not "was full": the
+   * server drops rows from a page after reading it (orphaned or unreadable
+   * conversations), so a short page does not mean the end — only an empty one does.
+   */
   hasMore: boolean;
   /** A next page is being read; the results so far stay. */
   loadingMore: boolean;
@@ -118,7 +122,7 @@ export function useConversationSearch(
               status: "done",
               results: append ? [...s.results, ...fresh] : page,
               nextIndex: index + 1,
-              hasMore: page.length >= pageSize,
+              hasMore: page.length > 0,
               loadingMore: false,
               moreFailed: false,
             };

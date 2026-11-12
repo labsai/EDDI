@@ -20,7 +20,7 @@ The rest of phase 7 of the frontend unification plan (`planning/frontend-unifica
 ### Design decisions
 
 - Titles only, as the backend decided (B3); the UI says so at every place it offers the search.
-- A full page means "maybe more"; a short page ends the list. The backend can return a short page when a match's memory is gone, which can hide later matches; that is rare (orphaned descriptors) and a narrower text finds them.
+- Any non-empty page means "maybe more"; only an empty page ends the list. The backend drops rows from a page after reading it (a match whose memory is gone), so a short page is not the end — treating it as one hid later matches. The cost is one empty extra request at the end of a list.
 - Cards go under the turn's question, so they read in the order things happened: the question, the tools it set off, the reply.
 
 ### Not done
