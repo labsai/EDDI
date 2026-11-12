@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import dev.langchain4j.data.message.AiMessage;
@@ -41,17 +42,10 @@ class ToolResponseTruncatorExtendedTest {
     @BeforeEach
     void setUp() {
         chatModelRegistry = mock(ChatModelRegistry.class);
-        truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), chatModelRegistry);
         paginatedResponseStore = mock(PaginatedResponseStore.class);
-
-        // Inject mocked store
-        try {
-            var f = ToolResponseTruncator.class.getDeclaredField("paginatedResponseStore");
-            f.setAccessible(true);
-            f.set(truncator, paginatedResponseStore);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        var globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), chatModelRegistry, globalVariableResolver, paginatedResponseStore);
     }
 
     @Nested
@@ -237,20 +231,6 @@ class ToolResponseTruncatorExtendedTest {
 
             assertTrue(result.contains("[TRUNCATED:"), result);
             verify(paginatedResponseStore, never()).store(anyString(), anyString(), anyString(), anyInt());
-        }
-
-        @Test
-        @DisplayName("Should fallback to truncate when store is null")
-        void testPaginateNoStore() {
-            // Create truncator without store
-            var truncatorNoStore = new ToolResponseTruncator(new SimpleMeterRegistry(), chatModelRegistry);
-
-            var limits = new ToolResponseLimits();
-            limits.setDefaultMaxChars(50);
-            limits.setTruncationStrategy("paginate");
-
-            String result = truncatorNoStore.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
-            assertTrue(result.contains("[TRUNCATED:"));
         }
 
         @Test

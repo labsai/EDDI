@@ -10,7 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IGroupConversationService;
-import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.mail.InboundMail;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -91,6 +91,7 @@ class EmailConversationModeTest {
     InMemoryEmailSuppressionStore suppressions;
     InMemoryEmailMailboxStateStore stateStore;
     IConversationService conversations;
+    SenderAuthenticator authenticator;
     EmailInboundProcessor processor;
     Map<String, MailAuthentication> verdicts;
     List<String> sayConversations;
@@ -109,7 +110,7 @@ class EmailConversationModeTest {
         ledger = new InMemoryEmailMessageLedger();
         suppressions = new InMemoryEmailSuppressionStore();
         verdicts = new HashMap<>();
-        SenderAuthenticator authenticator = mock(SenderAuthenticator.class);
+        authenticator = mock(SenderAuthenticator.class);
         when(authenticator.authenticate(any(), any(), any(), any())).thenAnswer(invocation -> {
             InboundMail parsed = invocation.getArgument(1);
             return verdicts.getOrDefault(parsed.fromAddress(), new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com"));
@@ -140,12 +141,7 @@ class EmailConversationModeTest {
             handlers.add(invocation.getArgument(6));
             return null;
         }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
-        Instance<IAttachmentStore> attachments = mock(Instance.class);
         stateStore = new InMemoryEmailMailboxStateStore();
-        processor = new EmailInboundProcessor(ledger, stateStore, new MimeMessageParser(new HtmlToMarkdownConverter()),
-                authenticator, conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
-                new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), attachments, mock(EmailOwnerNotifier.class),
-                new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
 
         sent = new ArrayList<>();
         sentMime = new ArrayList<>();
@@ -172,10 +168,22 @@ class EmailConversationModeTest {
         when(directory.find(INTEGRATION))
                 .thenReturn(
                         Optional.of(new EmailIntegration(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()))));
-        processor.replies = new EmailReplySender(ledger, suppressions, directory, conversations, transport,
+        processor = processor(new EmailReplySender(ledger, suppressions, directory, conversations, transport,
                 new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())),
+                mock(EmailOwnerNotifier.class), mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Runnable::run,
+                Duration.ofDays(30), 3, Duration.ofMinutes(1)));
+    }
+
+    /**
+     * The processor as CDI builds it: every collaborator through the constructor.
+     */
+    @SuppressWarnings("unchecked")
+    EmailInboundProcessor processor(EmailReplySender replies) {
+        return new EmailInboundProcessor(ledger, stateStore, new MimeMessageParser(new HtmlToMarkdownConverter()), authenticator, conversations,
+                mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
+                new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), mock(Instance.class),
                 mock(EmailOwnerNotifier.class),
-                null, new SimpleMeterRegistry(), Runnable::run, Duration.ofDays(30), 3, Duration.ofMinutes(1));
+                replies, mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
     }
 
     static ChannelIntegrationConfiguration configuration(Map<String, String> extra) {
@@ -350,7 +358,7 @@ class EmailConversationModeTest {
     void costWhenReplyCannotBeQueued() throws Exception {
         EmailReplySender failing = mock(EmailReplySender.class);
         when(failing.onTurnCompleted(any(), any(), any(), any(), any(), any())).thenThrow(new IllegalStateException("ledger unavailable"));
-        processor.replies = failing;
+        processor = processor(failing);
         EmailTestMail mail = EmailTestMail.mail();
         processor.process(context(Map.of()), mail.polled(1), Instant.now());
 
@@ -418,7 +426,7 @@ class EmailConversationModeTest {
     @DisplayName("trigger mode never touches the reply sender, and asks only for the current step")
     void triggerModeSendsNothing() throws Exception {
         EmailReplySender replies = mock(EmailReplySender.class);
-        processor.replies = replies;
+        processor = processor(replies);
         var configuration = EmailInboundProcessorTest.integration(Map.of());
         var trigger = new IntegrationContext(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()), Set.of());
 

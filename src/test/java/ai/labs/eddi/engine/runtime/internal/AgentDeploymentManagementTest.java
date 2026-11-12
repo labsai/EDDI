@@ -176,6 +176,7 @@ class AgentDeploymentManagementTest {
                     return now[0];
                 }
             };
+            servedReady("deletedLater", 1);
             // First sweep deploys it, so this node tracks the row (one config read).
             management.checkDeployments();
             verify(agentFactory).deployAgent(Environment.production, "deletedLater", 1, null);
@@ -325,6 +326,7 @@ class AgentDeploymentManagementTest {
 
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
                     .thenReturn(List.of(info));
+            servedReady("agent1", 1);
 
             // First call deploys
             management.checkDeployments();
@@ -620,6 +622,18 @@ class AgentDeploymentManagementTest {
                                                         String id,
                                                         ConversationState state) {
         return new ConversationActivitySummary(id, state, "agent1", 1, null);
+    }
+
+    /**
+     * The registry holding the agent READY, as after a successful deploy: the sweep
+     * keeps a row tracked only while the registry does.
+     */
+    private void servedReady(String agentId, int version) throws Exception {
+        IAgent served = mock(IAgent.class);
+        when(served.getAgentId()).thenReturn(agentId);
+        when(served.getAgentVersion()).thenReturn(version);
+        when(served.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
     }
 
     private void invokeEndOldConversations(String agentId, Integer agentVersion) throws Exception {

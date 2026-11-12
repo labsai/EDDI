@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import { queryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/app-router";
-import { i18nReady } from "@/i18n/config";
+import i18n, { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
 // bare side-effect import that opened an /administration/logs/stream SSE
@@ -14,14 +14,14 @@ import "@/index.css";
 // opened by the consumers that need a live tail (see that module).
 
 // ── Self-hosted fonts (no external CDN requests) ────────────────────
+// Only the default family is eager. The Arabic, Thai, Devanagari and CJK
+// families load with their locale (`@/i18n/locale-fonts`): their @font-face
+// rules were most of the main stylesheet, for every user in every language.
 import "@fontsource-variable/noto-sans";
-import "@fontsource-variable/noto-sans-arabic";
-import "@fontsource-variable/noto-sans-thai";
-import "@fontsource-variable/noto-sans-devanagari";
-import "@fontsource-variable/noto-sans-jp";
-import "@fontsource-variable/noto-sans-kr";
-import "@fontsource-variable/noto-sans-sc";
-import "@fontsource-variable/noto-sans-tc";
+import { installLocaleFonts } from "@/i18n/locale-fonts";
+
+/** How long the first paint waits for a locale's font CSS before going ahead. */
+const LOCALE_FONT_WAIT_MS = 3000;
 
 // Monaco is deliberately NOT imported here. It is ~7 MB and only four editor
 // components need it, so it lives in `@/lib/monaco-setup`, which those
@@ -95,6 +95,13 @@ async function startApp() {
   // cold load in a non-English locale. Never rejects; a failed chunk falls back
   // to English inside i18next.
   await i18nReady;
+  // The locale's script font, so a Japanese or Arabic first paint is already in
+  // Noto rather than swapping from the system font. Bounded: a slow chunk costs
+  // a font swap, never a blank page.
+  await Promise.race([
+    installLocaleFonts(i18n),
+    new Promise((resolve) => setTimeout(resolve, LOCALE_FONT_WAIT_MS)),
+  ]);
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

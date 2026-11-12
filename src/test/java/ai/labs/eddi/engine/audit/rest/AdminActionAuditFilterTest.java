@@ -4,15 +4,14 @@
  */
 package ai.labs.eddi.engine.audit.rest;
 
-import java.util.logging.Logger;
-import java.util.logging.LogRecord;
-import java.util.logging.Level;
-import java.util.logging.Handler;
-import java.util.List;
-import java.util.ArrayList;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.internal.RestAgentEngine;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.engine.triggermanagement.rest.RestUserConversationStore;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
@@ -23,11 +22,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.security.Principal;
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -46,10 +49,34 @@ class AdminActionAuditFilterTest {
     private ContainerRequestContext request;
     private ContainerResponseContext response;
     private UriInfo uriInfo;
+    private ResourceInfo resourceInfo;
 
     /** Stand-in for a resource method. */
     @SuppressWarnings("unused")
     public void deleteUserData() {
+    }
+
+    /**
+     * Stand-in for a conversation endpoint, which every conversing role may call.
+     */
+    @SuppressWarnings("unused")
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
+    public void conversationTurn() {
+    }
+
+    /** Stand-in for an admin-only resource class whose methods override it. */
+    @RolesAllowed("eddi-admin")
+    public static class AdminOnlyResource {
+        public void inherited() {
+        }
+
+        @PermitAll
+        public void open() {
+        }
+
+        @RolesAllowed({"eddi-admin", "eddi-user"})
+        public void forUsers() {
+        }
     }
 
     @BeforeEach
@@ -70,8 +97,11 @@ class AdminActionAuditFilterTest {
         when(identityInstance.isResolvable()).thenReturn(true);
         when(identityInstance.get()).thenReturn(identity);
 
-        filter = new AdminActionAuditFilter(ledgerInstance, identityInstance, true);
-        ResourceInfo resourceInfo = mock(ResourceInfo.class);
+        // A real recorder over a mocked ledger: what the filter decides to record is
+        // read off the entries the ledger receives. The entry itself is
+        // AdminActionRecorderTest's subject.
+        filter = new AdminActionAuditFilter(new AdminActionRecorder(ledgerInstance, identityInstance, true));
+        resourceInfo = mock(ResourceInfo.class);
         Method method = AdminActionAuditFilterTest.class.getMethod("deleteUserData");
         when(resourceInfo.getResourceMethod()).thenReturn(method);
         filter.resourceInfo = resourceInfo;
@@ -122,7 +152,7 @@ class AdminActionAuditFilterTest {
     }
 
     @Test
-    @DisplayName("the id of the person an action is about is pseudonymised — no raw id enters the immutable ledger")
+    @DisplayName("the request's path parameters reach the recorder, so the person an action is about is pseudonymised")
     void pseudonymisesTheSubjectOfTheAction() {
         when(request.getMethod()).thenReturn("DELETE");
         when(uriInfo.getPath()).thenReturn("/admin/gdpr/alice@example.com");
@@ -138,23 +168,6 @@ class AdminActionAuditFilterTest {
         assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
     }
 
-    @Test
-    @DisplayName("a user id that is also a path word replaces that segment only, not the rest of the path")
-    void pseudonymisesWholeSegmentsOnly() {
-        when(request.getMethod()).thenReturn("DELETE");
-        when(uriInfo.getPath()).thenReturn("/admin/gdpr/admin");
-        var parameters = new MultivaluedHashMap<String, String>();
-        parameters.add("userId", "admin");
-        when(uriInfo.getPathParameters()).thenReturn(parameters);
-        when(response.getStatus()).thenReturn(200);
-
-        filter.filter(request, response);
-
-        String path = (String) recorded().input().get("path");
-        assertTrue(path.startsWith("/admin/gdpr/gdpr-erased:"), path);
-        assertEquals(3, path.split("/").length - 1, path);
-    }
-
     @ParameterizedTest
     @ValueSource(strings = {"GET", "HEAD", "OPTIONS"})
     @DisplayName("reads are not recorded")
@@ -168,10 +181,11 @@ class AdminActionAuditFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/agents/production/agent1", "/agents/conv-1", "/v1/chat/completions", "/userconversationstore/x/say",
-            "/integrations/slack/events", "/connections/abc/callback", "/a2a/agent1"})
+    @ValueSource(strings = {"/agents/production/agent1", "/agents/conv-1", "/agents/managed/support/alice", "/v1/chat/completions",
+            "/integrations/slack/events", "/connections/callback", "/a2a/agents/agent1"})
     @DisplayName("conversation and data-plane traffic is not recorded here — it is audited per turn")
-    void dataPlaneIsNotRecorded(String path) {
+    void dataPlaneIsNotRecorded(String path) throws Exception {
+        when(resourceInfo.getResourceMethod()).thenReturn(AdminActionAuditFilterTest.class.getMethod("conversationTurn"));
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn(path);
 
@@ -180,30 +194,86 @@ class AdminActionAuditFilterTest {
         verify(ledger, never()).submit(any());
     }
 
-    @Test
-    @DisplayName("an unauthenticated caller is recorded as anonymous")
-    void anonymousCaller() {
-        when(identity.isAnonymous()).thenReturn(true);
-        when(request.getMethod()).thenReturn("POST");
-        when(uriInfo.getPath()).thenReturn("/administration/production/deploy/agent1");
-        when(response.getStatus()).thenReturn(202);
+    /**
+     * The path rule alone let an admin-only endpoint under a data-plane root go
+     * unrecorded: resetting a conversation's state and creating or deleting a
+     * user's managed-conversation mapping are administrative by definition — their
+     * {@code @RolesAllowed} does not admit {@code eddi-user} — and were on no
+     * record. The rows are the real endpoints, so the roles come from where Quarkus
+     * reads them: the interface, which the implementation method does not inherit
+     * them from.
+     */
+    static Stream<Arguments> adminOnlyDataPlaneEndpoints() throws Exception {
+        return Stream.of(
+                Arguments.of("PATCH", "/agents/conv-1/state", RestAgentEngine.class.getMethod("resetState", String.class, String.class), false),
+                Arguments.of("POST", "/userconversationstore/userconversations/support/alice", RestUserConversationStore.class
+                        .getMethod("createUserConversation", String.class, String.class, UserConversation.class), true),
+                Arguments.of("DELETE", "/userconversationstore/userconversations/support/alice",
+                        RestUserConversationStore.class.getMethod("deleteUserConversation", String.class, String.class), true));
+    }
+
+    @ParameterizedTest
+    @MethodSource("adminOnlyDataPlaneEndpoints")
+    @DisplayName("an admin-only endpoint under a data-plane root is recorded — its roles make it administrative")
+    void adminOnlyEndpointUnderDataPlaneIsRecorded(String method, String path, Method resourceMethod, boolean namesAUser) {
+        when(resourceInfo.getResourceMethod()).thenReturn(resourceMethod);
+        when(request.getMethod()).thenReturn(method);
+        when(uriInfo.getPath()).thenReturn(path);
+        if (namesAUser) {
+            var parameters = new MultivaluedHashMap<String, String>();
+            parameters.add("intent", "support");
+            parameters.add("userId", "alice");
+            when(uriInfo.getPathParameters()).thenReturn(parameters);
+        }
+        when(response.getStatus()).thenReturn(200);
 
         filter.filter(request, response);
 
-        assertEquals("anonymous", recorded().userId());
+        AuditEntry entry = recorded();
+        assertEquals("admin-ann", entry.userId());
+        assertEquals(method, entry.input().get("method"));
+        assertEquals(resourceMethod.getDeclaringClass().getSimpleName() + "#" + resourceMethod.getName(), entry.input().get("resource"));
+        String recordedPath = (String) entry.input().get("path");
+        assertFalse(recordedPath.contains("alice"), recordedPath);
+        if (namesAUser) {
+            assertTrue(recordedPath.startsWith("/userconversationstore/userconversations/support/gdpr-erased:"), recordedPath);
+        }
     }
 
     @Test
-    @DisplayName("switched off by eddi.audit.admin-actions.enabled=false")
+    @DisplayName("an endpoint under a data-plane root that admits eddi-user stays unrecorded")
+    void userEndpointUnderDataPlaneIsNotRecorded() throws Exception {
+        when(resourceInfo.getResourceMethod()).thenReturn(RestAgentEngine.class.getMethod("cancelConversation", String.class));
+        when(request.getMethod()).thenReturn("POST");
+        when(uriInfo.getPath()).thenReturn("/agents/conv-1/cancel");
+
+        filter.filter(request, response);
+
+        verify(ledger, never()).submit(any());
+    }
+
+    @Test
+    @DisplayName("a method's own security annotation decides before its class's")
+    void methodLevelSecurityDecidesBeforeClassLevel() throws Exception {
+        assertTrue(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("inherited")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("open")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminOnlyResource.class.getMethod("forUsers")));
+        assertFalse(AdminActionAuditFilter.adminOnly(AdminActionAuditFilterTest.class.getMethod("deleteUserData")), "no roles declared");
+    }
+
+    @Test
+    @DisplayName("switched off by eddi.audit.admin-actions.enabled=false, before any per-request work")
     @SuppressWarnings("unchecked")
     void canBeSwitchedOff() {
-        var off = new AdminActionAuditFilter(mock(Instance.class), mock(Instance.class), false);
+        var off = new AdminActionAuditFilter(new AdminActionRecorder(mock(Instance.class), mock(Instance.class), false));
+        off.resourceInfo = resourceInfo;
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn("/agentstore/agents");
 
         off.filter(request, response);
 
         verify(ledger, never()).submit(any());
+        verify(resourceInfo, never()).getResourceMethod();
     }
 
     @Test
@@ -227,56 +297,40 @@ class AdminActionAuditFilterTest {
         assertFalse(AdminActionAuditFilter.isAdministrative("/Agents/x"));
         assertFalse(AdminActionAuditFilter.isAdministrative("/"));
         assertFalse(AdminActionAuditFilter.isAdministrative(null));
-        assertTrue(AdminActionAuditFilter.namesAPerson("userId"));
-        assertTrue(AdminActionAuditFilter.namesAPerson("principalId"));
-        assertFalse(AdminActionAuditFilter.namesAPerson("agentId"));
     }
 
     @Test
     @DisplayName("the failure WARN cannot be used to forge log records (CWE-117)")
     void failureLogLineIsSanitized() {
-        doThrow(new IllegalStateException("ledger down\r\nFORGED")).when(ledger).submit(any());
+        // A failure on the filter's side of the hand-over: the recorder never throws.
+        when(uriInfo.getPathParameters()).thenThrow(new IllegalStateException("lookup failed\r\nFORGED"));
         when(request.getMethod()).thenReturn("POST");
         when(uriInfo.getPath()).thenReturn("/agentstore/agents\r\n2026-01-01 INFO forged admin login");
         when(response.getStatus()).thenReturn(201);
 
-        List<String> captured = new ArrayList<>();
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                captured.add(String.valueOf(record.getMessage()));
-                if (record.getParameters() != null) {
-                    for (Object parameter : record.getParameters()) {
-                        captured.add(String.valueOf(parameter));
-                    }
-                }
-            }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
-        };
-        // logging.properties turns ai.labs.eddi OFF for unit tests; open it, or this
-        // passes vacuously.
-        Logger julLogger = Logger.getLogger(AdminActionAuditFilter.class.getName());
-        Level previous = julLogger.getLevel();
-        julLogger.setLevel(Level.ALL);
-        julLogger.addHandler(handler);
-        try {
-            filter.filter(request, response);
-        } finally {
-            julLogger.removeHandler(handler);
-            julLogger.setLevel(previous);
-        }
+        List<String> captured = AdminActionRecorderTest.logged(AdminActionAuditFilter.class, () -> filter.filter(request, response));
 
         assertTrue(captured.stream().anyMatch(value -> value.contains("Could not record administrative action")),
                 "the line under test did not fire; captured: " + captured);
         for (String value : captured) {
             assertFalse(value.contains("\r") || value.contains("\n"), "a CR/LF reached the log: " + value);
+        }
+    }
+
+    @Test
+    @DisplayName("the failure WARN names neither the request path nor the exception message (CWE-532)")
+    void failureLogLineCarriesNoRequestData() {
+        when(uriInfo.getPathParameters()).thenThrow(new IllegalStateException("lookup failed for alice@example.com"));
+        when(request.getMethod()).thenReturn("DELETE");
+        when(uriInfo.getPath()).thenReturn("/admin/gdpr/alice@example.com");
+        when(response.getStatus()).thenReturn(200);
+
+        List<String> captured = AdminActionRecorderTest.logged(AdminActionAuditFilter.class, () -> filter.filter(request, response));
+
+        assertTrue(captured.stream().anyMatch(value -> value.contains("Could not record administrative action")),
+                "the line under test did not fire; captured: " + captured);
+        for (String value : captured) {
+            assertFalse(value.contains("alice"), "the subject reached the log: " + value);
         }
     }
 }
