@@ -38,6 +38,7 @@ class MongoOutcomeEventStoreIT extends MongoTestBase implements OutcomeStoreCont
     void createsTheQueryIndexes() {
         List<String> names = getDatabase().getCollection("group_outcomes").listIndexes().into(new ArrayList<Document>()).stream()
                 .map(index -> index.getString("name")).toList();
-        assertTrue(names.containsAll(List.of("idx_outcome_group", "idx_outcome_subject", "idx_outcome_user")), names.toString());
+        assertTrue(names.containsAll(List.of("idx_outcome_group", "idx_outcome_subject", "idx_outcome_user", "idx_outcome_subject_slot")),
+                names.toString());
     }
 }

@@ -572,4 +572,117 @@ class RestConversationStoreOwnershipTest {
         verify(conversationDescriptorStore).readDescriptors(anyString(), eq("term"), eq(0), eq(1), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
     }
+
+    /**
+     * The store with authorization disabled: an anonymous caller who sees every
+     * conversation.
+     */
+    private RestConversationStore anonymousStore() {
+        var identity = mock(SecurityIdentity.class);
+        lenient().when(identity.isAnonymous()).thenReturn(true);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(false), mock(IConversationDescriptorStore.class));
+        return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
+                30, 90, attachmentStorageInstance);
+    }
+
+    @Test
+    @DisplayName("mine=true lists an admin's own conversations only, not every user's and not the unowned ones")
+    @SuppressWarnings("unchecked")
+    void mineListsOnlyTheAdminsOwnConversations() throws Exception {
+        // The chat panel resumes the newest READY conversation it is shown. Shown
+        // every user's, an admin landed in an end user's conversation and the next
+        // message ran as that user.
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", "admin-user"),
+                descriptor("0a0a0a0a0a0a0a0a0a0a0a03", null));
+
+        List<ConversationDescriptor> result = asAdmin().readConversationDescriptors(
+                0, 20, null, null, null, null, null, null, true);
+
+        assertEquals(List.of("admin-user"), result.stream().map(ConversationDescriptor::getUserId).toList());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertEquals(1, captor.getValue().size(), "the owner is part of the descriptor query");
+        var owner = captor.getValue().getFirst().getQueryFilters();
+        assertEquals(1, owner.size(), "an exact match only: no 'or unowned' alternative");
+        assertEquals("userId", owner.getFirst().getField());
+        assertEquals("admin-user", owner.getFirst().getFilter());
+        assertTrue(owner.getFirst().isExact());
+    }
+
+    @Test
+    @DisplayName("mine=true narrows an agent listing to the caller's own conversations, reviewers' reach included")
+    @SuppressWarnings("unchecked")
+    void mineIsPushedDownForAnAgentListing() throws Exception {
+        firstPage();
+
+        asOwner().readConversationDescriptors(0, 20, null, null, "0000000000000000000000a1", null, null, null, true);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertEquals(2, captor.getValue().size());
+        assertEquals("agentResource", captor.getValue().getFirst().getQueryFilters().getFirst().getField());
+        var owner = captor.getValue().get(1).getQueryFilters();
+        assertEquals(1, owner.size());
+        assertEquals("userId", owner.getFirst().getField());
+        assertEquals(OWNER, owner.getFirst().getFilter());
+    }
+
+    @Test
+    @DisplayName("mine=true confines the 'search matches nothing' fallback to the caller's own conversations")
+    @SuppressWarnings("unchecked")
+    void mineSearchFallbackIsTheCallersOwn() throws Exception {
+        firstPage();
+
+        asAdmin().readConversationDescriptors(0, 20, "term", null, "0000000000000000000000a1", null, null, null, true);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), eq("term"), eq(0), eq(1), anyBoolean(), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        var owner = captor.getValue().getFirst().getQueryFilters();
+        assertEquals(1, owner.size());
+        assertEquals("admin-user", owner.getFirst().getFilter());
+    }
+
+    @Test
+    @DisplayName("mine=true changes nothing without a named caller (authorization disabled): every conversation is listed")
+    @SuppressWarnings("unchecked")
+    void mineWithoutANamedCallerListsEverything() throws Exception {
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
+
+        List<ConversationDescriptor> result = anonymousStore().readConversationDescriptors(
+                0, 20, null, null, null, null, null, null, true);
+
+        assertEquals(2, result.size());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertTrue(captor.getValue().isEmpty());
+    }
+
+    @Test
+    @DisplayName("mine=true changes nothing with authorization disabled, even for a caller a token names")
+    @SuppressWarnings("unchecked")
+    void mineWithAuthorizationDisabledIgnoresANamedCaller() throws Exception {
+        // With authorization.enabled=false a conversation records the userId the
+        // client passed, or a generated anonymous one, never the principal: matching
+        // the principal would hide every conversation, and the chat panel would
+        // never find one to resume.
+        var identity = mock(SecurityIdentity.class);
+        var principal = mock(Principal.class);
+        lenient().when(principal.getName()).thenReturn(OWNER);
+        lenient().when(identity.getPrincipal()).thenReturn(principal);
+        lenient().when(identity.isAnonymous()).thenReturn(false);
+        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(false), mock(IConversationDescriptorStore.class));
+        var store = new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
+                30, 90, attachmentStorageInstance);
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", "anonymous-0a1b"), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", INTRUDER));
+
+        List<ConversationDescriptor> result = store.readConversationDescriptors(0, 20, null, null, null, null, null, null, true);
+
+        assertEquals(2, result.size());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertTrue(captor.getValue().isEmpty());
+    }
 }

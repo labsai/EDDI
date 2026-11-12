@@ -8,11 +8,16 @@ export interface PatchInstruction<T> {
   document: Partial<T>;
 }
 
-/** Update a document descriptor (name + description) */
+/**
+ * Update a document descriptor's name and/or description.
+ *
+ * Nothing else: the server applies only these two and refuses (400) a document
+ * that sets any other field, so the type allows no other.
+ */
 export function updateDescriptor(
   id: string,
   version: number,
-  descriptor: { name?: string; description?: string; resources?: Record<string, unknown> }
+  descriptor: { name?: string; description?: string }
 ): Promise<void> {
   const patch: PatchInstruction<typeof descriptor> = {
     operation: "SET",

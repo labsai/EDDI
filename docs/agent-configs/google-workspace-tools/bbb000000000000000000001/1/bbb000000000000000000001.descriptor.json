@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.workflow/workflowstore/workflows/bbb000000000000000000001?version=1",
+  "name" : "Google Workspace Assistant (recipe)",
+  "description" : "Catch-all rule to the LLM task, which calls the Gmail and Drive httpcalls as tools",
+  "deleted" : false
+}
