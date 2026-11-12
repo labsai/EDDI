@@ -54,6 +54,7 @@ import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.EndpointParameters;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
@@ -3244,15 +3245,16 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
     /**
      * Parameter keys that belong to the provider that issued them: credentials, the
-     * endpoint coordinates that address that provider's account, and the model keys
+     * account coordinates of that provider, and the model keys
      * ({@link ModelParameterKeys#MODEL_KEYS}) — a model id means nothing to another
      * vendor, and an inherited {@code modelName} would override the summary
-     * provider's own default. Everything else (temperature, maxTokens, timeout, …)
-     * is vendor-neutral and safe to carry across a provider boundary.
+     * provider's own default. Every endpoint parameter
+     * ({@link EndpointParameters#isEndpointKey}) is provider-bound as well, and is
+     * not listed here. Everything else (temperature, maxTokens, timeout, …) is
+     * vendor-neutral and safe to carry across a provider boundary.
      */
     private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint", "apiEndpoint",
             "compartmentId", "configProfile", "projectId", "region", "location",
             "organizationId", "deploymentName", "serviceVersion",
             // Request-override containers: a custom header routinely carries a
@@ -3303,7 +3305,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var safeParameters = new LinkedHashMap<String, String>();
         var dropped = new ArrayList<String>();
         parentParameters.forEach((key, value) -> {
-            if (key != null && PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase)) {
+            if (key != null && (EndpointParameters.isEndpointKey(key) || PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase))) {
                 dropped.add(key);
             } else {
                 safeParameters.put(key, value);
