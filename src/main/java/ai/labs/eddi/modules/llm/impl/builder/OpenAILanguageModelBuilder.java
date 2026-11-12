@@ -9,6 +9,7 @@ import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,13 +37,15 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * {@link OpenAiCompatibleLanguageModelBuilder}) every OpenAI-compatible
  * provider.
  * <p>
- * Parameters are read once into a {@link Settings} and applied to the
- * synchronous and the streaming client alike, so the two cannot drift. Which of
- * them a given <em>model</em> accepts is not decided here: the reasoning
- * families reject {@code temperature}, {@code topP}, the penalties and
- * {@code maxTokens}, and {@link ModelParameterCatalog} (consulted by
- * {@code ChatModelRegistry} before a builder runs) removes what the configured
- * model would reject.
+ * Parameters are read once into a {@link Settings}. The request-level ones
+ * reach both clients as one set of request parameters
+ * ({@link #requestParameters}); the few client options are applied to each
+ * client builder, and {@code ProviderChatStreamingParityTest} fails when the
+ * two clients disagree. Which of them a given <em>model</em> accepts is not
+ * decided here: the reasoning families reject {@code temperature},
+ * {@code topP}, the penalties and {@code maxTokens}, and
+ * {@link ModelParameterCatalog} (consulted by {@code ChatModelRegistry} before
+ * a builder runs) removes what the configured model would reject.
  */
 @ApplicationScoped
 public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
@@ -180,6 +183,24 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
         }
     }
 
+    /**
+     * The request-level settings as langchain4j's request parameters, handed to the
+     * synchronous and the streaming client alike: every request starts from them. A
+     * {@code null} leaves the provider default. What stays on the client builders
+     * is not part of a request (endpoint, credentials, timeout, logging, headers,
+     * the thinking switches), {@code strictTools} and {@code strictJsonSchema}, and
+     * the {@code json_object} response format, whose OpenAI wire name the request
+     * parameters do not carry.
+     */
+    private static OpenAiChatRequestParameters requestParameters(Settings s) {
+        return OpenAiChatRequestParameters.builder().modelName(s.modelName()).temperature(s.temperature()).topP(s.topP())
+                .frequencyPenalty(s.frequencyPenalty()).presencePenalty(s.presencePenalty()).maxOutputTokens(s.maxTokens())
+                .maxCompletionTokens(s.maxCompletionTokens()).stopSequences(s.stop()).seed(s.seed()).logitBias(s.logitBias())
+                .reasoningEffort(s.reasoningEffort()).serviceTier(s.serviceTier()).parallelToolCalls(s.parallelToolCalls())
+                .store(s.store()).metadata(s.metadata()).user(s.user()).promptCacheKey(s.promptCacheKey())
+                .customParameters(s.customParameters()).build();
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, Map.of());
@@ -196,55 +217,21 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters, HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = OpenAiChatModel.builder().httpClientBuilder(httpClientBuilder);
+        var b = OpenAiChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        if (s.timeoutMs() != null)
-            b.timeout(Duration.ofMillis(s.timeoutMs()));
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
-        if (s.maxCompletionTokens() != null)
-            b.maxCompletionTokens(s.maxCompletionTokens());
-        if (s.stop() != null)
-            b.stop(s.stop());
-        if (s.seed() != null)
-            b.seed(s.seed());
-        if (s.logitBias() != null)
-            b.logitBias(s.logitBias());
-        if (s.reasoningEffort() != null)
-            b.reasoningEffort(s.reasoningEffort());
-        if (s.serviceTier() != null)
-            b.serviceTier(s.serviceTier());
-        if (s.parallelToolCalls() != null)
-            b.parallelToolCalls(s.parallelToolCalls());
-        if (s.strictTools() != null)
-            b.strictTools(s.strictTools());
-        if (s.strictJsonSchema() != null)
-            b.strictJsonSchema(s.strictJsonSchema());
-        if (s.store() != null)
-            b.store(s.store());
-        if (s.metadata() != null)
-            b.metadata(s.metadata());
-        if (s.user() != null)
-            b.user(s.user());
         if (s.organizationId() != null)
             b.organizationId(s.organizationId());
         if (s.projectId() != null)
             b.projectId(s.projectId());
-        if (s.promptCacheKey() != null)
-            b.promptCacheKey(s.promptCacheKey());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.strictTools() != null)
+            b.strictTools(s.strictTools());
+        if (s.strictJsonSchema() != null)
+            b.strictJsonSchema(s.strictJsonSchema());
         if (s.jsonObject())
             b.responseFormat("json_object");
         if (s.logRequests() != null)
@@ -255,8 +242,6 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
             b.customHeaders(s.customHeaders());
         if (s.customQueryParams() != null)
             b.customQueryParams(s.customQueryParams());
-        if (s.customParameters() != null)
-            b.customParameters(s.customParameters());
         b.returnThinking(s.returnThinking());
         b.sendThinking(s.sendThinking());
         // executeWithRetry is the single retry owner; library retries multiply it.
@@ -270,56 +255,29 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
+        return buildStreaming(parameters, customParameters, BoundedJdkHttpClient.builder(targetPolicy));
+    }
+
+    /** Streaming counterpart of {@link #build(Map, Map, HttpClientBuilder)}. */
+    StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters,
+                                      HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
+        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(httpClientBuilder)
+                .defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        if (s.timeoutMs() != null)
-            b.timeout(Duration.ofMillis(s.timeoutMs()));
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.frequencyPenalty() != null)
-            b.frequencyPenalty(s.frequencyPenalty());
-        if (s.presencePenalty() != null)
-            b.presencePenalty(s.presencePenalty());
-        if (s.maxTokens() != null)
-            b.maxTokens(s.maxTokens());
-        if (s.maxCompletionTokens() != null)
-            b.maxCompletionTokens(s.maxCompletionTokens());
-        if (s.stop() != null)
-            b.stop(s.stop());
-        if (s.seed() != null)
-            b.seed(s.seed());
-        if (s.logitBias() != null)
-            b.logitBias(s.logitBias());
-        if (s.reasoningEffort() != null)
-            b.reasoningEffort(s.reasoningEffort());
-        if (s.serviceTier() != null)
-            b.serviceTier(s.serviceTier());
-        if (s.parallelToolCalls() != null)
-            b.parallelToolCalls(s.parallelToolCalls());
-        if (s.strictTools() != null)
-            b.strictTools(s.strictTools());
-        if (s.strictJsonSchema() != null)
-            b.strictJsonSchema(s.strictJsonSchema());
-        if (s.store() != null)
-            b.store(s.store());
-        if (s.metadata() != null)
-            b.metadata(s.metadata());
-        if (s.user() != null)
-            b.user(s.user());
         if (s.organizationId() != null)
             b.organizationId(s.organizationId());
         if (s.projectId() != null)
             b.projectId(s.projectId());
-        if (s.promptCacheKey() != null)
-            b.promptCacheKey(s.promptCacheKey());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.strictTools() != null)
+            b.strictTools(s.strictTools());
+        if (s.strictJsonSchema() != null)
+            b.strictJsonSchema(s.strictJsonSchema());
         if (s.jsonObject())
             b.responseFormat("json_object");
         if (s.logRequests() != null)
@@ -330,8 +288,6 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
             b.customHeaders(s.customHeaders());
         if (s.customQueryParams() != null)
             b.customQueryParams(s.customQueryParams());
-        if (s.customParameters() != null)
-            b.customParameters(s.customParameters());
         b.returnThinking(s.returnThinking());
         b.sendThinking(s.sendThinking());
         return b.build();

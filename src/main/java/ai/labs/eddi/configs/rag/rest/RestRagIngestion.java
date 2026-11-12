@@ -184,17 +184,20 @@ public class RestRagIngestion implements IRestRagIngestion {
     public Response getIngestionStatus(String ragConfigId, String ingestionId) {
         // The status of an ingestion is only meaningful to whoever could have started
         // it, and the caller names the RAG config in the path — so check it.
+        // The service answers only for an ingestion of *this* RAG config: an ingestion
+        // id is global, so an id of another knowledge base is unknown here.
         resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
-        String status = ragIngestionService.getStatus(ingestionId);
+        String status = ragIngestionService.getStatus(ragConfigId, ingestionId);
         if (RagIngestionService.STATUS_UNKNOWN.equals(status)) {
-            // Never started here, or its status has already expired. A 200 with
+            // Never started for this knowledge base, or its status has already expired. A
+            // 200 with
             // status "unknown" read as "still in flight" to every polling client.
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("ingestionId", ingestionId, "status", status, "error",
                             "No ingestion with this id is known (statuses are kept for one hour)"))
                     .build();
         }
-        String warning = ragIngestionService.getWarning(ingestionId);
+        String warning = ragIngestionService.getWarning(ragConfigId, ingestionId);
         if (warning != null) {
             return Response.ok(Map.of("ingestionId", ingestionId, "status", status, "warning", warning)).build();
         }
