@@ -33,6 +33,11 @@ template data holds the current attempt's failure keys only (they are removed
 before the next attempt, so a `responseValuePathMatchers` entry on
 `{name}Error` still judges the response it decides about), and memory records
 the final attempt's failure once, after the loop — as the `forEach` path does.
+A matcher that reads the same keys through memory
+(`memory.current.httpCalls.{name}HttpCode`) used to see each attempt because
+every attempt was written to the live step output; the retry decision now gets
+a copy of the template data with the attempt's failure keys under that path, so
+it still sees the attempt it decides about while memory stays final-only.
 
 **One failed request of a fire-and-forget batch no longer drops the rest.**
 A `fireAndForget` call with `preRequest.batchRequests` sends its requests as

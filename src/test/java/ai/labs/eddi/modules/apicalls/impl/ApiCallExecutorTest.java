@@ -329,6 +329,36 @@ class ApiCallExecutorTest {
         assertEquals("fatal", templateData.get("weatherError"));
     }
 
+    @Test
+    @DisplayName("a memory-qualified responseValuePathMatcher sees the current attempt's code, which memory does not keep")
+    void retry_memoryQualifiedMatcherSeesTheCurrentAttempt_memoryKeepsOnlyTheFinal() throws Exception {
+        // Every attempt used to write {name}HttpCode into the live step output that
+        // template data exposes as memory.current, so this path saw the current
+        // attempt. Only the final attempt is stored now; the retry decision still
+        // has to see the attempt it is deciding about.
+        ApiCall call = weatherCallRetryingOn503(1);
+        var matcher = new RetryApiCallInstruction.MatchingInfo();
+        matcher.setValuePath("memory.current.httpCalls.weatherHttpCode");
+        matcher.setEquals("503");
+        var retry = ((HttpPostResponse) call.getPostResponse()).getRetryApiCallInstruction();
+        retry.setRetryOnHttpCodes(List.of());
+        retry.setResponseValuePathMatchers(List.of(matcher));
+        IResponse down = failure(503, "down");
+        IResponse stillDown = failure(503, "still down");
+        when(mockRequest.send()).thenReturn(down, stillDown);
+
+        Map<String, Object> httpCalls = new LinkedHashMap<>();
+        Map<String, Object> current = new LinkedHashMap<>(Map.of("httpCalls", httpCalls));
+        Map<String, Object> templateData = new HashMap<>(Map.of("memory", new HashMap<>(Map.of("current", current))));
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        verify(mockRequest, times(2)).send();
+        assertTrue(httpCalls.isEmpty(), "the retry view must not write into the step output: " + httpCalls);
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherHttpCode"), any());
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherError"), any());
+        verify(prePostUtils).createMemoryEntry(any(), eq("still down"), eq("weatherError"), any());
+    }
+
     private ApiCall weatherCallRetryingOn503(int maxRetries) {
         ApiCall call = createSimpleApiCall("weather-call", true);
         call.setResponseObjectName("weather");

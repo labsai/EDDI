@@ -524,7 +524,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     amountOfExecutions++;
-                    retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                    // A failed attempt reaches memory only after the loop, so a matcher on
+                    // memory.current.httpCalls.{name}HttpCode / …Error is given this
+                    // attempt's values in a view of its own.
+                    Map<String, Object> retryDecisionData = failureInTemplateData
+                            ? withAttemptFailure(templateDataObjects, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode())
+                            : templateDataObjects;
+                    retryCall = retryCall(call.getPostResponse(), retryDecisionData, amountOfExecutions, response.getHttpCode(),
                             response.getContentAsString());
                     if (retryCall && memory.getTurnDeadline() != null
                             && !retryFitsDeadline(call, amountOfExecutions, memory.getTurnDeadline())) {
@@ -594,6 +600,43 @@ public class ApiCallExecutor implements IApiCallExecutor {
             prePostUtils.createMemoryEntry(currentStep, errorBody, errorObjectName, KEY_HTTP_CALLS);
         }
         prePostUtils.createMemoryEntry(currentStep, httpCode, httpCodeObjectName, KEY_HTTP_CALLS);
+    }
+
+    /**
+     * The template data a retry condition judges a failed attempt by: the same map,
+     * except that {@code memory.current.httpCalls} also holds this attempt's
+     * {@code {name}Error} (when it had a body) and {@code {name}HttpCode}. Every
+     * attempt used to write those to memory, and {@code memory.current} is the live
+     * step output, so a matcher on that path saw the current attempt; now only the
+     * final attempt is stored, after the loop. The maps on the way are copied, so
+     * neither the step nor the shared template data changes.
+     */
+    static Map<String, Object> withAttemptFailure(Map<String, Object> templateData, String errorObjectName, String errorBody,
+                                                  String httpCodeObjectName, int httpCode) {
+        Map<String, Object> httpCalls = copyOfMap(nestedMap(nestedMap(templateData.get("memory"), "current"), KEY_HTTP_CALLS));
+        if (errorBody != null) {
+            httpCalls.put(errorObjectName, errorBody);
+        }
+        httpCalls.put(httpCodeObjectName, httpCode);
+        Map<String, Object> current = copyOfMap(nestedMap(templateData.get("memory"), "current"));
+        current.put(KEY_HTTP_CALLS, httpCalls);
+        Map<String, Object> memoryView = copyOfMap(templateData.get("memory"));
+        memoryView.put("current", current);
+        Map<String, Object> view = new LinkedHashMap<>(templateData);
+        view.put("memory", memoryView);
+        return view;
+    }
+
+    private static Object nestedMap(Object map, String key) {
+        return map instanceof Map<?, ?> m ? m.get(key) : null;
+    }
+
+    private static Map<String, Object> copyOfMap(Object map) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        if (map instanceof Map<?, ?> m) {
+            m.forEach((k, v) -> copy.put(String.valueOf(k), v));
+        }
+        return copy;
     }
 
     /**

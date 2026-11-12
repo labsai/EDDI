@@ -111,6 +111,7 @@ class ApiCallExecutorFireAndForgetBatchTest {
 
         assertDoesNotThrow(batch::call, "a failed item must not end the batch task");
         verify(first, times(1)).send(any(ICompleteListener.class));
+        verify(second, times(1)).send(any(ICompleteListener.class));
         verify(third, times(1)).send(any(ICompleteListener.class));
     }
 
