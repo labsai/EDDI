@@ -31,7 +31,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -90,11 +89,13 @@ public class ConverseWithAgentTool {
     private final Integer inheritedMaxDepth;
 
     /**
-     * Delegations performed by this tool instance. The instance is built per
-     * {@code buildToolList} call (i.e. per LLM task execution), so this bounds
-     * {@code maxDelegationsPerTask} — finding I4.
+     * Delegations this LLM task has made this turn, bounded by
+     * {@code maxDelegationsPerTask} — finding I4. Not a count of this instance: a
+     * turn builds a new instance per tool assembly (each cascade step, a HITL
+     * resume), so {@code DynamicAgentToolsProvider} passes a count kept on the
+     * conversation step.
      */
-    private final AtomicInteger delegationCount = new AtomicInteger();
+    private final TurnCounter delegationCount;
 
     /**
      * {@code (agentId, principal) -> may that principal use that agent}, asked
@@ -171,7 +172,19 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth) {
-        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, null);
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, TurnCounter.local(), null);
+    }
+
+    /**
+     * @param delegationCount
+     *            the count {@code maxDelegationsPerTask} bounds. Pass
+     *            {@link TurnCounter#onStep} so every instance built for the task
+     *            during one turn spends the same budget; {@code null} counts per
+     *            instance.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, delegationCount, null);
     }
 
     /**
@@ -182,6 +195,18 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, DelegationBudget budget) {
+        this(conversationService, userId, config, currentDepth, useCheck, inheritedMaxDepth, TurnCounter.local(), budget);
+    }
+
+    /**
+     * @param delegationCount
+     *            see the seven-argument constructor taking it
+     * @param budget
+     *            see the seven-argument constructor taking it
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth, TurnCounter delegationCount, DelegationBudget budget) {
+        this.delegationCount = delegationCount != null ? delegationCount : TurnCounter.local();
         this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
         this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
@@ -255,7 +280,7 @@ public class ConverseWithAgentTool {
             }
 
             // --- Guardrail: delegations per task (finding I4) ---
-            if (delegationCount.incrementAndGet() > config.getMaxDelegationsPerTask()) {
+            if (delegationCount.increment() > config.getMaxDelegationsPerTask()) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: maxDelegationsPerTask=%d exhausted",
                         agentId, config.getMaxDelegationsPerTask());
                 return "⚠️ Maximum delegations for this task (%d) reached.".formatted(config.getMaxDelegationsPerTask());

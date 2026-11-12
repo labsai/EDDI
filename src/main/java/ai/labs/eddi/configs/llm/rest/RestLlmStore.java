@@ -203,8 +203,8 @@ public class RestLlmStore implements IRestLlmStore {
 
     /**
      * Refuses {@code ${caller:token}} from a caller who may not author it — see
-     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
-     * path treats a non-200 update as "create it directly instead".
+     * {@link CallerTokenAuthorPolicy}. Throws rather than returning a response; a
+     * merge import fails on the refusal like on any other refused update.
      */
     private void requireMayAuthorCallerToken(Object configuration) {
         // A document read through the redacted view must not be stored with the

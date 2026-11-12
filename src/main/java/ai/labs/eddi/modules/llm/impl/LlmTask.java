@@ -774,7 +774,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var cascadeConfig = task.getModelCascade();
         boolean cascadeConfigured = cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null
                 && !cascadeConfig.getSteps().isEmpty();
-        boolean skipCascade = cascadeConfigured && task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+        // Whether the task has a tool this turn other than the answerMode reply tool.
+        // The task's configuration answers for its own tools, built-ins and a2aAgents;
+        // the tools a workflow's httpcalls / mcpcalls contribute only show in the
+        // assembly the tool loop runs on, so the orchestrator is asked — and only when
+        // the answer changes the plan: a cascade's tool decision or the reservation's
+        // round count.
+        boolean reservationOn = spendGate != null && spendGate.reservationEnabled();
+        boolean taskHasTools = task.isAgentMode() || ((cascadeConfigured || reservationOn) && agentOrchestrator.offersTools(task, memory));
+        boolean skipCascade = cascadeConfigured && taskHasTools && !cascadeConfig.isEnableInAgentMode();
         boolean cascadeActive = cascadeConfigured && !skipCascade;
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
@@ -837,9 +845,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
         // Hard tenant ceiling (opt-in): hold the most this model phase can cost
         // against the monthly budget before it starts. Off, this reads one flag.
-        if (spendRefusal == null && spendGate != null && spendGate.reservationEnabled()) {
-            spendRefusal = spendGate.holdModelPhase(memory, ModelCallBound.phaseMaxUsd(task, cascadeActive, messages, processedParams,
-                    resolvedType, resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
+        if (spendRefusal == null && reservationOn) {
+            spendRefusal = spendGate.holdModelPhase(memory,
+                    ModelCallBound.phaseMaxUsd(task, cascadeActive, taskHasTools || AnswerTool.enabled(task), messages, processedParams, resolvedType,
+                            resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
         }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
@@ -879,7 +888,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()), reaskSpend,
+                        turnBudget(memory.getTurnDeadline()), reaskSpend, taskHasTools,
                         (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
                                 processedParams,
                                 stepType, stepParams, screenedInput, currentStep, stepTextVerdicts));
@@ -1076,7 +1085,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             responseContent = fallbackServed.content();
             responseMetadata = new HashMap<>();
             toolTrace = new ArrayList<>();
-            usedToolMode = task.isAgentMode();
+            // The fallback is shown where the tool loop's answer would have been. When the
+            // plan above did not need to ask whether the task has tools, a refusal — rare
+            // — asks now.
+            usedToolMode = taskHasTools || (!cascadeConfigured && !reservationOn && agentOrchestrator.offersTools(task, memory));
             cascadeAuditModel = null;
         } catch (Exception e) {
             settleCircuit(circuitTicket, e);
@@ -3027,7 +3039,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * regex replacement also read {@code $} and {@code \} inside one as group
      * references).
      */
-    static String escapeConfigReferenceMentions(String value) {
+    public static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
