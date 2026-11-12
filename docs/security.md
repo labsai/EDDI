@@ -591,7 +591,7 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > Service name is refused. The `k8s/overlays/production` component sets the same
 > two properties. Docker Compose keeps the application default (service names are
 > its internal APIs); `.env.example` and the compose files carry the commented
-> `EDDI_SECURITY_SSRF_PROTECTION_*` lines to turn it on.
+> `EDDI_SECURITY_SSRF_PROTECTION_ENABLED` and `EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS` lines to turn it on.
 >
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse

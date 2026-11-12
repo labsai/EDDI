@@ -1,0 +1,93 @@
+## 🔒 fix(deploy): deployment, installer and CI hardening (2026-11-12)
+
+**Repo:** EDDI (`fix/deploy-installer-ci-hardening`)
+
+### What changed and why
+
+A security review of the deployment, installer and CI files turned up thirteen
+findings. Twelve are fixed here; the OpenTelemetry advisory is not (below).
+
+**Kubernetes.** `k8s/quickstart.yaml` and `k8s/base` ship EDDI with all three
+`*_ALLOW_UNAUTHENTICATED` flags on, so every pod in the cluster was an
+administrator. Both now carry an `eddi-ingress` NetworkPolicy admitting only the
+pods of EDDI's own namespace on port 7070; the `ingress` component adds
+`eddi-ingress-controller` for a controller in another namespace. Their comments
+and [`docs/kubernetes.md`](../kubernetes.md) say that every admitted pod is still an
+unauthenticated administrator and that NetworkPolicy needs an enforcing CNI. The
+one-file quickstart MongoDB stays unauthenticated: the authenticated pattern in
+`overlays/mongodb` needs a separately created Secret, an init container and a
+second config file, which does not fit one `kubectl apply -f`.
+`create-secrets.sh` and `create-secrets.ps1` print the generated vault master key
+only to a terminal; with output redirected they name the Secret instead of
+putting the key in a CI log.
+
+**SSRF protection.** The application default stays off (compose service names and
+a local Ollama are private addresses). The Helm chart now has
+`eddi.security.ssrfProtection.enabled` (empty follows the install: on when
+`eddi.oidc.enabled` or `ingress.enabled`) and `.allowedHosts` (default
+`127.0.0.1:7070`, the Platform Operator's self-call); `k8s/overlays/production`
+sets both properties; the compose files and `.env.example` carry commented
+`EDDI_SECURITY_SSRF_PROTECTION_ENABLED` and `EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS` lines. Helm chart version 2.15.0.
+
+**Helm TLS.** An OIDC-enabled Ingress without `ingress.tls` fails the render unless
+`ingress.allowPlainHttp=true` acknowledges TLS terminated elsewhere; the kustomize
+ingress overlay says the same next to its commented `tls:` block.
+
+**Installers.** `eddi update` discarded the installer's verification: it re-downloaded
+every compose file and monitoring asset with plain curl, so a moved tag or the
+`main` fallback silently replaced the files that run with the vault key and the
+database credentials. The bash CLI now fetches `SHA256SUMS` (and verifies its cosign
+signature when cosign is installed) and compares every file before moving any
+into place; `eddi.cmd` hands the download to a generated `eddi-fetch.ps1` that embeds
+the installer's own functions. An install pinned to a release refuses to fall back
+to `main` when the release lookup fails (`EDDI_BRANCH=main eddi update` opts in).
+`install.ps1` also gained what `install.sh` already had: Keycloak and Grafana
+credentials go to `127.0.0.1` and only after Docker confirms this project's
+container publishes the port, and `.env`, `.eddi-config` and `first-login.txt` are
+created owner-only before they are written under pwsh on Linux and macOS.
+
+**GCP.** With `--https` the provisioner opens no direct EDDI firewall rule, binds
+EDDI to the VM's loopback and drops the plain-http links; readiness is polled over
+HTTPS. The VM gets `--no-service-account --no-scopes`. `--eddi-version` and
+`--eddi-branch` are validated with the installer's patterns before being spliced
+into root scripts, and the startup script checks `install.sh` against the release's
+`SHA256SUMS` (the release job in `ci.yml` now lists it) before running it as root.
+The `eddi-frontend` client loses its loopback redirects and `+` web origin when a
+public domain is configured, as the Helm chart does.
+
+**CI.** `docker-pull-notify.yml` coerces cache-restored values to integers and
+passes them to the delta step through `env`; `base-image-check.yml` does the same for
+values parsed from the Dockerfile. `ci.yml` restores the Maven cache by exact key
+only on tag builds. `auto-approve-copilot.yml` protects the rest of the trust
+boundary (URL validation, integrations, mail, HITL, templating, REST and MCP
+surface, export/import, resources, tests, the Platform Operator, the assistant
+instructions, docs-site, docker, `.env.example`); `AutoApproveCopilotPolicyTest`
+moved `src/main/resources/application-test.properties` and `src/test/**` from the
+"ordinary" list to the protected one.
+
+**Docs.** `.env.example` no longer claims the compose file supplies a demo vault key:
+an empty `EDDI_VAULT_MASTER_KEY` disables the vault, and the compose files say so.
+
+### Not changed
+
+`io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform
+BOM (GHSA-ccrj-gw8r-854m, fixed in 1.67.0). Quarkus platform 3.40.1.2, the newest
+patch of the line, still manages 1.62.0, and importing `opentelemetry-bom` 1.67.0
+alone would split the API from the `opentelemetry-api-incubator` and SDK artifacts
+the Quarkus extension is compiled against, which cannot be validated without the
+container tests. Tracing ships off (`quarkus.otel.sdk.disabled=true`); keep it off
+on an untrusted network until a platform release carries 1.67.0.
+
+### Design decisions
+
+- The auto-approve header comment (approval is additional to a human review, `main`
+  must require two) matches `docs/code-review-standards.md` and was left as written;
+  the setting itself is not something a file can read.
+- Per-finding policy for non-breaking defaults: SSRF protection follows the install
+  (on only where OIDC or an Ingress makes the pod reachable by others) rather than
+  flipping the application default.
+
+**Files:** [`helm/eddi/templates/configmap.yaml`](../../helm/eddi/templates/configmap.yaml),
+[`install.sh`](../../install.sh), [`install.ps1`](../../install.ps1),
+[`gcp/provision-vm.sh`](../../gcp/provision-vm.sh),
+[`k8s/base/eddi-networkpolicy.yaml`](../../k8s/base/eddi-networkpolicy.yaml)

@@ -799,9 +799,14 @@ class DeploymentManifestsTest {
                             + "enough for a second installer to create the Secret and have this run destroy "
                             + "it without --force and without a word. The delete belongs to --force alone; "
                             + "AlreadyExists is what makes the normal path safe. " + absent);
-            assertTrue(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_SH + " created the Secret but never printed the key. It is generated in "
-                            + "the script and stored nowhere else; unprinted, it is unrecoverable. " + absent);
+            // The run is captured, so stdout is not a terminal: the key is withheld (it
+            // would land in a CI log) and the Secret that holds it is named instead.
+            assertFalse(absent.output().contains("Save this key"),
+                    CREATE_SECRETS_SH + " printed the vault master key to a stdout that is not a terminal, "
+                            + "which is how it ended up in CI logs. " + absent);
+            assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
+                    CREATE_SECRETS_SH + " withheld the key without saying where it is: unprinted and "
+                            + "unlocated, it is unrecoverable. " + absent);
         }
 
         /**
@@ -875,8 +880,12 @@ class DeploymentManifestsTest {
                             + "the strength of a probe that had already returned — the same destructive race "
                             + "as the shell script, and the two are documented as equivalent. The delete "
                             + "belongs to -Force alone. " + absent);
-            assertTrue(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_PS1 + " created the Secret but never printed the key. " + absent);
+            // The run is captured, so output is redirected: the key is withheld (it would
+            // land in a log) and the Secret that holds it is named instead.
+            assertFalse(absent.output().contains("Save this key"),
+                    CREATE_SECRETS_PS1 + " printed the vault master key to redirected output. " + absent);
+            assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
+                    CREATE_SECRETS_PS1 + " withheld the key without saying where it is. " + absent);
         }
 
         @Test

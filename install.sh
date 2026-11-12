@@ -2626,7 +2626,10 @@ _set_kv() {
 RELEASE_SIGNER_IDENTITY_PREFIX="https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
 FIRST_SIGNED_RELEASE="6.6.0"
 RELEASE_SIGNER_ISSUER="https://token.actions.githubusercontent.com"
-RELEASE_CHECKSUMS=""
+# Bare assignment on purpose: InstallerReleaseRefTest extracts the installer's own
+# functions with a sed range that starts at the line RELEASE_CHECKSUMS="" and must
+# not find a second start here.
+RELEASE_CHECKSUMS=
 _sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | cut -d' ' -f1

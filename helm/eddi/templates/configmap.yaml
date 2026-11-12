@@ -388,7 +388,7 @@ data:
   {{- $ssrf := .Values.eddi.security.ssrfProtection | default dict }}
   {{- $ssrfOn := or .Values.eddi.oidc.enabled .Values.ingress.enabled }}
   {{- if kindIs "bool" $ssrf.enabled }}{{ $ssrfOn = $ssrf.enabled }}
-  {{- else if $ssrf.enabled }}{{ $ssrfOn = eq (lower (toString $ssrf.enabled)) "true" }}{{ end }}
+  {{- else if $ssrf.enabled }}{{ $ssrfOn = eq (lower (toString (default "" $ssrf.enabled))) "true" }}{{ end }}
   EDDI_SECURITY_SSRF_PROTECTION_ENABLED: {{ $ssrfOn | quote }}
   {{- $ssrfHosts := $ssrf.allowedHosts | default list }}
   {{- if kindIs "slice" $ssrfHosts }}{{ $ssrfHosts = join "," $ssrfHosts }}{{ end }}
