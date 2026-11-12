@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.hitl.HitlPauseIdPolicy;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
@@ -384,6 +386,39 @@ class ConversationHitlService {
         }
     }
 
+    /**
+     * Refuse a decision that names a plan other than the pause's — the pre-CAS half
+     * of {@link HitlPlanBinding#check}. A decision without a hash is not judged
+     * here: strict binding needs the agent configuration, read once the resume is
+     * committed to the snapshot.
+     */
+    private static void requireDecisionMatchesPlan(String conversationId, HitlDecision decision, String committedPlanHash) {
+        try {
+            HitlPlanBinding.check(conversationId, decision, committedPlanHash, () -> false);
+        } catch (HitlPlanBinding.PlanMismatch mismatch) {
+            throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+        }
+    }
+
+    /**
+     * Whether a human decision on this agent's pauses must carry the plan hash: the
+     * deployment says so ({@code eddi.hitl.plan-hash.strict}), or the paused agent
+     * version's {@code hitlConfig.requirePlanHash} does. A failed config read
+     * counts as strict — an unknown policy must not relax a binding the agent may
+     * require.
+     */
+    boolean planBindingStrict(String agentId, Integer agentVersion) {
+        if (conversationService.planHashStrict) {
+            return true;
+        }
+        AgentConfigLookup lookup = lookupAgentConfigPinned(agentId, agentVersion);
+        if (lookup.readFailed()) {
+            return true;
+        }
+        AgentConfiguration config = lookup.config();
+        return config != null && config.getHitlConfig() != null && Boolean.TRUE.equals(config.getHitlConfig().getRequirePlanHash());
+    }
+
     private static IConversationService.PauseMismatchException pauseMismatch(String conversationId) {
         LOGGER.infof("Refusing a HITL decision for conversation %s: it names a pause that is no longer current",
                 sanitize(conversationId));
@@ -484,7 +519,9 @@ class ConversationHitlService {
         boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
         boolean hasResumeContext = decision.getContext() != null && !decision.getContext().isEmpty();
         boolean hasReviewFields = HitlDecisionValidator.hasReviewFields(decision);
-        if (hasToolDecisions || namesPause || hasResumeContext || hasReviewFields) {
+        HitlPlanBinding.requireWellFormed(decision);
+        boolean namesPlan = decision.namesPlan();
+        if (hasToolDecisions || namesPause || namesPlan || hasResumeContext || hasReviewFields) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
                 // A decision made for an earlier pause must not consume this one.
@@ -497,6 +534,12 @@ class ConversationHitlService {
                 // the state) — "pause changed" would misdescribe it.
                 if (preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                     requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                    // A decision for another plan is refused before the CAS too; the
+                    // authoritative check (and the strict missing-hash refusal) runs
+                    // again on the snapshot the resume actually executes.
+                    if (namesPlan) {
+                        requireDecisionMatchesPlan(conversationId, decision, preCasSnapshot.getHitlPlanHash());
+                    }
                 }
                 if (hasToolDecisions) {
                     validateToolDecisions(decision, preCasSnapshot);
@@ -572,6 +615,24 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw new PauseIdRequiredException(HitlPauseIdPolicy.message());
             }
+            // Plan binding (HitlPlanHash): a decision for another plan, or a human
+            // decision without one under strict binding, is refused here, on the
+            // snapshot this resume runs. The pause is put back untouched (its timeout
+            // schedule is still armed), exactly as for a changed pause.
+            final String committedPlanHash = snapshot.getHitlPlanHash();
+            final HitlPlanBinding.Outcome planOutcome;
+            final String agentIdForStrict = snapshot.getAgentId();
+            final Integer agentVersionForStrict = snapshot.getAgentVersion();
+            try {
+                planOutcome = HitlPlanBinding.check(conversationId, decision, committedPlanHash,
+                        () -> planBindingStrict(agentIdForStrict, agentVersionForStrict));
+            } catch (HitlPlanBinding.PlanMismatch mismatch) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+            } catch (HitlPlanBinding.PlanHashRequired planHashRequired) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw planHashRequired;
+            }
             // GDPR Art. 18 — the same admission rule as start and say. A resume runs the
             // rest of the turn (tools, a model call, a rejection-note revision) for the
             // conversation's OWNER, so an owner whose processing an administrator has
@@ -586,6 +647,18 @@ class ConversationHitlService {
             }
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            // Execution side of the binding: re-derive the hash from the plan this
+            // resume is about to run and refuse when it is not the committed one —
+            // whatever changed the stored plan after the pause, the approval was not
+            // given for it.
+            if (!HitlPlanBinding.verifies(committedPlanHash, HitlPlanHash.forPause(memory))) {
+                LOGGER.warnf("hitl.plan.changed: the stored plan of the pause of conversation %s no longer matches the hash it was "
+                        + "committed with — refusing the decision; nothing was run", sanitize(conversationId));
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException("The pending approval's plan no longer matches the plan it was "
+                        + "committed with — nothing was run. Cancel the conversation or contact an administrator.");
+            }
+            decision.bindPlan(committedPlanHash, planOutcome.name());
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
@@ -597,7 +670,7 @@ class ConversationHitlService {
             prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
         } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
-                | PauseIdRequiredException e) {
+                | PauseIdRequiredException | HitlPlanBinding.PlanHashRequired e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -1914,6 +1987,9 @@ class ConversationHitlService {
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
         populateTimeoutBookmark(memory);
         renderApprovalContext(memory);
+        // Last: after the turn's secret scrub (done before this is called) and before
+        // the store, so the hash covers exactly what is persisted.
+        HitlPlanHash.commit(memory);
     }
 
     /**

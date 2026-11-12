@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
@@ -945,5 +946,50 @@ class AgentOrchestratorResumeToolLoopTest {
                 .filter(m -> m instanceof ToolExecutionResultMessage)
                 .map(m -> ((ToolExecutionResultMessage) m).text())
                 .anyMatch(t -> t.contains("NOT_EXECUTED")));
+    }
+
+    @Test
+    @DisplayName("plan hash: a batch that still hashes to its committed plan executes")
+    void intactPlanExecutes() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        batch.setPlanNonce("nonce-1");
+        batch.setPlanHash(HitlPlanHash.forToolBatch("conv-1", null, null, batch));
+        when(journalStore.tryClaim(eq("conv-1"), eq("epoch-1"), anyString(), eq("calculate"), eq("reviewer-1"))).thenReturn(true);
+        when(calculatorTool.calculate("6*7")).thenReturn("42");
+        ChatModel chatModel = mock(ChatModel.class);
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("42"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        assertEquals("42", result.response());
+        verify(calculatorTool, times(1)).calculate("6*7");
+        assertTrue(result.trace().stream().anyMatch(t -> "hitl_approved".equals(t.get("type")) && batch.getPlanHash().equals(t.get("planHash"))),
+                "the approval trace (and so the LLM task's audit entry) names the plan it executed");
+    }
+
+    @Test
+    @DisplayName("plan hash: arguments changed after the plan was committed - NOT_EXECUTED, no claim, no execution")
+    void changedPlanIsRefusedInTheLoop() throws Exception {
+        var task = twoToolTask();
+        var r1 = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var batch = batchWith(0, List.of(gatedCall("c1", "calculate", "{\"expression\":\"6*7\"}")), List.of(r1));
+        batch.setPlanNonce("nonce-1");
+        batch.setPlanHash(HitlPlanHash.forToolBatch("conv-1", null, null, batch));
+        batch.getCalls().get(0).setArgumentsRaw("{\"expression\":\"6*8\"}");
+        ChatModel chatModel = mock(ChatModel.class);
+        var captor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(captor.capture())).thenReturn(text("handled"));
+
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), true);
+
+        verify(calculatorTool, never()).calculate(anyString());
+        verify(journalStore, never()).tryClaim(anyString(), anyString(), anyString(), anyString(), anyString());
+        assertTrue(captor.getValue().messages().stream()
+                .filter(m -> m instanceof ToolExecutionResultMessage)
+                .map(m -> ((ToolExecutionResultMessage) m).text())
+                .anyMatch(t -> t.contains("NOT_EXECUTED") && t.contains("the plan changed after it was approved")));
+        assertTrue(result.trace().stream().anyMatch(t -> "hitl_plan_changed".equals(t.get("type"))));
     }
 }
