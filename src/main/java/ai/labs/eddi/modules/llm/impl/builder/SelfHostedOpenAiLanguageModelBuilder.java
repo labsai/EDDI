@@ -56,6 +56,12 @@ public class SelfHostedOpenAiLanguageModelBuilder implements ILanguageModelBuild
         return recognised;
     }
 
+    /** The OpenAI builder's credential keys; this type's own keys carry none. */
+    @Override
+    public Set<String> secretParameters() {
+        return delegate.secretParameters();
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return delegate.build(prepare(parameters), Map.of());

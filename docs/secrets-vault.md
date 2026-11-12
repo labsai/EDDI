@@ -55,8 +55,40 @@ ${vault:tenantId/keyName}
 | Configuration Type                    | Fields Resolved                        |
 | ------------------------------------- | -------------------------------------- |
 | **HTTP Calls** (`httpcalls.json`)     | URL, headers, body, query parameters   |
-| **LangChain** (`langchain.json`)      | `apiKey` and other model configuration |
+| **LangChain** (`langchain.json`)      | The provider's credential parameters only — see below |
+| **RAG** (`rag.json`)                  | `embeddingParameters.apiKey`; `storeParameters` |
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
+
+### Model parameters: credentials only
+
+In the parameters of a chat model (an LLM task, a cascade step, a judge model, a guardrail or summarizer model), of an embedding model and of a vector store, a `${vault:…}` reference may sit **only in a parameter that carries a credential**. Anywhere else the resolved value is sent as data — in the request body or the URL — and comes back: in the provider's "model `sk-…` does not exist" error, which reaches the conversation's `taskErrors`, the RAG search response and the ingestion status, and in the `gen_ai.request.model` span attribute and the `model` meter tag. An editor with a working key of their own could otherwise read any secret of the vault back by writing its reference into `modelName`.
+
+| Provider type | Parameters that may hold a reference |
+| --- | --- |
+| `openai`, the OpenAI-compatible presets, `openai-compatible` | `apiKey`, `customHeaders`, `customQueryParams` (for a gateway that authenticates with a query key such as `?api-key=`) |
+| `anthropic`, `gemini`, `mistral` | `apiKey`, `customHeaders` |
+| `azure-openai` | `apiKey`, `nonAzureApiKey`, `customHeaders` |
+| `huggingface` | `accessToken` |
+| `jlama` | `authToken` |
+| `ollama`, `bedrock`, `gemini-vertex` | `customHeaders` (Bedrock and Vertex authenticate through the cloud credential chain) |
+| `oracle-genai` | none |
+| Embedding `openai`, `azure-openai`, `mistral`, `cohere`, `gemini` | `apiKey` |
+| Embedding `ollama`, `bedrock`, `vertex` | none |
+| Vector store `pgvector` | `user`, `password` |
+| Vector store `elasticsearch` | `apiKey`, `userName`, `password` |
+| Vector store `qdrant` | `apiKey` |
+| Vector store `mongodb-atlas` | `connectionString` |
+| Vector store `chroma`, `in-memory` | none |
+
+A reference anywhere else — `modelName`, `model`, `deploymentName`, `baseUrl`, `region`, … — is refused before anything is resolved: the model is not built, and the error names the parameter, never its value. The check runs after `${vars:…}` expansion, so a variable that expands to a reference is refused the same way. Saving such a configuration through `PUT`/`POST`/`PATCH` or duplicating it is a **400** naming the field, and so is importing it (a ZIP import or an agent upgrade). The prompts (`systemMessage`, `prompt`) are never resolved and may quote reference-shaped text. A configuration stored before this rule is refused when its model is built; move the secret into the credential parameter, or put a literal (or a `${vars:…}` holding one) where the reference was.
+
+Errors from an embedding model or a vector store that a knowledge base's search, chunk and ingestion-status endpoints return are also scrubbed of the knowledge base's own secrets by value, and of credential shapes, before they leave the server.
+
+A provider may still echo a credential in its error — a gateway quoting the query key it rejected, say. The plaintexts a chat model was built with are therefore removed **by value** from the task-error digest (`taskErrors`), the audit and streaming failure summary, and `llm:error:<taskId>`, before the pattern redaction that catches only recognisable key shapes; those digests also replace every URL with `[url]`.
+
+Deploying an agent whose LLM configuration carries a reference outside a credential parameter fails at deploy, naming the field (in the server log, and as `DEPLOYMENT_FAILED`), rather than on the first turn. A reference reached through a `${vars:…}`, and a knowledge base's embedding or store parameters, are only judged when the model or store is built.
+
+**Upgrade note.** Configurations saved before this rule that hold a `${vault:…}` (or a `${vars:…}` expanding to one) in any other parameter stop working: the LLM task's deploy fails, or its turn fails with the error above; a knowledge base's search and ingestion fail with it. Typical cases are a tokenised URL in `baseUrl`, a secret model or deployment name, a vaulted `database` or `indexName`. To find them, search the stored configurations for `${vault:` and `${eddivault:` outside the keys in the table — for example `GET /llmstore/llms/{id}` and `GET /ragstore/rags/{id}` per configuration, or, for secrets without `allowedHosts`, the startup `[SECURITY]` WARN of `UnrestrictedSecretsCheck`, which names the configurations referencing each — and global variables whose value is a reference. Move the secret into a credential parameter (a token that was part of a URL into a credential header, or `customQueryParams` on the OpenAI types), and put a literal where it was.
 
 In an HTTP call, a vault reference is resolved **only where the configuration wrote it**: in the
 template of that URL, header, body or query parameter, or as the value of a property the template
@@ -111,6 +143,15 @@ copied into a property. The property therefore carries an `autoVaulted` marker, 
 auto-vaulting code and by nothing else, and the reference is resolved only when that marker is
 present. On top of it the reference must still name this agent, this user and the property the
 template reads, **under this conversation's own tenant**.
+
+That tenant is `default`, unless the conversation property `tenantId` asks for another. Any
+`property.json` can set that property, so with [workspaces](workspaces.md) enforced it is honoured
+only when it names the tenant of the **agent's own space**; anything else (another space's tenant,
+an administrator-made tenant, an agent whose space cannot be read) is ignored with a WARN and the
+secret goes to `default` — a designer cannot write into the vault of a space they are not a member
+of. Without workspace enforcement every editor already reaches every tenant, and the property is
+honoured as before. The reference check accepts the conversation's own slot under `default` or
+under the requested tenant.
 
 Every auto-vaulted write gets **its own slot**, `<agentId>.u<userHash>.<nonce>.<property>` — the
 user hash is a truncated SHA-256 of the user id (the id itself never enters the vault), the nonce
@@ -219,6 +260,10 @@ Blocking at resolution would fail in the middle of a live conversation, after th
 The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 
 One path uses an agent's configuration without deploying it: a scheduled **Dream** consolidation reads the stored agent version (a pinned, never-deployed one included) and hands `userMemoryConfig.dream.parameters` to the model. It runs the same check against that exact version before the cycle starts, and refuses the cycle in `enforce` mode.
+
+### Knowledge bases run outside an agent
+
+A knowledge base's standalone endpoints — `POST /ragstore/rags/{id}/ingest`, search, document chunks, and the source run, preview, files and history endpoints — build its embedding model and vector store on the spot, outside any agent. There is no agent there that could be on a grant, so when the knowledge base names a secret whose `allowedAgents` lists particular agents (no wildcard), the call is permitted only to a caller who may **edit at least one existing agent on that grant** — they can already make that agent use the secret, so nothing new is exposed, and the editor who maintains an agent and its knowledge base keeps searching and ingesting. Anyone else is refused (**403**), naming the reference but not the agents on the grant; a grant naming only deleted or unknown agents lets no editor through. Before this, the deploy-time check was the only one, and any editor with EDIT on any knowledge base could have the server resolve a secret granted to one agent. Without workspace enforcement every editor may edit every agent, so the check then passes for any editor as long as a granted agent exists. An administrator is exempt; a secret open to every agent (`["*"]`, or no list) is unaffected; a `${vars:…}` is expanded and a `${connection:…}` followed, as at deployment. Unlike the deploy gate this fails **closed**: a grant, variable or connection that cannot be read refuses the call, because no later check would catch it. It follows the same mode: `warn` logs and lets the call through, `off` does not check. The retrieval an agent's own LLM task performs, and scheduled source runs, do not pass through these endpoints and are unchanged.
 
 ### Modes
 
@@ -408,7 +453,7 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 - **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl`, `host` or Vertex's `apiEndpoint` in `langchain.json`; for an OpenAI-compatible preset without `baseUrl`, the preset URL its `region` selects), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string, its `proxyHost` included — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
 - **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing for those until an operator sets it. `[]` or `["*"]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use. A cached chat model whose parameters reach a secret through a `${vars:…}` variable cannot be matched to the secret, so every variable-bearing chat model is evicted along with it.
-- **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's. (An OpenAI-compatible preset is the exception: its `region` lets an editor pick among the vendor's hosts, so the URL it selects is checked — also when the configuration carries an `endpoint`-style key the preset does not read.)
+- **A provider's default endpoint is checked too.** An LLM or embedding configuration with *no* endpoint parameter sends to the provider's own default host — and the editor chooses the provider `type`, so a key restricted to `api.openai.com` could otherwise go to `api.anthropic.com` by switching the type and leaving `baseUrl` out. The default is checked like a configured endpoint: `api.openai.com` (`openai`; `azure-openai` without an `endpoint`, i.e. `nonAzureApiKey` mode), `api.anthropic.com`, `generativelanguage.googleapis.com` (`gemini`), `api.mistral.ai`, `router.huggingface.co` (`huggingface`), `huggingface.co` (`jlama`'s model download, which `authToken` authenticates), `bedrock-runtime.<region>.amazonaws.com` (`us-east-1` when no `region`), `<location>-aiplatform.googleapis.com` (`gemini-vertex`), `localhost:11434` (`ollama`); for embeddings also `api.cohere.ai` and Vertex's `us-central1` default. An OpenAI-compatible preset is checked against the URL its `region` selects — also when the configuration carries an `endpoint`-style key the preset does not read. A secret **without** `allowedHosts` is unaffected.
 - **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
 - **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
 

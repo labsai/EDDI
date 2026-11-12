@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.properties.impl;
 
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -12,6 +14,9 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
+import ai.labs.eddi.engine.security.spaces.SpaceTenants;
+import ai.labs.eddi.engine.security.spaces.Subjects;
+import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -21,8 +26,10 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -78,8 +85,22 @@ public class SecretPropertyVault {
     private static final int MIN_NORMALIZED_MATCH_LENGTH = 4;
     private static final String SECRET_INPUT_PLACEHOLDER = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
 
+    /** The conversation property that asks for a vault tenant. */
+    static final String TENANT_PROPERTY = "tenantId";
+
     private final ISecretProvider secretProvider;
     private final IDataFactory dataFactory;
+
+    /**
+     * Whether workspaces are enforced, and the agent's space — see
+     * {@link #vaultTenant}. Field-injected; null in tests built with {@code new},
+     * which then behave as without workspace enforcement.
+     */
+    @Inject
+    WorkspaceSettings workspaceSettings;
+
+    @Inject
+    IDocumentDescriptorStore descriptorStore;
 
     @Inject
     public SecretPropertyVault(ISecretProvider secretProvider, IDataFactory dataFactory) {
@@ -165,17 +186,8 @@ public class SecretPropertyVault {
      *             {@code input:initial} ) in the conversation document.
      */
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) throws LifecycleException {
-        // Determine tenantId — use conversation property if set, else "default"
-        var conversationProperties = memory.getConversationProperties();
-        String tenantId = "default";
-        if (conversationProperties.containsKey("tenantId")) {
-            Property tenantProp = conversationProperties.get("tenantId");
-            if (tenantProp.getValueString() != null) {
-                tenantId = tenantProp.getValueString();
-            }
-        }
-
         String agentId = memory.getAgentId();
+        String tenantId = vaultTenant(memory, agentId);
         // A fresh slot per write, attributable to the user (see AutoVaultedSecrets).
         // The slot used to be <agentId>.<keyName> — shared by every user and every
         // conversation of the agent, so the last writer's secret was what every
@@ -207,6 +219,68 @@ public class SecretPropertyVault {
 
         // Return the vault reference to be stored in properties instead of plaintext
         return ref.toReferenceString();
+    }
+
+    /**
+     * The vault tenant an auto-vaulted secret of this conversation is written to.
+     * <p>
+     * The conversation property {@code tenantId} asks for one, but any
+     * {@code property.json} can set it, so with workspaces enforced it is honoured
+     * only when it names the tenant of the agent's own space — a designer must not
+     * be able to write into another space's vault, which only its members may.
+     * Anything else (another space's tenant, an administrator-made tenant, an agent
+     * whose space cannot be read) falls back to {@code default}, with a warning.
+     * Without workspace enforcement every editor already reaches every tenant, and
+     * the property is honoured as before; without the property the tenant is
+     * {@code default}, as before.
+     */
+    String vaultTenant(IConversationMemory memory, String agentId) {
+        String requested = requestedTenant(memory.getConversationProperties());
+        if (requested == null || SecretReference.DEFAULT_TENANT.equals(requested)) {
+            return SecretReference.DEFAULT_TENANT;
+        }
+        if (workspaceSettings == null || !workspaceSettings.isEnforcing()) {
+            return requested;
+        }
+        String own = agentSpaceTenant(agentId);
+        if (requested.equals(own)) {
+            return requested;
+        }
+        LOGGER.warnf("Agent '%s' asks for auto-vaulted secrets in vault tenant '%s' (conversation property 'tenantId'), which is not "
+                + "the tenant of the agent's own space; writing to the '%s' tenant instead.", sanitize(agentId), sanitize(requested),
+                SecretReference.DEFAULT_TENANT);
+        return SecretReference.DEFAULT_TENANT;
+    }
+
+    /**
+     * The {@code valueString} of the {@code tenantId} property, or {@code null}.
+     */
+    static String requestedTenant(Map<String, Property> conversationProperties) {
+        Property tenant = conversationProperties == null ? null : conversationProperties.get(TENANT_PROPERTY);
+        String value = tenant != null ? tenant.getValueString() : null;
+        return value != null && !value.isBlank() ? value.trim() : null;
+    }
+
+    /**
+     * The vault tenant of the space the agent belongs to, or {@code null} when it
+     * belongs to none (unowned, legacy) or its descriptor cannot be read.
+     */
+    private String agentSpaceTenant(String agentId) {
+        if (descriptorStore == null || agentId == null || agentId.isBlank()) {
+            return null;
+        }
+        try {
+            DocumentDescriptor descriptor = descriptorStore.readCurrentDescriptor(agentId);
+            String space = descriptor == null ? null : descriptor.getSpaceId();
+            if (space == null || space.isBlank() || Subjects.LEGACY.equals(space)) {
+                return null;
+            }
+            return SpaceTenants.tenantFor(space);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the space of agent '%s' to place its auto-vaulted secrets (%s)", sanitize(agentId),
+                    e.getClass().getSimpleName());
+            return null;
+        }
     }
 
     /**

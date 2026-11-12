@@ -139,6 +139,19 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_CACHED_CONTENT, KEY_CUSTOM_HEADERS);
     }
 
+    /** langchain4j's endpoint when no {@code baseUrl} is configured. */
+    static final String DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_API_KEY, KEY_CUSTOM_HEADERS);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_BASE_URL, DEFAULT_ENDPOINT);
+    }
+
     /**
      * The settings added on top of the original handful, shared by the synchronous
      * and the streaming client (both extend the same base builder).

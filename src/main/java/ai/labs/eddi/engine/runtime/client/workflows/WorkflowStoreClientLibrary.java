@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.service.IWorkflowStoreService;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -44,6 +45,14 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
     private final Map<String, Provider<ILifecycleTask>> lifecycleExtensionsProvider;
     private static final String URI_SCHEME_ID = "eddi";
     private final IComponentCache componentCache;
+
+    /**
+     * Handed to every lifecycle manager, which scrubs the credentials it records
+     * from a failed task's error digest. Field-injected; null in tests built with
+     * {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
 
     @Inject
     public WorkflowStoreClientLibrary(IWorkflowStoreService workflowStoreService, IComponentCache componentCache,
@@ -73,6 +82,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
 
         final var workflowId = extractResourceId(documentDescriptor.getResource());
         final var lifecycleManager = new LifecycleManager(componentCache, workflowId);
+        lifecycleManager.useResolvedCredentials(resolvedCredentials);
         boolean secretInstructions = false;
 
         try {

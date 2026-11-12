@@ -158,6 +158,17 @@ class ConfigReferenceGuardTest {
                 "Bearer ${vault:acme/agent1.apiKey}", "header", DATA, ownTenant));
     }
 
+    @Test
+    @DisplayName("a default-tenant slot is allowed where the tenantId property asked for another tenant (the vault's fallback)")
+    void defaultTenantFallbackIsAllowed() {
+        // SecretPropertyVault ignores a tenantId that is not the agent's own space's
+        // and writes to the default tenant instead; the reference it wrote must still
+        // be usable in the conversation that asked for the other tenant.
+        Map<String, Property> fellBack = properties(unmarked("tenantId", "victim-tenant"), autoVaulted("apiKey", "${vault:agent1.apiKey}"));
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("Bearer {properties.apiKey}",
+                "Bearer ${vault:agent1.apiKey}", "header", DATA, fellBack));
+    }
+
     // =================================================================
     // Per-write slots: <agentId>.u<userHash>.<nonce>.<name> (AutoVaultedSecrets)
     // =================================================================

@@ -77,6 +77,16 @@ public class OpenAiCompatibleLanguageModelBuilder implements ILanguageModelBuild
     }
 
     /**
+     * The OpenAI builder's credential keys. A catalog entry that becomes a header
+     * ({@code HTTP-Referer} on OpenRouter, say) is a vendor setting, not a
+     * credential, and takes no vault reference.
+     */
+    @Override
+    public Set<String> secretParameters() {
+        return delegate.secretParameters();
+    }
+
+    /**
      * The preset's URL for the configured {@code region} (or its default), when no
      * {@code baseUrl} is set — the destination {@link #merged} will pick. The
      * region is editor-controlled, so a secret restricted to one region's host must

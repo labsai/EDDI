@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -81,12 +82,24 @@ final class LlmFallbackHandler {
     private final IDataFactory dataFactory;
     private final MeterRegistry meterRegistry;
 
+    /**
+     * Removes, by value, the credentials handed to model clients from the stored
+     * error message — see {@code ResolvedCredentials}. Identity when none is given.
+     */
+    private final UnaryOperator<String> credentialScrubber;
+
     LlmFallbackHandler(ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, IDataFactory dataFactory,
             MeterRegistry meterRegistry) {
+        this(templatingEngine, jsonSerialization, dataFactory, meterRegistry, UnaryOperator.identity());
+    }
+
+    LlmFallbackHandler(ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, IDataFactory dataFactory,
+            MeterRegistry meterRegistry, UnaryOperator<String> credentialScrubber) {
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.dataFactory = dataFactory;
         this.meterRegistry = meterRegistry;
+        this.credentialScrubber = credentialScrubber != null ? credentialScrubber : UnaryOperator.identity();
     }
 
     /**
@@ -128,7 +141,7 @@ final class LlmFallbackHandler {
         storeQuickReplies(config, templateData, step, taskId);
 
         if (failure != null) {
-            Map<String, Object> described = describe(failure);
+            Map<String, Object> described = describe(failure, credentialScrubber);
             step.storeData(dataFactory.createData(MemoryKeys.LLM_ERROR_PREFIX + taskId, described));
             LOGGER.warnf("LLM task '%s' failed in conversation '%s' (%s: %s) — serving the configured fallback (onError=fallback)", taskId,
                     sanitizeForLog(conversationId), described.get("class"), described.get("message"));
@@ -237,6 +250,15 @@ final class LlmFallbackHandler {
      * properly; this is the one place to swap that in.
      */
     static Map<String, Object> describe(Throwable failure) {
+        return describe(failure, UnaryOperator.identity());
+    }
+
+    /**
+     * {@link #describe(Throwable)} with {@code scrubber} applied to the message
+     * before anything else: a provider that echoes a credential without a
+     * recognisable prefix would otherwise reach {@code llm:error:<taskId>}.
+     */
+    static Map<String, Object> describe(Throwable failure, UnaryOperator<String> scrubber) {
         Throwable root = failure;
         for (int depth = 0; root.getCause() != null && root.getCause() != root && depth < MAX_CAUSE_DEPTH; depth++) {
             root = root.getCause();
@@ -247,7 +269,7 @@ final class LlmFallbackHandler {
         }
         Map<String, Object> described = new LinkedHashMap<>();
         described.put("class", root.getClass().getSimpleName());
-        described.put("message", sanitizeMessage(message));
+        described.put("message", sanitizeMessage(message == null ? null : scrubber.apply(message)));
         return described;
     }
 

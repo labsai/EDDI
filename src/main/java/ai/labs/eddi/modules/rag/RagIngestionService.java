@@ -78,6 +78,14 @@ public class RagIngestionService {
     /** Chunk metadata: the ingestion that wrote the chunk. */
     static final String METADATA_INGESTION_ID = "ingestionId";
 
+    /**
+     * Redacts a failed ingestion's message before it is stored as its status.
+     * Field-injected; null in tests built with {@code new}, which then redact
+     * credential shapes only.
+     */
+    @Inject
+    KnowledgeBaseFailureRedactor failureRedactor;
+
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory) {
         this.embeddingModelFactory = embeddingModelFactory;
@@ -175,7 +183,9 @@ public class RagIngestionService {
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
-            ingestionStatus.put(ingestionId, "failed: " + e.getMessage());
+            // The status is returned to anyone with VIEW on the knowledge base, and the
+            // message is the provider's: redacted before it is kept.
+            ingestionStatus.put(ingestionId, "failed: " + KnowledgeBaseFailureRedactor.redact(failureRedactor, ragConfig, e.getMessage()));
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
     }

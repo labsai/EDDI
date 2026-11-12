@@ -85,6 +85,7 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.modules.llm.impl.VaultReferencePlacementGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
@@ -208,6 +209,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Refuses a {@code ${vault:…}} outside a model's credential parameters. Null
+     * when built outside the container, where the check is skipped (the runtime
+     * check still applies). Updates go through the REST stores, which apply it; the
+     * direct creates below apply it here.
+     */
+    private VaultReferencePlacementGuard vaultReferencePlacementGuard;
+
+    @Inject
+    void useVaultReferencePlacementGuard(VaultReferencePlacementGuard guard) {
+        this.vaultReferencePlacementGuard = guard;
     }
 
     /**
@@ -1682,6 +1696,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Outside the try, like the caller-token check: a refusal must fail (and roll
         // back) the import.
         RedactionMarkerGuard.requireNoneIfRedactedType(document);
+        if (vaultReferencePlacementGuard != null) {
+            // Outside the try too, like the checks around it.
+            vaultReferencePlacementGuard.requireNone(document);
+        }
         if (callerTokenAuthorPolicy != null) {
             // Outside the try: a 403 must fail the import (and roll it back), not be
             // reported as a store failure.

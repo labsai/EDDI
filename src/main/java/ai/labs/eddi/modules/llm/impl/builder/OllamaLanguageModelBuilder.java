@@ -104,6 +104,24 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_CUSTOM_HEADERS);
     }
 
+    /**
+     * Ollama's own default address. langchain4j has no default and refuses to build
+     * without {@code baseUrl}, so nothing is sent here today; it is named anyway,
+     * so a secret restricted elsewhere fails the host check rather than depending
+     * on that.
+     */
+    static final String DEFAULT_ENDPOINT = "http://localhost:11434";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_CUSTOM_HEADERS);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_BASE_URL, DEFAULT_ENDPOINT);
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));

@@ -60,6 +60,23 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_QUANTIZE_AT_RUNTIME, KEY_WORKING_DIRECTORY, KEY_WORKING_QUANTIZED_TYPE);
     }
 
+    /**
+     * Where {@code authToken} goes: Jlama downloads the weights from the Hugging
+     * Face hub, and the token authenticates that download. Inference itself never
+     * leaves the JVM.
+     */
+    static final String DEFAULT_ENDPOINT = "https://huggingface.co";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_AUTH_TOKEN);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return DEFAULT_ENDPOINT;
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         JlamaRuntimeSupport.warnOnceIfDegraded();

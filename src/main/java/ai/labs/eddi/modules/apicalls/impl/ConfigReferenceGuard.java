@@ -283,7 +283,6 @@ public final class ConfigReferenceGuard {
             if (value == null) {
                 continue;
             }
-            String tenantPrefix = SecretReference.DEFAULT_TENANT.equals(tenantId) ? "" : tenantId + "/";
             // The legacy prefix too: a conversation property stored before the
             // ${eddivault:…} → ${vault:…} rename still holds the old spelling, and the
             // vault still resolves it.
@@ -292,18 +291,40 @@ public final class ConfigReferenceGuard {
                     : value.startsWith("${eddivault:") && value.endsWith("}")
                             ? value.substring("${eddivault:".length(), value.length() - 1)
                             : null;
-            if (body == null || !body.startsWith(tenantPrefix)) {
+            if (body == null) {
                 continue;
             }
-            String keyName = body.substring(tenantPrefix.length());
-            if (keyName.contains("/")) {
-                continue; // a tenant prefix on a default-tenant conversation
+            // The default tenant always, the requested one too. SecretPropertyVault
+            // writes to the requested tenant only when it is the agent's own space's
+            // (with workspaces enforced) and falls back to default otherwise, so a
+            // reference it wrote is under one of the two.
+            String keyName = keyNameUnder(body, SecretReference.DEFAULT_TENANT);
+            if (keyName == null && !SecretReference.DEFAULT_TENANT.equals(tenantId)) {
+                keyName = keyNameUnder(body, tenantId);
+            }
+            if (keyName == null) {
+                continue;
             }
             if (keyName.equals(agentId + "." + name) || AutoVaultedSecrets.isSlotFor(keyName, agentId, userId, name)) {
                 found.add(value);
             }
         }
         return found;
+    }
+
+    /**
+     * The key name of a reference body under {@code tenantId}, or {@code null} when
+     * the body names another tenant. A default-tenant reference is written in the
+     * short form, without a prefix.
+     */
+    private static String keyNameUnder(String body, String tenantId) {
+        String tenantPrefix = SecretReference.DEFAULT_TENANT.equals(tenantId) ? "" : tenantId + "/";
+        if (!body.startsWith(tenantPrefix)) {
+            return null;
+        }
+        String keyName = body.substring(tenantPrefix.length());
+        // A tenant prefix where the short form was expected.
+        return keyName.contains("/") ? null : keyName;
     }
 
     private static String userId(Map<String, Object> templateData) {

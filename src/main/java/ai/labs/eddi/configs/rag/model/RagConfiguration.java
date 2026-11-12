@@ -271,6 +271,12 @@ public class RagConfiguration {
         if (embeddingProblem != null) {
             throw new IllegalArgumentException(embeddingProblem);
         }
+        // The same rule for the vector store: a vault reference only in a parameter the
+        // store takes as a credential.
+        String storeProblem = StoreParameters.findMisplacedVaultReference(storeType, storeParameters);
+        if (storeProblem != null) {
+            throw new IllegalArgumentException(storeProblem);
+        }
         if (chunkSize != null && (chunkSize < 1 || chunkSize > MAX_CHUNK_SIZE)) {
             throw new IllegalArgumentException("chunkSize must be between 1 and " + MAX_CHUNK_SIZE + ", was " + chunkSize);
         }

@@ -75,6 +75,19 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_SEND_THINKING, KEY_CUSTOM_HEADERS);
     }
 
+    /** langchain4j's endpoint when no {@code baseUrl} is configured. */
+    static final String DEFAULT_ENDPOINT = "https://api.mistral.ai/v1";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_API_KEY, KEY_CUSTOM_HEADERS);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_BASE_URL, DEFAULT_ENDPOINT);
+    }
+
     /**
      * Every setting the builders read; {@code null} leaves the provider default.
      */

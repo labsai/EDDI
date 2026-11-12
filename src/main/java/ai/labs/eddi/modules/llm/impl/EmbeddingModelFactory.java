@@ -95,11 +95,48 @@ public class EmbeddingModelFactory {
 
     /**
      * The parameter keys the providers below read an editor-chosen endpoint from. A
-     * configuration with neither uses the provider's own endpoint, which an editor
-     * cannot choose, so there is nothing to check — as in
-     * {@link ChatModelRegistry}.
+     * configuration with neither uses the provider's own endpoint
+     * ({@link #defaultEndpoint}), which is checked too: the editor chooses the
+     * provider, so a key restricted to one vendor must not reach another vendor's
+     * fixed host — as in {@link ChatModelRegistry}.
      */
     static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint");
+
+    /**
+     * Where each provider that reads {@code baseUrl} sends a request when it is not
+     * set: langchain4j's defaults, and EDDI's own for Ollama (see
+     * {@link #buildOllama}).
+     */
+    static final Map<String, String> DEFAULT_BASE_URLS = Map.of(
+            "openai", "https://api.openai.com/v1",
+            "mistral", "https://api.mistral.ai/v1",
+            "cohere", "https://api.cohere.ai/v1/",
+            "gemini", "https://generativelanguage.googleapis.com/v1beta",
+            "ollama", "http://localhost:11434");
+
+    /** The Bedrock and Vertex region when none is configured, as built below. */
+    static final String DEFAULT_BEDROCK_REGION = "us-east-1";
+    static final String DEFAULT_VERTEX_LOCATION = "us-central1";
+
+    /**
+     * The endpoint {@code provider} uses when the configuration names none of its
+     * own endpoint key, or {@code null} when it has no default (Azure requires an
+     * {@code endpoint}).
+     */
+    static String defaultEndpoint(String provider, Map<String, String> params) {
+        return switch (provider) {
+            case "openai", "mistral", "cohere", "gemini", "ollama" -> isBlank(params.get("baseUrl")) ? DEFAULT_BASE_URLS.get(provider) : null;
+            case "bedrock" -> "https://bedrock-runtime." + valueOr(params.get("region"), DEFAULT_BEDROCK_REGION) + ".amazonaws.com";
+            case "vertex" -> isBlank(params.get("endpoint"))
+                    ? "https://" + valueOr(params.get("location"), DEFAULT_VERTEX_LOCATION) + "-aiplatform.googleapis.com"
+                    : null;
+            default -> null;
+        };
+    }
+
+    private static String valueOr(String value, String fallback) {
+        return isBlank(value) ? fallback : value.trim();
+    }
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -196,7 +233,11 @@ public class EmbeddingModelFactory {
         // Checked BEFORE vault references are resolved: the conflict message quotes
         // the model values, and an editor must not be able to read a secret's
         // plaintext back by putting its reference into 'model' (RAG search and
-        // ingestion status return this message to the caller).
+        // ingestion status return this message to the caller). For the same reason
+        // findProblem refuses a vault reference in any parameter but the provider's
+        // credential (apiKey) — after variable expansion, so a ${vars:} holding one
+        // is caught: resolved into 'model' it comes back in the provider's own
+        // "model does not exist" error.
         String problem = EmbeddingParameters.findProblem(provider, params);
         if (problem != null) {
             throw new IllegalArgumentException(problem);
@@ -249,6 +290,12 @@ public class EmbeddingModelFactory {
             if (!isBlank(endpoint)) {
                 vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
             }
+        }
+        // And the provider's own default, which the editor chose by choosing the
+        // provider. A secret without allowedHosts passes as before.
+        String defaultEndpoint = defaultEndpoint(provider, params);
+        if (defaultEndpoint != null) {
+            vaultHostAllowlist.requireAllowed(params, defaultEndpoint, "embedding model '" + provider + "'");
         }
     }
 

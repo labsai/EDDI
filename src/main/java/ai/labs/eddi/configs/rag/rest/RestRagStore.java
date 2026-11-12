@@ -9,8 +9,10 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.model.StoreParameters;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -532,6 +534,17 @@ public class RestRagStore implements IRestRagStore {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
         RedactionMarkerGuard.requireNone(config);
+        // Not validated as a whole (see below), but a copy must not carry a vault
+        // reference outside the embedding credential: that is how a secret is read
+        // back through the provider's error. Create and update refuse it in validate().
+        String misplacedReference = EmbeddingParameters.findMisplacedVaultReference(config.getEmbeddingProvider(),
+                config.getEmbeddingParameters());
+        if (misplacedReference == null) {
+            misplacedReference = StoreParameters.findMisplacedVaultReference(config.getStoreType(), config.getStoreParameters());
+        }
+        if (misplacedReference != null) {
+            throw new BadRequestException(misplacedReference);
+        }
         // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
         // document must not be refused just because the rules tightened after it was
         // stored.

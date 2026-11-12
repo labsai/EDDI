@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
+import ai.labs.eddi.modules.rag.KnowledgeBaseFailureRedactor;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -50,6 +51,13 @@ public class RestRagIngestion implements IRestRagIngestion {
 
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceReferenceGuard spaceReferenceGuard;
+
+    /**
+     * Redacts a provider's failure before it is returned. Field-injected; null in
+     * tests built with {@code new}, which then redact credential shapes only.
+     */
+    @Inject
+    KnowledgeBaseFailureRedactor failureRedactor;
 
     @Inject
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
@@ -394,7 +402,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         } catch (UnsupportedOperationException e) {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
         } catch (RuntimeException e) {
-            return inspectionFailed(ragConfigId, e);
+            return inspectionFailed(ragConfigId, resolved.knowledgeBase(), e);
         }
     }
 
@@ -435,19 +443,22 @@ public class RestRagIngestion implements IRestRagIngestion {
         } catch (UnsupportedOperationException e) {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
         } catch (RuntimeException e) {
-            return inspectionFailed(ragConfigId, e);
+            return inspectionFailed(ragConfigId, knowledgeBase, e);
         }
     }
 
     /**
      * An embedding provider or vector store that failed. Said as a 502 with the
      * cause, because the cause -- a bad API key, an unreachable store -- is exactly
-     * what the operator opened this view to find out.
+     * what the operator opened this view to find out. The cause is the provider's
+     * own text, so it is redacted first: the knowledge base's secrets by value,
+     * then credential shapes.
      */
-    private static Response inspectionFailed(String ragConfigId, RuntimeException e) {
+    private Response inspectionFailed(String ragConfigId, RagConfiguration knowledgeBase, RuntimeException e) {
         LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
+        String cause = KnowledgeBaseFailureRedactor.redact(failureRedactor, knowledgeBase, e.getMessage());
         return Response.status(Response.Status.BAD_GATEWAY)
-                .entity(Map.of("error", "The embedding model or vector store failed: " + e.getMessage()))
+                .entity(Map.of("error", "The embedding model or vector store failed: " + cause))
                 .build();
     }
 

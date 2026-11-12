@@ -71,7 +71,7 @@ class ChatModelRegistryTest {
         };
 
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-        builders.put("openai", () -> new ILanguageModelBuilder() {
+        builders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 parseTimeoutLikeARealProvider(parameters);
@@ -86,7 +86,7 @@ class ChatModelRegistryTest {
                 return mockStreamingModel;
             }
         });
-        builders.put("unsupported", () -> new ILanguageModelBuilder() {
+        builders.put("unsupported", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 return mockSyncModel;
@@ -103,7 +103,7 @@ class ChatModelRegistryTest {
         registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
 
         Map<String, Provider<ILanguageModelBuilder>> uniqueBuilders = new HashMap<>();
-        uniqueBuilders.put("openai", () -> new ILanguageModelBuilder() {
+        uniqueBuilders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 parseTimeoutLikeARealProvider(parameters);
@@ -813,7 +813,7 @@ class ChatModelRegistryTest {
         @BeforeEach
         void setUpUniqueBuilder() {
             Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-            builders.put("openai", () -> new ILanguageModelBuilder() {
+            builders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
                 @Override
                 public ChatModel build(Map<String, String> parameters) {
                     return new ChatModel() {
@@ -991,7 +991,7 @@ class ChatModelRegistryTest {
             var registryRef = new AtomicReference<ChatModelRegistry>();
 
             Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-            builders.put("openai", () -> new ILanguageModelBuilder() {
+            builders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
                 @Override
                 public ChatModel build(Map<String, String> parameters) {
                     // Only the first build races an invalidation: a secret rotation lands
@@ -1043,7 +1043,7 @@ class ChatModelRegistryTest {
             var registryRef = new AtomicReference<ChatModelRegistry>();
 
             Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-            builders.put("openai", () -> new ILanguageModelBuilder() {
+            builders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
                 @Override
                 public ChatModel build(Map<String, String> parameters) {
                     return new ChatModel() {
@@ -1096,7 +1096,7 @@ class ChatModelRegistryTest {
 
         private ChatModelRegistry capturing() {
             Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-            ILanguageModelBuilder capture = new ILanguageModelBuilder() {
+            ILanguageModelBuilder capture = new ApiKeyLanguageModelBuilder() {
                 @Override
                 public ChatModel build(Map<String, String> parameters) {
                     built.set(new HashMap<>(parameters));

@@ -61,6 +61,7 @@ import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
 import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -258,6 +259,21 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
     private final ChatTranscriptCodec revisionTranscriptCodec = new ChatTranscriptCodec();
 
+    /**
+     * The credentials handed to model clients, scrubbed by value from the stored
+     * {@code llm:error:<taskId>}. Field-injected; null in tests built with
+     * {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
+
+    /**
+     * The save-time placement rule, applied again at deploy. Field-injected; null
+     * in tests built with {@code new}, which skips it.
+     */
+    @Inject
+    VaultReferencePlacementGuard vaultReferencePlacementGuard;
+
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
@@ -278,7 +294,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.modelOutputParser = new ModelOutputParser(jsonSerialization);
-        this.fallbackHandler = new LlmFallbackHandler(templatingEngine, jsonSerialization, dataFactory, meterRegistry);
+        // The scrubber reads the field when a failure is described, after injection.
+        this.fallbackHandler = new LlmFallbackHandler(templatingEngine, jsonSerialization, dataFactory, meterRegistry,
+                text -> ResolvedCredentials.scrub(resolvedCredentials, text));
         this.prePostUtils = prePostUtils;
 
         this.meterRegistry = meterRegistry;
@@ -3892,6 +3910,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 validateAnswerMode(llmConfiguration);
+                validateVaultReferencePlacement(vaultReferencePlacementGuard, llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
@@ -3901,6 +3920,25 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on a {@code ${vault:…}} outside a model's credential
+     * parameters — a configuration stored or imported before the save-time check
+     * existed — so the operator sees it when deploying, naming the field, rather
+     * than at the first turn. A reference reached through a {@code ${vars:…}} is
+     * only known once the variable is expanded, and is refused when the model is
+     * built.
+     */
+    static void validateVaultReferencePlacement(VaultReferencePlacementGuard guard, LlmConfiguration llmConfiguration)
+            throws WorkflowConfigurationException {
+        if (guard == null) {
+            return;
+        }
+        List<String> problems = guard.problemsOf(llmConfiguration);
+        if (!problems.isEmpty()) {
+            throw new WorkflowConfigurationException("Invalid vault reference placement: " + String.join(" ", problems));
+        }
     }
 
     /**
