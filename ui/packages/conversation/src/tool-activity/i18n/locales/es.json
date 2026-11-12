@@ -1,0 +1,16 @@
+{
+  "toolActivity": {
+    "region": "Actividad de herramientas",
+    "summary": "Herramientas usadas: {{n}}",
+    "failedCount": "{{n}} con error",
+    "ok": "Correcto",
+    "failed": "Error",
+    "noSummary": "Sin detalles",
+    "more": "+{{n}} más",
+    "notice": {
+      "edit": "Ejecutó {{tools}}. Editar retira la respuesta, no lo que hicieron las herramientas.",
+      "regenerate": "Ejecutó {{tools}}. Lo que hicieron se mantiene, y una nueva respuesta puede volver a ejecutarlas.",
+      "edited": "Tu mensaje ha vuelto al cuadro de texto. Lo que hizo {{tools}} no se ha deshecho."
+    }
+  }
+}

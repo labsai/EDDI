@@ -1,5 +1,6 @@
 import { AppLink } from "@eddi/app-kit/components/shared/app-link";
 import {
+  Fragment,
   useState,
   useEffect,
   useMemo,
@@ -51,7 +52,14 @@ import {
   useAgentConversation,
   type ConversationMessage,
 } from "@eddi/conversation";
-import { extractOutputTexts, type ContextMap, type ConversationSnapshot } from "@eddi/core";
+import { extractOutputTexts, lastStepIndex, type ContextMap, type ConversationSnapshot } from "@eddi/core";
+import { toolResultListener } from "@eddi/core/tool-events";
+import {
+  ToolActivityCards,
+  ToolActivityLog,
+  toolCardPositions,
+  useToolTurns,
+} from "@eddi/conversation/tool-activity";
 import { translateStreamError } from "@eddi/app-kit/hooks/use-chat";
 import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 import {
@@ -686,13 +694,20 @@ function firstAttachmentName(context: ContextMap | undefined): string | undefine
  * The member thread on @eddi/conversation's controller (phase 3c): the turn —
  * streaming, the reconcile, dropped vs paused turns — is the controller's, the
  * thread keeps its own error banner and Retry (`presentFailure`) and its pause
- * notice (`onTurnSnapshot`). One per advisor.
+ * notice (`onTurnSnapshot`). One per advisor. The `tool_result` events of its
+ * turns go into `tools`, for the tool cards (T1.9).
  */
 function createThreadConversation(
   memberId: string,
   hooksRef: MutableRefObject<ThreadHooks | null>,
   turnRef: MutableRefObject<ThreadTurn | null>,
+  tools: ToolActivityLog,
 ): AgentConversation {
+  // Filed under the conversation and step on screen when each call finishes.
+  const recordToolResult = toolResultListener((result) => {
+    const { conversationId, messages } = controller.getSnapshot();
+    tools.record(conversationId, lastStepIndex(messages), result);
+  });
   const controller: AgentConversation = new AgentConversation({
     stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
     reconnectDelaysMs: RECONNECT_DELAYS_MS,
@@ -723,7 +738,12 @@ function createThreadConversation(
       const texts = extractOutputTexts(output.output);
       return texts.length > 0 ? texts : extractOutputParts(output as ConversationOutput);
     },
+    onTurnStarting: () => {
+      const { conversationId, messages } = controller.getSnapshot();
+      tools.beginTurn(conversationId, lastStepIndex(messages));
+    },
     onStreamEvent: (event) => {
+      recordToolResult(event);
       const turn = turnRef.current;
       if (!turn) return;
       if (event.type === "token") turn.tokens = true;
@@ -840,10 +860,18 @@ function WorkforceThread() {
   // The thread's conversation runs on the controller; these read it.
   const hooksRef = useRef<ThreadHooks | null>(null);
   const turnRef = useRef<ThreadTurn | null>(null);
-  const controller = useMemo(() => createThreadConversation(memberId, hooksRef, turnRef), [memberId]);
+  // One for the page: it files every call under its conversation, so another
+  // advisor's thread simply reads other entries.
+  const [toolLog] = useState(() => new ToolActivityLog({ maxConversations: 5 }));
+  const controller = useMemo(
+    () => createThreadConversation(memberId, hooksRef, turnRef, toolLog),
+    [memberId, toolLog],
+  );
   const conversation = useAgentConversation(controller);
   const conversationId = conversation.conversationId;
   const messages = conversation.messages;
+  const toolTurns = useToolTurns(toolLog, conversationId);
+  const toolCardsAt = useMemo(() => toolCardPositions(messages, toolTurns), [messages, toolTurns]);
   const isLoading = conversation.isProcessing;
   const setConversationId = useCallback(
     (id: string | null) => controller.dispatch({ type: "SET_CONVERSATION_ID", id }),
@@ -1283,9 +1311,12 @@ function WorkforceThread() {
             </div>
           )}
 
-          {messages.map((msg, idx) => (
+          {messages.map((msg, idx) => {
+            const toolStep = toolCardsAt.get(idx);
+            const toolActivity = toolStep === undefined ? undefined : toolTurns.get(toolStep);
+            return (
+            <Fragment key={`${msg.role}-${msg.timestamp}-${idx}`}>
             <div
-              key={`${msg.role}-${msg.timestamp}-${idx}`}
               className={cn(
                 "group/msg flex",
                 msg.role === "user" ? "justify-end" : "justify-start",
@@ -1424,7 +1455,15 @@ function WorkforceThread() {
                 </div>
               </div>
             </div>
-          ))}
+            {/* What the tools of this turn did (T1.9), under its question. */}
+            {toolActivity && (
+              <div className="ps-10">
+                <ToolActivityCards activity={toolActivity} />
+              </div>
+            )}
+            </Fragment>
+            );
+          })}
 
           {/* A failed turn.
               This used to be appended to the transcript as a message from the

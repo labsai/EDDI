@@ -577,7 +577,22 @@
       "title": "Ir para uma conversa ou agente",
       "search": "Pesquisar conversas e agentes",
       "results": "Resultados",
-      "noResults": "Nada corresponde"
+      "noResults": "Nada corresponde",
+      "searchFailed": "A pesquisa nas suas conversas mais antigas falhou."
+    },
+    "search": {
+      "label": "Pesquisar minhas conversas",
+      "placeholder": "Pesquisar títulos de conversas",
+      "hint": "Pesquisa apenas nos títulos, não no que foi dito.",
+      "loading": "Pesquisando…",
+      "error": "Não foi possível pesquisar suas conversas. Tentar novamente",
+      "empty": "Nenhum título de conversa corresponde.",
+      "found": "Conversas encontradas: {{n}}",
+      "failed": "A pesquisa falhou.",
+      "results": "Resultados da pesquisa",
+      "clear": "Limpar pesquisa",
+      "more": "Mais resultados",
+      "moreFailed": "Não foi possível carregar mais. Tentar novamente"
     }
   },
   "analyticsPage": {

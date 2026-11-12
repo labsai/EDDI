@@ -1,0 +1,16 @@
+{
+  "toolActivity": {
+    "region": "Werkzeugaktivität",
+    "summary": "Verwendete Werkzeuge: {{n}}",
+    "failedCount": "{{n}} fehlgeschlagen",
+    "ok": "Erfolgreich",
+    "failed": "Fehlgeschlagen",
+    "noSummary": "Keine Details",
+    "more": "+{{n}} weitere",
+    "notice": {
+      "edit": "{{tools}} ausgeführt. Bearbeiten nimmt die Antwort zurück, nicht das, was die Werkzeuge getan haben.",
+      "regenerate": "{{tools}} ausgeführt. Was sie getan haben, bleibt bestehen, und eine neue Antwort kann sie erneut ausführen.",
+      "edited": "Ihre Nachricht ist wieder im Eingabefeld. Was {{tools}} getan hat, wurde nicht rückgängig gemacht."
+    }
+  }
+}

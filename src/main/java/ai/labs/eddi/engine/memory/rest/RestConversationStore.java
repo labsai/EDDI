@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceFilter.ContainsIgnoreCase;
 import ai.labs.eddi.datastore.IResourceFilter.NotMatching;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
@@ -438,6 +439,80 @@ public class RestConversationStore implements IRestConversationStore {
 
             return retConversationDescriptors;
 
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public List<ConversationDescriptor> searchConversations(String query, Integer index, Integer limit) {
+        PageBounds.require(index, limit);
+        String text = ConversationTitles.requireValidSearchQuery(query);
+        if (index == null) {
+            index = 0;
+        }
+        if (limit == null || limit < 1) {
+            limit = 20;
+        }
+        if ((long) index * limit > MAX_RESULT_OFFSET) {
+            throw new BadRequestException(format("index * limit must not exceed %d. Search with more of the title instead.",
+                    MAX_RESULT_OFFSET));
+        }
+
+        // "My conversations": the caller's own, for an administrator too. The owner is
+        // an exact match in the query, so the page the store returns is a page of
+        // results — no foreign row is read, so there is no owner-scan budget and no
+        // back-fill as in the listing. A legacy descriptor that records no owner is
+        // not searched: it predates titles (v5.1.6 started recording owners).
+        final String caller = conversationAccessGuard.callerActor(null);
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        List<QueryFilters> restrictions = new ArrayList<>();
+        if (caller != null) {
+            restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_USER_ID, caller))));
+        } else if (!seesAllConversations) {
+            // No named caller and authorization on: nobody to scope to, nothing to find.
+            return List.of();
+        }
+        // Titles only — see IRestConversationStore#searchConversations for why.
+        restrictions.add(new QueryFilters(List.of(new QueryFilter(ConversationDescriptor.FIELD_TITLE, new ContainsIgnoreCase(text)))));
+
+        try {
+            List<ConversationDescriptor> matches = conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, null, index, limit, false,
+                    restrictions);
+            List<ConversationDescriptor> candidates = new ArrayList<>();
+            List<String> candidateIds = new ArrayList<>();
+            for (var descriptor : matches) {
+                // The query is the scope; this is the authority, as in the listing — a
+                // row that is not the caller's is never returned, whatever the store did.
+                if (caller != null && !caller.equals(descriptor.getUserId())) {
+                    continue;
+                }
+                var resourceId = descriptor.getResource() == null ? null : extractResourceId(descriptor.getResource());
+                if (resourceId == null || resourceId.getId() == null) {
+                    continue;
+                }
+                candidates.add(descriptor);
+                candidateIds.add(resourceId.getId());
+            }
+
+            Set<String> unreadable = new HashSet<>();
+            Map<String, ConversationListingSummary> summaries = readListingSummaries(candidateIds, unreadable);
+            Map<String, String> agentNames = new HashMap<>();
+            List<ConversationDescriptor> results = new ArrayList<>(candidates.size());
+            for (int i = 0; i < candidates.size(); i++) {
+                var summary = summaries.get(candidateIds.get(i));
+                // No memory: an orphan (or unreadable) — nothing to open, so not listed.
+                if (summary == null) {
+                    continue;
+                }
+                var descriptor = candidates.get(i);
+                if (!conversationAdmits(descriptor, summary, seesAllConversations, null, null, null, null)) {
+                    continue;
+                }
+                fillAgentName(descriptor, summary, agentNames);
+                results.add(descriptor);
+            }
+            return results;
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }

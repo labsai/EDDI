@@ -575,7 +575,22 @@
       "title": "Go to a conversation or agent",
       "search": "Search conversations and agents",
       "results": "Results",
-      "noResults": "Nothing matches"
+      "noResults": "Nothing matches",
+      "searchFailed": "Searching your older conversations failed."
+    },
+    "search": {
+      "label": "Search my conversations",
+      "placeholder": "Search conversation titles",
+      "hint": "Searches titles only, not what was said.",
+      "loading": "Searching…",
+      "error": "Couldn't search your conversations. Retry",
+      "empty": "No conversation titles match.",
+      "found": "Conversations found: {{n}}",
+      "failed": "The search failed.",
+      "results": "Search results",
+      "clear": "Clear search",
+      "more": "More results",
+      "moreFailed": "Couldn't load more. Retry"
     }
   },
   "analyticsPage": {

@@ -4,6 +4,7 @@ import LanguageDetector from "i18next-browser-languagedetector";
 import { setDefaultVariables, setupI18n, SUPPORTED_LANGUAGES, type LocaleLoader, type SupportedLanguage } from "@eddi/ui";
 import { withConversationLocales } from "@eddi/conversation";
 import { mergeLocaleBundles, withTeamLocales } from "@eddi/conversation/team";
+import { withToolActivityLocales } from "@eddi/conversation/tool-activity";
 import en from "./locales/en.json";
 import { brandVariables, getBrand, subscribeBrand } from "../lib/brand";
 
@@ -58,7 +59,8 @@ export function withAppKitLocales(
 /**
  * Initialise the app's i18next — the default instance — for one of the signed-in
  * apps: its own strings, this package's and `@eddi/conversation`'s (the agent
- * kind's `conversation.*` and the team components' `groups.*`), the language
+ * kind's `conversation.*`, the team components' `groups.*` and the tool
+ * cards' `toolActivity.*`), the language
  * detector (stored choice first, so a language picked in the Manager is the one
  * Workforce opens in), and the brand's `{{productName}}` / `{{shortName}}`.
  *
@@ -68,7 +70,8 @@ export function withAppKitLocales(
 export function setupAppI18n(english: Bundle, loaders: AppLocaleLoaders): Promise<unknown> {
   const withKit = withAppKitLocales(english, loaders);
   const withTeam = withTeamLocales(withKit.english, withKit.loaders);
-  const bundles = withConversationLocales(withTeam.english, withTeam.loaders);
+  const withTools = withToolActivityLocales(withTeam.english, withTeam.loaders);
+  const bundles = withConversationLocales(withTools.english, withTools.loaders);
   const ready = setupI18n({
     i18n,
     languages: SUPPORTED_LANGUAGES,

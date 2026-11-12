@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ConversationSnapshot, type SSEEvent } from "@eddi/core";
+import { toolResultListener, type ToolResultEvent } from "@eddi/core/tool-events";
 import { AgentConversation, SECRET_BUBBLE } from "./agent-conversation";
 import { initialConversationState } from "./state";
 import type { AgentTransport } from "./transport";
@@ -823,6 +824,26 @@ describe("host hooks (a host with its own store and its own copy)", () => {
     });
     await c.send("hello");
     expect(seen).toEqual(["start", "done", "end"]);
+  });
+
+  it("hands tool_result to the host through onStreamEvent and keeps it out of the transcript", async () => {
+    // B6: a host that shows tool cards plugs @eddi/core/tool-events'
+    // toolResultListener into onStreamEvent; the controller itself ignores it.
+    const transport = fakeTransport({
+      stream: vi.fn(() =>
+        events(
+          ev("tool_call", '{"tool":"weather"}'),
+          ev("tool_result", '{"tool":"weather","ok":true,"summary":"18C"}'),
+          ev("token", "It is 18C."),
+          done({ conversationState: "READY", conversationOutputs: [output("It is 18C.")] }),
+        ),
+      ),
+    });
+    const results: ToolResultEvent[] = [];
+    const c = await opened(transport, { onStreamEvent: toolResultListener((r) => results.push(r)) });
+    await c.send("weather?");
+    expect(results).toEqual([{ tool: "weather", ok: true, summary: "18C" }]);
+    expect(texts(c)).toEqual(["weather?", "It is 18C."]);
   });
 
   it("shows why a finished turn failed in its reply, after the reconcile", async () => {

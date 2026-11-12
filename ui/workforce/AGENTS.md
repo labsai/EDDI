@@ -130,6 +130,19 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
   `NEW_CHAT_STATE` (`lib/workforce-keyboard.ts`) so `HomeComposer` focuses its box. Esc
   (stop), ↑ (edit the last message) and Enter live in the shared `ChatPanel`. The shortcuts
   dialog (`?`) lists all of them; a new shortcut goes there too.
+- **Search my conversations (T1.3).** `hooks/use-conversation-search.ts` is the one request
+  discipline: normalized text (`normalizeSearchQuery`, at most
+  `MAX_CONVERSATION_SEARCH_LENGTH`), a 300 ms debounce, an `AbortController` per request (a
+  new text aborts the old one, and a late answer is dropped), More while pages come back
+  full. `components/workforce/conversation-search.tsx` puts it in the sidebar (inside the
+  lazy `SessionList`): a combobox whose results replace the date list while it holds text,
+  a "titles only" line tied to it with `aria-describedby`, and a polite status that says the
+  count once a search settles. The quick switcher adds the title matches it has not shown.
+  Titles only, by the backend's design (B3); say so wherever search is offered.
+- **Tool cards in the member thread (T1.9).** `pages/workforce/workforce-thread.tsx` feeds
+  its controller's `tool_result` events into a page-wide `ToolActivityLog` and draws
+  `ToolActivityCards` under each turn's question. The chat page gets the same from
+  `ChatPanel`.
 - **Installable, no service worker.** The shells link `/workforce/manifest.webmanifest`,
   which EDDI renders in the brand (`RestWorkforceResource#manifest`, `WorkforceManifest`;
   the dev server answers with the default brand's, `vite.config.ts`). There is deliberately
