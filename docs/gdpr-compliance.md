@@ -284,8 +284,13 @@ person was involved but not who: their id becomes `[other person]`. That covers 
 approver (`decidedBy`) of a decision in the subject's conversation, the owner
 (`userId`) of a conversation the subject decided in, the reviewer (`reviewedBy`) of an
 audit sample, and the other human members of a group discussion the subject started
-(speaker and target id and display name in `transcript`). The subject's own id, agent
-ids and `system:*` principals are kept. What another person *wrote* in a discussion
+(speaker and target id and display name in `transcript`). The subject's own id and
+`system:*` principals are kept. In a transcript the rule fails closed: an id stays
+only if it is positively known to be an agent — the group's current configuration
+lists it as an agent or group member, facilitator or moderator, or the stored
+discussion started a member conversation for it, recruited it or created it — and
+every other id is masked. When the group configuration is gone or unreadable, an agent
+that never got a member conversation therefore also reads `[other person]`. What another person *wrote* in a discussion
 the subject started stays in the transcript; review it before handing the bundle over.
 (Earlier releases exported those identifiers as stored.)
 

@@ -233,8 +233,9 @@ class GdprGroupDataTest {
     @Test
     void export_masksTheOtherHumanMembersOfTheUsersDiscussions() throws Exception {
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
-        var gc = discussion("gc-1");
-        gc.getTranscript().add(new TranscriptEntry("agent-1", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
+        // agent-0 got a member conversation, so the stored discussion records it as an agent
+        var gc = discussion("gc-1", "member-1");
+        gc.getTranscript().add(new TranscriptEntry("agent-0", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
                 null));
         gc.getTranscript().add(new TranscriptEntry("bob@example.com", "Bob", "his input", 0, "p", TranscriptEntryType.HUMAN_INPUT,
                 Instant.EPOCH, null, null));
@@ -244,7 +245,7 @@ class GdprGroupDataTest {
 
         var transcript = service.exportUserData(USER_ID).groupConversations().getFirst().transcript();
 
-        assertEquals("agent-1", transcript.get(0).speakerAgentId());
+        assertEquals("agent-0", transcript.get(0).speakerAgentId());
         assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(1).speakerAgentId());
         assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(1).speakerDisplayName());
         assertEquals(USER_ID, transcript.get(2).speakerAgentId());
@@ -280,17 +281,19 @@ class GdprGroupDataTest {
     }
 
     @Test
-    void export_withoutTheGroupConfiguration_fallsBackToTheTranscriptHeuristics() throws Exception {
+    void export_withoutTheGroupConfiguration_masksEveryIdItCannotPlace() throws Exception {
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
         var gc = discussion("gc-1");
-        gc.getTranscript().add(new TranscriptEntry("bob@example.com", "Bob", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH, null,
-                null));
+        gc.getTranscript().add(new TranscriptEntry("gregor", "Gregor", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH, null,
+                "agent-9"));
         groupConversations(gc);
         // the default service has no group store at all
 
         var transcript = service.exportUserData(USER_ID).groupConversations().getFirst().transcript();
 
         assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).speakerAgentId());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).speakerDisplayName());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).targetAgentId(), "an agent nothing records is masked too");
     }
 
     @Test

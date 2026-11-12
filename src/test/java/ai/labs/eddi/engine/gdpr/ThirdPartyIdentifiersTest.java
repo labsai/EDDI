@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.gdpr.ThirdPartyIdentifiers.OTHER_PERSON;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,6 +58,8 @@ class ThirdPartyIdentifiersTest {
         transcript.add(entry("erin", "Erin", TranscriptEntryType.SKIPPED, null));
         discussion.setTranscript(transcript);
         discussion.setPendingHumanInput(new PendingHumanInput("erin", "Erin", 0, 0, 0, "HUMAN_INPUT", null, null, Instant.EPOCH));
+        // agent-1 got a member conversation, which only agents do
+        discussion.getMemberConversationIds().put("agent-1", "conv-a");
         transcript = discussion.getTranscript();
 
         List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner@example.com");
@@ -72,5 +75,49 @@ class ThirdPartyIdentifiersTest {
         assertSame(transcript.get(5), masked.get(5));
         assertEquals(OTHER_PERSON, masked.get(6).speakerAgentId(), "the member a pending turn waits on is a human");
         assertEquals("gregor", transcript.get(1).speakerAgentId(), "the stored transcript is not changed");
+    }
+
+    @Test
+    @DisplayName("fail closed: with no configuration a skipped-only, non-address human is masked as speaker, name and target")
+    void unknownIdsAreMaskedWithoutAConfiguration() {
+        GroupConversation discussion = new GroupConversation();
+        discussion.setUserId("owner");
+        List<TranscriptEntry> transcript = new ArrayList<>();
+        // never spoke, not pending, no address for an id, no configuration
+        transcript.add(entry("gregor", "Gregor", TranscriptEntryType.SKIPPED, null));
+        transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.CRITIQUE, "gregor"));
+        transcript.add(entry("owner", "Owner", TranscriptEntryType.HUMAN_INPUT, "agent-1"));
+        discussion.setTranscript(transcript);
+        discussion.getMemberConversationIds().put("agent-1", "conv-a");
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner");
+
+        assertEquals(OTHER_PERSON, masked.get(0).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(0).speakerDisplayName());
+        assertEquals("agent-1", masked.get(1).speakerAgentId(), "an agent the discussion recorded still reads correctly");
+        assertEquals("Analyst", masked.get(1).speakerDisplayName());
+        assertEquals("text", masked.get(1).content());
+        assertEquals(OTHER_PERSON, masked.get(1).targetAgentId());
+        assertSame(discussion.getTranscript().get(2), masked.get(2), "the subject's own entry is kept, its agent target too");
+    }
+
+    @Test
+    @DisplayName("an id the configuration does not place is masked; a configured HUMAN is masked even with a member conversation")
+    void configurationPlacesAgentsAndHumans() {
+        GroupConversation discussion = new GroupConversation();
+        List<TranscriptEntry> transcript = new ArrayList<>();
+        transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.OPINION, null));
+        transcript.add(entry("moderator-1", "Moderator", TranscriptEntryType.SYNTHESIS, null));
+        transcript.add(entry("stranger", "Stranger", TranscriptEntryType.OPINION, null));
+        transcript.add(entry("hank", "Hank", TranscriptEntryType.OPINION, null));
+        discussion.setTranscript(transcript);
+        discussion.getMemberConversationIds().put("hank", "conv-h");
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner", Set.of("agent-1", "moderator-1"), Set.of("hank"));
+
+        assertEquals("agent-1", masked.get(0).speakerAgentId());
+        assertEquals("moderator-1", masked.get(1).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(2).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(3).speakerAgentId());
     }
 }

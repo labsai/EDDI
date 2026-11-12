@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.gdpr;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
-import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 
 import java.util.ArrayList;
@@ -53,28 +52,41 @@ public final class ThirdPartyIdentifiers {
     }
 
     /**
-     * The transcript of {@code discussion} with every human member other than the
-     * subject masked — speaker and target id and display name. Agent members stay
-     * as they are: an agent id is configuration, not a person.
-     * <p>
-     * A transcript entry does not record whether its speaker was a human, so the
-     * humans are taken from what does: the speakers of {@code HUMAN_INPUT} entries,
-     * the member a pending human turn waits on, and any speaker or target id that
-     * is an e-mail address (the usual principal of a human member, and never an
-     * agent id).
+     * The transcript of {@code discussion} with nobody but the subject and the
+     * group's agents left recognisable, without a group configuration — see
+     * {@link #transcriptFor(GroupConversation, String, Set, Set)}.
      */
     public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId) {
-        return transcriptFor(discussion, subjectId, Set.of());
+        return transcriptFor(discussion, subjectId, Set.of(), Set.of());
     }
 
     /**
-     * As {@link #transcriptFor(GroupConversation, String)}, with the ids the
-     * group's configuration declares as {@code HUMAN} members — the authoritative
-     * source, which also covers a human who only ever skipped, never spoke and has
-     * no address for an id. The transcript heuristics still apply on top of it, for
-     * members a configuration that changed since (or was deleted) no longer lists.
+     * The transcript of {@code discussion} with nobody but the subject and the
+     * group's agents left recognisable. Fails closed: an id is kept only when it is
+     * absent (a system entry names no speaker), the subject's own, names no person
+     * ({@code system:*}, {@code unknown}, {@code anonymous}) or is <em>positively
+     * known</em> to be an agent. Every other speaker id and target id, and the
+     * display name of a masked speaker, becomes {@value #OTHER_PERSON}; the content
+     * of the entries is not changed.
+     * <p>
+     * A transcript entry does not record whether its speaker was human — a human
+     * member's turn can carry any entry type, and a human id need not look like an
+     * address — so a person cannot be ruled out from the transcript alone. What
+     * makes an id a known agent: the group configuration lists it as an
+     * {@code AGENT} or {@code GROUP} member, facilitator or moderator
+     * ({@code configuredAgents}), or the stored discussion records it as one — a
+     * member conversation was started for it (only agents get one), or it was
+     * recruited or created during the discussion. An id the configuration lists as
+     * {@code HUMAN} ({@code configuredHumans}), or the member a pending human turn
+     * waits on, is masked even if one of those also names it.
+     * <p>
+     * Without a readable configuration, an agent that never got a member
+     * conversation (one that was only ever skipped, say) is masked as well: the
+     * bundle then shows {@value #OTHER_PERSON} for it, which costs the data subject
+     * an agent's name, never another person's identity.
      */
-    public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredHumans) {
+    public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredAgents,
+                                                      Set<String> configuredHumans) {
         List<TranscriptEntry> stored = discussion.getTranscript();
         if (stored == null || stored.isEmpty()) {
             return stored;
@@ -84,17 +96,24 @@ public final class ThirdPartyIdentifiers {
             // The model's list is a synchronized list; iterating it needs the lock.
             transcript = new ArrayList<>(stored);
         }
-        Set<String> humans = new HashSet<>();
+        Set<String> agents = new HashSet<>();
+        if (configuredAgents != null) {
+            agents.addAll(configuredAgents);
+        }
+        if (discussion.getMemberConversationIds() != null) {
+            agents.addAll(discussion.getMemberConversationIds().keySet());
+        }
+        if (discussion.getRecruitedAgentIds() != null) {
+            agents.addAll(discussion.getRecruitedAgentIds());
+        }
+        if (discussion.getCreatedAgentIds() != null) {
+            agents.addAll(discussion.getCreatedAgentIds());
+        }
         if (configuredHumans != null) {
-            humans.addAll(configuredHumans);
+            agents.removeAll(configuredHumans);
         }
-        for (TranscriptEntry entry : transcript) {
-            if (entry != null && entry.type() == TranscriptEntryType.HUMAN_INPUT && entry.speakerAgentId() != null) {
-                humans.add(entry.speakerAgentId());
-            }
-        }
-        if (discussion.getPendingHumanInput() != null && discussion.getPendingHumanInput().memberId() != null) {
-            humans.add(discussion.getPendingHumanInput().memberId());
+        if (discussion.getPendingHumanInput() != null) {
+            agents.remove(discussion.getPendingHumanInput().memberId());
         }
         List<TranscriptEntry> masked = new ArrayList<>(transcript.size());
         for (TranscriptEntry entry : transcript) {
@@ -102,8 +121,8 @@ public final class ThirdPartyIdentifiers {
                 masked.add(null);
                 continue;
             }
-            boolean speakerMasked = isOtherHuman(entry.speakerAgentId(), subjectId, humans);
-            boolean targetMasked = isOtherHuman(entry.targetAgentId(), subjectId, humans);
+            boolean speakerMasked = !recognisable(entry.speakerAgentId(), subjectId, agents);
+            boolean targetMasked = !recognisable(entry.targetAgentId(), subjectId, agents);
             if (!speakerMasked && !targetMasked) {
                 masked.add(entry);
                 continue;
@@ -116,15 +135,16 @@ public final class ThirdPartyIdentifiers {
         return masked;
     }
 
-    private static boolean isOtherHuman(String id, String subjectId, Set<String> humans) {
-        if (id == null || id.isBlank() || id.equals(subjectId) || namesNoPerson(id)) {
-            return false;
+    /**
+     * Whether {@code id} may stay in the subject's bundle: absent, the subject's
+     * own, no person, or a known agent.
+     */
+    private static boolean recognisable(String id, String subjectId, Set<String> agents) {
+        if (id == null || id.isBlank() || id.equals(subjectId) || namesNoPerson(id) || agents.contains(id)) {
+            return true;
         }
         Optional<String> address = AddressNormalizer.tryNormalize(id);
-        if (address.isPresent() && subjectId != null && address.equals(AddressNormalizer.tryNormalize(subjectId))) {
-            // The subject's own address, spelled differently (case, IDN form).
-            return false;
-        }
-        return humans.contains(id) || address.isPresent();
+        // The subject's own address, spelled differently (case, IDN form).
+        return address.isPresent() && subjectId != null && address.equals(AddressNormalizer.tryNormalize(subjectId));
     }
 }
