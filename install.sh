@@ -1169,6 +1169,7 @@ resolve_compose_files() {
       "docs/monitoring/eddi-grafana-dashboard.json"
       "docs/monitoring/eddi-operations-dashboard.json"
       "docs/monitoring/eddi-full-metrics-dashboard.json"
+      "docs/monitoring/eddi-cluster-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -2877,7 +2878,15 @@ case "${1:-help}" in
         staged+=("$f")
         echo "✅"
       else
-        # Every compose file is REQUIRED: keeping the old one and recording the new
+        # The --local overlay is the checkout's own file. A release ref that predates it
+        # does not carry it, and it is not one of the compose files that must match the
+        # image, so keep the checkout copy instead of refusing the update.
+        if [[ "$local_name" == "docker-compose.local.yml" && -s "$f" ]]; then
+          rm -f "$tmp_file"
+          echo "kept the checkout copy (not in this ref)"
+          continue
+        fi
+        # Every other compose file is REQUIRED: keeping the old one and recording the new
         # version would start the new image with an old compose file. A file that
         # cannot be fetched refuses the whole update; nothing is replaced or recorded.
         echo "❌"

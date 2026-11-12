@@ -1397,7 +1397,8 @@ REMOTE_SCRIPT
     local probe=$(( 120 - elapsed < 10 ? 120 - elapsed : 10 ))
     if curl -sf --connect-timeout 5 --max-time "$probe" "$health_url" &>/dev/null 2>&1; then
       base="http://${external_ip}:${EDDI_PORT}"
-    elif curl -sf --connect-timeout 5 --max-time "$probe" "${https_base}/q/health/ready" &>/dev/null 2>&1; then
+    elif probe=$(( 120 - (SECONDS - started) )); (( probe > 0 )) \
+        && curl -sf --connect-timeout 5 --max-time "$(( probe < 10 ? probe : 10 ))" "${https_base}/q/health/ready" &>/dev/null 2>&1; then
       base="$https_base"
     fi
     if [[ -n "$base" ]]; then
