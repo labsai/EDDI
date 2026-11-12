@@ -54,16 +54,29 @@ group whose `hitlConfig.granularity` is `TASK`:
 | Approved, then the discussion was cancelled before the action ran | `SKIPPED` |
 | Rejected at phase level (`verdict: REJECTED`, the whole discussion ends) | Nothing |
 | Approved, then the discussion ended before the action ran (completed, failed, cancelled — crash recovery included) | `NOT_SENT` — never sent afterwards |
-| Approved **again** by a person after a retry or rework reset, and its earlier action ended `FAILED`, `SKIPPED` or `NOT_SENT` | Runs again — a new attempt with the newly approved result and the same idempotency key |
-| Approved again after a reset, and its earlier action ended `SUCCEEDED` | Nothing — a publish is never sent twice; the record of what was sent is kept |
-| Approved again after a reset, and its earlier action ended `OUTCOME_UNKNOWN` | Nothing — the target may have acted; check it |
+| Approved, and its action ended `FAILED` (under `FAIL_TASK` the task is now `FAILED`) | Nothing more in this discussion — see below |
 
 A task has **at most one live action** at a time, and an action whose call
-went out and succeeded, or whose outcome is unknown, is never sent again. A
-task is awaiting approval a second time only after a reset — `onTaskRejection:
-RETRY`, or VERIFY sending it back for rework (`maxReworks`) — so "approve the
-task again" means: send it back, let the member redo it, and approve the new
-result. The action runs on the resumed leg *before* the phase loop re-enters
+went out and succeeded, or whose outcome is unknown, is never sent again.
+Within one discussion a task is **approved once**: no reset returns an approved
+task to approval in the configuration this feature requires. `onTaskRejection:
+RETRY` resets only a task *rejected* while awaiting approval — it was never
+approved, so it has no action yet — and VERIFY rework (`maxReworks`) is not
+applied when the EXECUTE phase gates its tasks for approval (`TASK`
+granularity). So a task whose action failed under `FAIL_TASK` stays `FAILED`
+for the rest of the discussion, and under `KEEP_COMPLETED` stays `COMPLETED`
+with the failure on its record. To publish it after all, post it by hand
+(check the target first); on a standing team a task left `FAILED` returns to
+the backlog and is approved again in a later discussion (see
+[Standing teams](#standing-teams-cadence-writeback)).
+
+Should a task nevertheless be approved again (the record does not depend on
+how), its earlier record decides: `FAILED`, `SKIPPED` or `NOT_SENT` gives a new
+attempt with the newly approved result and the **earlier record's** idempotency
+key; `SUCCEEDED` is never sent twice and `OUTCOME_UNKNOWN` is never resent, and
+the record of what happened is kept.
+
+The action runs on the resumed leg *before* the phase loop re-enters
 the EXECUTE phase, so a task that depends on the published one never starts
 before the publish has settled (or, under `FAIL_TASK`, failed it).
 
@@ -126,9 +139,10 @@ states `runAs: group:<groupId>`.
    the discussion's task list in the same write as the approval — the
    compare-and-set on state *and* `pauseId` that every group approval uses. A
    retried, duplicated or concurrent approval of the same pause loses that write
-   (`409`) and records nothing. A task gets a new record only from a later
-   human approval after a reset, and only when its earlier action ended
-   without an accepted publish (`FAILED`, `SKIPPED`, `NOT_SENT`).
+   (`409`) and records nothing. A task is approved once per discussion (see
+   *When it runs* above); were it approved again, it
+   would get a new record only when its earlier action ended without an
+   accepted publish (`FAILED`, `SKIPPED`, `NOT_SENT`).
 2. **Claimed before it is sent.** The resumed leg marks the record `RUNNING` and
    persists that *before* the request goes out. A record found `RUNNING` belongs
    to a run that died mid-call (pod crash, failover): it becomes

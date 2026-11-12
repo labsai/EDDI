@@ -11,6 +11,7 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -258,10 +259,10 @@ public class GroupConversationStore implements IGroupConversationStore {
         }
         if (persisting) {
             LOGGER.infof("Group conversation %s ended (%s) owing %d approved-result action(s); settled them without sending",
-                    gc.getId(), gc.getState(), settled.size());
+                    LogSanitizer.sanitize(gc.getId()), gc.getState(), settled.size());
         } else {
             LOGGER.debugf("Group conversation %s ended (%s) owing %d approved-result action(s); read them as settled (not persisted)",
-                    gc.getId(), gc.getState(), settled.size());
+                    LogSanitizer.sanitize(gc.getId()), gc.getState(), settled.size());
         }
     }
 

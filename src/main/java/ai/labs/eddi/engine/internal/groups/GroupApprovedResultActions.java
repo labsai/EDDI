@@ -60,19 +60,22 @@ import java.util.function.BooleanSupplier;
  * approval: it adds a {@code PENDING} record per approved task to the
  * discussion's task list, and the approval's own compare-and-set (state
  * <em>and</em> pauseId) persists it. A retried or concurrent approval of the
- * same pause loses that CAS, so an approval yields at most one record. A task
- * gets a new record only when a person approves it again after a retry or
- * rework reset and its previous action ended without an accepted publish
- * (FAILED, SKIPPED, NOT_SENT); a SUCCEEDED or OUTCOME_UNKNOWN action is never
- * sent again. {@link #runOwed} runs on the resumed leg, before the phase loop
- * re-enters the EXECUTE phase (so a dependent never starts before the action of
- * what it depends on has settled): each owed record is claimed as
- * {@code RUNNING} and that claim is persisted <em>before</em> the request is
- * sent. A record found {@code RUNNING} belongs to a run that died mid-call; it
- * becomes {@code OUTCOME_UNKNOWN} and is never sent again. The guarantee is
- * therefore <b>at most once</b> — exactly once whenever the run survives, and
- * for a target that deduplicates on {@code {action.idempotencyKey}},
- * effectively once even when it does not.
+ * same pause loses that CAS, so an approval yields at most one record. No
+ * engine path returns an approved task to approval in a configuration that can
+ * carry the action (RETRY resets only a task rejected while awaiting approval;
+ * VERIFY rework is not applied when the EXECUTE phase gates tasks), so a task
+ * is approved once per discussion. Should one be approved again, it gets a new
+ * record — with the earlier record's idempotency key — only when its previous
+ * action ended without an accepted publish (FAILED, SKIPPED, NOT_SENT); a
+ * SUCCEEDED or OUTCOME_UNKNOWN action is never sent again. {@link #runOwed}
+ * runs on the resumed leg, before the phase loop re-enters the EXECUTE phase
+ * (so a dependent never starts before the action of what it depends on has
+ * settled): each owed record is claimed as {@code RUNNING} and that claim is
+ * persisted <em>before</em> the request is sent. A record found {@code RUNNING}
+ * belongs to a run that died mid-call; it becomes {@code OUTCOME_UNKNOWN} and
+ * is never sent again. The guarantee is therefore <b>at most once</b> — exactly
+ * once whenever the run survives, and for a target that deduplicates on
+ * {@code {action.idempotencyKey}}, effectively once even when it does not.
  * <p>
  * <b>Data, not template.</b> The approved result reaches the call only as the
  * template variable {@code {task.result}}; the call's path, headers and body
@@ -167,16 +170,24 @@ public class GroupApprovedResultActions {
             if (task == null || task.status() != TaskStatus.COMPLETED) {
                 continue; // rejected, reset for retry, or still waiting: owes nothing
             }
-            if (!workspaceRead) {
-                // once per decision, and only when there is a task to record
-                workspace = readWorkspace(gc);
-                workspaceRead = true;
-            }
             boolean edited = taskList.getReviewerEdits().containsKey(taskId);
             ApprovedActionRecord previous = taskList.getApprovedActions().get(taskId);
+            String idempotencyKey;
+            if (previous != null && previous.idempotencyKey() != null) {
+                // a new attempt keeps the task's key: the target may have acted on the
+                // earlier request before it answered with an error
+                idempotencyKey = previous.idempotencyKey();
+            } else {
+                if (!workspaceRead) {
+                    // once per decision, and only when there is a task to key
+                    workspace = readWorkspace(gc);
+                    workspaceRead = true;
+                }
+                idempotencyKey = idempotencyKeyFor(gc, task, workspace);
+            }
             var record = new ApprovedActionRecord(ApprovedActionStatus.PENDING, phase.name(), phaseIndex, target,
                     phase.onApproved().onFailure(), approvedBy != null ? approvedBy : "unknown", edited,
-                    idempotencyKeyFor(gc, task, workspace), now, null, null, null, null, null);
+                    idempotencyKey, now, null, null, null, null, null);
             if (taskList.recordApprovedAction(taskId, record)) {
                 added++;
                 if (previous != null) {
@@ -250,8 +261,8 @@ public class GroupApprovedResultActions {
                                 wasCancelled
                                         ? "The discussion was cancelled before the action ran"
                                         : "Not sent: the claim could not be written (the discussion changed state or the store was "
-                                                + "unavailable) — post it by hand, or send the task back (retry or rework) and "
-                                                + "approve it again: that approval sends it"),
+                                                + "unavailable) — post it by hand if it is still wanted; this discussion does not "
+                                                + "send it again"),
                                 0L);
                     }
                 }

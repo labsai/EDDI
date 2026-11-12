@@ -886,11 +886,11 @@ public class SharedTaskList {
         NOT_SENT;
 
         /**
-         * Whether a fresh human approval of the same task — one that went back through
-         * retry or rework and was approved again — owes a new attempt: true only when
-         * this record produced no accepted publish (it failed, was skipped, or was
-         * never sent). SUCCEEDED is never sent twice, and OUTCOME_UNKNOWN is never
-         * resent because the target may have acted.
+         * Whether a fresh human approval of the same task, should it be approved again
+         * (no engine path does so today), owes a new attempt: true only when this
+         * record produced no accepted publish (it failed, was skipped, or was never
+         * sent). SUCCEEDED is never sent twice, and OUTCOME_UNKNOWN is never resent
+         * because the target may have acted.
          */
         public boolean allowsNewAttempt() {
             return this == FAILED || this == SKIPPED || this == NOT_SENT;
@@ -973,10 +973,11 @@ public class SharedTaskList {
      * whose previous record ended without an accepted publish (FAILED, SKIPPED,
      * NOT_SENT — {@link ApprovedActionStatus#allowsNewAttempt()}) gets it as a new
      * attempt: the caller records only tasks that went AWAITING_APPROVAL →
-     * COMPLETED in the current decision, and a task whose action already settled
-     * can be awaiting approval again only after a retry or rework reset. Every
-     * other record is kept: PENDING or RUNNING (still owed, or in flight),
-     * SUCCEEDED (never sent twice), OUTCOME_UNKNOWN (never resent).
+     * COMPLETED in the current decision, and no engine path returns an approved
+     * task to approval where an action can be configured (RETRY resets only a
+     * rejected task; VERIFY rework is off when EXECUTE gates tasks). Every other
+     * record is kept: PENDING or RUNNING (still owed, or in flight), SUCCEEDED
+     * (never sent twice), OUTCOME_UNKNOWN (never resent).
      *
      * @return whether the record was added, or replaced an earlier attempt
      */

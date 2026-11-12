@@ -1641,10 +1641,15 @@ your tool schemas do not cover it, not as a routine first step:
   owed (PENDING) when the discussion ends — completed, failed, cancelled,
   crash recovery included — reads NOT_SENT and was not sent (no audit entry,
   no metric for it). A claim that cannot be written sends nothing and is
-  settled FAILED, or SKIPPED when the discussion was cancelled. A person
-  approving the task again after a RETRY or VERIFY-rework reset owes a new
-  attempt only when the earlier one ended FAILED, SKIPPED or NOT_SENT; a
-  SUCCEEDED or OUTCOME_UNKNOWN action is never sent again. Calls with
+  settled FAILED, or SKIPPED when the discussion was cancelled. A task is
+  approved once per discussion: RETRY resets only a task rejected while
+  awaiting approval (it has no action yet), and VERIFY rework is not applied
+  when the EXECUTE phase gates tasks, so a task whose action FAILED stays
+  FAILED (FAIL_TASK) or COMPLETED (KEEP_COMPLETED) — do not tell the admin to
+  send it back and approve it again. To publish it after all: check the target,
+  then post it by hand; on a standing team a FAILED task returns to the backlog
+  and is approved in a later discussion. A SUCCEEDED or OUTCOME_UNKNOWN action
+  is never sent again. Calls with
   preRequest.propertyInstructions are refused. At most once covers the
   claim, not the call's own retries: postResponse.retryApiCallInstruction on
   the referenced call can repeat the request, so for a non-idempotent publish

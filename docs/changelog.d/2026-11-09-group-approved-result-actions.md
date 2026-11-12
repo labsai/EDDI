@@ -77,13 +77,18 @@ same phase). The gate now sits where it belongs — on the draft — and the gro
   to the record's claim or approval time), never `now()`, so every read — and the write that finally persists it —
   shows the same record; a read logs at DEBUG (the Manager polls), a write at INFO. Rejected: auto-sending on recovery (breaks at most once);
   calling a settle hook at each of the nine terminal-transition sites (one missed site, or #1326's, leaves it stuck).
-- **Re-approval owes a new attempt only when nothing was published.** `recordApprovedAction` replaces a record whose
-  status `allowsNewAttempt()` — FAILED, SKIPPED, NOT_SENT — and keeps every other: PENDING/RUNNING (still owed or in
-  flight), SUCCEEDED (never sent twice), OUTCOME_UNKNOWN (never resent). Only tasks that went AWAITING_APPROVAL →
-  COMPLETED in the current decision are recorded, and a settled task is awaiting approval again only after a RETRY or
-  VERIFY-rework reset, so the replacement is always a person approving a redone task. Before, `putIfAbsent` dropped
-  that approval's action silently while the FAILED summary told the user to "approve the task again"; the summary
-  now says to send the task back (retry or rework) and approve it again.
+- **A task is approved once per discussion; a re-approval, should one happen, owes a new attempt only when nothing
+  was published.** In the configuration `onApproved` requires (TASK granularity, gated EXECUTE phase) no engine path
+  returns an approved task to approval: `onTaskRejection: RETRY` resets only a task rejected while AWAITING_APPROVAL
+  (`GroupHitlCoordinator` refuses a decision on any other status), and VERIFY rework is skipped when the EXECUTE phase
+  gates tasks (`TaskForceEngine`). So a task whose action FAILED under `FAIL_TASK` stays FAILED for the rest of the
+  discussion; the way to publish it after all is by hand, or — on a standing team — through the backlog in a later
+  discussion. The docs, the failed-claim summary and the Platform Operator prompt used to say "send the task back
+  (retry or rework) and approve it again", which no path does; they now say what works. `recordApprovedAction` still
+  replaces a record whose status `allowsNewAttempt()` — FAILED, SKIPPED, NOT_SENT — and keeps every other:
+  PENDING/RUNNING (still owed or in flight), SUCCEEDED (never sent twice), OUTCOME_UNKNOWN (never resent), and the new
+  attempt reuses the **earlier record's idempotency key** rather than recomputing it, so a workspace that was
+  unreadable at the first approval and readable at the second cannot give the same publish two keys.
 - **Idempotency key from the stable identity.** A cadence discussion's task pulled from the standing team's backlog
   is keyed `sha256("backlog/" + groupId + "/" + backlogTaskId)` — the backlog task found the way writeback matches it
   (by subject among the workspace's `pulledTaskIds`, while `runningDiscussionId` is this discussion) — so a task that
@@ -117,12 +122,14 @@ never sends one twice.
   cancelling it included).
 - Retries configured on the referenced call (`postResponse.retryApiCallInstruction`) still apply and can repeat a
   request the target processed.
+- No in-discussion way to retry a publish that ended FAILED: whether a person should be able to send such a task back
+  for another approval (and how that interacts with at most once) is a product decision not taken here.
 
 ```decision-log
 | 2026-11-09 | Approved-result actions run through the existing httpcalls executor (`IApiCallExecutor`), HTTPCALL only in v1 | Reuses vault resolution, the reference guard, redaction and caps instead of a second outbound path; one executor done fully | MCP-tool actions in the same change; a bespoke OutboundHttp call |
 | 2026-11-09 | At-most-once: record in the approval CAS, persist a RUNNING claim before the send, never resend a RUNNING record | An external side effect cannot be exactly-once without the target's help; a double publish is worse than a visible OUTCOME_UNKNOWN | Retrying RUNNING records; a separate journal store |
 | 2026-11-09 | A `system:*` (AUTO_APPROVE) approval records SKIPPED instead of running the action | The feature exists to publish only human-approved text | A `runOnAutoApprove` switch |
 | 2026-11-11 | An approved action still owed when its discussion ends is settled NOT_SENT by the discussion store, never sent | Every ending (cancel, crash recovery, cadence reclaim) passes the store; at most once forbids sending after a crash | Auto-send on recovery; a settle call at each terminal-transition site |
-| 2026-11-11 | A re-approval after retry/rework owes a new attempt only if the earlier one ended FAILED, SKIPPED or NOT_SENT | A failed publish must be recoverable by the user; a SUCCEEDED or OUTCOME_UNKNOWN one must never be sent twice | `putIfAbsent` per task (silently dropped the re-approval) |
+| 2026-11-11 | A re-approval owes a new attempt only if the earlier one ended FAILED, SKIPPED or NOT_SENT, with the earlier record's idempotency key | A SUCCEEDED or OUTCOME_UNKNOWN action must never be sent twice; one task offers one key. No engine path re-approves a task today, so this is the record's rule, not a recovery path | `putIfAbsent` per task (silently dropped the re-approval); recomputing the key per attempt |
 | 2026-11-11 | A standing team's backlog task keys its idempotency key on the backlog task id, when its subject matches exactly one pulled backlog task and one discussion task | The task is re-run in new discussions; a per-discussion key let the target receive the same publish twice | Keying on the subject; adding a backlog id to every discussion task |
 ```

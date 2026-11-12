@@ -173,14 +173,31 @@ class GroupConversationStoreApprovedActionsTest {
     void theWritePersistsTheSettledRecord_soTheNextReadHasNothingLeftToSettle() throws Exception {
         var gc = gcWith(GroupConversationState.CANCELLED);
         gc.setLastModified(ENDED_AT);
-        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenReturn(mock(IResourceStorage.IResource.class));
+        // what the write hands to storage, captured when it does — not the live object
+        AtomicReference<Map<String, ApprovedActionRecord>> written = new AtomicReference<>();
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenAnswer(inv -> {
+            written.set(Map.copyOf(gc.getTaskList().getApprovedActions()));
+            return resource;
+        });
 
         store.update(gc);
 
-        assertTrue(gc.getTaskList().settleOwedApprovedActions("unused", Instant.now()).isEmpty(),
+        verify(storage).storeIfCurrentVersion(same(resource), eq(1));
+        assertNotNull(written.get(), "update wrote the document");
+        assertEquals(ApprovedActionStatus.NOT_SENT, written.get().get("pending").status(), "settled in the document as written");
+        // the next read deserializes only what that write stored
+        storedAs(() -> {
+            var stored = new GroupConversation();
+            stored.setId("gc-1");
+            stored.setState(GroupConversationState.CANCELLED);
+            var list = new SharedTaskList();
+            list.setApprovedActions(written.get());
+            stored.setTaskList(list);
+            return stored;
+        });
+        assertTrue(store.read("gc-1").getTaskList().settleOwedApprovedActions("unused", Instant.now()).isEmpty(),
                 "the document as written owes nothing, so a later read has nothing left to settle");
-        // the document as written is what the next read deserializes
-        storedAs(() -> gc);
         GroupConversation readBack = store.read("gc-1");
         assertEquals(ApprovedActionStatus.NOT_SENT, readBack.getTaskList().getApprovedActions().get("pending").status());
         assertEquals(ENDED_AT, readBack.getTaskList().getApprovedActions().get("pending").finishedAt());

@@ -557,7 +557,10 @@ class GroupApprovedResultActionsTest {
             actions.runOwed(gc, store, () -> false);
 
             String summary = gc.getTaskList().getApprovedActions().get(task.id()).summary();
-            assertTrue(summary.contains("retry or rework"), summary);
+            assertTrue(summary.contains("post it by hand"), summary);
+            // no engine path returns an approved task to approval, so the summary must not
+            // promise one
+            assertFalse(summary.contains("approve it again"), summary);
         }
     }
 
@@ -700,6 +703,33 @@ class GroupApprovedResultActionsTest {
             verify(workspaceStore, times(1)).find("group-1");
             assertEquals(GroupApprovedResultActions.backlogIdempotencyKey("group-1", backlogTask.id()), keyOf(gc, first),
                     "the unambiguous backlog match still gets the backlog key");
+        }
+
+        /**
+         * Finding: a new attempt recomputed the key, so a workspace unreadable at the
+         * first approval and readable at the second gave the same publish two keys.
+         */
+        @Test
+        void aNewAttempt_keepsTheEarlierRecordsKey_evenWhenTheWorkspaceBecameReadable() throws Exception {
+            when(workspaceStore.find("group-1")).thenThrow(new IResourceStore.ResourceStoreException("down")).thenReturn(workspace);
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(Map.of("httpCode", 502, "body", "Bad Gateway"));
+            var task = new TaskItem("Post", "publish the weekly note", 0);
+            var gc = runningDiscussionWith(task);
+            withWorkspace.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "alice");
+            withWorkspace.runOwed(gc, store, () -> false);
+            String firstKey = keyOf(gc, task);
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()), firstKey, "unreadable: per-discussion key");
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+
+            SharedTaskList list = gc.getTaskList();
+            list.reworkTask(task.id(), "try again");
+            list.startTask(task.id());
+            list.submitForApproval(task.id(), "second draft");
+            list.approveTask(task.id());
+            assertEquals(1, withWorkspace.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "bob"));
+
+            assertEquals(ApprovedActionStatus.PENDING, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(firstKey, keyOf(gc, task), "the new attempt offers the target the key it may already have acted on");
         }
 
         @Test
