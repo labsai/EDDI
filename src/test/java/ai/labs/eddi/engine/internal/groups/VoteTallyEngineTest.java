@@ -194,11 +194,67 @@ class VoteTallyEngineTest {
     }
 
     @Test
+    @DisplayName("a skipped over-long option line cannot shift the labels of the options after it")
+    void resolveOptions_skippedLineDoesNotShiftLabels() {
+        // Option A is over the line cap. Read positionally, B's text became the first
+        // option, so a ballot for "Option B" resolved to C's text, "Unsafe".
+        String synthesis = "Option A: " + "x".repeat(VoteTallyEngine.MAX_OPTION_LINE_LENGTH) + "\nOption B: Safe\nOption C: Unsafe";
+
+        List<String> options = VoteTallyEngine.synthesisOptions(synthesis);
+
+        assertEquals(List.of(), options, "labels out of sequence: the vote must not run rather than mislabel");
+        assertNull(VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option B\"}"), options, VoteMethod.MAJORITY));
+    }
+
+    @Test
+    @DisplayName("labels with a gap, a duplicate or the wrong start are rejected; blank lines between options are fine")
+    void resolveOptions_labelsMustBeConsecutive() {
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Safe\nOption C: Unsafe"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Safe\nOption A: Unsafe"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option B: Safe\nOption C: Unsafe"));
+        assertEquals(List.of("Safe", "Unsafe"), VoteTallyEngine.synthesisOptions("Option A: Safe\n\n\n   \nOption B: Unsafe"));
+        assertEquals(List.of("Safe", "Unsafe"), VoteTallyEngine.synthesisOptions("Option 1: Safe\nOption 2: Unsafe"));
+    }
+
+    @Test
+    @DisplayName("an empty label does not swallow the next option line as its text")
+    void resolveOptions_emptyLabelDoesNotConsumeTheNextOption() {
+        // "Option B: Stay" used to become A's text, and B's line was consumed.
+        List<String> options = VoteTallyEngine.synthesisOptions("Option A:\nOption B: Stay");
+
+        assertFalse(options.contains("Option B: Stay"), "an option label is never another option's text: " + options);
+        assertEquals(List.of(), options, "A has no text, so B is out of sequence and the vote cannot run");
+        assertEquals(List.of("Adopt", "Stay"), VoteTallyEngine.synthesisOptions("Option A:\nAdopt\nOption B: Stay"),
+                "a plain continuation line is still A's text");
+    }
+
+    @Test
+    @DisplayName("the option cap truncates the tail only: labels before it keep their text, labels after it resolve to nothing")
+    void resolveOptions_capDoesNotShiftLabels() {
+        var synthesis = new StringBuilder();
+        for (int i = 1; i <= 40; i++) {
+            synthesis.append("Option ").append(i).append(": choice ").append(i).append('\n');
+        }
+
+        List<String> options = VoteTallyEngine.synthesisOptions(synthesis.toString());
+
+        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, options.size());
+        var last = VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option 32\"}"), options, VoteMethod.MAJORITY);
+        assertNotNull(last);
+        assertEquals(List.of("choice 32"), last.votes());
+        assertNull(VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option 33\"}"), options, VoteMethod.MAJORITY));
+    }
+
+    @Test
     @DisplayName("adversarial whitespace in a synthesis is parsed in linear time, not by catastrophic backtracking")
     void resolveOptions_adversarialWhitespace_completesQuickly() {
         String pad800 = " ".repeat(800);
         String pad4000 = " ".repeat(4000);
-        String manyLines = ("Option A: x" + pad800 + "y\n").repeat(100);
+        var numbered = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            numbered.append("Option ").append(i).append(": x").append(pad800).append("y\n");
+        }
+        String manyLines = numbered.toString();
         String blankRun = "\n".repeat(20_000) + "Option A: x" + pad4000 + "y";
         var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,
                 TiePolicy.NO_DECISION);

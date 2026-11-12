@@ -142,19 +142,32 @@ public final class VoteTallyEngine {
     /**
      * The {@code Option X: …} lines of one synthesis, line by line. A label whose
      * text is empty ({@code **Option A:**} on a line of its own) takes the next
-     * non-blank line as its text, as the whole-text pattern did.
+     * non-blank line as its text, as the whole-text pattern did — unless that line
+     * is itself an option, which is never another option's text.
+     * <p>
+     * <b>Labels must run in sequence</b> — A, B, C… or 1, 2, 3…, the k-th option
+     * labelled k — or the synthesis yields no options and the vote cannot run.
+     * Ballots may vote by label, and {@link #canonicalOption} resolves a label by
+     * position: an option that went missing (its line over the length cap, its text
+     * empty) or a label out of order would make "Option B" mean another option's
+     * text. An over-long option line therefore rejects the synthesis too, rather
+     * than being skipped.
      */
     static List<String> synthesisOptions(String content) {
         List<String> options = new ArrayList<>();
         List<String> lines = content.lines().toList();
         for (int i = 0; i < lines.size() && options.size() < MAX_SYNTHESIS_OPTIONS; i++) {
             String line = lines.get(i);
-            if (line.length() > MAX_OPTION_LINE_LENGTH || line.isBlank()) {
+            if (line.isBlank()) {
                 continue;
             }
-            MatchResult match = BoundedRegex.firstMatch(OPTION_LINE, line, OPTION_LINE_TIMEOUT_MS).orElse(null);
+            MatchResult match = optionLine(line);
             if (match == null) {
                 continue;
+            }
+            if (line.length() > MAX_OPTION_LINE_LENGTH || labelPosition(match.group(1)) != options.size()) {
+                LOGGER.debugf("Synthesis options rejected: option line %d is over-long or out of label sequence", i + 1);
+                return List.of();
             }
             String text = optionText(match.group(2));
             if (text.isEmpty()) {
@@ -162,8 +175,8 @@ public final class VoteTallyEngine {
                 while (next < lines.size() && lines.get(next).isBlank()) {
                     next++;
                 }
-                if (next >= lines.size() || lines.get(next).length() > MAX_OPTION_LINE_LENGTH) {
-                    continue;
+                if (next >= lines.size() || lines.get(next).length() > MAX_OPTION_LINE_LENGTH || optionLine(lines.get(next)) != null) {
+                    continue; // no text for this label; a following option line is left for the loop
                 }
                 String continuation = lines.get(next).strip();
                 for (int markers = 0; markers < 2 && !continuation.isEmpty()
@@ -178,6 +191,27 @@ public final class VoteTallyEngine {
             }
         }
         return options;
+    }
+
+    /**
+     * The option-line match of {@code line}, or {@code null}. An over-long line is
+     * matched on its first {@link #MAX_OPTION_LINE_LENGTH} characters, enough to
+     * tell whether it is an option label; its text is never used.
+     */
+    private static MatchResult optionLine(String line) {
+        String probe = line.length() > MAX_OPTION_LINE_LENGTH ? line.substring(0, MAX_OPTION_LINE_LENGTH) : line;
+        return BoundedRegex.firstMatch(OPTION_LINE, probe, OPTION_LINE_TIMEOUT_MS).orElse(null);
+    }
+
+    /**
+     * The zero-based position an option label names: a single letter (A = 0) or a
+     * number (1 = 0); {@code -1} for anything else.
+     */
+    private static int labelPosition(String label) {
+        String index = label.toUpperCase(Locale.ROOT);
+        return index.length() == 1 && Character.isLetter(index.charAt(0))
+                ? index.charAt(0) - 'A'
+                : parseIndex(index);
     }
 
     /**
@@ -501,10 +535,7 @@ public final class VoteTallyEngine {
         }
         Matcher label = OPTION_LABEL.matcher(trimmed);
         if (label.matches()) {
-            String index = label.group(1).toUpperCase(Locale.ROOT);
-            int position = index.length() == 1 && Character.isLetter(index.charAt(0))
-                    ? index.charAt(0) - 'A'
-                    : parseIndex(index);
+            int position = labelPosition(label.group(1));
             if (position >= 0 && position < options.size()) {
                 return options.get(position);
             }
