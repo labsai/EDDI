@@ -34,6 +34,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -729,6 +733,71 @@ class HealthOutcomeEvaluatorTest {
             evaluator.ratingChanged("c1", 3, NOW);
             evaluator.ratingChanged(" ", 3, NOW);
             verify(outcomes, times(1)).markDue("c1", List.of(0), NOW);
+        }
+
+        @Test
+        @DisplayName("a full hand-off queue defers the mark, counted, and the next mark that runs marks the deferred conversation too")
+        void fullQueueDefersTheMark() {
+            when(outcomes.findByConversation(anyString())).thenReturn(List.of(stored("c1", 0, NOW)));
+            List<Runnable> queued = new ArrayList<>();
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c1", 3));
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c1", 4));
+            verify(outcomes, never()).markDue(anyString(), any(), any());
+            assertEquals(2.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DEFERRED).counter().count());
+
+            // The queue has room again: the next mark it runs also marks c1 — every
+            // session, since the deferred rating's own one is not kept — and only once.
+            evaluator.ratingExecutor(queued::add);
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c2", 3));
+            queued.get(0).run();
+            verify(outcomes).markDue(eq("c1"), isNull(), eq(NOW));
+            verify(outcomes).markDue("c2", List.of(0), NOW);
+            evaluator.drainDeferredRatings();
+            verify(outcomes, times(1)).markDue(eq("c1"), isNull(), eq(NOW));
+            assertEquals(0.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DROPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("beyond the deferred set's bound a mark is lost, and counted as dropped")
+        void deferredSetIsBounded() {
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            for (int i = 0; i < HealthOutcomeEvaluator.MAX_DEFERRED_RATINGS + 2; i++) {
+                evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c" + i, -1));
+            }
+            assertEquals(HealthOutcomeEvaluator.MAX_DEFERRED_RATINGS,
+                    registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DEFERRED).counter().count());
+            assertEquals(2.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DROPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("the production hand-off refuses a task when its queue is full, rather than discarding it unseen")
+        void productionExecutorRefusesWhenFull() throws Exception {
+            ThreadPoolExecutor executor = HealthOutcomeEvaluator.newRatingExecutor(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch started = new CountDownLatch(1);
+            try {
+                executor.execute(() -> {
+                    started.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                assertTrue(started.await(10, TimeUnit.SECONDS));
+                executor.execute(() -> {
+                });
+                assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {
+                }), "a discarding policy loses the mark without the caller ever knowing");
+            } finally {
+                release.countDown();
+                executor.shutdownNow();
+            }
         }
 
         @Test

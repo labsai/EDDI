@@ -19658,7 +19658,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_health_rollup_days_total` — agent days recomputed, `eddi_health_rollup_rows_total` — daily rows written, `eddi_health_rollup_failures_total` — agent days whose rollup failed (retried on the next pass; should stay at zero), the mean pass duration from `eddi_health_rollup_duration_seconds`, and the outcome evaluation that runs first in every pass: `eddi_health_outcomes_sessions_total` — session outcome rows written, `eddi_health_outcomes_failures_total` — conversations whose evaluation failed (should stay at zero).",
+          "description": "`eddi_health_rollup_days_total` — agent days recomputed, `eddi_health_rollup_rows_total` — daily rows written, `eddi_health_rollup_failures_total` — agent days whose rollup failed (retried on the next pass; should stay at zero), the mean pass duration from `eddi_health_rollup_duration_seconds`, and the outcome evaluation that runs first in every pass: `eddi_health_outcomes_sessions_total` — session outcome rows written, `eddi_health_outcomes_failures_total` — conversations whose evaluation failed (should stay at zero), and `eddi_health_outcomes_rating_overflow_total` by `result` — rating changes the outcome hand-off queue had no room for: `deferred` (marked once it catches up) or `dropped` (lost; should stay at zero).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -19731,6 +19731,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "outcome failures/s"
+            },
+            {
+              "refId": "G",
+              "expr": "sum by (result) (rate(eddi_health_outcomes_rating_overflow_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rating marks {{result}}/s"
             }
           ],
           "fieldConfig": {

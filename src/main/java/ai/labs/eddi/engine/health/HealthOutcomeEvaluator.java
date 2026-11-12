@@ -34,11 +34,14 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -140,12 +143,30 @@ public class HealthOutcomeEvaluator {
     private final HealthMetrics metrics;
     private final Clock clock;
 
+    /** Rating marks waiting on the hand-off thread. */
+    static final int RATING_QUEUE = 1_000;
+    /** The most conversations a full hand-off queue defers. */
+    static final int MAX_DEFERRED_RATINGS = 10_000;
+    /** At most one WARN about lost rating marks per this long. */
+    static final Duration RATING_WARN_INTERVAL = Duration.ofMinutes(1);
+
     /**
      * Where rating events are handed off: the rating request must never wait for
-     * Agent Health. One thread, a bounded queue; a full queue drops the mark (the
-     * session is judged again with its next change).
+     * Agent Health. One thread, a bounded queue. A mark the full queue refuses is
+     * not dropped: its conversation is deferred ({@link #deferredRatings}) and
+     * marked — every session, as a withdrawal is — by the hand-off thread once it
+     * catches up. A closed session has no next change to be judged again with, so a
+     * dropped mark would have left a rating out of its outcome for good.
      */
     private Executor ratingExecutor;
+    /**
+     * Conversations whose rating mark the full queue refused, coalesced and bounded
+     * ({@link #MAX_DEFERRED_RATINGS}); only beyond that is a mark lost — counted
+     * and logged.
+     */
+    private final Set<String> deferredRatings = ConcurrentHashMap.newKeySet();
+    private final AtomicLong ratingsLostSinceWarn = new AtomicLong();
+    private final AtomicReference<Instant> lastRatingWarn = new AtomicReference<>();
     private ExecutorService ownedExecutor;
     /**
      * When the feed first failed to evaluate a conversation, by this node's clock:
@@ -166,13 +187,22 @@ public class HealthOutcomeEvaluator {
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
             IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics) {
         this(turnStore, outcomeStore, configPolicy, ratingStore, fence, settings, metrics, Clock.systemUTC());
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1_000), r -> {
+        ThreadPoolExecutor executor = newRatingExecutor(RATING_QUEUE);
+        this.ownedExecutor = executor;
+        this.ratingExecutor = executor;
+    }
+
+    /**
+     * The rating hand-off: one thread and a bounded queue that <em>refuses</em> a
+     * task when full ({@code AbortPolicy}, the default) — {@link #handOff} defers
+     * what it refuses, where a discarding policy lost it without a trace.
+     */
+    static ThreadPoolExecutor newRatingExecutor(int queueSize) {
+        return new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(queueSize), r -> {
             Thread thread = new Thread(r, "health-outcome-ratings");
             thread.setDaemon(true);
             return thread;
-        }, new ThreadPoolExecutor.DiscardPolicy());
-        this.ownedExecutor = executor;
-        this.ratingExecutor = executor;
+        });
     }
 
     HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
@@ -542,22 +572,65 @@ public class HealthOutcomeEvaluator {
             // event does not say which session it was in before: mark them all, as a
             // withdrawal does.
             Instant at = rating.isConversationRating() && changed(rating) ? null : ratingTime(rating);
-            handOff(() -> ratingChanged(rating.conversationId(), rating.stepIndex(), at));
+            handOff(rating.conversationId(), () -> ratingChanged(rating.conversationId(), rating.stepIndex(), at));
         }
     }
 
     void onRatingWithdrawn(@Observes ConversationRatingWithdrawn withdrawn) {
         if (withdrawn != null) {
             // A withdrawn conversation rating has no time left to place it by.
-            handOff(() -> ratingChanged(withdrawn.conversationId(), withdrawn.stepIndex(), null));
+            handOff(withdrawn.conversationId(), () -> ratingChanged(withdrawn.conversationId(), withdrawn.stepIndex(), null));
         }
     }
 
-    private void handOff(Runnable task) {
+    private void handOff(String conversationId, Runnable task) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return;
+        }
         try {
-            ratingExecutor.execute(task);
+            ratingExecutor.execute(() -> {
+                task.run();
+                drainDeferredRatings();
+            });
         } catch (RejectedExecutionException e) {
-            LOGGER.debugf("Agent Health rating hand-off rejected: %s", e.getMessage());
+            if (ownedExecutor != null && ownedExecutor.isShutdown()) {
+                // The application stops; the queue's own marks go with it.
+                return;
+            }
+            deferRating(conversationId);
+        }
+    }
+
+    /**
+     * The queue is full: the conversation waits in {@link #deferredRatings} for the
+     * hand-off thread, which drains it after every mark it runs — and a full queue
+     * means marks are waiting, so the drain is never far behind.
+     */
+    private void deferRating(String conversationId) {
+        if (deferredRatings.contains(conversationId) || deferredRatings.size() < MAX_DEFERRED_RATINGS && deferredRatings.add(conversationId)) {
+            metrics.ratingMarkOverflow(HealthMetrics.RESULT_DEFERRED);
+            return;
+        }
+        metrics.ratingMarkOverflow(HealthMetrics.RESULT_DROPPED);
+        long lost = ratingsLostSinceWarn.incrementAndGet();
+        Instant now = clock.instant();
+        Instant last = lastRatingWarn.get();
+        if ((last == null || !now.isBefore(last.plus(RATING_WARN_INTERVAL))) && lastRatingWarn.compareAndSet(last, now)) {
+            ratingsLostSinceWarn.addAndGet(-lost);
+            LOGGER.warnf("Agent Health could not keep up with rating changes: %d rating mark(s) lost (conversation %s among them); "
+                    + "those sessions keep their outcome until they are judged again", lost, sanitize(conversationId));
+        }
+    }
+
+    /**
+     * Marks every session of each deferred conversation for another look — what a
+     * withdrawal does, since the deferred rating's own session is no longer known.
+     */
+    void drainDeferredRatings() {
+        for (String conversationId : deferredRatings) {
+            if (deferredRatings.remove(conversationId)) {
+                ratingChanged(conversationId, ConversationRating.CONVERSATION_STEP_INDEX, null);
+            }
         }
     }
 

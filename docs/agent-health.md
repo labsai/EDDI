@@ -761,7 +761,15 @@ eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent da
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
+eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
+
+A rating saved or withdrawn marks its session for another look on a hand-off
+thread (1,000 marks queued), so the rating request never waits. When that queue
+is full the conversation is deferred (`deferred`) and marked — every session of
+it — once the thread catches up; only past 10,000 deferred conversations is a
+mark lost (`dropped`, with a WARN at most once a minute). Both should stay at
+zero.
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because
