@@ -263,6 +263,97 @@ class HtmlToMarkdownConverterSalvageTest {
     }
 
     @Test
+    @DisplayName("nested blockquotes allocate what they contain, not what they contain times their depth")
+    void nestedBlockquotesDoNotAllocateQuadratically() {
+        // Each quote renders its content into a buffer and copies every line out of
+        // it behind a "> ", so a line d quotes deep was copied d times and grew by a
+        // prefix at each. The walk's budgets count source text and elements, never
+        // prefixes, so a reply chain quoted ninety deep stopped neither of them.
+        String mail = nestedLines("<blockquote>", "</blockquote>", 90, 18_000);
+        String flat = nestedLines("<blockquote>", "</blockquote>", 1, 18_000);
+
+        String[] markdown = new String[1];
+        long allocated = allocatedBy(() -> markdown[0] = converter.convertMail(mail, 50_000_000));
+        long allocatedFlat = allocatedBy(() -> converter.convertMail(flat, 50_000_000));
+
+        assertEquals(1, markdown[0].split("innermost", -1).length - 1, "the content itself must still be there");
+        // About 240 KB either way. Ninety levels measured 1.7 times the flat cost with
+        // the cap and 13 times without it (340 MB).
+        assertGrowsWithContent(allocated, allocatedFlat);
+    }
+
+    @Test
+    @DisplayName("lists nested through another element allocate what they contain, not times their depth")
+    void listsNestedThroughBlocksDoNotAllocateQuadratically() {
+        // A list inside a div inside an item is not "directly nested": it starts at
+        // indent level 0 in the item's own buffer, and every enclosing item then
+        // re-indents all of it, so the linear handling of ul>li>ul never applied.
+        String page = nestedLines("<ul><li><div>", "</div></li></ul>", 40, 8_000);
+        String flat = nestedLines("<ul><li><div>", "</div></li></ul>", 1, 8_000);
+
+        String[] markdown = new String[1];
+        long allocated = allocatedBy(() -> markdown[0] = converter.convert(page, null, 50_000_000));
+        long allocatedFlat = allocatedBy(() -> converter.convert(flat, null, 50_000_000));
+
+        assertEquals(1, markdown[0].split("innermost", -1).length - 1, "the content itself must still be there");
+        // Forty levels measured 3.8 times the flat cost with the cap (the rest is each
+        // div copying its content once, which MAX_DEPTH bounds) and 20 times without
+        // it (240 MB).
+        assertGrowsWithContent(allocated, allocatedFlat);
+    }
+
+    /**
+     * {@code levels} containers nested in one another in {@code <body>}, holding
+     * {@code lines} short paragraphs between them and an innermost one, spread
+     * evenly over the levels: the same amount of text whatever the depth.
+     */
+    private static String nestedLines(String open, String close, int levels, int lines) {
+        StringBuilder html = new StringBuilder("<body>");
+        for (int level = 0; level < levels; level++) {
+            html.append(open);
+            for (int line = 0; line < lines / levels; line++) {
+                html.append("<p>n").append(level).append('.').append(line).append("</p>");
+            }
+        }
+        return html.append("<p>innermost</p>").append(close.repeat(levels)).append("</body>").toString();
+    }
+
+    private static void assertGrowsWithContent(long allocated, long allocatedFlat) {
+        assertTrue(allocated < 6 * allocatedFlat, "nesting allocated " + allocated / (1024 * 1024) + " MB against "
+                + allocatedFlat / (1024 * 1024) + " MB for the same text unnested: it grows with depth, not content");
+    }
+
+    @Test
+    @DisplayName("quotes and lists up to the prefix cap keep every marker")
+    void shallowNestingKeepsItsMarkers() {
+        String quoted = converter.convertMail(
+                "<body><blockquote>one<blockquote>two<blockquote>three</blockquote></blockquote></blockquote></body>", 0);
+        String listed = converter.convert(
+                "<body><ul><li><div>outer<ul><li><div>inner<ul><li>innermost</li></ul></div></li></ul></div></li></ul></body>",
+                null);
+
+        assertTrue(quoted.contains("> > > three"), quoted);
+        assertTrue(listed.contains("        - innermost"), listed);
+    }
+
+    /**
+     * Bytes the current thread allocates running {@code conversion} the second
+     * time; the first run warms up the classes and the parser.
+     */
+    private static long allocatedBy(Runnable conversion) {
+        var threadBean = ManagementFactory.getThreadMXBean();
+        assumeTrue(threadBean instanceof ThreadMXBean, "allocation counters are a HotSpot extension");
+        var hotspot = (ThreadMXBean) threadBean;
+        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not enabled");
+
+        conversion.run();
+        long threadId = Thread.currentThread().threadId();
+        long before = hotspot.getThreadAllocatedBytes(threadId);
+        conversion.run();
+        return hotspot.getThreadAllocatedBytes(threadId) - before;
+    }
+
+    @Test
     @DisplayName("deeply nested lists do not overflow the stack")
     void deepListNestingDoesNotOverflow() throws Exception {
         // A list nested in a list item recurses through appendList directly, never
