@@ -97,6 +97,11 @@ public class ToolCostTracker {
     public void init() {
         meterRegistry.gauge(ACCRUED_COST_GAUGE, totalCost, DoubleAdder::sum);
 
+        String rawPrice = configuredWebSearchPrice();
+        if (rawPrice != null && !rawPrice.isBlank() && parseWebSearchPrice(rawPrice) == null) {
+            LOGGER.warnf("%s=%s is not a finite, non-negative number; the websearch price falls back to the provider default.",
+                    WEBSEARCH_PRICE_PROPERTY, sanitize(rawPrice));
+        }
         LOGGER.info("Tool cost tracker initialized with metrics");
     }
 
@@ -300,24 +305,69 @@ public class ToolCostTracker {
     static final Map<String, Double> WEBSEARCH_PROVIDER_PRICES = Map.of("brave", 0.005, "google", 0.005);
 
     /**
+     * Optional deployment-wide price of one {@code websearch} call, in dollars. It
+     * replaces the provider default of {@link #WEBSEARCH_PROVIDER_PRICES} for
+     * whichever provider is configured (only one is active at a time), so a
+     * contract that is not list price needs no rebuild. A per-agent
+     * {@code toolPricing} entry still wins over it.
+     */
+    static final String WEBSEARCH_PRICE_PROPERTY = "eddi.tools.websearch.price-per-call";
+
+    /**
      * The built-in default for {@code slug}. {@code websearch} is priced by the
      * configured provider — a deployment-wide setting, so it is read from the
-     * config rather than carried on every invocation. A paid provider configured
+     * config rather than carried on every invocation — unless
+     * {@value #WEBSEARCH_PRICE_PROPERTY} sets a price. A paid provider configured
      * without its key falls back to DuckDuckGo but is still priced as configured:
      * the safe direction for a budget, and the startup log already warns.
      */
     static double defaultPriceOf(String slug) {
-        return defaultPriceOf(slug, "websearch".equals(slug) ? configuredWebSearchProvider() : null);
+        boolean webSearch = "websearch".equals(slug);
+        return defaultPriceOf(slug, webSearch ? configuredWebSearchProvider() : null, webSearch ? configuredWebSearchPrice() : null);
     }
 
     static double defaultPriceOf(String slug, String webSearchProvider) {
-        if ("websearch".equals(slug) && webSearchProvider != null) {
-            Double providerPrice = WEBSEARCH_PROVIDER_PRICES.get(webSearchProvider.trim().toLowerCase(Locale.ROOT));
-            if (providerPrice != null) {
-                return providerPrice;
+        return defaultPriceOf(slug, webSearchProvider, null);
+    }
+
+    static double defaultPriceOf(String slug, String webSearchProvider, String webSearchPriceOverride) {
+        if ("websearch".equals(slug)) {
+            Double override = parseWebSearchPrice(webSearchPriceOverride);
+            if (override != null) {
+                return override;
+            }
+            if (webSearchProvider != null) {
+                Double providerPrice = WEBSEARCH_PROVIDER_PRICES.get(webSearchProvider.trim().toLowerCase(Locale.ROOT));
+                if (providerPrice != null) {
+                    return providerPrice;
+                }
             }
         }
         return DEFAULT_TOOL_PRICES.getOrDefault(slug, 0.0);
+    }
+
+    /**
+     * Parses {@value #WEBSEARCH_PRICE_PROPERTY}; null for a blank, non-numeric,
+     * negative or non-finite value, which means "use the provider default".
+     */
+    static Double parseWebSearchPrice(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            double price = Double.parseDouble(raw.trim());
+            return Double.isFinite(price) && price >= 0.0 ? price : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String configuredWebSearchPrice() {
+        try {
+            return ConfigProvider.getConfig().getOptionalValue(WEBSEARCH_PRICE_PROPERTY, String.class).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String configuredWebSearchProvider() {

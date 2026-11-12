@@ -462,6 +462,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key), `brave` (Brave Search API, $5 per 1,000 requests) or `google` (deprecated — Google shuts the Custom Search JSON API down on 2027-01-01; a startup WARN says so). A paid provider without its key falls back to `duckduckgo`. See [langchain.md → Web Search Tool](langchain.md#web-search-tool) |
 | `eddi.tools.websearch.brave.api-key` | *(empty)* | Required for the `brave` provider. A plain key or a `${vault:...}` reference; sent in the `X-Subscription-Token` header |
+| `eddi.tools.websearch.price-per-call` | *(empty)* | Dollars one `websearch` call costs in cost tracking, replacing the provider default (`0.005` for `brave` and `google`, `0.001` for `duckduckgo`). Empty uses the provider default; a negative or non-numeric value is ignored with a startup WARN. A per-agent `toolPricing` still wins |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the deprecated `google` provider |
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID, for the deprecated `google` provider |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |

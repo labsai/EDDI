@@ -1495,6 +1495,15 @@ startup log names the missing property — but the call is still priced as the
 configured provider, so a budget never undercounts. An unknown provider value
 also falls back to DuckDuckGo with a startup WARN.
 
+**Pricing.** The default price per search is a property of the provider, not a
+constant of the build: `$0.005` for `brave` and `google`, `$0.001` for
+`duckduckgo`. If your contract differs, set `eddi.tools.websearch.price-per-call`
+(dollars per call; `0` makes searches free) and it replaces the provider default
+for whichever provider is configured. A value that is not a finite, non-negative
+number is ignored with a startup WARN. A per-agent
+[`toolPricing`](#agent-mode-parameters) entry (`{"websearch": 0.002}`) still wins
+over both.
+
 #### Web Scraper Tool
 
 `extractWithSelector` evaluates a model-written CSS selector against a page of up to
@@ -2472,7 +2481,7 @@ ceiling still completes and the next one is refused with
 
 Default per-call prices: `webscraper` $0.002, `websearch` $0.001 with
 `duckduckgo` and $0.005 with `brave` or `google` (the
-`eddi.tools.websearch.provider` in force), `pdfreader` $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
+`eddi.tools.websearch.provider` in force, or `eddi.tools.websearch.price-per-call` when set), `pdfreader` $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
 `textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
 and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
 Negative `toolPricing` values are clamped to 0.0.

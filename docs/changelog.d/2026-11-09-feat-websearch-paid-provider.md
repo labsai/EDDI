@@ -32,6 +32,12 @@ thin for research agents. (The docs said it did "HTML scraping"; it never did. C
   $0.001 for `duckduckgo`. A per-agent `toolPricing` still wins. The price follows the
   *configured* provider, so a paid provider that fell back for lack of a key is still charged as
   paid. That errs on the safe side for budgets.
+- **Price is configurable.** `eddi.tools.websearch.price-per-call` (dollars per call, empty by
+  default) replaces the provider default, so a deployment on a different plan corrects the price
+  without a rebuild; an invalid value (negative, non-finite, non-numeric) falls back to the
+  provider default with a startup WARN. Per-agent `toolPricing` still wins over both. The
+  `google` price rise ($0.001 to $0.005) is called out in
+  [Upgrading](../upgrading-from-6.5.md#changes-after-670), with how to keep the old price.
 - **Docs:** `langchain.md` (Web Search Tool section rewritten: provider table, Brave setup, terms
   note, Google deprecation; default-price line), `configuration-reference.md`, `docker.md`,
   `developer-quickstart.md`, `security.md` (pricing line), `README.md` feature table.
