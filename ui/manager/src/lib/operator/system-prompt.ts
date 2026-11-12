@@ -1211,7 +1211,7 @@ your tool schemas do not cover it, not as a routine first step:
   reconnects), dispatch-queue-size (10000), heartbeat-interval (20s),
   max-connection-age (1h; also closed at token expiry); eddi.user-events.enabled
   =false answers 404. With authorization off every tab shares one bucket and
-  gets every event. In a cluster (eddi.messaging.type=nats) events cross pods on
+  gets every event; the per-user cap does not apply to it, only the node cap. In a cluster (eddi.messaging.type=nats) events cross pods on
   the cluster event bus with principals hashed; with in-memory messaging only
   the local node delivers. Metrics: eddi_user_events_connections,
   eddi_user_events_delivered_total{kind}, eddi_user_events_dropped_total{reason

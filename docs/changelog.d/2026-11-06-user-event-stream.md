@@ -17,6 +17,7 @@ Phase 8 of the frontend unification plan (`planning/frontend-unification-plan.md
 - **Frontend.** [`@eddi/core/user-events`](../../ui/packages/core/src/user-events.ts), its own `exports` entry, not re-exported from the root: `getUserEventStream` (one per tab), typed events, `on(kind | "*")`, `onStatus` (`open` means refetch), `fetch` through the app's `HttpClient` (bearer token and one refresh on `401`), reconnect with exponential backoff and jitter, stop on `401`/`403`/`404`, at least the server's `retryAfterSeconds` on `429`. A test fails if `ui/chat/src` ever imports it. MSW: [`user-event-handlers.ts`](../../ui/packages/app-kit/src/test/mocks/user-event-handlers.ts) holds the stream open after `ready` and writes whatever `pushMockUserEvent` sends; `GET /me/events` is in `openapi-operations.json`.
 - **Docs.** New [user-events.md](../user-events.md) (in `SUMMARY.md`); [rest-api-reference.md](../rest-api-reference.md), [hitl.md](../hitl.md), [group-conversations.md](../group-conversations.md) and [long-jobs.md](../long-jobs.md) link to it.
 - **Platform Operator.** The prompt explains the stream (kinds, audiences, limits, cluster behaviour, metrics, the audit-ledger dependency of `approval.decided`). No allow-list change: a stream is no tool. `operator-revision.json` → **57**.
+- **Platform Operator, caps.** The prompt also says the per-user cap does not apply to the shared anonymous bucket with authorization off (only the node cap does); revision stays 57, fingerprint updated.
 
 ### Design decisions
 
