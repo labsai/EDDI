@@ -25,6 +25,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
 
@@ -191,10 +198,12 @@ class ChatErrorCredentialScrubbingTest {
     }
 
     /**
-     * A registry whose model echoes the key it was built with in every failure,
-     * sync and streaming, over a vault whose value can be rotated.
+     * A registry whose models block inside the provider call until released, then
+     * fail echoing the key they were built with — sync and streaming — over a vault
+     * whose value the test rotates while the request is blocked.
      */
-    private ChatModelRegistry echoingRegistry(Map<String, String> vault, ResolvedCredentials credentials) {
+    private ChatModelRegistry blockingRegistry(Map<String, String> vault, ResolvedCredentials credentials, CountDownLatch entered,
+                                               CountDownLatch release) {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
         builders.put("openai", () -> new ILanguageModelBuilder() {
             @Override
@@ -203,7 +212,8 @@ class ChatErrorCredentialScrubbingTest {
                 return new ChatModel() {
                     @Override
                     public ChatResponse doChat(ChatRequest request) {
-                        throw new IllegalStateException("gateway rejected key " + key);
+                        blockUntilReleased(entered, release);
+                        throw new IllegalStateException("provider rejected key " + key);
                     }
                 };
             }
@@ -214,7 +224,8 @@ class ChatErrorCredentialScrubbingTest {
                 return new StreamingChatModel() {
                     @Override
                     public void doChat(ChatRequest request, StreamingChatResponseHandler handler) {
-                        handler.onError(new IllegalStateException("gateway rejected key " + key));
+                        blockUntilReleased(entered, release);
+                        handler.onError(new IllegalStateException("provider rejected key " + key));
                     }
                 };
             }
@@ -237,59 +248,114 @@ class ChatErrorCredentialScrubbingTest {
         return registry;
     }
 
+    private static void blockUntilReleased(CountDownLatch entered, CountDownLatch release) {
+        entered.countDown();
+        try {
+            if (!release.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("never released");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static final ChatRequest REQUEST = ChatRequest.builder().messages(UserMessage.from("hello")).build();
 
-    @Test
-    @DisplayName("a sync failure of a model evicted and rotated mid-request is scrubbed in the fallback and lifecycle outputs")
-    void evictedSyncModelFailureIsScrubbed() throws Exception {
-        var credentials = new ResolvedCredentials();
-        Map<String, String> vault = new HashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
-        var registry = echoingRegistry(vault, credentials);
-        ChatModel inFlight = registry.getOrCreate("openai", Map.of("apiKey", "${vault:gateway-key}"));
-
-        // The request is running when the key is rotated and the model evicted.
+    /**
+     * While the request is blocked in the provider: the key is rotated, the model
+     * evicted from the registry, and the process-wide set churned past its cap. The
+     * global path is then shown not to hold the old key, so the outputs can only be
+     * clean through the credentials pinned to the failure.
+     */
+    private static void rotateEvictAndChurn(Map<String, String> vault, ChatModelRegistry registry, ResolvedCredentials credentials) {
         vault.put("${vault:gateway-key}", "rotated" + "r".repeat(12));
         registry.invalidateForSecret(null);
-        RuntimeException failure = assertThrows(RuntimeException.class, () -> inFlight.chat(REQUEST));
-        var wrapped = new RuntimeException("task failed", failure);
+        List<String> churn = new ArrayList<>();
+        for (int i = 0; i < 20_000; i++) {
+            churn.add("churn-" + i + "-" + "c".repeat(8));
+        }
+        credentials.record(churn);
+        assertTrue(credentials.scrub("echo " + GATEWAY_VALUE).contains(GATEWAY_VALUE),
+                "the process-wide set no longer holds the old key, so it cannot be what scrubs it");
+    }
 
-        assertTrue(credentials.pinnedOn(wrapped).contains(GATEWAY_VALUE), "the failure carries the key the model was built with");
-        UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, wrapped, text);
-        String fallback = String.valueOf(LlmFallbackHandler.describe(wrapped, scrubber).get("message"));
-        String lifecycle = LifecycleManager.summarizeForAudit(wrapped, scrubber);
-        assertFalse(fallback.contains(GATEWAY_VALUE), fallback);
-        assertFalse(lifecycle.contains(GATEWAY_VALUE), lifecycle);
-        assertTrue(fallback.contains("gateway rejected key"), fallback);
+    private static void assertNoPartOfTheOldKey(String text) {
+        assertFalse(text.contains(GATEWAY_VALUE), text);
+        assertFalse(text.contains("qqqq"), text);
     }
 
     @Test
-    @DisplayName("a streaming failure after a rotation is scrubbed of the key the evicted model was built with")
-    void evictedStreamingModelFailureIsScrubbed() throws Exception {
-        var credentials = new ResolvedCredentials();
-        Map<String, String> vault = new HashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
-        var registry = echoingRegistry(vault, credentials);
-        StreamingChatModel inFlight = registry.getOrCreateStreaming("openai", Map.of("apiKey", "${vault:gateway-key}"));
+    @DisplayName("a sync request in flight while its key is rotated, its model evicted and the set churned fails scrubbed of the old key")
+    void inFlightSyncFailureIsScrubbed() throws Exception {
+        var credentials = new ResolvedCredentials(0);
+        Map<String, String> vault = new ConcurrentHashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var registry = blockingRegistry(vault, credentials, entered, release);
+        ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "${vault:gateway-key}"));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> request = executor.submit(() -> model.chat(REQUEST));
+            assertTrue(entered.await(10, TimeUnit.SECONDS), "the request reached the provider");
 
-        vault.put("${vault:gateway-key}", "rotated" + "r".repeat(12));
-        registry.invalidateForSecret(null);
+            rotateEvictAndChurn(vault, registry, credentials);
+            release.countDown();
+            ExecutionException thrown = assertThrows(ExecutionException.class, () -> request.get(10, TimeUnit.SECONDS));
+
+            var failure = new RuntimeException("task failed", thrown.getCause());
+            UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, failure, text);
+            String fallback = String.valueOf(LlmFallbackHandler.describe(failure, scrubber).get("message"));
+            String lifecycle = LifecycleManager.summarizeForAudit(failure, scrubber);
+            assertNoPartOfTheOldKey(fallback);
+            assertNoPartOfTheOldKey(lifecycle);
+            assertTrue(fallback.contains("provider rejected key"), fallback);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("a streaming request in flight while its key is rotated, its model evicted and the set churned fails scrubbed of the old key")
+    void inFlightStreamingFailureIsScrubbed() throws Exception {
+        var credentials = new ResolvedCredentials(0);
+        Map<String, String> vault = new ConcurrentHashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var registry = blockingRegistry(vault, credentials, entered, release);
+        StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "${vault:gateway-key}"));
         AtomicReference<Throwable> error = new AtomicReference<>();
-        inFlight.chat(REQUEST, new StreamingChatResponseHandler() {
-            @Override
-            public void onCompleteResponse(ChatResponse response) {
-            }
+        var done = new CountDownLatch(1);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(() -> model.chat(REQUEST, new StreamingChatResponseHandler() {
+                @Override
+                public void onCompleteResponse(ChatResponse response) {
+                    done.countDown();
+                }
 
-            @Override
-            public void onError(Throwable e) {
-                error.set(e);
-            }
-        });
+                @Override
+                public void onError(Throwable e) {
+                    error.set(e);
+                    done.countDown();
+                }
+            }));
+            assertTrue(entered.await(10, TimeUnit.SECONDS), "the request reached the provider");
 
-        Throwable failure = error.get();
-        assertNotNull(failure);
-        assertTrue(credentials.pinnedOn(failure).contains(GATEWAY_VALUE));
-        UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, failure, text);
-        assertFalse(String.valueOf(LlmFallbackHandler.describe(failure, scrubber).get("message")).contains(GATEWAY_VALUE));
-        assertFalse(LifecycleManager.summarizeForAudit(failure, scrubber).contains(GATEWAY_VALUE));
+            rotateEvictAndChurn(vault, registry, credentials);
+            release.countDown();
+            assertTrue(done.await(10, TimeUnit.SECONDS), "the request finished");
+
+            Throwable failure = error.get();
+            assertNotNull(failure);
+            UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, failure, text);
+            assertNoPartOfTheOldKey(String.valueOf(LlmFallbackHandler.describe(failure, scrubber).get("message")));
+            assertNoPartOfTheOldKey(LifecycleManager.summarizeForAudit(failure, scrubber));
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
     @Test
     @DisplayName("the registry ties a built model's credentials to that model")

@@ -272,18 +272,25 @@ public class EmbeddingModelFactory {
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
-        // What the client holds, for a caller that holds it to pin to its failure
-        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
-        if (resolvedCredentials != null) {
-            resolvedCredentials.record(model, captured);
-        }
-
+        EmbeddingModel returned;
         if (pinsNonRetrievalTaskType(provider, params)) {
             LOGGER.infof("Embedding provider %s pins taskType=%s; leaving the %s role unset so the configured task type stands",
                     provider, params.get("taskType"), inputType);
-            return model;
+            returned = model;
+        } else {
+            returned = InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
         }
-        return InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
+        // What the client holds, for a caller that holds it to pin to its failure
+        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
+        // Recorded against the object callers receive — a Gemini or Cohere model comes
+        // back wrapped — and against the provider model inside it.
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(model, captured);
+            if (returned != model) {
+                resolvedCredentials.record(returned, captured);
+            }
+        }
+        return returned;
     }
 
     /**

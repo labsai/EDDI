@@ -76,9 +76,22 @@ public class ResolvedCredentials {
 
     private static final int MAX_VALUES = 10_000;
 
-    private final Cache<String, Boolean> plaintexts = Caffeine.newBuilder().maximumSize(MAX_VALUES).build();
-    private final Cache<String, Boolean> shortPlaintexts = Caffeine.newBuilder().maximumSize(MAX_VALUES).build();
+    private final Cache<String, Boolean> plaintexts;
+    private final Cache<String, Boolean> shortPlaintexts;
 
+    public ResolvedCredentials() {
+        this(MAX_VALUES);
+    }
+
+    /**
+     * With a process-wide set of at most {@code maxValues} per length class,
+     * evicted on the writing thread — so a test can show that a failure is scrubbed
+     * through what is pinned to it, not through that set.
+     */
+    public ResolvedCredentials(int maxValues) {
+        this.plaintexts = Caffeine.newBuilder().maximumSize(maxValues).executor(Runnable::run).build();
+        this.shortPlaintexts = Caffeine.newBuilder().maximumSize(maxValues).executor(Runnable::run).build();
+    }
     /**
      * The values each client was built with, for {@link #heldBy}: read by a caller
      * that holds the client, right after acquiring it. Weak keys, compared by

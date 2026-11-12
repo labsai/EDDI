@@ -111,6 +111,9 @@ so the fallback stays usable.
   them and pass or pin it; a held credential under 8 characters withholds the provider text.
 - `SecretCapture` (shared by `ChatModelRegistry` and both embedding factories) resolves each distinct
   reference once and captures the secret it stood for, so `prefix-${vault:key}` captures the secret itself.
+- `EmbeddingModelFactory` records a client's credentials against the object it returns as well as the provider
+  model inside it: a Gemini or Cohere model comes back wrapped (`InputTypedEmbeddingModel`), and the ingestion
+  and inspection lookups found nothing for it.
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
 - `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; a shorter

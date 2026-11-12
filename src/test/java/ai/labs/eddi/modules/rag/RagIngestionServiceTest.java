@@ -222,6 +222,10 @@ class RagIngestionServiceTest {
      * returns the rotated value, which would not match.
      */
     private String[] ingestAfterRotation(String apiKey, String heldSecret, String echoed) throws Exception {
+        return ingestAfterRotation("openai", apiKey, heldSecret, echoed);
+    }
+
+    private String[] ingestAfterRotation(String provider, String apiKey, String heldSecret, String echoed) throws Exception {
         Map<String, String> vault = new HashMap<>(Map.of("${vault:kb-key}", heldSecret));
         SecretResolver secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> {
@@ -236,8 +240,12 @@ class RagIngestionServiceTest {
         var factory = new EmbeddingModelFactory(variables, secretResolver);
         factory.useResolvedCredentials(credentials);
         var config = createConfig();
+        config.setEmbeddingProvider(provider);
         config.setEmbeddingParameters(Map.of("apiKey", apiKey));
         EmbeddingModel built = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        if ("gemini".equals(provider)) {
+            assertEquals("InputTypedEmbeddingModel", built.getClass().getSimpleName(), "Gemini comes back wrapped");
+        }
         assertEquals(Set.of(heldSecret), credentials.heldBy(built), "the factory captures the secret itself, not the whole value");
 
         vault.put("${vault:kb-key}", "rotated-" + "t".repeat(12));
@@ -318,6 +326,18 @@ class RagIngestionServiceTest {
         String shortSecret = "q".repeat(3);
 
         String[] result = ingestAfterRotation("${vault:kb-key}", shortSecret, shortSecret);
+
+        assertTrue(result[0].startsWith("failed: The provider's error was withheld"), result[0]);
+        assertFalse(result[0].contains("was revoked"), result[0]);
+        assertFalse(result[1].contains("was revoked"), result[1]);
+        assertFalse(result[1].contains("key " + shortSecret), result[1]);
+    }
+
+    @Test
+    void rotatedShortSecretOfAWrappedModel_withholdsTheStatusAndLog() throws Exception {
+        String shortSecret = "g".repeat(3);
+
+        String[] result = ingestAfterRotation("gemini", "${vault:kb-key}", shortSecret, shortSecret);
 
         assertTrue(result[0].startsWith("failed: The provider's error was withheld"), result[0]);
         assertFalse(result[0].contains("was revoked"), result[0]);
