@@ -942,13 +942,53 @@ public class ConversationService implements IConversationService, UserErasurePar
      * @return true when a running turn was signalled
      */
     public boolean signalLocalInFlight(String conversationId) {
+        return signalLocalInFlight(conversationId, false);
+    }
+
+    /**
+     * As {@link #signalLocalInFlight(String)}, saying whether the signal is an end.
+     * An ended turn's memory is marked before it is cancelled, so its finalization
+     * tears down the sub-agents it created from that live memory
+     * ({@code ConversationStepRunner.tearDownSubAgentsIfEnded}) — the end's own
+     * cleanup, on whichever node ran it, reads a stored snapshot that does not hold
+     * them. A plain cancel leaves them in place.
+     */
+    public boolean signalLocalInFlight(String conversationId, boolean ending) {
         var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
         if (inFlightMemory == null) {
             return false;
         }
+        if (ending) {
+            endSignalledTurns.add(inFlightMemory);
+        }
         inFlightMemory.setCancelled(true);
         return true;
     }
+
+    /**
+     * Turn memories cancelled by an end rather than a plain cancel. Weak, keyed by
+     * the memory object: an entry goes with the turn's memory, so a turn that
+     * finished before it saw the cancel leaves nothing behind.
+     */
+    private final Set<IConversationMemory> endSignalledTurns = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
+
+    /** Whether {@code memory}'s turn was cancelled by an end. */
+    boolean wasEndSignalled(IConversationMemory memory) {
+        return memory != null && endSignalledTurns.contains(memory);
+    }
+
+    /**
+     * The value of {@link #CANCEL_REASON} for a cancel that ends the conversation.
+     */
+    public static final String CANCEL_REASON_END = "end";
+
+    /**
+     * Optional field of the {@code conversation-cancel} request:
+     * {@value #CANCEL_REASON_END} for an end. Absent means a plain cancel, which is
+     * what a node of an earlier version sends and how it reads the field it does
+     * not know.
+     */
+    public static final String CANCEL_REASON = "reason";
 
     /**
      * Cluster mode: when the conversation's turn runs on ANOTHER node (it holds the
@@ -957,6 +997,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      * @return true when the executing node confirmed it signalled a running turn
      */
     boolean signalRemoteInFlight(String conversationId) {
+        return signalRemoteInFlight(conversationId, false);
+    }
+
+    /**
+     * As {@link #signalRemoteInFlight(String)}; {@code ending} tells the executing
+     * node the cancel is an end — see
+     * {@link #signalLocalInFlight(String, boolean)}.
+     */
+    boolean signalRemoteInFlight(String conversationId, boolean ending) {
         if (leaseManager == null || clusterRpc == null || !leaseManager.isClustered() || !clusterRpc.isClustered()) {
             return false;
         }
@@ -964,7 +1013,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (holder.isEmpty()) {
             return false;
         }
-        var reply = clusterRpc.call(holder.get().node(), IClusterRpc.CONVERSATION_CANCEL, Map.of("conversationId", conversationId));
+        Map<String, Object> request = ending
+                ? Map.of("conversationId", conversationId, CANCEL_REASON, CANCEL_REASON_END)
+                : Map.of("conversationId", conversationId);
+        var reply = clusterRpc.call(holder.get().node(), IClusterRpc.CONVERSATION_CANCEL, request);
         boolean signalled = reply.map(r -> Boolean.TRUE.equals(r.get("signalled"))).orElse(false);
         if (signalled) {
             LOGGER.infof("Signalled the turn of conversation %s running on node %s", sanitize(conversationId), holder.get().node());
@@ -1064,11 +1116,13 @@ public class ConversationService implements IConversationService, UserErasurePar
         // skip persistence, so ENDED wins.
         var inFlightMemory = inFlightConversations.get(conversationId);
         if (inFlightMemory != null) {
+            // Marked as an end before it is cancelled, like a remote end signal.
+            endSignalledTurns.add(inFlightMemory);
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight resume to abort — conversation %s is being ended", conversationId);
         } else {
             // Cluster mode: the turn may be running on the node that holds the lease.
-            signalRemoteInFlight(conversationId);
+            signalRemoteInFlight(conversationId, true);
         }
         // Ending a PAUSED conversation terminally resolves its pending approval:
         // disarm the timeout schedule (a stale fire would log spurious errors and

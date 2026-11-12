@@ -1131,7 +1131,7 @@ class ConversationStepRunner {
         try {
             // The end marks the conversation before it signals the cancel and stores
             // ENDED after: a turn settling in between sees the mark, not the state.
-            if (conversationService.isEnding(conversationId)
+            if (conversationService.isEnding(conversationId) || conversationService.wasEndSignalled(conversationMemory)
                     || conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED) {
                 conversationService.tearDownStandaloneSubAgents(conversationId, conversationMemory);
             }

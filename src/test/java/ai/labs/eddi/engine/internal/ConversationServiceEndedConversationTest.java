@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -38,8 +39,10 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.lang.reflect.Field;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -243,6 +246,27 @@ class ConversationServiceEndedConversationTest {
 
             assertTrue(markedWhileStoring.get(), "a turn settling before ENDED is stored must see the mark");
             assertFalse(conversationService.isEnding(CONVERSATION_ID), "the mark is cleared once the end is done");
+        }
+
+        @Test
+        @DisplayName("a remote end signal marks the running turn's memory as ended; a plain cancel does not")
+        @SuppressWarnings("unchecked")
+        void endSignalMarksTheTurn() throws Exception {
+            Field field = ConversationService.class.getDeclaredField("inFlightConversations");
+            field.setAccessible(true);
+            var inFlight = (Map<String, IConversationMemory>) field.get(conversationService);
+            IConversationMemory endedTurn = mock(IConversationMemory.class);
+            IConversationMemory cancelledTurn = mock(IConversationMemory.class);
+
+            inFlight.put("ended", endedTurn);
+            inFlight.put("cancelled", cancelledTurn);
+            assertTrue(conversationService.signalLocalInFlight("ended", true));
+            assertTrue(conversationService.signalLocalInFlight("cancelled", false));
+
+            assertTrue(conversationService.wasEndSignalled(endedTurn));
+            assertFalse(conversationService.wasEndSignalled(cancelledTurn));
+            verify(endedTurn).setCancelled(true);
+            verify(cancelledTurn).setCancelled(true);
         }
     }
 }
