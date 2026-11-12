@@ -549,4 +549,44 @@ class LlmTaskTest {
         }
     }
 
+    // ==================== logSizeLimit parsing ====================
+
+    @Test
+    void logSizeLimit_validValuesAreUsed() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(5, LlmTask.resolveLogSizeLimit("5", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("-1", 10, memory), "-1 stays unlimited");
+        assertEquals(0, LlmTask.resolveLogSizeLimit("0", 10, memory), "0 stays no history");
+    }
+
+    @Test
+    void logSizeLimit_surroundingWhitespaceIsTrimmed() {
+        assertEquals(7, LlmTask.resolveLogSizeLimit("  7 \n", 10, mock(IConversationMemory.class)));
+    }
+
+    @Test
+    void logSizeLimit_absentOrBlankFallsBack() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(10, LlmTask.resolveLogSizeLimit(null, 10, memory));
+        assertEquals(10, LlmTask.resolveLogSizeLimit("", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("   ", -1, memory));
+    }
+
+    @Test
+    void logSizeLimit_nonNumericFallsBackInsteadOfThrowing() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getConversationId()).thenReturn("conv-1");
+        assertEquals(10, LlmTask.resolveLogSizeLimit("ten", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("3.5", -1, memory));
+        assertEquals(10, LlmTask.resolveLogSizeLimit("99999999999", 10, memory), "out of int range");
+    }
+
+    @Test
+    void logSizeLimit_negativeBelowMinusOneFallsBack() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(10, LlmTask.resolveLogSizeLimit("-2", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("-50", -1, memory));
+    }
+
 }

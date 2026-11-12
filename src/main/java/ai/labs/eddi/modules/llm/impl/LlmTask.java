@@ -504,10 +504,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // Parse history parameters
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
 
-        int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
-        if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
-            logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
-        }
+        int logSizeLimit = resolveLogSizeLimit(processedParams.get(KEY_LOG_SIZE_LIMIT),
+                task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1, memory);
         boolean includeFirstAgentMessage = isNullOrEmpty(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE))
                 || Boolean.parseBoolean(processedParams.get(KEY_INCLUDE_FIRST_AGENT_MESSAGE));
 
@@ -1469,6 +1467,33 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         note.put("reasks", outcome.reasks());
         note.put("unresolved", outcome.unresolved() != null ? outcome.unresolved().label() : null);
         currentStep.storeData(dataFactory.createData(KEY_RETRY + (task.getId() != null ? task.getId() : "default"), note));
+    }
+
+    /**
+     * The {@code logSizeLimit} parameter (already templated) as a step count, or
+     * {@code fallback} — the task's {@code conversationHistoryLimit}, else
+     * {@code -1} — when it is absent, blank, not an integer or below {@code -1}.
+     * {@code -1} (unlimited) and {@code 0} keep their meaning. A bad value used to
+     * reach {@code Integer.parseInt} unguarded, so a typo in the config failed
+     * every turn of the agent with a {@code NumberFormatException}.
+     */
+    static int resolveLogSizeLimit(String rawValue, int fallback, IConversationMemory memory) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return fallback;
+        }
+        String value = rawValue.trim();
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed >= -1) {
+                return parsed;
+            }
+        } catch (NumberFormatException notAnInteger) {
+            // falls through to the warning below
+        }
+        LOGGER.warnf("Ignoring invalid logSizeLimit '%s' (expected an integer >= -1) for agent %s, conversation %s — using %d",
+                sanitize(value), memory != null ? sanitize(memory.getAgentId()) : null,
+                memory != null ? sanitize(memory.getConversationId()) : null, fallback);
+        return fallback;
     }
 
     /**
