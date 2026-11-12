@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -321,22 +322,21 @@ public class BoundedLogStore {
         if (userId == null || pseudonym == null) {
             return 0;
         }
-        return mark(KvKeys.sha256(userId), new Erasure(pseudonym, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
+        return mark(KvKeys.sha256(userId), pseudonym, null);
     }
 
     /**
      * As {@link #markUserErased} for an erasure that started on another node, which
      * names the user only by {@code KvKeys.sha256(userId)}. The id is replaced by
-     * {@value #REMOTE_ERASURE_MARKER}.
+     * {@value #REMOTE_ERASURE_MARKER}; a local mark for the same user (this node
+     * erased them too) keeps its keyed pseudonym, and only its lifetime is
+     * extended.
      */
     public int markUserErasedHash(String userIdHash) {
         if (userIdHash == null || userIdHash.isBlank()) {
             return 0;
         }
-        // A local mark for the same user (this node erased them too) keeps its keyed
-        // pseudonym; only the lifetime is extended.
-        Erasure remote = new Erasure(REMOTE_ERASURE_MARKER, Instant.now().plus(ERASED_USER_REWRITE_WINDOW));
-        return mark(userIdHash, remote);
+        return mark(userIdHash, REMOTE_ERASURE_MARKER, null);
     }
 
     /**
@@ -350,25 +350,37 @@ public class BoundedLogStore {
      * publisher adds meanwhile. {@code flushToDb} never takes the write lock and
      * {@code publish} never takes the monitor, so the two cannot deadlock.
      * <p>
-     * The queue is rewritten here rather than only scrubbed on its way out: an
-     * entry that waited in it longer than the mark lives (a database call hanging
-     * for longer than {@link #ERASED_USER_REWRITE_WINDOW}) would otherwise leave
-     * with the raw id after the mark expired.
+     * The mark's lifetime is computed only once both are held: a flush that kept
+     * the monitor for longer than {@link #ERASED_USER_REWRITE_WINDOW} would
+     * otherwise hand over a mark that had already expired. And the rewrite of what
+     * is held does not consult the lifetime at all — it replaces the id of the user
+     * being marked, unconditionally — so an entry that waited in the queue longer
+     * than a mark lives still leaves pseudonymised.
+     *
+     * @param untilOverride
+     *            the mark's expiry, or {@code null} for now plus the window (tests
+     *            pass one)
      */
-    private synchronized int mark(String hash, Erasure erasure) {
-        erasedUserHashes.merge(hash, erasure,
-                (existing, added) -> existing.local() && !added.local() ? new Erasure(existing.replacement(), added.until()) : added);
-        pruneExpiredMarks(Instant.now());
+    private synchronized int mark(String hash, String replacement, Instant untilOverride) {
         int rewritten = 0;
         lock.writeLock().lock();
         try {
+            Instant now = clock.instant();
+            Instant until = untilOverride != null ? untilOverride : now.plus(ERASED_USER_REWRITE_WINDOW);
+            Erasure placed = erasedUserHashes.merge(hash, new Erasure(replacement, until),
+                    (existing, added) -> existing.local() && !added.local() ? new Erasure(existing.replacement(), added.until()) : added);
+            String effective = placed.replacement();
+            pruneExpiredMarks(now);
+
+            // Hash each distinct id once per pass, however many entries carry it.
+            Map<String, Boolean> matches = new HashMap<>();
             List<LogEntry> kept = new ArrayList<>(buffer.size());
             for (LogEntry entry : buffer) {
-                LogEntry scrubbed = scrub(entry);
-                if (scrubbed != entry) {
+                LogEntry replaced = replaceIfMarked(entry, hash, effective, matches);
+                if (replaced != entry) {
                     rewritten++;
                 }
-                kept.add(scrubbed);
+                kept.add(replaced);
             }
             if (rewritten > 0) {
                 buffer.clear();
@@ -380,12 +392,31 @@ public class BoundedLogStore {
                 if (queued == null) {
                     break;
                 }
-                dbQueue.offer(scrub(queued));
+                dbQueue.offer(replaceIfMarked(queued, hash, effective, matches));
             }
         } finally {
             lock.writeLock().unlock();
         }
         return rewritten;
+    }
+
+    /**
+     * {@code entry} with {@code replacement} for its user id when that id hashes to
+     * {@code hash}.
+     */
+    private static LogEntry replaceIfMarked(LogEntry entry, String hash, String replacement, Map<String, Boolean> matches) {
+        if (entry == null || entry.userId() == null) {
+            return entry;
+        }
+        if (!matches.computeIfAbsent(entry.userId(), id -> hash.equals(KvKeys.sha256(id)))) {
+            return entry;
+        }
+        return withUserId(entry, replacement);
+    }
+
+    private static LogEntry withUserId(LogEntry entry, String userId) {
+        return new LogEntry(entry.timestamp(), entry.level(), entry.loggerName(), entry.message(), entry.environment(), entry.agentId(),
+                entry.agentVersion(), entry.conversationId(), userId, entry.instanceId());
     }
 
     /**
@@ -395,6 +426,14 @@ public class BoundedLogStore {
     private void pruneExpiredMarks(Instant now) {
         erasedUserHashes.values().removeIf(erasure -> erasure.until().isBefore(now));
         nextMarkExpiry = erasedUserHashes.values().stream().map(Erasure::until).min(Instant::compareTo).orElse(null);
+    }
+
+    /** The time source of the mark lifetimes; replaceable in tests. */
+    private volatile Clock clock = Clock.systemUTC();
+
+    /** Test hook: the clock mark lifetimes are measured on. */
+    void setClockForTesting(Clock testClock) {
+        this.clock = testClock;
     }
 
     /** Test hook: the keys of the erasure marks held. */
@@ -410,7 +449,7 @@ public class BoundedLogStore {
 
     /** Test hook: a local mark with an explicit expiry. */
     int markUserErasedUntil(String userId, String pseudonym, Instant until) {
-        return mark(KvKeys.sha256(userId), new Erasure(pseudonym, until));
+        return mark(KvKeys.sha256(userId), pseudonym, until);
     }
 
     /**
@@ -423,11 +462,10 @@ public class BoundedLogStore {
             return entry;
         }
         Erasure erasure = erasedUserHashes.get(KvKeys.sha256(entry.userId()));
-        if (erasure == null || erasure.until().isBefore(Instant.now())) {
+        if (erasure == null || erasure.until().isBefore(clock.instant())) {
             return entry;
         }
-        return new LogEntry(entry.timestamp(), entry.level(), entry.loggerName(), entry.message(), entry.environment(), entry.agentId(),
-                entry.agentVersion(), entry.conversationId(), erasure.replacement(), entry.instanceId());
+        return withUserId(entry, erasure.replacement());
     }
 
     /**
@@ -450,7 +488,7 @@ public class BoundedLogStore {
             if (due != null) {
                 // Only while a mark is held: expired marks go on the first publish
                 // after they expire, not at the next erasure.
-                Instant now = Instant.now();
+                Instant now = clock.instant();
                 if (due.isBefore(now)) {
                     pruneExpiredMarks(now);
                 }

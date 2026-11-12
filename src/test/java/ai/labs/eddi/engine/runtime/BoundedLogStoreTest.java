@@ -12,7 +12,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -47,6 +51,34 @@ class BoundedLogStoreTest {
     private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
         return new LogEntry(System.currentTimeMillis(), level, "test.Logger", message, "production", agentId, 1, conversationId, "user-1",
                 "test-host-abcd");
+    }
+
+    /** A clock the test moves by hand. */
+    static final class MutableClock extends Clock {
+        private volatile Instant now;
+
+        MutableClock(Instant start) {
+            this.now = start;
+        }
+
+        void advance(Duration by) {
+            now = now.plus(by);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     // ==================== GDPR erasure ====================
@@ -104,16 +136,67 @@ class BoundedLogStoreTest {
 
         @Test
         void anExpiredMarkIsPrunedByTheNextPublish_notOnlyByTheNextErasure() {
-            Instant until = Instant.now().plusMillis(200);
-            store.markUserErasedUntil("alice", "gdpr-erased:k1:abc", until);
+            MutableClock clock = new MutableClock(Instant.parse("2026-11-12T10:00:00Z"));
+            store.setClockForTesting(clock);
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
             assertEquals(1, store.markKeys().size());
-            while (!Instant.now().isAfter(until)) {
-                Thread.onSpinWait();
-            }
+            clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusSeconds(1));
 
             store.publish(entryOf("bob", "INFO"));
 
             assertTrue(store.markKeys().isEmpty());
+        }
+
+        /**
+         * A flush blocked on the database for longer than a mark lives: the mark's
+         * lifetime must be measured from when it gets the monitor, and the queue
+         * rewrite must not depend on it.
+         */
+        @Test
+        void aMarkPlacedBehindAFlushBlockedPastTheWindowStillPseudonymisesTheQueue() throws Exception {
+            MutableClock clock = new MutableClock(Instant.parse("2026-11-12T10:00:00Z"));
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.setClockForTesting(clock);
+            CountDownLatch flushEntered = new CountDownLatch(1);
+            CountDownLatch releaseFlush = new CountDownLatch(1);
+            List<List<String>> batches = Collections.synchronizedList(new ArrayList<>());
+            doAnswer(invocation -> {
+                List<LogEntry> batch = invocation.getArgument(0);
+                batches.add(batch.stream().map(LogEntry::userId).toList());
+                if (batches.size() == 1) {
+                    flushEntered.countDown();
+                    assertTrue(releaseFlush.await(30, TimeUnit.SECONDS));
+                }
+                return null;
+            }).when(databaseLogs).addLogsBatch(any());
+
+            dbStore.publish(entryOf("carol", "WARN"));
+            Thread flusher = new Thread(dbStore::flushToDb);
+            flusher.start();
+            assertTrue(flushEntered.await(30, TimeUnit.SECONDS));
+            // queued while the flush is stuck: not in its batch
+            dbStore.publish(entryOf("alice", "WARN"));
+
+            // loaded now, so the only thing the marker can block on is the flush's monitor
+            String aliceHash = KvKeys.sha256("alice");
+            Thread marker = new Thread(() -> dbStore.markUserErased("alice", "gdpr-erased:k1:abc"));
+            marker.start();
+            // waits until the marker sits on the flush's monitor (it has already been
+            // called)
+            while (marker.getState() != Thread.State.BLOCKED && marker.getState() != Thread.State.TERMINATED) {
+                Thread.onSpinWait();
+            }
+            assertEquals(Thread.State.BLOCKED, marker.getState());
+            // the flush stays stuck for longer than a mark lives
+            clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusMinutes(5));
+            releaseFlush.countDown();
+            flusher.join(30_000);
+            marker.join(30_000);
+
+            dbStore.flushToDb();
+
+            assertEquals(List.of(List.of("carol"), List.of("gdpr-erased:k1:abc")), batches);
+            assertEquals(Set.of(aliceHash), dbStore.markKeys(), "the mark lives a full window from when it was placed");
         }
 
         @Test
