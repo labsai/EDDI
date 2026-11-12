@@ -1037,13 +1037,18 @@ wait_for_eddi() {
   echo -ne "  "
 
   while [[ $elapsed -lt $max_wait ]]; do
-    if curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1; then
+    # Never past the budget: the probe and the sleep are capped to what is left.
+    local left=$((max_wait - elapsed))
+    local probe=$(( left < 10 ? left : 10 ))
+    if curl -sf --connect-timeout 5 --max-time "$probe" "$health_url" &>/dev/null 2>&1; then
       echo ""
       echo ""
       info "EDDI is healthy! (ready in ${elapsed}s)"
       return 0
     fi
-    sleep 10
+    elapsed=$((SECONDS - started))
+    left=$((max_wait - elapsed))
+    (( left > 0 )) && sleep $(( left < 10 ? left : 10 ))
     elapsed=$((SECONDS - started))
     echo -ne "."
     if (( elapsed % 60 < 10 )); then
@@ -1076,6 +1081,7 @@ print_success() {
   echo -e "  ${BOLD}Zone${RESET}         ${ZONE}"
   echo ""
 
+  local ssh_cmd_https="gcloud compute ssh ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT}"
   if [[ "$SETUP_HTTPS" == "true" ]]; then
     echo -e "  ${BOLD}${GREEN}HTTPS URLs${RESET} (available once cert setup completes ~2-3 min):"
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}https://${eddi_domain}/manage${RESET}"
@@ -1087,11 +1093,18 @@ print_success() {
     echo -e "  ${DIM}is the one way in. There is deliberately no plain-http URL.${RESET}"
     echo ""
     echo -e "  ${YELLOW}If the HTTPS URLs do not answer${RESET} (certificate not issued, or the Keycloak client"
-    echo -e "  ${DIM}could not be restricted, in which case the VM deliberately keeps 443 closed), EDDI is${RESET}"
-    echo -e "  ${DIM}still running on the VM's loopback. Reach it over an SSH tunnel, then open${RESET}"
-    echo -e "  ${DIM}http://localhost:${EDDI_PORT}/manage:${RESET}"
-    echo -e "    ${CYAN}gcloud compute ssh ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT} -- -L ${EDDI_PORT}:localhost:${EDDI_PORT} -L 8180:localhost:8180${RESET}"
-    echo -e "  ${DIM}Diagnose with:  $(basename "$0") logs ${VM_NAME}${RESET}"
+    echo -e "  ${DIM}could not be restricted, in which case the VM deliberately keeps 443 closed):${RESET}"
+    echo -e "  ${DIM}1. Read the install log:  $(basename "$0") logs ${VM_NAME}   (/var/log/eddi-install.log on the VM)${RESET}"
+    echo -e "  ${DIM}2. Certificate:  ${ssh_cmd_https} --command='sudo certbot certificates'${RESET}"
+    echo -e "  ${DIM}   (sslip.io must resolve and port 80 must be reachable for the Let's Encrypt challenge)${RESET}"
+    echo -e "  ${DIM}3. Re-run the whole setup on the VM once the cause is fixed; the install step${RESET}"
+    echo -e "  ${DIM}   detects the running stack and the certificate and Keycloak client steps repeat:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd_https} --command='sudo google_metadata_script_runner startup'${RESET}"
+    echo -e "  ${DIM}A browser sign-in through an SSH tunnel does NOT work here: once the HTTPS override${RESET}"
+    echo -e "  ${DIM}is applied the Manager redirects to https://${kc_domain} and tokens carry that public${RESET}"
+    echo -e "  ${DIM}issuer, which a tunnelled backend rejects. Only unauthenticated endpoints are usable${RESET}"
+    echo -e "  ${DIM}over a tunnel, e.g. the health check:${RESET}"
+    echo -e "    ${CYAN}${ssh_cmd_https} --command='curl -s http://localhost:${EDDI_PORT}/q/health/ready'${RESET}"
   else
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
     echo -e "  ${BOLD}API Docs${RESET}     ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/q/swagger-ui${RESET}"
@@ -1380,9 +1393,11 @@ REMOTE_SCRIPT
   echo -ne "  "
   while [[ $elapsed -lt 120 ]]; do
     local base=""
-    if curl -sf --connect-timeout 5 --max-time 10 "$health_url" &>/dev/null 2>&1; then
+    # Each probe and the sleep are capped to the time left of the 120 s budget.
+    local probe=$(( 120 - elapsed < 10 ? 120 - elapsed : 10 ))
+    if curl -sf --connect-timeout 5 --max-time "$probe" "$health_url" &>/dev/null 2>&1; then
       base="http://${external_ip}:${EDDI_PORT}"
-    elif curl -sf --connect-timeout 5 --max-time 10 "${https_base}/q/health/ready" &>/dev/null 2>&1; then
+    elif curl -sf --connect-timeout 5 --max-time "$probe" "${https_base}/q/health/ready" &>/dev/null 2>&1; then
       base="$https_base"
     fi
     if [[ -n "$base" ]]; then
@@ -1394,7 +1409,8 @@ REMOTE_SCRIPT
       echo ""
       return 0
     fi
-    sleep 5
+    elapsed=$((SECONDS - started))
+    (( elapsed < 120 )) && sleep $(( 120 - elapsed < 5 ? 120 - elapsed : 5 ))
     elapsed=$((SECONDS - started))
     echo -ne "."
   done
