@@ -466,6 +466,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
 | `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
+| `eddi.tools.websearch.google.base-url` | *(empty)* | Endpoint of the Custom Search JSON API for the `google` provider. Empty uses `https://www.googleapis.com/customsearch/v1`; set it to send the same request to another service that serves this API |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
