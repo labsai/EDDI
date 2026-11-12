@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -1368,7 +1369,7 @@ public class GroupHitlCoordinator {
                 tieBreakPauses.onTimeout(gc, pending, gc.getPauseId());
                 return;
             }
-            String reason = "No response from " + pending.displayName()
+            String reason = HumanTurnSkipReasons.TIMED_OUT_PREFIX + pending.displayName()
                     + (gc.getHitlApprovalTimeout() != null ? " within " + gc.getHitlApprovalTimeout() : "");
             // Bound to the pause the timeout read (and just checked against
             // expectedPauseId): the write conflicts if the turn was answered and the

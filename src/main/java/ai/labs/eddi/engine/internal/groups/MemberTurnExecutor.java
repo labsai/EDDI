@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -300,7 +301,7 @@ public class MemberTurnExecutor {
             }
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
                     TranscriptEntryType.SKIPPED, Instant.now(),
-                    "Human member does not take automated turns in this context — skipped", targetAgentId);
+                    HumanTurnSkipReasons.AUTOMATED_TURN, targetAgentId);
         }
 
         // Check agent availability

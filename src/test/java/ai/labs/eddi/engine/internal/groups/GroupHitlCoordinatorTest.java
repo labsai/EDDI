@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OnHumanTimeout;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
@@ -846,6 +847,9 @@ class GroupHitlCoordinatorTest {
         assertEquals(TranscriptEntryType.SKIPPED, entry.type());
         assertTrue(entry.errorReason().contains("Hannah"), "the skip names WHO did not respond: " + entry.errorReason());
         assertTrue(entry.errorReason().contains("PT1H"), "and within WHAT window: " + entry.errorReason());
+        // the GDPR export reads this reason back as evidence of a person
+        assertTrue(entry.errorReason().startsWith(HumanTurnSkipReasons.TIMED_OUT_PREFIX), entry.errorReason());
+        assertTrue(HumanTurnSkipReasons.isHumanSkipReason(entry.errorReason()));
         assertEquals(2, gc.getResumePoint().speakerIdx(), "a skipped turn still advances past the speaker");
     }
 

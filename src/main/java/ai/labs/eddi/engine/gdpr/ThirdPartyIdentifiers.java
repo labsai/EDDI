@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 
 import java.util.ArrayList;
@@ -168,30 +169,15 @@ public final class ThirdPartyIdentifiers {
     }
 
     /**
-     * Skip reasons only a human member's turn is written with: the turn timed out
-     * ({@code GroupHitlCoordinator}) or an automated sub-round asked a human
-     * ({@code MemberTurnExecutor}). Matched by prefix; the texts are this
-     * codebase's own, not user input.
-     */
-    static final List<String> HUMAN_SKIP_REASON_PREFIXES = List.of("No response from ", "Human member does not take automated turns");
-
-    /**
      * Whether the entry itself shows a human speaker: a {@code HUMAN_INPUT} entry,
-     * or a {@code SKIPPED} one with a human-turn reason. Other entry types say
-     * nothing — a human turn can be written as an OPINION or a VOTE.
+     * or a {@code SKIPPED} one with a human-turn reason
+     * ({@link HumanTurnSkipReasons}, the same constants the writers use). Other
+     * entry types say nothing — a human turn can be written as an OPINION or a
+     * VOTE.
      */
     private static boolean isHumanEntry(TranscriptEntry entry) {
-        if (entry.type() == TranscriptEntryType.HUMAN_INPUT) {
-            return true;
-        }
-        if (entry.type() == TranscriptEntryType.SKIPPED && entry.errorReason() != null) {
-            for (String prefix : HUMAN_SKIP_REASON_PREFIXES) {
-                if (entry.errorReason().startsWith(prefix)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return entry.type() == TranscriptEntryType.HUMAN_INPUT
+                || entry.type() == TranscriptEntryType.SKIPPED && HumanTurnSkipReasons.isHumanSkipReason(entry.errorReason());
     }
 
     /**
