@@ -550,6 +550,11 @@ disk. The defaults (`10000` entries, 32 MiB per entry, 256 MiB in total) sit far
 agent export; see `eddi.backup.import.*` in the
 [configuration reference](configuration-reference.md).
 
+A node also runs at most `eddi.backup.max-concurrent-operations` (default `4`) imports,
+import previews and syncs at once, since each holds memory while it runs. One more is
+refused at once with `429 Too Many Requests` and a `Retry-After` header; retry when one has
+finished.
+
 An archive that is **malformed** is refused with `400` and the reason, never `500` (which
 would blame this server for the archive). Two kinds, with different guarantees:
 
