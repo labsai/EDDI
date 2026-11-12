@@ -670,7 +670,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      * write and the check that the row is still there cannot be one step, and "the
      * row is gone" looks the same whether a concurrent delete or an erasure removed
      * it. The tombstone is then an orphan history row carrying the erased
-     * resource's data; a repeated erasure removes it.
+     * resource's data; a repeated erasure removes it. On one node
+     * {@code HistorizedResourceStore}'s per-id lock keeps the two calls apart; a
+     * delete and an erasure of the same id on two different nodes can still meet
+     * here.
      *
      * @see #storeHistoryAndUpdate(IHistoryResource, IResource, int) for why this is
      *      not a session transaction

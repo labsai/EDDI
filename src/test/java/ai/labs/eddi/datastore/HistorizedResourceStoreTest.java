@@ -12,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.*;
@@ -226,16 +227,15 @@ class HistorizedResourceStoreTest {
     }
 
     /**
-     * The store is one instance per resource type, so a lock on it made every
-     * delete of that type on this node queue behind the one in progress, each
+     * The store is one instance per resource type, so a lock on the store made
+     * every delete of that type on this node queue behind the one in progress, each
      * holding it across several majority-acknowledged round trips (the GDPR erasure
-     * loop deletes one conversation descriptor after another). It protected
-     * nothing: update was never locked, other nodes do not share the monitor, and
-     * the storage's version-checked write already decides two deletes of the same
-     * id.
+     * loop deletes one conversation descriptor after another). The lock is per id
+     * now: "a" and "b" fall into different stripes, so neither waits.
      */
     @Test
     void deletesOfDifferentResourcesDoNotWaitForEachOther() throws Exception {
+        assertNotEquals(HistorizedResourceStore.stripeOf("a"), HistorizedResourceStore.stripeOf("b"));
         when(storage.read("a", 1)).thenReturn(mock(IResourceStorage.IResource.class));
         when(storage.read("b", 1)).thenReturn(mock(IResourceStorage.IResource.class));
         var entered = new CountDownLatch(1);
@@ -276,6 +276,110 @@ class HistorizedResourceStoreTest {
         });
 
         verify(storage).removeAllPermanently("b");
+    }
+
+    /**
+     * Without a transaction (MongoDB standalone), a delete that read the resource
+     * before a permanent removal ran to completion would then upsert its tombstone
+     * — the erased resource's data — into the emptied history, after the erasure
+     * had reported success. The delete must not even read until the removal has
+     * left the storage.
+     */
+    @Test
+    void deleteOfTheSameIdWaitsForAPermanentDeleteInProgress() throws Exception {
+        when(storage.read("a", 1)).thenReturn(mock(IResourceStorage.IResource.class));
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            release.await(10, SECONDS);
+            return null;
+        }).when(storage).removeAllPermanently("a");
+
+        assertWaitsWhileAnotherIsInsideTheStorage(() -> store.deleteAllPermanently("a"), entered, release, () -> {
+            try {
+                store.delete("a", 1);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        InOrder order = inOrder(storage);
+        order.verify(storage).removeAllPermanently("a");
+        order.verify(storage).read("a", 1);
+        order.verify(storage).storeHistoryAndRemove(any(), eq("a"), eq(1));
+    }
+
+    /**
+     * The same race through update: on MongoDB it archives the predecessor before
+     * its version-checked replace, so an update that read before the erasure would
+     * leave that history row behind even though its replace then fails.
+     */
+    @Test
+    void updateOfTheSameIdWaitsForAPermanentDeleteInProgress() throws Exception {
+        IResourceStorage.IResource<String> current = mock(IResourceStorage.IResource.class);
+        when(current.getId()).thenReturn("a");
+        when(current.getVersion()).thenReturn(1);
+        when(storage.read("a", 1)).thenReturn(current);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            entered.countDown();
+            release.await(10, SECONDS);
+            return null;
+        }).when(storage).removeAllPermanently("a");
+
+        assertWaitsWhileAnotherIsInsideTheStorage(() -> store.deleteAllPermanently("a"), entered, release, () -> {
+            try {
+                store.update("a", 1, "new content");
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+
+        InOrder order = inOrder(storage);
+        order.verify(storage).removeAllPermanently("a");
+        order.verify(storage).read("a", 1);
+        order.verify(storage).storeHistoryAndUpdate(any(), any(), eq(1));
+    }
+
+    /**
+     * Starts {@code blocked}, waits until it is inside the storage call that holds
+     * on {@code release}, starts {@code other} and requires it to park on the lock
+     * without touching the storage. Then releases the first and lets both finish.
+     * No sleeps: the wait is for the thread's state, bounded by a deadline.
+     */
+    private void assertWaitsWhileAnotherIsInsideTheStorage(Runnable blocked, CountDownLatch entered, CountDownLatch release, Runnable other)
+            throws Exception {
+        var firstError = new AtomicReference<Throwable>();
+        var secondError = new AtomicReference<Throwable>();
+        Thread first = new Thread(() -> runCapturing(blocked, firstError));
+        Thread second = new Thread(() -> runCapturing(other, secondError));
+        try {
+            first.start();
+            assertTrue(entered.await(5, SECONDS), "the first call never reached the storage");
+            second.start();
+            long deadline = System.nanoTime() + SECONDS.toNanos(5);
+            while (second.getState() != Thread.State.WAITING && second.isAlive() && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertEquals(Thread.State.WAITING, second.getState(), "the second call did not wait for the first one to leave the storage");
+            verify(storage, never()).read(any(), any());
+        } finally {
+            release.countDown();
+            first.join(SECONDS.toMillis(5));
+            second.join(SECONDS.toMillis(5));
+        }
+        assertNull(firstError.get());
+        assertNull(secondError.get());
+    }
+
+    private static void runCapturing(Runnable action, AtomicReference<Throwable> error) {
+        try {
+            action.run();
+        } catch (Throwable t) {
+            error.set(t);
+        }
     }
 
     /**

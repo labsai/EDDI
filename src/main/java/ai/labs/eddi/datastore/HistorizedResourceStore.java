@@ -5,6 +5,8 @@
 package ai.labs.eddi.datastore;
 
 import java.io.IOException;
+import java.util.Objects;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
@@ -20,16 +22,26 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
  * </ul>
  * This class has <b>zero</b> database-specific dependencies.
  * <p>
- * No method holds a lock: concurrent writers, on this node or another, are
- * decided by the storage's version-checked writes
+ * Concurrent writers are decided by the storage's version-checked writes
  * ({@link IResourceStorage#storeHistoryAndUpdate storeHistoryAndUpdate},
  * {@link IResourceStorage#storeHistoryAndRemove storeHistoryAndRemove},
- * {@link IResourceStorage#storeIfCurrentVersion storeIfCurrentVersion}). A
- * {@link #delete} racing a {@link #deleteAllPermanently} of the same id is
- * settled the same way, in the storage: PostgreSQL writes the tombstone only if
- * its delete removed the row, so an erasure is never undone; MongoDB cannot do
- * that without a transaction (see
- * {@link IResourceStorage#storeHistoryAndRemove}).
+ * {@link IResourceStorage#storeIfCurrentVersion storeIfCurrentVersion}). Those
+ * settle update against update, update against delete and delete against
+ * delete. They do not settle a permanent removal against a write of the same id
+ * on MongoDB: without a transaction, a {@link #delete} or {@link #update} that
+ * read the resource before a {@link #deleteAllPermanently} ran to completion
+ * then writes its history row (the tombstone, or the archived predecessor) into
+ * an erased resource, and the erasure has already reported success. PostgreSQL
+ * settles it in its transactions.
+ * <p>
+ * So {@link #update}, {@link #delete} and {@link #deleteAllPermanently} hold a
+ * lock <em>per resource id</em>, one of {@value #LOCK_STRIPES} stripes chosen
+ * by the id's hash, for their whole read-then-write sequence: same-id sequences
+ * on this node run one after the other, and different ids contend only when
+ * they share a stripe. Each call takes exactly one stripe and calls nothing but
+ * the storage while holding it, so no two stripes are ever held together. The
+ * lock is per JVM: a second node is not excluded, exactly as it was not by the
+ * {@code synchronized} store-wide monitor this replaces.
  *
  * @param <T>
  *            the resource document type
@@ -48,10 +60,28 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         return new ResourceModifiedException(message);
     }
 
+    /** A power of two, so {@link #stripeOf} spreads ids evenly. */
+    static final int LOCK_STRIPES = 64;
+
     protected IResourceStorage<T> resourceStorage;
+
+    private final ReentrantLock[] idLocks = new ReentrantLock[LOCK_STRIPES];
 
     public HistorizedResourceStore(IResourceStorage<T> resourceStore) {
         this.resourceStorage = resourceStore;
+        for (int i = 0; i < LOCK_STRIPES; i++) {
+            idLocks[i] = new ReentrantLock();
+        }
+    }
+
+    static int stripeOf(String id) {
+        // Null-safe: deleteAllPermanently never checked its id, and the storage
+        // treats a null id as naming nothing.
+        return Math.floorMod(Objects.hashCode(id), LOCK_STRIPES);
+    }
+
+    private ReentrantLock lockFor(String id) {
+        return idLocks[stripeOf(id)];
     }
 
     @Override
@@ -60,6 +90,18 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         checkNotNull(id, "id");
         checkNotNull(version, "version");
         checkNotNull(content, "content");
+
+        var lock = lockFor(id);
+        lock.lock();
+        try {
+            return updateLocked(id, version, content);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Integer updateLocked(String id, Integer version, T content)
+            throws ResourceStoreException, ResourceModifiedException, ResourceNotFoundException {
 
         var resource = resourceStorage.read(id, version);
 
@@ -100,6 +142,16 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         checkNotNull(id, "id");
         checkNotNull(version, "version");
 
+        var lock = lockFor(id);
+        lock.lock();
+        try {
+            deleteLocked(id, version);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void deleteLocked(String id, Integer version) throws ResourceModifiedException, ResourceNotFoundException {
         var resource = resourceStorage.read(id, version);
 
         checkIfFoundAndLatest(id, version, resource);
@@ -128,7 +180,13 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
 
     @Override
     public void deleteAllPermanently(String id) {
-        resourceStorage.removeAllPermanently(id);
+        var lock = lockFor(id);
+        lock.lock();
+        try {
+            resourceStorage.removeAllPermanently(id);
+        } finally {
+            lock.unlock();
+        }
     }
 
     @Override
