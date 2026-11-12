@@ -16,10 +16,16 @@ import java.util.Set;
 /**
  * Save-time checks of {@link HealthConfig}, run when an agent is created,
  * updated or duplicated through the agent store — the
- * {@code RatingConfigValidator} pattern. An agent that reached the store
- * another way (a ZIP import, an older version) is read leniently: an unknown
- * outcome is ignored and an out-of-range window falls back to the deployment
- * default ({@link HealthConfigPolicy}).
+ * {@code RatingConfigValidator} pattern; an upgrade or a sync writes through
+ * that store too — and when a {@code create} or {@code merge} import reads the
+ * archive's agent, before anything is written ({@code RestImportService}). The
+ * field shipped with these checks, so on import they refuse only what no save
+ * ever accepted. <b>A rule tightened later must not be applied to imports as a
+ * refusal</b>: exports made before it would stop importing — report it instead.
+ * Whatever still reaches the store unchecked (written before an import was
+ * checked, or by hand) is read leniently: an unknown outcome is ignored and an
+ * out-of-range window falls back to the deployment default
+ * ({@link HealthConfigPolicy}).
  */
 public final class HealthConfigValidator {
 

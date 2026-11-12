@@ -83,3 +83,38 @@ Documented in [`docs/agent-health.md`](../agent-health.md#the-evaluation).
   order is always the database's (PostgreSQL's collation may differ from `String.compareTo`).
 - The overlap trade-off under sustained overload is unchanged in kind: a conversation the replay already passed in
   the current sweep is not re-read for a row that lands after the sweep passed it.
+
+## 🐛 fix(health): a rating change is never lost silently, and an import checks the healthConfig (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+### What changed and why
+
+Three further review findings on PR #1389.
+
+- **A full rating hand-off queue defers the mark instead of discarding it.** `HealthOutcomeEvaluator`'s rating
+  executor (one thread, 1,000 queued marks) used `ThreadPoolExecutor.DiscardPolicy`, so under a burst of ratings a
+  mark was dropped with no log and no metric — and its `RejectedExecutionException` catch never ran. A closed
+  session has no next change, so a dropped mark left a rating out of its outcome for good. The executor now refuses
+  (`AbortPolicy`); a refused mark puts its conversation in a bounded, coalescing set (10,000), which the hand-off
+  thread drains after each mark it runs, marking every session of the conversation due (as a withdrawal does —
+  the original session is not kept). The request thread never waits. Only beyond that bound is a mark lost, with a
+  WARN at most once a minute. New counter `eddi.health.outcomes.rating.overflow{result=deferred|dropped}`, on the
+  Full Metrics dashboard and in [`docs/metrics.md`](../metrics.md).
+- **A ZIP import runs `HealthConfigValidator`.** A `create` import wrote the agent through the store directly, so a
+  `healthConfig` the REST save refuses was stored; a `merge` refused it in `updateAgent`, but only after the
+  workflows had landed. Both now refuse it with the save's 400 before anything is written, next to the HITL and
+  continuation checks. Upgrades and syncs already wrote through `RestAgentStore.updateAgent`. Documented in
+  [`docs/agent-config-authoring.md`](../agent-config-authoring.md).
+- Tests: `HealthOutcomeEvaluatorTest` (a refused mark is deferred, counted and marked by the next one that runs; the
+  bound; the production executor refuses when full), `RestImportServiceArchiveContractTest` (an invalid
+  `healthConfig` is a 400 with nothing created; a valid one imports unchanged).
+
+### Design decisions
+
+- On import every rule refuses: `healthConfig` shipped with its validator, so no export a save accepted can fail.
+  A rule tightened later must report on import instead of refusing, or older exports stop importing (noted on
+  `HealthConfigValidator`).
+- Left as is: `HealthDrillDownAccess.reviewableVersions` reads the review setting of up to 100 versions, once per
+  request (not per listed session), and `ConversationReviewPolicy` caches each immutable version for 30 minutes —
+  at most 101 agent reads on a cold cache for an agent with 100+ versions.
