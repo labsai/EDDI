@@ -39,9 +39,11 @@ final class McpRoles {
     static final String APPROVER = "eddi-approver";
 
     /**
-     * Operator-only: agent setup ({@code IRestAgentSetup}), schedules (these tools
-     * address the schedule store directly, without the per-owner scoping REST
-     * applies), memory writes for arbitrary users, GDPR, and unscoped server logs.
+     * Operator-only: agent setup ({@code IRestAgentSetup}), schedules (narrower
+     * than the REST store's admin/editor tier, though the tools now run through
+     * {@code IRestScheduleStore} under the caller's identity and so get its
+     * per-owner scoping), memory writes for arbitrary users, GDPR, and unscoped
+     * server logs.
      */
     static final List<String> ADMIN_ONLY = List.of(ADMIN);
 

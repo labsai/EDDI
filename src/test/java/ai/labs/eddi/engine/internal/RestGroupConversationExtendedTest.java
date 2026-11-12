@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -29,7 +31,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.security.Principal;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -64,7 +69,7 @@ class RestGroupConversationExtendedTest {
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
 
@@ -421,6 +426,37 @@ class RestGroupConversationExtendedTest {
 
             // continue runs on a background virtual thread — wait for the invocation
             verify(groupService, timeout(2000)).continueDiscussion(eq("gc-1"), eq("q"), any());
+        }
+
+        /**
+         * The continuation runs on this class's own executor, where the request scope
+         * is gone: a capture there finds no caller, so the member turns'
+         * {@code ${caller:userId}} / {@code ${caller:token}} failed closed on this path
+         * alone. The caller is captured on the request thread and bound around the
+         * work, as {@code startAndDiscussAsync} does for a streamed start.
+         */
+        @Test
+        @DisplayName("the streamed continuation runs as the caller who asked for it")
+        void continuation_runsAsTheRequestingCaller() throws Exception {
+            var caller = mock(SecurityIdentity.class);
+            Principal principal = () -> "user-1";
+            when(caller.getPrincipal()).thenReturn(principal);
+            var callerIdentityContext = new CallerIdentityContext(caller, null);
+            var rest = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator,
+                    mock(HitlAccessGuard.class), resourceAccessGuard, callerIdentityContext);
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            var boundOnWorker = new CompletableFuture<CallerIdentity>();
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenAnswer(inv -> {
+                boundOnWorker.complete(callerIdentityContext.current());
+                return gcInGroup("group-1");
+            });
+
+            rest.continueDiscussionStreaming("group-1", "gc-1", new DiscussRequest("q", "user-1"), eventSink, sse);
+
+            CallerIdentity bound = boundOnWorker.get(5, TimeUnit.SECONDS);
+            assertNotNull(bound, "the continuation must not run without the caller who started it");
+            assertEquals("user-1", bound.userId());
+            assertNull(callerIdentityContext.current(), "the request thread keeps no binding of its own");
         }
 
         @Test
