@@ -56,8 +56,10 @@ class RestLlmStoreProviderAuthorTest {
     }
 
     private LlmConfiguration bedrock(String modelId, String prompt) throws Exception {
-        return mapper.readValue("{\"tasks\":[{\"actions\":[\"help\"],\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"" + modelId
-                + "\",\"systemMessage\":\"" + prompt + "\"}}]}", LlmConfiguration.class);
+        // An id, so the task keeps its identity when other fields change.
+        String json = "{\"tasks\":[{\"id\":\"t1\",\"actions\":[\"help\"],\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"" + modelId
+                + "\",\"systemMessage\":\"" + prompt + "\"}}]}";
+        return mapper.readValue(json, LlmConfiguration.class);
     }
 
     @Test

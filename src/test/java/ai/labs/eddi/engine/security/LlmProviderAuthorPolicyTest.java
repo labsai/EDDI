@@ -295,7 +295,8 @@ class LlmProviderAuthorPolicyTest {
             assertDoesNotThrow(() -> asEditor().requireMayAuthor(stored, stored, "langchain"));
             // An id-less step is identified by its position and content, so even a
             // non-pointing edit to it needs an administrator (the stricter rule).
-            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(bedrockWithStep("\"temperature\":\"0.2\""), stored, "langchain"));
+            assertThrows(ForbiddenException.class,
+                    () -> asEditor().requireMayAuthor(bedrockWithStep("\"temperature\":\"0.2\""), stored, "langchain"));
         }
 
         private String openAiWithBedrockStep(String taskModel) {
