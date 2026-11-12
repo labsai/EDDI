@@ -169,9 +169,20 @@ public class RestSlackWebhook {
                     // in the payload. A team-less identity (slack:<user>) is used, which
                     // never equals a slack:<team>:<user> of a workspace that is declared.
                     String teamId = origin.pinnedTeamId();
-                    eventHandler.handleEventAsync(eventId, event, botUserId(payload),
+                    var admission = eventHandler.handleEventAsync(eventId, event, botUserId(payload),
                             new SlackEventHandler.EventOrigin(teamId, origin.signingIntegrationName(),
                                     origin.signingSecret()));
+                    // At capacity: refuse with a retryable status rather than take the
+                    // event and drop it. Slack redelivers an event it got no 2xx for
+                    // (up to three times, backing off over minutes), and the handler has
+                    // released the event's dedup claim so the redelivery is processed.
+                    if (admission == SlackEventHandler.Admission.OVERLOADED) {
+                        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                                .header("Retry-After", "1")
+                                .entity("{\"error\":\"Busy\"}")
+                                .type(MediaType.APPLICATION_JSON)
+                                .build();
+                    }
                 }
             }
 

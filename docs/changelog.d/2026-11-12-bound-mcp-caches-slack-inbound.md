@@ -1,4 +1,4 @@
-## 🐛 fix(mcp): bound the MCP client cache and build clients outside the map lock (2026-11-12)
+## 🐛 fix(mcp, slack): bound the MCP client cache and Slack inbound processing (2026-11-12)
 
 **Repo:** EDDI (`fix/bound-mcp-caches-slack-inbound`)
 
@@ -41,8 +41,43 @@ unrelated servers hashed to the same bin.
 (its reflective seeding helper follows the new field type),
 [`configuration-reference.md`](../configuration-reference.md), [`mcp-client.md`](../mcp-client.md).
 
+**Slack inbound events had no concurrency bound, and a missing `event_id` broke de-duplication.**
+`SlackEventHandler` handed every event to a virtual-thread-per-task executor, which
+has no limit. A burst of events, or of Slack's retries, started as many concurrent
+turns as there were events. A payload without an `event_id` also failed. The
+node-local dedup cache threw an NPE on the null key, so the webhook answered 400
+and never processed the event. The shared (cluster) cache turned the null into the
+string `"null"`, so every id-less event after the first was dropped as a
+duplicate.
+
+- Admission is now two semaphores around the existing executor.
+  `eddi.slack.max-concurrent-events` (default `32`) events run at once, and
+  `eddi.slack.max-queued-events` (default `256`) more may wait. The webhook
+  thread only calls `tryAcquire`, so it never blocks.
+- Past that limit the Events API webhook answers **503 with `Retry-After: 1`**
+  instead of 200, and the handler first releases the event's dedup claim, so
+  Slack's redelivery is processed rather than skipped. WARN logs are throttled to
+  one every 10 s. `handleEventAsync` returns an `Admission`
+  (`ACCEPTED`/`DUPLICATE`/`OVERLOADED`), and only `OVERLOADED` changes the HTTP
+  answer.
+- A missing or blank `event_id` skips de-duplication, and the event is processed.
+
+**Files:** [`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
+[`SlackConfig.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackConfig.java),
+[`RestSlackWebhook.java`](../../src/main/java/ai/labs/eddi/integrations/slack/rest/RestSlackWebhook.java),
+[`SlackInboundAdmissionTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/SlackInboundAdmissionTest.java),
+[`RestSlackWebhookTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/rest/RestSlackWebhookTest.java).
+
 ### Design decisions
 
 - A per-key future, not "build, then put-if-absent and close the loser": two
   callers racing on a cold key now cost one handshake, not two.
 - No new meter. The existing `eddi.mcp.discovery` counter is unchanged.
+- Slack overflow is answered with a retryable status, not dropped with a WARN.
+  The webhook already acknowledges an event before processing it, so a 503 costs
+  nothing against Slack's 3-second window, and Slack redelivers what it got no
+  2xx for. Dropping the event would lose a user's message without a trace. The
+  A2A limiter answers 503 the same way.
+- No dedup key is derived from `channel` + `ts` for an id-less event: Slack
+  delivers a message and its `app_mention` as two events with the same `ts`.
+- `docs/slack-integration.md` is not touched, because open PR #1342 rewrites it.
