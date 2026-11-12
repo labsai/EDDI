@@ -591,7 +591,9 @@ public class HealthReportService {
             }
         }
         if (!missing.isEmpty()) {
-            Map<String, List<HealthTurnAggregate>> read = byAgent(dailyStore.findForAgents(missing, from, to));
+            // Identical portfolio requests arriving together share this one read.
+            Map<String, List<HealthTurnAggregate>> read = cache.shared(List.of("dailyBatch", List.copyOf(missing), from, to),
+                    () -> byAgent(dailyStore.findForAgents(missing, from, to)));
             for (String agentId : missing) {
                 List<HealthTurnAggregate> agentRows = read.getOrDefault(agentId, List.of());
                 cache.put(List.of("daily", agentId, from, to), agentRows);
@@ -632,8 +634,8 @@ public class HealthReportService {
             }
         }
         if (!missing.isEmpty()) {
-            Map<String, HealthPortfolioSessions> read = turnStore.portfolioSessions(missing, readFrom, window.from(), window.to(),
-                    HealthOrigins.INTERACTIVE, all);
+            Map<String, HealthPortfolioSessions> read = cache.shared(List.of("portfolioSessionsBatch", List.copyOf(missing), window),
+                    () -> turnStore.portfolioSessions(missing, readFrom, window.from(), window.to(), HealthOrigins.INTERACTIVE, all));
             for (String agentId : missing) {
                 HealthPortfolioSessions counted = read.getOrDefault(agentId, HealthPortfolioSessions.NONE);
                 HealthPortfolioSessions agentSessions = baselineCountable ? counted : counted.withoutBaseline();
