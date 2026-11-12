@@ -557,6 +557,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.mcp.tool-cache.ttl-ms` | `300000` (5 min) | How long a remote server's tool list is cached. Lower it while developing against a changing MCP server |
+| `eddi.mcp.client-cache.max-size` | `256` | Most MCP clients kept open at once — one per distinct server URL, credential and timeout. Past it the cache evicts a client and closes its connection; the next call to that server reconnects. Also bounds the tool-list and circuit-breaker entries keyed the same way. Zero/negative falls back to `256` |
+| `eddi.mcp.client-cache.expire-after-access-ms` | `1800000` (30 min) | How long an MCP client may go unused before it is closed and dropped. A tool-cache hit counts as use. Zero/negative falls back to `1800000` |
 | `eddi.mcp.tool-description.max-chars` | `1024` | Truncation cap on imported tool descriptions, bounding prompt cost. Also the cap on every description, title and enum value inside a tool's parameter schema |
 | `eddi.mcp.tool-schema.max-bytes` | `32768` | Cap on one remote tool's serialised parameter schema. Over it, the schema's descriptions are stripped first; a schema still over it is dropped with its tool (`eddi_mcp_tool_schema_governed_total{outcome=dropped}`) |
 | `eddi.mcp.tool-schema.max-bytes-per-server` | `524288` (512 KB) | Cap on the schema bytes one MCP server may put into the prompt across all its tools per discovery; tools past it are dropped (`outcome=dropped_server_cap`) |
