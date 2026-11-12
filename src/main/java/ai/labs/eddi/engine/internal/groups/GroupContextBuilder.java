@@ -638,7 +638,7 @@ public class GroupContextBuilder {
         }
         String previousSummary = anonymous ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
         String content = previousSummary != null && !previousSummary.isBlank()
-                ? "## Summary of entries 1-" + alreadyCovered + ":\n" + previousSummary + "\n\n## New entries:\n" + newSlice
+                ? "## Summary of entries 1-" + alreadyCovered + ":\n" + PeerContentGuard.fenced(previousSummary) + "\n\n## New entries:\n" + newSlice
                 : newSlice;
 
         if (!SystemSpendMeter.admit() || UnpricedCallPolicy.check(PriceOverride.of(window.inputPricePer1M(), window.outputPricePer1M()),
