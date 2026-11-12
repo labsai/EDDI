@@ -174,6 +174,22 @@ public class AlertAccess {
         }
     }
 
+    /**
+     * The rule with each Slack target marked as admitted by an administrator or not
+     * ({@link DeliveryTarget#adminAdmitted()}), as the caller saves it. Delivery
+     * reads the mark: the caller's role is not known then.
+     */
+    public AlertRule withAdmission(AlertRule rule) {
+        if (rule == null) {
+            return null;
+        }
+        boolean admin = hasAdminRole();
+        List<DeliveryTarget> targets = rule.delivery().stream()
+                .map(t -> t != null && t.type() == DeliveryTarget.DeliveryType.SLACK ? t.withAdminAdmitted(admin) : t).toList();
+        return new AlertRule(rule.id(), rule.name(), rule.enabled(), rule.scope(), rule.source(), rule.condition(), targets, rule.throttle(),
+                rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+    }
+
     /** May the caller see or act on this event? */
     public void requireEvent(AlertEvent event) {
         requireAgent(event.agentId());
@@ -190,8 +206,12 @@ public class AlertAccess {
         // Every read shows each target's id; a rule stored before ids existed gets
         // the derived ones, the same on every read until its next save stores them.
         List<DeliveryTarget> targets = rule.withTargetIds().delivery().stream().map(t -> {
-            if (t == null || t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
-                return t;
+            if (t == null) {
+                return null;
+            }
+            if (t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
+                // The admission mark is the server's bookkeeping, not part of the rule.
+                return t.withAdminAdmitted(null);
             }
             DeliveryTarget masked = t.masked();
             return admin

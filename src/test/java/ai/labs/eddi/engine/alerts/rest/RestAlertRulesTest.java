@@ -85,8 +85,14 @@ class RestAlertRulesTest {
         when(store.update(any())).thenReturn(true);
         router = mock(ChannelTargetRouter.class);
         when(router.channelTargetsAgent("slack", "C0123ABC", AGENT)).thenReturn(true);
-        rest = new RestAlertRules(store, eventStore, cache, new AlertAccess(guard, conversationGuard, router), senders, schedule,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        access = new AlertAccess(guard, conversationGuard, router);
+        rest = new RestAlertRules(store, eventStore, cache, access, senders, schedule, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private AlertAccess access;
+
+    private AlertAccess access() {
+        return access;
     }
 
     private ChannelTargetRouter router;
@@ -139,6 +145,46 @@ class RestAlertRulesTest {
             when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), foreign)));
 
             assertEquals(204, rest.deleteRule(RULE_ID).getStatus());
+        }
+
+        private AlertRule enabled(AlertRule rule, boolean enabled) {
+            return new AlertRule(rule.id(), rule.name(), enabled, rule.scope(), rule.source(), rule.condition(), rule.delivery(), rule.throttle(),
+                    rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+        }
+
+        @Test
+        @DisplayName("an editor can still disable a rule whose channel changed hands, but not enable it again")
+        void disableAfterReassignment() {
+            asEditor();
+            AlertRule stored = scoped(AlertScope.agent(AGENT), foreign);
+            when(store.read(RULE_ID)).thenReturn(Optional.of(stored));
+
+            AlertRule off = rest.updateRule(RULE_ID, enabled(stored, false));
+
+            assertFalse(off.enabled());
+            verify(eventStore).releaseDigestPending(RULE_ID);
+            assertError(403, AlertErrors.SLACK_CHANNEL_NOT_PERMITTED, () -> rest.updateRule(RULE_ID, enabled(stored, true)));
+            // Disabling does not let a new foreign channel in.
+            assertError(403, AlertErrors.SLACK_CHANNEL_NOT_PERMITTED,
+                    () -> rest.updateRule(RULE_ID, enabled(scoped(AlertScope.agent(AGENT), foreign, unknown), false)));
+        }
+
+        @Test
+        @DisplayName("the server marks who admitted a Slack target; a body cannot claim the administrator's exemption")
+        void admissionMarkedByServer() {
+            asEditor();
+            rest.createRule(scoped(AlertScope.agent(AGENT), SLACK.withAdminAdmitted(true)));
+            ArgumentCaptor<AlertRule> byEditor = ArgumentCaptor.forClass(AlertRule.class);
+            verify(store).create(byEditor.capture());
+            assertEquals(Boolean.FALSE, byEditor.getValue().delivery().get(0).adminAdmitted());
+
+            asAdmin();
+            AlertRule read = access().redact(scoped(AlertScope.agent(AGENT), SLACK.withAdminAdmitted(true)));
+            assertNull(read.delivery().get(0).adminAdmitted(), "never shown on a read");
+            rest.createRule(scoped(AlertScope.agent(AGENT), foreign));
+            ArgumentCaptor<AlertRule> byAdmin = ArgumentCaptor.forClass(AlertRule.class);
+            verify(store, times(2)).create(byAdmin.capture());
+            assertEquals(Boolean.TRUE, byAdmin.getAllValues().get(1).delivery().get(0).adminAdmitted());
         }
 
         @Test

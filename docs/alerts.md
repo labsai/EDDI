@@ -316,7 +316,15 @@ Roles `eddi-admin` and `eddi-editor`, enumerated (REST has no role hierarchy;
   an editor may name only a channel served by an integration that has a target pointing
   at the rule's agent (`SLACK_CHANNEL_NOT_PERMITTED` otherwise — the same answer whether
   the channel is served by another integration or by none); this is checked when a rule
-  is created, updated or tested, not when it is deleted. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
+  is created, updated or tested, not when it is deleted, and an existing rule can always
+  be disabled. It is checked again at **every delivery**, since a channel can change hands
+  after the rule was saved: a Slack target an editor saved is then not posted to, and the
+  event records `FAILED` with the reason. The server marks each Slack target with who
+  admitted it (never from the request, never shown on a read); a target an administrator
+  saved posts anywhere. Rules saved before this mark existed count as an administrator's
+  when they cover several or every agent (only an administrator can save those); a
+  single-agent one is checked like an editor's — a channel that no longer belongs to its
+  agent shows up as a failed delivery with that reason, never as a silently dropped alert. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
   webhook target appears to them by scheme and host only, without the secret
   reference. A rule over several agents produces one digest per originating agent; each
   digest carries that agent and is readable by editors with access to it, and administrators

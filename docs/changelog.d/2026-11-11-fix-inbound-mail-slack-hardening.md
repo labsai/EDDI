@@ -65,6 +65,25 @@ the same answer for a channel served by another integration or by none); checked
 delete. `POST /alerts/rules/test` allows `eddi.alerts.test-max-per-minute` (6) sends per caller and minute
 (`429 TEST_THROTTLED`).
 
+**Review follow-up (2026-11-12).**
+
+- The signature replay key hashes the domain with the *decoded* `b=` bytes, not its text: `b=` is blanked from the
+  signed header input, so stripping its padding or refolding it kept the signature valid and gave a new key.
+- A mail without a usable Message-ID (keyed on a hash of its raw bytes, which an added unsigned header changes) now
+  records its signature too, so an added header or Message-ID does not make the copy a new mail.
+- A signed `Date` standing in for `t=` may be at most one hour ahead of the delivery instant; a far-future Date would
+  otherwise keep the signature from ever growing too old.
+- File names: the length cap keeps the end of the name (path's last segment, extension), a basename over 255
+  characters keeps its extension when cut, and an attachment whose raw name exceeds the cap is withheld as
+  executable — `a…a/payload.js` had lost its `.js` and been stored.
+- Address headers: encoded words past 100 per header are broken before the mail library's `getPersonal()` decodes
+  them (a charset lookup per word).
+- Alerts: Slack targets are checked again at every delivery (`AlertDeliveryService`); the server records on each
+  Slack target whether an administrator admitted it (`adminAdmitted`, never from a body, never shown). Pre-mark rules
+  over several agents count as an administrator's; a pre-mark single-agent rule whose channel no longer belongs to
+  its agent fails that delivery with the reason on the event. Disabling a rule no longer requires its unchanged Slack
+  channels to still be deliverable.
+
 ### Design decisions
 
 - The loop guard and delivery-report handling still read every header of the mail as received: a header that can

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.alerts.model.AlertEvent.Delivery;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.DeliveryStatus;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -52,18 +53,27 @@ public class AlertDeliveryService {
     private final AlertSettings settings;
     private final AlertMetrics metrics;
     private final Clock clock;
+    private final ChannelTargetRouter channelTargetRouter;
 
     @Inject
-    public AlertDeliveryService(IAlertEventStore eventStore, AlertSenders senders, AlertSettings settings, AlertMetrics metrics) {
-        this(eventStore, senders, settings, metrics, Clock.systemUTC());
+    public AlertDeliveryService(IAlertEventStore eventStore, AlertSenders senders, AlertSettings settings, AlertMetrics metrics,
+            ChannelTargetRouter channelTargetRouter) {
+        this(eventStore, senders, settings, metrics, Clock.systemUTC(), channelTargetRouter);
     }
 
+    /** For tests: no channel router, so Slack targets are not re-checked. */
     AlertDeliveryService(IAlertEventStore eventStore, AlertSenders senders, AlertSettings settings, AlertMetrics metrics, Clock clock) {
+        this(eventStore, senders, settings, metrics, clock, null);
+    }
+
+    AlertDeliveryService(IAlertEventStore eventStore, AlertSenders senders, AlertSettings settings, AlertMetrics metrics, Clock clock,
+            ChannelTargetRouter channelTargetRouter) {
         this.eventStore = eventStore;
         this.senders = senders;
         this.settings = settings;
         this.metrics = metrics;
         this.clock = clock;
+        this.channelTargetRouter = channelTargetRouter;
     }
 
     /**
@@ -124,10 +134,47 @@ public class AlertDeliveryService {
                 // later.
                 return skipped(delivery, now);
             }
+            String refusal = slackRefusal(rule, target);
+            if (refusal != null) {
+                // Not worth retrying: the channel belongs to another agent's integration
+                // until someone changes the rule or the integration. Recorded on the event,
+                // so the inbox shows why the alert did not reach Slack.
+                LOGGER.warnf("Alert %s not delivered to %s: %s", sanitize(event.id()), sanitize(delivery.label()), refusal);
+                metrics.delivery(delivery.type(), "gave_up");
+                return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now, refusal, null);
+            }
             return send(current.get(), delivery, target, attempts, now);
         } finally {
             eventStore.releaseSend(event.id(), token);
         }
+    }
+
+    /**
+     * Why a Slack target may not be posted to now, or null. A Slack post uses the
+     * bot token of whichever integration serves the channel, so the binding the
+     * rule was saved under is checked again at every send — a channel can change
+     * hands after the rule was saved:
+     * <ul>
+     * <li>a target an administrator saved ({@code adminAdmitted}) may post
+     * anywhere;</li>
+     * <li>a rule saved before the mark existed is an administrator's when its scope
+     * is several or every agent (only an administrator can save such a rule);</li>
+     * <li>everything else needs the serving integration to target the rule's
+     * agent.</li>
+     * </ul>
+     */
+    String slackRefusal(AlertRule rule, DeliveryTarget target) {
+        if (channelTargetRouter == null || target.type() != DeliveryTarget.DeliveryType.SLACK || Boolean.TRUE.equals(target.adminAdmitted())) {
+            return null;
+        }
+        String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
+        if (agentId == null && target.adminAdmitted() == null) {
+            return null;
+        }
+        if (agentId != null && channelTargetRouter.channelTargetsAgent("slack", target.channelId(), agentId)) {
+            return null;
+        }
+        return "Slack channel " + target.channelId() + " is not served by a Slack integration that targets this rule's agent";
     }
 
     /** The delivery left as it was, due again after one lease. */

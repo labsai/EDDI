@@ -10,9 +10,11 @@ import ai.labs.eddi.engine.alerts.model.AlertEvent.Delivery;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.DeliveryStatus;
 import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
+import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +33,7 @@ import static ai.labs.eddi.engine.alerts.AlertTestData.event;
 import static ai.labs.eddi.engine.alerts.AlertTestData.pending;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -89,6 +92,47 @@ class AlertDeliveryServiceTest {
         ArgumentCaptor<AlertEvent> sent = ArgumentCaptor.forClass(AlertEvent.class);
         verify(senders).send(sent.capture(), eq(SLACK));
         assertNull(sent.getValue().match().commentExcerpt());
+    }
+
+    private AlertDeliveryService withRouter(ChannelTargetRouter router) {
+        return new AlertDeliveryService(store, senders, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(NOW, ZoneOffset.UTC), router);
+    }
+
+    @Test
+    @DisplayName("a Slack channel that changed hands after the rule was saved is not posted to; the event says why")
+    void slackChannelReassigned() throws Exception {
+        ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+        DeliveryTarget editorTarget = SLACK.withAdminAdmitted(false);
+        AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), editorTarget);
+        AlertEvent held = event("e5", rule, AlertEvent.State.PENDING, pending(rule));
+
+        AlertEvent outcome = withRouter(router).deliver(held, rule).orElseThrow();
+
+        verify(senders, never()).send(any(), any());
+        assertEquals(DeliveryStatus.FAILED, outcome.deliveries().get(0).status());
+        assertTrue(outcome.deliveries().get(0).lastError().contains("not served"), outcome.deliveries().get(0).lastError());
+
+        // Still served by an integration that targets the rule's agent: posted.
+        when(router.channelTargetsAgent("slack", "C0123ABC", AlertTestData.AGENT)).thenReturn(true);
+        withRouter(router).deliver(held, rule);
+        verify(senders).send(any(), eq(editorTarget));
+    }
+
+    @Test
+    @DisplayName("an administrator's Slack target, and a pre-mark rule over several agents, post anywhere")
+    void adminTargetsExempt() throws Exception {
+        ChannelTargetRouter router = mock(ChannelTargetRouter.class);
+        DeliveryTarget adminTarget = SLACK.withAdminAdmitted(true);
+        AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), adminTarget);
+        withRouter(router).deliver(event("e6", rule, AlertEvent.State.PENDING, pending(rule)), rule);
+        verify(senders).send(any(), eq(adminTarget));
+
+        AlertRule base = errorRule(List.of(ErrorKind.TURN_ERROR), SLACK);
+        AlertRule everyAgent = new AlertRule(base.id(), base.name(), true, new AlertScope(true, List.of()), base.source(), base.condition(),
+                base.delivery(), null, null, "admin", NOW, "admin", NOW);
+        withRouter(router).deliver(event("e7", everyAgent, AlertEvent.State.PENDING, pending(everyAgent)), everyAgent);
+        verify(senders).send(any(), eq(SLACK));
     }
 
     @Test
