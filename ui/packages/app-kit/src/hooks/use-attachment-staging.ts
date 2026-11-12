@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
   AttachmentError,
+  UPLOAD_CANCELLED,
   MAX_ATTACHMENTS_PER_TURN,
   deleteAttachment,
   isImageMime,
@@ -185,16 +186,27 @@ export function useAttachmentStaging(
   // is the very conversation the staged chips were uploaded to.
   const lazyCreatedIdRef = useRef<string | null>(null);
 
+  // In-flight uploads by chip id, so a chip that is removed, dropped, or left
+  // behind (conversation switch, unmount) can have its request aborted.
+  const uploadsRef = useRef(new Map<string, AbortController>());
+  const abortUpload = useCallback((id: string) => {
+    uploadsRef.current.get(id)?.abort();
+    uploadsRef.current.delete(id);
+  }, []);
+
   // Discard a staged attachment: free its object URL and best-effort delete
   // the uploaded blob server-side. Runs OUTSIDE any state updater (StrictMode
   // double-invokes updaters, which would double-fire the revoke / DELETE).
   const discardPending = useCallback((a: PendingAttachment) => {
+    // A chip still uploading: stop the request. Its handlers see the abort and
+    // stay silent; a blob that landed in the meantime is deleted by uploadEntry.
+    if (a.status === "uploading") abortUpload(a.id);
     if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     const targetConversation = a.result?.conversationId ?? conversationIdRef.current;
     if (a.status === "ready" && a.result && targetConversation) {
       deleteAttachment(targetConversation, a.result.storageRef).catch(() => {});
     }
-  }, []);
+  }, [abortUpload]);
 
   // Reset pending attachments whenever the conversation changes, so a
   // storageRef uploaded to a previous conversation is never sent to a new one.
@@ -226,16 +238,33 @@ export function useAttachmentStaging(
     },
     [],
   );
+  // Abort whatever is still uploading when the surface unmounts.
+  useEffect(() => {
+    const uploads = uploadsRef.current;
+    return () => {
+      uploads.forEach((c) => c.abort());
+      uploads.clear();
+    };
+  }, []);
 
   /** Upload one chip, tracking its progress, then mark it ready or failed (with the reason). */
   const uploadEntry = useCallback(
     async (targetId: string, entry: PendingAttachment) => {
+      const controller = new AbortController();
+      uploadsRef.current.set(entry.id, controller);
       const update = (patch: Partial<PendingAttachment>) => {
+        if (controller.signal.aborted) return;
         pendingRef.current = pendingRef.current.map((a) => (a.id === entry.id ? { ...a, ...patch } : a));
         setPendingAttachments((prev) => prev.map((a) => (a.id === entry.id ? { ...a, ...patch } : a)));
       };
       try {
-        const result = await uploadAttachment(targetId, entry.file, (progress) => update({ progress }));
+        const result = await uploadAttachment(targetId, entry.file, (progress) => update({ progress }), controller.signal);
+        if (controller.signal.aborted) {
+          // The chip was discarded while the reply was on its way: the file is
+          // stored but nothing refers to it, so remove it again.
+          deleteAttachment(result.conversationId ?? targetId, result.storageRef).catch(() => {});
+          return;
+        }
         update({ status: "ready", result, progress: 1 });
         if (result.forwardableInline === false) {
           toast.warning(
@@ -247,12 +276,16 @@ export function useAttachmentStaging(
           );
         }
       } catch (err) {
+        // Cancelled by the user (removed, switched away, unmounted): not an error.
+        if (controller.signal.aborted || (err instanceof AttachmentError && err.code === UPLOAD_CANCELLED)) return;
         const message =
           err instanceof AttachmentError
             ? err.message
             : t("chat.attachError", "Failed to upload file");
         update({ status: "error", error: message });
         toast.error(message);
+      } finally {
+        if (uploadsRef.current.get(entry.id) === controller) uploadsRef.current.delete(entry.id);
       }
     },
     [t],
@@ -355,11 +388,12 @@ export function useAttachmentStaging(
     const forwarded = new Set(ready.map((a) => a.previewUrl).filter(Boolean));
     pendingRef.current.forEach((a) => {
       if (a.previewUrl && !forwarded.has(a.previewUrl)) URL.revokeObjectURL(a.previewUrl);
+      if (a.status === "uploading") abortUpload(a.id);
     });
     pendingRef.current = [];
     setPendingAttachments([]);
     return ready;
-  }, []);
+  }, [abortUpload]);
 
   return {
     pendingAttachments,
