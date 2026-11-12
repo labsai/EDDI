@@ -1,6 +1,6 @@
 # Email Integration
 
-> **Since**: v6.6.0
+> **Since**: v6.7.0
 
 An **email integration** connects a mailbox to an agent: EDDI polls the mailbox over IMAP and every new mail starts
 one agent turn, with the mail as the turn's input and its attachments as files. It is a channel integration with
