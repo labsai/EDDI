@@ -146,6 +146,61 @@ class PostgresDeploymentStorageUnitTest {
         assertThrows(IResourceStore.ResourceStoreException.class, () -> storage.readDeploymentInfos());
     }
 
+    /**
+     * A row with a status this release does not know used to throw out of
+     * Enum.valueOf and fail the read of every deployment, startup redeploy
+     * included. It is skipped; the others are returned.
+     */
+    @Test
+    void readDeploymentInfos_skipsARowWithAnUnknownStatusAndKeepsTheRest() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true, true, false);
+        when(resultSet.getString("environment")).thenReturn("production", "production", "test");
+        when(resultSet.getString("AGENT_ID")).thenReturn("agent-1", "agent-bad", "agent-3");
+        when(resultSet.getInt("AGENT_VERSION")).thenReturn(1, 2, 3);
+        when(resultSet.getString("deployment_status")).thenReturn("deployed", "PAUSED", "undeployed");
+
+        List<DeploymentInfo> infos = storage.readDeploymentInfos();
+
+        assertEquals(List.of("agent-1", "agent-3"), infos.stream().map(DeploymentInfo::getAgentId).toList());
+        assertEquals(DeploymentStatus.deployed, infos.get(0).getDeploymentStatus());
+        assertEquals(DeploymentStatus.undeployed, infos.get(1).getDeploymentStatus());
+        assertEquals(Environment.test, infos.get(1).getEnvironment());
+    }
+
+    @Test
+    void readDeploymentInfos_skipsARowWithANullStatus() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true, false);
+        when(resultSet.getString("environment")).thenReturn("production");
+        when(resultSet.getString("AGENT_ID")).thenReturn("agent-null", "agent-2");
+        when(resultSet.getInt("AGENT_VERSION")).thenReturn(1);
+        when(resultSet.getString("deployment_status")).thenReturn(null, "deployed");
+
+        assertEquals(List.of("agent-2"), storage.readDeploymentInfos().stream().map(DeploymentInfo::getAgentId).toList());
+    }
+
+    /** As MongoDeploymentStorage reads it: the v5 environment names map. */
+    @Test
+    void readDeploymentInfo_legacyEnvironmentNameReadsAsProduction() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        mockDeploymentResultSet();
+        when(resultSet.getString("environment")).thenReturn("unrestricted");
+
+        assertEquals(Environment.production, storage.readDeploymentInfo("unrestricted", "agent-1", 1).getEnvironment());
+    }
+
+    @Test
+    void readDeploymentInfo_unknownStatusReadsAsNoRow() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        mockDeploymentResultSet();
+        when(resultSet.getString("deployment_status")).thenReturn("PAUSED");
+
+        assertNull(storage.readDeploymentInfo("production", "agent-1", 1));
+    }
+
     // ─── Helpers ───
 
     private void mockDeploymentResultSet() throws SQLException {
