@@ -37,6 +37,8 @@ public class SpendControlAudit {
     public static final String WITHDRAWN = "SPEND_CONTROL_WITHDRAWN";
     /** Approved, but the control had changed meanwhile: nothing applied. */
     public static final String STALE = "SPEND_CONTROL_STALE";
+    /** Approved, but the write failed: whether it took effect is unknown. */
+    public static final String FAILED = "SPEND_CONTROL_FAILED";
 
     private AuditLedgerService ledger;
 

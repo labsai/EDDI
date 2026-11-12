@@ -32,13 +32,21 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,8 +56,11 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -278,6 +289,132 @@ class SpendControlChangeServiceTest {
                     assertThrows(SpendControlException.class, () -> service.approve(id, null, identity("alice", "eddi-admin"))).code());
             assertEquals(Status.EXPIRED, store.read(id).orElseThrow().status());
             verify(catalogService, never()).replace(anyLong(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("the claim (APPLYING) is stored before the write, and APPLIED only after it")
+        void claimBeforeWrite() {
+            String id = lowerGpt4o().proposal().id();
+            List<Status> seenDuringWrite = new ArrayList<>();
+            ModelPriceCatalog base = stored.get();
+            doAnswer(inv -> {
+                seenDuringWrite.add(store.read(id).orElseThrow().status());
+                ModelPriceCatalog next = ((ModelPriceCatalog) inv.getArgument(1)).stamped(base.revision() + 1, "now", inv.getArgument(2));
+                stored.set(next);
+                return next;
+            }).when(catalogService).replace(anyLong(), any(), anyString());
+
+            service.approve(id, null, identity("alice", "eddi-admin"));
+
+            assertEquals(List.of(Status.APPLYING), seenDuringWrite);
+            assertEquals(Status.APPLIED, store.read(id).orElseThrow().status());
+        }
+
+        @Test
+        @DisplayName("of two concurrent approvals exactly one writes; the other is ALREADY_DECIDED")
+        void concurrentApprovals() throws Exception {
+            String id = lowerGpt4o().proposal().id();
+            CountDownLatch inWrite = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            AtomicInteger writes = new AtomicInteger();
+            doAnswer(inv -> {
+                writes.incrementAndGet();
+                inWrite.countDown();
+                assertTrue(release.await(10, TimeUnit.SECONDS));
+                return ((ModelPriceCatalog) inv.getArgument(1)).stamped(5, "now", inv.getArgument(2));
+            }).when(catalogService).replace(anyLong(), any(), anyString());
+            SecurityIdentity alice = identity("alice", "eddi-admin");
+            SecurityIdentity dave = identity("dave", "eddi-admin");
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            try {
+                Future<SpendControlChange> first = pool.submit(() -> service.approve(id, null, alice));
+                assertTrue(inWrite.await(10, TimeUnit.SECONDS));
+
+                var e = assertThrows(SpendControlException.class, () -> service.approve(id, null, dave));
+                assertEquals(SpendControlException.ALREADY_DECIDED, e.code());
+                assertEquals("APPLYING", e.details().get("status"));
+
+                release.countDown();
+                assertEquals(Status.APPLIED, first.get(10, TimeUnit.SECONDS).status());
+            } finally {
+                release.countDown();
+                pool.shutdownNow();
+            }
+            assertEquals(1, writes.get());
+        }
+
+        @Test
+        @DisplayName("a failed write is FAILED, never back to PENDING, and its error quotes no store text")
+        void failedWrite() {
+            String id = lowerGpt4o().proposal().id();
+            doThrow(new IllegalStateException("connection to db://admin:hunter2@store refused")).when(catalogService).replace(anyLong(), any(),
+                    anyString());
+
+            var e = assertThrows(SpendControlException.class, () -> service.approve(id, null, identity("alice", "eddi-admin")));
+
+            assertEquals(SpendControlException.APPLY_FAILED, e.code());
+            assertEquals(500, e.status());
+            assertFalse(e.getMessage().contains("hunter2"), e.getMessage());
+            SpendControlChange failed = store.read(id).orElseThrow();
+            assertEquals(Status.FAILED, failed.status());
+            assertTrue(failed.outcome().contains("IllegalStateException"), failed.outcome());
+            assertFalse(failed.outcome().contains("hunter2"), failed.outcome());
+            verify(audit).record(eq(SpendControlAudit.FAILED), eq("alice"), anyMap());
+            // terminal: it is not approvable again
+            assertEquals(SpendControlException.ALREADY_DECIDED,
+                    assertThrows(SpendControlException.class, () -> service.approve(id, null, identity("dave", "eddi-admin"))).code());
+            verify(catalogService, times(1)).replace(anyLong(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a change left APPLYING by a crash says its outcome is unknown, is never re-applied and survives retention")
+        void interruptedStaysApplying() {
+            String id = lowerGpt4o().proposal().id();
+            SpendControlChange pending = store.read(id).orElseThrow();
+            // what a crash between the claim and the result leaves behind
+            SpendControlChange applying = pending.decided(Status.APPLYING, "alice", clock.millis(), null,
+                    "approved; the write started — if this stays APPLYING it was interrupted and its outcome is unknown");
+            assertTrue(store.compareAndSetStatus(id, Status.PENDING, applying));
+
+            assertEquals(SpendControlException.ALREADY_DECIDED,
+                    assertThrows(SpendControlException.class, () -> service.approve(id, null, identity("dave", "eddi-admin"))).code());
+            assertEquals(SpendControlException.ALREADY_DECIDED,
+                    assertThrows(SpendControlException.class, () -> service.reject(id, null, identity("dave", "eddi-admin"))).code());
+            verify(catalogService, never()).replace(anyLong(), any(), anyString());
+
+            clock.advance(SpendControlChangeService.RETENTION.plusDays(1));
+            assertEquals(0, store.deleteDecidedBefore(clock.millis() - SpendControlChangeService.RETENTION.toMillis()));
+            assertEquals(Status.APPLYING, service.read(id).status());
+            assertTrue(service.read(id).outcome().contains("outcome is unknown"));
+        }
+
+        @Test
+        @DisplayName("with authentication the proposer cannot approve its own change, under any spelling; another admin can")
+        void fourEyes() {
+            String id = service.changeModelPrices(4, List.of(entry("openai", "gpt-4o", 0.0, 0.0)), List.of(), null, "cheaper", "alice", "mcp")
+                    .proposal().id();
+
+            for (String self : List.of("alice", "Alice", " ALICE ")) {
+                var e = assertThrows(SpendControlException.class, () -> service.approve(id, null, identity(self, "eddi-admin")));
+                assertEquals(SpendControlException.SELF_APPROVAL, e.code(), self);
+                assertEquals(403, e.status());
+            }
+            verify(catalogService, never()).replace(anyLong(), any(), anyString());
+            assertEquals(Status.PENDING, store.read(id).orElseThrow().status());
+
+            assertEquals(Status.APPLIED, service.approve(id, null, identity("bob", "eddi-admin")).status());
+        }
+
+        @Test
+        @DisplayName("without authentication every caller is anonymous: the single operator still approves")
+        void anonymousWithoutAuth() {
+            var open = new SpendControlChangeService(store, catalogService, quotaService, audit, new SimpleMeterRegistry(), false, clock);
+            SecurityIdentity anonymous = mock(SecurityIdentity.class);
+            when(anonymous.isAnonymous()).thenReturn(true);
+            String id = open.changeModelPrices(4, List.of(entry("openai", "gpt-4o", 0.0, 0.0)), List.of(), null, "cheaper",
+                    SpendControlChangeService.name(anonymous), "mcp").proposal().id();
+
+            assertEquals(Status.APPLIED, open.approve(id, null, anonymous).status());
         }
 
         @Test

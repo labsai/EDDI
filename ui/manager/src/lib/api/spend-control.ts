@@ -6,7 +6,15 @@ import type { TenantQuota } from "./quotas";
 
 export type SpendControlKind = "MODEL_PRICES" | "TENANT_QUOTA";
 
-export type SpendControlStatus = "PENDING" | "APPLIED" | "REJECTED" | "WITHDRAWN" | "STALE" | "EXPIRED";
+export type SpendControlStatus =
+  | "PENDING"
+  | "APPLYING"
+  | "APPLIED"
+  | "REJECTED"
+  | "WITHDRAWN"
+  | "STALE"
+  | "FAILED"
+  | "EXPIRED";
 
 /**
  * A change to the price catalog or a tenant quota that an MCP client asked for

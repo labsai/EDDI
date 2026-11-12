@@ -86,7 +86,7 @@ public class MongoSpendControlChangeStore implements ISpendControlChangeStore {
 
     @Override
     public long deleteDecidedBefore(long proposedBeforeMillis) {
-        return collection.deleteMany(Filters.and(Filters.ne(STATUS, Status.PENDING.name()), Filters.lt(PROPOSED_AT, proposedBeforeMillis)))
-                .getDeletedCount();
+        return collection.deleteMany(Filters.and(Filters.nin(STATUS, Status.PENDING.name(), Status.APPLYING.name()),
+                Filters.lt(PROPOSED_AT, proposedBeforeMillis))).getDeletedCount();
     }
 }

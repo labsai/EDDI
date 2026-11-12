@@ -78,9 +78,15 @@ public record SpendControlChange(String id, Kind kind, Status status, String ten
         MODEL_PRICES, TENANT_QUOTA
     }
 
-    /** The life cycle: PENDING, then exactly one of the others. */
+    /**
+     * The life cycle: PENDING, then REJECTED, WITHDRAWN or EXPIRED — or, on
+     * approval, APPLYING (claimed by compare-and-set before the write) and then
+     * APPLIED, STALE or FAILED. A change still APPLYING after its approval returned
+     * was interrupted mid-write: its outcome is unknown, and it is never applied
+     * again.
+     */
     public enum Status {
-        PENDING, APPLIED, REJECTED, WITHDRAWN, STALE, EXPIRED
+        PENDING, APPLYING, APPLIED, REJECTED, WITHDRAWN, STALE, FAILED, EXPIRED
     }
 
     public SpendControlChange {

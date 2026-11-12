@@ -22,6 +22,12 @@ public class SpendControlException extends RuntimeException {
     /** The control changed since the proposal was filed; nothing was applied. */
     public static final String STALE = "STALE";
     public static final String TOO_MANY_PENDING = "TOO_MANY_PENDING";
+    /**
+     * The write of an approved change failed; whether it took effect is unknown.
+     */
+    public static final String APPLY_FAILED = "APPLY_FAILED";
+    /** The approver is the principal that proposed the change. */
+    public static final String SELF_APPROVAL = "SELF_APPROVAL";
 
     private final int status;
     private final String code;

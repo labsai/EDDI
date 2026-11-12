@@ -46,7 +46,8 @@ public interface ISpendControlChangeStore {
 
     /**
      * Deletes decided changes proposed before the cutoff (retention). Pending ones
-     * are never deleted here; they expire first.
+     * are never deleted here; they expire first. Nor are APPLYING ones: an approval
+     * interrupted mid-write stays visible until someone looks at it.
      *
      * @return how many were deleted
      */

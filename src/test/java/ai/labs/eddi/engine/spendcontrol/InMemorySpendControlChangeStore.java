@@ -58,7 +58,8 @@ class InMemorySpendControlChangeStore implements ISpendControlChangeStore {
     @Override
     public long deleteDecidedBefore(long proposedBeforeMillis) {
         List<String> doomed = list(null, Integer.MAX_VALUE).stream()
-                .filter(c -> c.status() != Status.PENDING && c.proposedAtMillis() < proposedBeforeMillis).map(SpendControlChange::id).toList();
+                .filter(c -> c.status() != Status.PENDING && c.status() != Status.APPLYING && c.proposedAtMillis() < proposedBeforeMillis)
+                .map(SpendControlChange::id).toList();
         doomed.forEach(rows::remove);
         return doomed.size();
     }

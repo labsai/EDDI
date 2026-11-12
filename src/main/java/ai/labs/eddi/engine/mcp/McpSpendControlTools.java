@@ -113,7 +113,7 @@ public class McpSpendControlTools {
     @Tool(name = "update_model_prices", description = "Administrators only. Add, change or remove entries of the model price catalog, "
             + "or set its unpricedPolicy, in one compare-and-set write: give expectedRevision from read_model_prices. A change that "
             + "only makes spending stricter is applied at once (result APPLIED): a higher price, a stricter unpricedPolicy, or a new "
-            + "entry under the ALLOW policy that costs at least as much as every entry that may price the same models. Anything that "
+            + "entry under the ALLOW policy that costs at least as much as every entry of the same provider (or of provider *). Anything that "
             + "could lower what a call costs or admit a refused call — a lower or cleared price, a removed entry, a looser policy, a "
             + "new price while unpriced calls are refused — is NOT applied: it is filed for an administrator's approval in the Manager "
             + "(result PROPOSED, with the changeId and why it loosens). Lowering a price is raising a budget: propose it only when "
@@ -187,8 +187,11 @@ public class McpSpendControlTools {
     @Tool(name = "list_spend_control_changes", description = "Administrators only. List price and quota changes filed for approval, "
             + "newest first: what each changes, which part loosens spending, who proposed it and why, and its status — PENDING "
             + "(waits for an administrator in the Manager), APPLIED, REJECTED, WITHDRAWN, STALE (the catalog or quota changed before "
-            + "approval; nothing applied) or EXPIRED (7 days undecided). Approving is a human action in the Manager; no tool approves.")
-    public String listSpendControlChanges(@ToolArg(description = "PENDING (default), APPLIED, REJECTED, WITHDRAWN, STALE, EXPIRED or ALL",
+            + "approval; nothing applied), EXPIRED (7 days undecided), FAILED (the approved write failed; it may or may not have taken "
+            + "effect) or APPLYING (approved and being written — if it stays so, the write was interrupted and its outcome is unknown: "
+            + "read the catalog or quota, never re-propose blindly). Approving is a human action in the Manager; no tool approves.")
+    public String listSpendControlChanges(@ToolArg(description = "PENDING (default), APPLYING, APPLIED, REJECTED, WITHDRAWN, STALE, FAILED, "
+            + "EXPIRED or ALL",
                                                    required = false) String status,
                                           @ToolArg(description = "At most this many, 1..100 (default 20)", required = false) Integer limit) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);

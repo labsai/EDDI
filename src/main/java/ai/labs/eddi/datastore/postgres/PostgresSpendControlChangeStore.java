@@ -164,9 +164,11 @@ public class PostgresSpendControlChangeStore implements ISpendControlChangeStore
     public long deleteDecidedBefore(long proposedBeforeMillis) {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement("DELETE FROM spend_control_changes WHERE status <> ? AND proposed_at < ?")) {
+                PreparedStatement ps = conn
+                        .prepareStatement("DELETE FROM spend_control_changes WHERE status NOT IN (?, ?) AND proposed_at < ?")) {
             ps.setString(1, Status.PENDING.name());
-            ps.setLong(2, proposedBeforeMillis);
+            ps.setString(2, Status.APPLYING.name());
+            ps.setLong(3, proposedBeforeMillis);
             return ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to prune spend-control changes", e);

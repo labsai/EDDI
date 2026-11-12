@@ -381,17 +381,33 @@ public class SpendControlChangeService {
 
     /**
      * Approves a pending change and applies it, with the approver as actor.
+     * <p>
+     * <b>Ordering.</b> The approval first claims the change, PENDING →
+     * {@link Status#APPLYING} by compare-and-set — of two concurrent approvals
+     * exactly one wins, the other answers ALREADY_DECIDED — then writes, then
+     * records the result: {@link Status#APPLIED}, {@link Status#STALE} (the control
+     * moved; nothing written) or {@link Status#FAILED} (the write threw; whether it
+     * took effect is unknown). A change that stays APPLYING was interrupted between
+     * claim and result (a crash): its outcome is unknown and it is never re-applied
+     * — the target has to be checked. The write itself is compare-and-set against
+     * the proposal's base, so even a re-proposal of the same document cannot apply
+     * twice.
      *
      * @throws SpendControlException
      *             FORBIDDEN unless the approver is an {@code eddi-admin};
-     *             ALREADY_DECIDED; STALE when the control changed since the
-     *             proposal (then nothing is applied and the change is marked stale)
+     *             SELF_APPROVAL when the approver proposed the change (with
+     *             authentication on); ALREADY_DECIDED; STALE when the control
+     *             changed since the proposal (then nothing is applied and the
+     *             change is marked stale); APPLY_FAILED when the write failed
      */
     public SpendControlChange approve(String id, String note, SecurityIdentity approver) {
         String by = requireAdmin(approver, "approve");
         String decisionNote = note(note);
         SpendControlChange change = requirePending(id);
-        SpendControlChange claimed = change.decided(Status.APPLIED, by, clock.millis(), decisionNote, "applying");
+        requireNotProposer(change, by);
+        SpendControlChange claimed = change.decided(Status.APPLYING, by, clock.millis(), decisionNote,
+                "approved; the write started — if this stays APPLYING it was interrupted and its outcome is unknown: check the "
+                        + target(change) + " before proposing it again");
         if (!store.compareAndSetStatus(change.id(), Status.PENDING, claimed)) {
             throw alreadyDecided(load(id));
         }
@@ -399,24 +415,32 @@ public class SpendControlChangeService {
         try {
             outcome = apply(change, by);
         } catch (SpendControlException e) {
-            if (!SpendControlException.STALE.equals(e.code())) {
-                // put it back: an unexpected failure must not burn the proposal
-                store.compareAndSetStatus(change.id(), Status.APPLIED, change);
-                throw e;
-            }
+            // apply() reports only STALE: the control moved and nothing was written
             SpendControlChange stale = change.decided(Status.STALE, by, clock.millis(), decisionNote, e.getMessage());
-            store.compareAndSetStatus(change.id(), Status.APPLIED, stale);
+            store.compareAndSetStatus(change.id(), Status.APPLYING, stale);
             Map<String, Object> details = decisionDetails(change, decisionNote);
             details.put("outcome", e.getMessage());
             audit.record(SpendControlAudit.STALE, by, details);
             count(change.kind(), "STALE");
             throw e;
         } catch (RuntimeException e) {
-            store.compareAndSetStatus(change.id(), Status.APPLIED, change);
-            throw e;
+            // Unknown whether the write took effect, so the change is not put back to
+            // PENDING (a later approval would then report "nothing was applied", which may
+            // be false). Only the exception type is kept: its message may quote the store.
+            String failure = "the write failed (" + e.getClass().getSimpleName() + "); it may or may not have taken effect — check the "
+                    + target(change) + " before proposing it again";
+            SpendControlChange failed = change.decided(Status.FAILED, by, clock.millis(), decisionNote, failure);
+            store.compareAndSetStatus(change.id(), Status.APPLYING, failed);
+            Map<String, Object> details = decisionDetails(change, decisionNote);
+            details.put("outcome", failure);
+            audit.record(SpendControlAudit.FAILED, by, details);
+            count(change.kind(), "FAILED");
+            LOGGER.warnf("Spend-control change %s approved by %s failed to apply (%s); outcome unknown", change.id(), sanitize(by),
+                    e.getClass().getName());
+            throw new SpendControlException(500, SpendControlException.APPLY_FAILED, "Spend-control change " + change.id() + ": " + failure);
         }
         SpendControlChange applied = change.decided(Status.APPLIED, by, clock.millis(), decisionNote, outcome);
-        store.compareAndSetStatus(change.id(), Status.APPLIED, applied);
+        store.compareAndSetStatus(change.id(), Status.APPLYING, applied);
         Map<String, Object> details = decisionDetails(change, decisionNote);
         details.put("outcome", outcome);
         audit.record(SpendControlAudit.APPROVED, by, details);
@@ -539,6 +563,28 @@ public class SpendControlChangeService {
                     "Only an eddi-admin may " + verb + " a spend-control change; nothing was applied");
         }
         return name(identity);
+    }
+
+    /**
+     * Four eyes: the principal that proposed a change does not approve it. An MCP
+     * client acts with its user's credential, so without this a steered model
+     * holding that credential could approve its own proposal over REST. Without
+     * authentication every caller is {@code anonymous} and principals cannot be
+     * told apart — the single-operator deployment keeps approving.
+     */
+    private void requireNotProposer(SpendControlChange change, String approver) {
+        if (!authEnabled || "anonymous".equals(approver) || change.proposedBy() == null) {
+            return;
+        }
+        if (change.proposedBy().trim().equalsIgnoreCase(approver.trim())) {
+            throw new SpendControlException(403, SpendControlException.SELF_APPROVAL,
+                    "Spend-control change " + change.id() + " was proposed by you; another eddi-admin has to approve it (an MCP "
+                            + "client should sign in with an account of its own). Nothing was applied");
+        }
+    }
+
+    private static String target(SpendControlChange change) {
+        return change.kind() == Kind.MODEL_PRICES ? "price catalog" : "quota of tenant '" + change.tenantId() + "'";
     }
 
     /** The principal's name, {@code anonymous} without one. */
