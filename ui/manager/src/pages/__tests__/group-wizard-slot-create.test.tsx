@@ -81,7 +81,7 @@ async function reachMembers(user: User, { moderator = false } = {}) {
   await user.click(screen.getByTestId("gw-add-member"));
   await user.type(await screen.findByTestId("member-name-0"), "Alice");
   await user.type(screen.getByTestId("member-name-1"), "Bob");
-  if (moderator) await user.click(screen.getByRole("button", { name: /add moderator/i }));
+  if (moderator) await user.click(screen.getByTestId("gw-add-moderator"));
   await user.type(await screen.findByTestId("gw-bulk-apikey-input"), "sk-test-key");
   await user.click(screen.getByTestId("gw-bulk-apply"));
 }
@@ -126,7 +126,10 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
     pending[1]!(true);
     pending[0]!(true);
 
-    await waitFor(() => expect(screen.getAllByText("Agent created & deployed")).toHaveLength(2));
+    await waitFor(() => {
+      expect(screen.getByTestId("member-created-0")).toBeInTheDocument();
+      expect(screen.getByTestId("member-created-1")).toBeInTheDocument();
+    });
     const group = await saveGroup(user);
     expect(setupCount).toBe(2);
     expect(group.members.map((m) => m.agentId)).toEqual(["new-agent-1", "new-agent-2"]);
@@ -141,7 +144,7 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
     await user.type(screen.getByTestId("member-name-1"), "by");
     pending[0]!(true);
 
-    await screen.findByText("Agent created & deployed");
+    await screen.findByTestId("member-created-0");
     expect(screen.getByTestId("member-name-1")).toHaveValue("Bobby");
     const group = await saveGroup(user);
     expect(group.members.map((m) => [m.displayName, m.agentId])).toEqual([
@@ -159,7 +162,7 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
     await user.click(screen.getByTestId("remove-member-0"));
     pending[0]!(true);
 
-    await screen.findByText("Agent created & deployed");
+    await screen.findByTestId("member-created-0");
     expect(screen.queryByTestId("member-card-1")).not.toBeInTheDocument();
     expect(screen.getByTestId("member-name-0")).toHaveValue("Bob");
   });
@@ -200,7 +203,7 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
     expect(screen.queryByTestId("template-grid")).not.toBeInTheDocument();
 
     pending[0]!(true);
-    await screen.findByText("Agent created & deployed");
+    await screen.findByTestId("member-created-0");
     expect(screen.getByTestId("group-wizard-back")).toBeEnabled();
     expect(screen.getByTestId("group-wizard-step-template")).toBeEnabled();
   });
@@ -211,16 +214,16 @@ describe("GroupWizardPage - Create Agent on a member card", () => {
 
     await user.click(screen.getByTestId("gw-create-moderator"));
     await heldSetups(1);
-    expect(screen.getByTitle("Remove moderator")).toBeDisabled();
-    await user.type(screen.getByPlaceholderText(/skilled moderator/i), "Be brief.");
+    expect(screen.getByTestId("gw-remove-moderator")).toBeDisabled();
+    await user.type(screen.getByTestId("gw-moderator-prompt"), "Be brief.");
     pending[0]!(false);
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
-    expect(screen.getByPlaceholderText(/skilled moderator/i)).toHaveValue("Be brief.");
+    expect(screen.getByTestId("gw-moderator-prompt")).toHaveValue("Be brief.");
 
     autoRespond = true;
     await user.click(screen.getByTestId("gw-create-moderator"));
-    await screen.findByText("Moderator agent ready");
+    await screen.findByTestId("moderator-created");
     const group = await saveGroup(user);
     // The failed attempt, the retry, then the two members.
     expect(setupCount).toBe(4);

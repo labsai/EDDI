@@ -1673,6 +1673,7 @@ function MembersStep({
           {!state.moderator ? (
             <button
               onClick={() => onChange({ moderator: createModeratorSlot() })}
+              data-testid="gw-add-moderator"
               className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
             >
               <UserPlus className="h-3 w-3" />
@@ -1685,6 +1686,7 @@ function MembersStep({
               disabled={state.moderator.creating}
               className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               title={t("groupWizard.removeModerator")}
+              data-testid="gw-remove-moderator"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -2235,7 +2237,10 @@ function MemberCard({
             </span>
           </div>
         ) : (
-        <div className="px-4 py-2 bg-emerald-500/5 border-t border-emerald-500/20 flex items-center gap-2">
+        <div
+          className="px-4 py-2 bg-emerald-500/5 border-t border-emerald-500/20 flex items-center gap-2"
+          data-testid={`member-created-${index}`}
+        >
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
             {t("groupWizard.agentReady")}
@@ -2289,7 +2294,10 @@ function ModeratorCard({
 
   if (moderator.created) {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2.5">
+      <div
+        className="flex items-center gap-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2.5"
+        data-testid="moderator-created"
+      >
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex-1">
           {t("groupWizard.moderatorReady")}
@@ -2354,6 +2362,7 @@ function ModeratorCard({
             onChange={(e) => onChange({ systemPrompt: e.target.value })}
             placeholder={defaultModeratorPrompt(t)}
             aria-label={t("groupWizard.systemPrompt")}
+            data-testid="gw-moderator-prompt"
             rows={2}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
           />

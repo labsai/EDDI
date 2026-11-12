@@ -36,7 +36,7 @@ replaced every card, so the new agent had no card left to be written back to.
   Remove, are disabled while that agent is being created; Back and the step
   buttons are disabled during the final Create and while any card or the
   moderator is provisioning. The per-slot buttons get
-  `gw-create-agent-<n>` and `gw-create-moderator` test ids.
+  `gw-create-agent-<n>`, `gw-create-moderator`, `gw-add-moderator`, `gw-remove-moderator`, `gw-moderator-prompt`, `member-created-<n>` and `moderator-created` test ids (the tests select by them, not by translated copy).
 - [`create-group-dialog.tsx`](../../ui/manager/src/components/groups/create-group-dialog.tsx):
   removed the `selectedTemplate` state, whose value was never read.
 - New [`group-wizard-slot-create.test.tsx`](../../ui/manager/src/pages/__tests__/group-wizard-slot-create.test.tsx):
