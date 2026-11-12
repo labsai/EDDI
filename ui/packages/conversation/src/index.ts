@@ -9,6 +9,7 @@ export * from "./controller/state";
 export * from "./controller/transport";
 export * from "./controller/agent-conversation";
 export * from "./controller/notices";
+export * from "./controller/composer-mode";
 export * from "./i18n/text";
 export * from "./react/hooks";
 export * from "./react/context";

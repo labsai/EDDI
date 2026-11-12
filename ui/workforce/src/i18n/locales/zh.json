@@ -591,6 +591,45 @@
       "clear": "清除搜索",
       "more": "更多结果",
       "moreFailed": "无法加载更多。重试"
+    },
+    "memory": {
+      "navLabel": "我的记忆",
+      "title": "我记得的关于你的事",
+      "subtitle": "你的代理为在之后的对话中使用而保存的关于你的信息。不想让它们保留的内容，可以让它们忘掉。",
+      "explainer": "私有条目只由保存它的代理使用，团队条目由该团队的代理使用，共享条目由你的所有代理使用。你可以忘掉任何条目；忘掉共享条目会让所有使用它的代理都不再拥有它。",
+      "search": "搜索记住的内容",
+      "total": "条目：{{n}}",
+      "shown": "显示 {{shown}} / {{total}}",
+      "writtenBy": "由 {{agent}} 保存",
+      "writtenByUnknown": "未记录保存它的代理",
+      "updated": "更新于 {{date}}",
+      "badge": {
+        "self": "私有",
+        "group": "团队",
+        "global": "所有代理"
+      },
+      "visibility": {
+        "self": "只有保存它的代理会使用",
+        "group": "由 {{teams}} 的代理使用",
+        "groupUnknown": "由某个团队的代理使用",
+        "global": "由你的所有代理使用",
+        "unknown": "可见范围：{{value}}"
+      },
+      "forget": "忘掉",
+      "forgetAria": "忘掉“{{key}}”",
+      "forgotten": "已忘掉：{{key}}",
+      "forgetFailed": "无法忘掉：{{message}}",
+      "forgetAll": "全部忘掉",
+      "forgetAllTitle": "忘掉关于你的一切？",
+      "forgetAllDescription": "全部 {{n}} 个条目都将被删除，涉及每个代理和团队。你的代理在新的对话中将不再知道这些内容，且无法撤销。你的对话本身会保留。",
+      "forgetAllConfirm": "全部忘掉",
+      "forgetAllDone": "你的代理记得的关于你的一切都已忘掉。",
+      "reserved": "管理员为数据保护请求保留的记录不在此列出，也无法在此页面删除。",
+      "empty": "目前还没有记住任何关于你的内容。当代理保存了关于你的信息时，会显示在这里。",
+      "noMatch": "没有与搜索匹配的内容。",
+      "loadFailed": "无法加载你的记忆。",
+      "retry": "重试",
+      "noSignIn": "此部署未启用登录，因此没有可显示的个人记忆。"
     }
   },
   "analyticsPage": {

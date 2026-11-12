@@ -593,6 +593,45 @@
       "clear": "Effacer la recherche",
       "more": "Plus de résultats",
       "moreFailed": "Impossible d’en charger plus. Réessayer"
+    },
+    "memory": {
+      "navLabel": "Ma mémoire",
+      "title": "Ce dont je me souviens à votre sujet",
+      "subtitle": "Ce que vos agents ont enregistré à votre sujet pour s'en servir dans de prochaines conversations. Faites oublier tout ce que vous ne voulez pas qu'ils gardent.",
+      "explainer": "Les entrées privées ne servent qu'à l'agent qui les a enregistrées, les entrées d'équipe aux agents de cette équipe, et les entrées partagées à tous vos agents. Vous pouvez faire oublier n'importe quelle entrée ; une entrée partagée disparaît alors pour chaque agent qui s'en sert.",
+      "search": "Rechercher dans ce qui est retenu",
+      "total": "Entrées : {{n}}",
+      "shown": "{{shown}} sur {{total}} affichées",
+      "writtenBy": "Enregistré par {{agent}}",
+      "writtenByUnknown": "Agent d'origine non enregistré",
+      "updated": "Mis à jour le {{date}}",
+      "badge": {
+        "self": "Privé",
+        "group": "Équipe",
+        "global": "Tous les agents"
+      },
+      "visibility": {
+        "self": "Seul l'agent qui l'a enregistré s'en sert",
+        "group": "Utilisé par les agents de {{teams}}",
+        "groupUnknown": "Utilisé par les agents d'une équipe",
+        "global": "Utilisé par tous vos agents",
+        "unknown": "Visibilité : {{value}}"
+      },
+      "forget": "Oublier",
+      "forgetAria": "Oublier « {{key}} »",
+      "forgotten": "Oublié : {{key}}",
+      "forgetFailed": "Impossible d'oublier ceci : {{message}}",
+      "forgetAll": "Tout oublier",
+      "forgetAllTitle": "Tout oublier à votre sujet ?",
+      "forgetAllDescription": "Les {{n}} entrées sont supprimées, pour chaque agent et chaque équipe. Vos agents ne sauront plus rien de tout cela dans les nouvelles conversations, et c'est irréversible. Vos conversations elles-mêmes sont conservées.",
+      "forgetAllConfirm": "Tout oublier",
+      "forgetAllDone": "Tout ce dont vos agents se souvenaient à votre sujet est oublié.",
+      "reserved": "Les enregistrements que votre administrateur conserve pour les demandes liées à la protection des données ne sont pas listés ici et ne peuvent pas être supprimés depuis cette page.",
+      "empty": "Rien n'est encore retenu à votre sujet. Lorsqu'un agent enregistre quelque chose sur vous, cela apparaît ici.",
+      "noMatch": "Rien ne correspond à votre recherche.",
+      "loadFailed": "Votre mémoire n'a pas pu être chargée.",
+      "retry": "Réessayer",
+      "noSignIn": "La connexion est désactivée sur ce déploiement, il n'y a donc aucune mémoire personnelle à afficher."
     }
   },
   "analyticsPage": {

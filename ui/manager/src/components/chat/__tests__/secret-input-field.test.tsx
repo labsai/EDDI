@@ -37,7 +37,45 @@ describe("SecretInputField — accessible name", () => {
 
     await userEvent.type(screen.getByLabelText("API Key"), "sk-secret{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("sk-secret");
+    expect(onSend).toHaveBeenCalledWith("sk-secret", true);
     expect(screen.getByLabelText("API Key")).toHaveValue("sk-secret");
+  });
+});
+
+/** T2.5 — the field mode follows the same rules as the widget's (`composer-mode.ts`). */
+describe("SecretInputField — field mode", () => {
+  it("masks a password field and sends it as typed, flagged secret", async () => {
+    const onSend = vi.fn();
+    renderWithProviders(<SecretInputField label="API Key" subType="password" onSend={onSend} />);
+    const field = screen.getByLabelText("API Key");
+    expect(field).toHaveAttribute("type", "password");
+
+    await userEvent.type(field, "  sk-1  {Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("  sk-1  ", true);
+    expect(field).toHaveValue("");
+  });
+
+  it("an e-mail field is an ordinary turn: type email, unmasked, no reveal toggle, not secret", async () => {
+    const onSend = vi.fn();
+    renderWithProviders(<SecretInputField label="E-mail" subType="email" onSend={onSend} />);
+    const field = screen.getByLabelText("E-mail");
+    expect(field).toHaveAttribute("type", "email");
+    expect(screen.queryByTestId("secret-input-eye")).toBeNull();
+
+    await userEvent.type(field, " me@example.com {Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("me@example.com", false);
+  });
+
+  it("offers a way back to the ordinary composer when the host gives one", async () => {
+    const onCancel = vi.fn();
+    const { unmount } = renderWithProviders(<SecretInputField label="Key" onSend={vi.fn()} />);
+    expect(screen.queryByTestId("secret-input-cancel")).toBeNull();
+    unmount();
+
+    renderWithProviders(<SecretInputField label="Key" onSend={vi.fn()} onCancel={onCancel} />);
+    await userEvent.click(screen.getByTestId("secret-input-cancel"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });

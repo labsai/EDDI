@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --config vite.embed.config.ts",
     "budget": "node ../scripts/check-bundle-budget.mjs chat",
     "preview": "vite preview",
     "test": "vitest run",

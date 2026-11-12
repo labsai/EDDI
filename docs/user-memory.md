@@ -289,6 +289,23 @@ The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint per
 
 Keys starting with `_gdpr_` are reserved: agents, property setters and the memory/property REST and MCP endpoints cannot write or delete them.
 
+### What the user sees: "My memory" in Workforce
+
+A signed-in person reviews and deletes their own memory in Workforce, at `/workforce/memory` ("My memory" in the sidebar and the ⌘K switcher; see the [Workforce guide](workforce-guide.md#what-your-agents-remember-about-you)). The page is built on this REST API alone:
+
+| What the page does | Endpoint |
+|---|---|
+| List the entries, newest first | `GET /{userId}` with the caller's own principal name (the token's `preferred_username` in the Keycloak setup) |
+| Forget one | `DELETE /entry/{entryId}` |
+| Forget everything, after a confirm that names the consequence | `DELETE /{userId}` |
+
+- **Only the person's own.** Every endpoint is open to `eddi-user`, and `OwnershipValidator` answers 403 when the `userId` is not the caller's principal name, so the page can only ever show its user their own entries. An administrator using the page sees their own memory there too. The Manager's **User Data → Memory** tab is where an administrator works on any user's.
+- **Attribution and scope.** Each entry shows the agent that wrote it (`sourceAgentId`, by its catalog name where the person may use it, otherwise its id; legacy global entries without one say so) and its visibility in plain words: *Private* for `self` (only that agent reads it), *Team* for `group` (the agents of the teams in `groupIds`, by name), *All agents* for `global`.
+- **What may be deleted.** The person may delete any of their own entries, whatever the visibility. Deleting a `global` or `group` entry removes it for every agent that reads it, and the page says so. The reserved `_gdpr_` rows are not listed at all: `DELETE /entry/{id}` refuses them (400) and `DELETE /{userId}` keeps them, so the page names their existence without offering a button that would fail. Team lessons a RETRO writes are stored under the group's own id (`group:<id>`), not the person's, so they are not part of anyone's personal memory.
+- **Search** is done in the browser over what the page shows (the key, the value, the agent and team names, the category), not with `GET /{userId}/search`, which matches keys and string values only, newest 200.
+- **Values are shown as text.** A stored value is rendered as a plain text child, never as markdown or HTML, and JSON values as compact JSON.
+- With sign-in off there is no principal, so the page explains that there is no personal memory instead of requesting one.
+
 ## Dream Consolidation
 
 The Dream service performs background maintenance on user memories:
