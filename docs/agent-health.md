@@ -396,8 +396,19 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    for this: the mark is handed to a worker thread. A mark that arrives while its
    session is being evaluated survives that evaluation's write, even when the
    session was already overdue: a mark always sets the session due at its own
-   time. Each due session is judged over
-   its own steps only, up to the next stored session.
+   time. A session the evaluation creates did not exist to take a mark, so when
+   such a new row is written final from ratings it read, the ratings are read
+   once more after the write, and a change makes the row due. A mark that cannot
+   be stored when it arrives — the worker's queue (1,000) is full, or the store
+   fails — is kept on that node (up to 10,000 conversations) and stored by its
+   next pass, marking every session of the conversation, before the due
+   sessions are read; past that bound it is lost (each case counted in
+   `eddi_health_outcomes_rating_marks_total{result="deferred"|"lost"}`), and
+   the session waits for its next change or due time. Each due session is
+   judged over its own steps only, up to the next stored session. A due session
+   whose evaluation fails is made due again later — 15 minutes at the least,
+   growing with the time since it was last judged, up to 6 hours — so sessions
+   that keep failing cannot fill every pass's page of 1,000 and starve the rest.
 2. **The feed** — conversations with turn rows captured up to a minute ago,
    paged by each conversation's newest capture (then its id), oldest first.
    Where it stands is a **cursor** of two such (capture, conversation) pairs
@@ -417,14 +428,26 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    - the **forward feed** then reads on from the watermark. While a replay is
      pending, the stored watermark stays within one overlap of it, so the replay
      never trails it by more than that; the replay's own position only moves
-     on, so the feed always does too.
+     on, so the feed always does too. The limit of this: while a replay is
+     pending across passes (more conversations in the overlap than half a
+     pass takes), a row that lands *behind* the replay's position is not
+     re-read by that sweep, and the next sweep starts at its own watermark
+     minus the overlap. Covering it would mean restarting every sweep where
+     the last one began, which under the load that makes a sweep pending never
+     moves on. Such a row is still judged when its session's window closes
+     (the due evaluation reads the session's steps again) or with the
+     conversation's next turn; only a row landing in a session already judged
+     final, while a sweep is pending, waits for that.
 
    A conversation whose evaluation fails, in either part — any store it needs
    cannot be read: turn rows, outcomes, the agent version's `healthConfig`, the
    ratings — sets the replay back to its capture time, so every following pass
    retries it first, however far the forward feed has got, for at most an hour
    from its first failure, however old the turn (then it is given up with a
-   WARN; its next change or due time judges it). Nothing is written for it in
+   WARN; its next change or due time judges it). The node that saw the failure
+   also retries it directly at the start of each replay, so with several
+   failures a later one is retried every pass too, not only once the replay —
+   restarted at the earliest — gets that far. Nothing is written for it in
    the meantime: a session is never judged under default settings, or as
    silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns
    recorded before outcomes existed are judged too, up to 5,000 conversations
@@ -655,11 +678,16 @@ which of them still exist — one projected read per 500 ids — and deletes the
 rows (turns and sessions) of those that do not, counted (in rows) as
 `eddi_health_dropped_total{reason="orphaned"}`. Only a definite "does not
 exist" deletes: a batch the conversation store cannot answer keeps its rows,
-with a WARN, and the next day asks again. An orphan is deleted only when its
-rows name an agent: should its days be unreadable at delete time, that agent's
-retained days are re-rolled instead. Rows that name no agent are kept for the
-next sweep (a WARN with their count) rather than deleted without a way to
-correct the daily rows. At most
+with a WARN, and the next day asks again. The turn rows go first, and an
+orphan's sessions are deleted only once they are gone. When its recent rows
+name an agent, should its days be unreadable at delete time, that agent's
+retained days are re-rolled instead. Without an agent — its recent rows name
+none, or it was found by its sessions alone, with turn rows older than the
+window that a failed purge left — its rows are deleted only if their days can
+be read; otherwise rows and sessions are both kept for the next sweep (a WARN
+with their count) rather than deleted without a way to correct the daily rows,
+the sessions being the next sweep's way back to turn rows outside its window.
+At most
 `eddi.health.orphan-sweep-max` conversations are checked per run (a WARN when
 there were more); the sweep keeps no cursor, so conversations past the cap are
 not guaranteed a check before they leave the window, and their rows then stay
@@ -761,6 +789,7 @@ eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent da
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
+eddi_health_outcomes_rating_marks_total  # Rating marks not stored on arrival; tag: result (deferred = stored by the next pass | lost)
 ```
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`

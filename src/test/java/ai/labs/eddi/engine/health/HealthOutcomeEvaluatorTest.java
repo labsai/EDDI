@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -457,6 +458,40 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("a later failure is retried every pass on this node, even while the replay, restarted at an earlier failure, runs out "
+                + "of its share before reaching it")
+        void laterFailureRetriedBehindAnEarlierOne() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant a = NOW.minus(Duration.ofMinutes(40));
+            List<ConversationActivity> feed = new ArrayList<>();
+            feed.add(new ConversationActivity("a", a));
+            for (int i = 1; i <= 4; i++) {
+                feed.add(new ConversationActivity("s" + i, a.plus(Duration.ofMinutes(i))));
+                feed.add(new ConversationActivity("n" + i, a.plus(Duration.ofMinutes(15 + i))));
+            }
+            feed.add(new ConversationActivity("b", a.plus(Duration.ofMinutes(20))));
+            cursor = HealthFeedCursor.at(a.minusSeconds(60));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of("a", "b"));
+
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(1, evaluated.stream().filter("b"::equals).count());
+            assertEquals(a, cursor.replayAt(), "the replay restarts at the earliest failure");
+
+            // From now on the replay's share (two) is used up before it gets past the
+            // conversations after a, and the forward feed, kept within one overlap of
+            // the replay, is used up before it reaches b.
+            evaluator.maxConversations(4);
+            for (int pass = 2; pass <= 5; pass++) {
+                clock.now = clock.now.plus(Duration.ofMinutes(10));
+                evaluator.run(clock.now.plusSeconds(60));
+                assertEquals(pass, evaluated.stream().filter("b"::equals).count(), "b retried on pass " + pass + ": " + evaluated);
+            }
+        }
+
+        @Test
         @DisplayName("M4: due sessions are judged before the feed, so a backfill cannot starve them")
         void dueFirst() {
             HealthOutcome due = stored("c1", 0, NOW.minus(Duration.ofDays(2)));
@@ -681,6 +716,95 @@ class HealthOutcomeEvaluatorTest {
             assertEquals(1, result.failed());
             assertEquals(1, result.conversations());
             assertEquals(1.0, registry.get(HealthMetrics.OUTCOME_FAILURES).counter().count());
+        }
+
+        @Test
+        @DisplayName("a due session whose evaluation fails is made due again later — longer the longer ago it was last judged — so failing "
+                + "sessions leave the head of the due order")
+        void failedDueSessionBacksOff() {
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
+            HealthOutcome old = stored("old", 0, NOW.minus(Duration.ofDays(2)));
+            HealthOutcome recent = stored("recent", 3, NOW.minus(Duration.ofMinutes(1)));
+            HealthOutcome middle = stored("middle", 0, NOW.minus(Duration.ofHours(1)));
+            when(outcomes.findDue(any(), anyInt())).thenReturn(List.of(old, recent, middle));
+            when(outcomes.findByConversation(anyString())).thenThrow(new HealthStoreException("down", null));
+
+            HealthOutcomeEvaluator.Result result = evaluator.run(NOW.plusSeconds(60));
+
+            assertEquals(3, result.failed());
+            verify(outcomes).markDue("old", List.of(0), NOW.plus(HealthOutcomeEvaluator.DUE_RETRY_MAX));
+            verify(outcomes).markDue("recent", List.of(3), NOW.plus(HealthOutcomeEvaluator.DUE_RETRY_MIN));
+            verify(outcomes).markDue("middle", List.of(0), NOW.plus(Duration.ofHours(1)));
+        }
+
+        @Test
+        @DisplayName("a rating saved while a session's first evaluation ran, after it read the ratings, makes the new final row due: no "
+                + "session existed yet to take the mark")
+        void ratingDuringFirstEvaluation() {
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            ConversationRating negative = new ConversationRating("r", "c1", 1, "agent", 1, "production", "api", "user", null, 0, 0.0, List.of(),
+                    null, NOW, NOW);
+            when(ratings.readByConversation("c1")).thenReturn(List.of()).thenReturn(List.of(negative));
+
+            evaluator.evaluate("c1", null);
+
+            verify(ratings, times(2)).readByConversation("c1");
+            verify(outcomes).markDue("c1", List.of(0), NOW);
+        }
+
+        @Test
+        @DisplayName("ratings unchanged during the evaluation, or a session that existed before (its mark survives the upsert): no extra mark")
+        void ratingsUnchangedNoMark() {
+            when(turns.findByConversationSteps("c1", 0, null, LIMIT)).thenReturn(closedConversation("c1"));
+            when(ratings.readByConversation("c1")).thenReturn(List.of());
+            evaluator.evaluate("c1", null);
+            verify(outcomes, never()).markDue(anyString(), any(), any());
+
+            when(outcomes.findByConversation("c2")).thenReturn(List.of(stored("c2", 0, NOW.minus(Duration.ofDays(2)))));
+            when(turns.findByConversationSteps("c2", 0, null, LIMIT)).thenReturn(closedConversation("c2"));
+            when(ratings.readByConversation("c2")).thenReturn(List.of());
+            evaluator.evaluate("c2", null);
+            verify(ratings, times(1)).readByConversation("c2");
+            verify(outcomes, never()).markDue(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a rating mark the full hand-off queue rejects, or the store fails to take, is counted and stored by the next pass — "
+                + "every session of the conversation due")
+        void lostRatingMarksAreRetried() {
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("queued", 4));
+            evaluator.ratingExecutor(Runnable::run);
+            when(outcomes.findByConversation("failed")).thenReturn(List.of(stored("failed", 0, NOW)));
+            when(outcomes.markDue(eq("failed"), anyCollection(), any())).thenThrow(new HealthStoreException("down", null));
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("failed", 2));
+            assertEquals(2.0, registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "deferred").counter().count());
+            verify(outcomes, never()).markDue(anyString(), isNull(), any());
+
+            evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes).markDue(eq("queued"), isNull(), eq(NOW));
+            verify(outcomes).markDue(eq("failed"), isNull(), eq(NOW));
+
+            // Stored: the next pass does not mark them again.
+            evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes, times(1)).markDue(eq("queued"), isNull(), eq(NOW));
+        }
+
+        @Test
+        @DisplayName("past the deferred set's bound a rating mark is counted as lost")
+        void deferredSetBounded() {
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            for (int i = 0; i <= HealthOutcomeEvaluator.MAX_RATING_RETRIES; i++) {
+                evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c" + i, 1));
+            }
+            assertEquals(HealthOutcomeEvaluator.MAX_RATING_RETRIES,
+                    registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "deferred").counter().count());
+            assertEquals(1.0, registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "lost").counter().count());
         }
 
         @Test

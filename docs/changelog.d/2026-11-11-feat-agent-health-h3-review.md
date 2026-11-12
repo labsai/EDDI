@@ -83,3 +83,55 @@ Documented in [`docs/agent-health.md`](../agent-health.md#the-evaluation).
   order is always the database's (PostgreSQL's collation may differ from `String.compareTo`).
 - The overlap trade-off under sustained overload is unchanged in kind: a conversation the replay already passed in
   the current sweep is not re-read for a row that lands after the sweep passed it.
+
+## 🐛 fix(health): rating marks, failed due sessions and later feed failures are never silently dropped (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+### What changed and why
+
+A third round of review findings on PR #1389, documented in [`docs/agent-health.md`](../agent-health.md#the-evaluation)
+and [`docs/metrics.md`](../metrics.md#agent-health-metrics).
+
+- **A rating saved during a session's first evaluation is not lost.** The mark goes to the sessions that exist, and
+  a row the evaluation inserts did not exist yet. When an evaluation inserts a final row (no due time) from ratings
+  it read, it reads them once more after the upsert, and a change (or a failed read) makes those new rows due. Rows
+  that existed already keep a mark through the upsert, as before; a provisional row reads the ratings again at its
+  window's close.
+- **A rating mark that cannot be stored is deferred, not dropped.** The hand-off executor no longer uses
+  `DiscardPolicy`: a rejected mark, or one whose `markDue` fails, puts the conversation in a bounded per-node set
+  (10,000) that the next pass on that node stores first, marking every session of it. Past the bound the mark is
+  lost with a WARN. Both are counted in `eddi.health.outcomes.rating.marks{result=deferred|lost}`, charted on the
+  Full Metrics Reference's "Agent Health rollup work" panel (Kubernetes copy re-synced with
+  `scripts/sync-monitoring-assets.py`).
+- **A failing due session backs off.** Its `dueAt` is pushed to `now + age` (time since its last successful
+  evaluation, between 15 minutes and 6 hours), so sessions that keep failing no longer fill every pass's page of
+  1,000 and starve the rest. `IHealthOutcomeStore.markDue` is unchanged; only its Javadoc names the later `at`.
+- **Several feed failures are all retried.** The replay restarts at the *earliest* failure, so when the
+  conversations after it used up the replay's share, a later failure was not reached until the earlier one was
+  given up, and could then be given up on its first retry. The evaluator now also retries every failure it holds
+  (`feedFailures`, per node) directly at the start of the replay, oldest capture first, within the replay's share.
+  The persisted replay reset stays as the cross-node path.
+- **The orphan sweep deletes an outcome-only orphan's turn rows first.** A conversation found only by its recently
+  evaluated sessions (its turn rows older than the window, left by a failed purge) had its sessions deleted and its
+  turn rows skipped. Agentless candidates now go through `deleteConversationIfDaysKnown`: the rows are deleted and
+  their days marked when the days can be read; otherwise rows and sessions are both kept for the next sweep. A
+  candidate whose turn delete fails keeps its sessions too.
+- Tests: `HealthOutcomeEvaluatorTest` (rating during a first evaluation, unchanged ratings, deferred and lost rating
+  marks, due back-off, a later failure behind an earlier one), `HealthOutcomeGdprParticipantTest` (outcome-only
+  orphan with readable and unreadable days). Store interfaces are unchanged, so the store contract tests are too;
+  the ITs (Docker) were not run.
+
+### Design decisions
+
+- **A purge that keeps the turn rows keeps the sessions too.** When `ConversationPurgeService` can read neither the
+  agent nor the days, it leaves both for the orphan sweep. The sessions are the sweep's way back to turn rows
+  captured outside its window, which is the case the sweep fix above handles.
+- **A row that lands behind a pending replay is not chased.** A sweep that spans passes does not re-read what it
+  already passed. Covering such a row would mean restarting every sweep where the last one began, which never moves
+  on under the load that makes a sweep pending. The row is still read by its session's due evaluation at window
+  close (at least 1 hour), or with the conversation's next turn. Only a row that lands in a session already judged
+  final, while a sweep is pending, waits for that.
+- The deferred rating marks and the direct feed retries are per node. A claim that moves to another node re-reads
+  the feed from the persisted replay reset. Rating marks deferred on a node that never runs a pass again wait for
+  their session's next change or due time.

@@ -261,9 +261,14 @@ public class HealthTurnRetention {
                 if (existing.containsKey(conversationId)) {
                     continue;
                 }
-                if (agentsOf.containsKey(conversationId)) {
-                    removed += deleteOrphanTurns(conversationId, agentsOf.get(conversationId), counts);
+                // A conversation found only by its sessions has no recent turn rows, but
+                // may have older ones a failed purge left: they are deleted here too.
+                long turnRows = deleteOrphanTurns(conversationId, agentsOf.getOrDefault(conversationId, Set.of()), counts);
+                if (turnRows < 0) {
+                    // Turn rows kept: so are the sessions, the next sweep's way back to them.
+                    continue;
                 }
+                removed += turnRows;
                 if (sessions != null) {
                     // Session outcomes are not rolled up into daily rows: deleting them
                     // marks no day, and a failure here cannot skip the turn rows' marks.
@@ -282,8 +287,8 @@ public class HealthTurnRetention {
         int noAgent = counts[NO_AGENT];
         int failedDeletes = counts[FAILED_DELETES];
         if (noAgent > 0) {
-            LOGGER.warnf("The Agent Health orphan sweep left %d orphaned conversation(s) whose rows name no agent: their daily rows could "
-                    + "not be re-rolled, so they are kept for the next sweep", noAgent);
+            LOGGER.warnf("The Agent Health orphan sweep left %d orphaned conversation(s) whose rows name no agent and whose days could not "
+                    + "be read: their daily rows could not be re-rolled, so the rows and sessions are kept for the next sweep", noAgent);
         }
         if (unanswered > 0 || failedDeletes > 0) {
             LOGGER.warnf("The Agent Health orphan sweep could not check %d conversation(s) and could not clean up %d; the next daily sweep "
@@ -297,24 +302,26 @@ public class HealthTurnRetention {
     private static final int FAILED_DELETES = 1;
 
     /**
-     * Deletes an orphan's turn rows and marks their days for re-roll at once. Rows
-     * that name no agent are kept: if their days cannot be read at delete time
-     * nothing could be re-rolled, so they wait for the next sweep (or the
-     * retention).
+     * Deletes an orphan's turn rows and marks their days for re-roll at once. With
+     * no agent known (the recent rows name none, or there are no recent rows — a
+     * conversation found by its sessions) the rows are deleted only if their days
+     * can be read; otherwise nothing could be re-rolled, so they are kept for the
+     * next sweep (or the retention).
      *
-     * @return the rows removed
+     * @return the rows removed, or {@code -1} when they were kept or the delete
+     *         failed
      */
     private long deleteOrphanTurns(String conversationId, Set<String> agents, int[] counts) {
-        if (agents.isEmpty()) {
-            counts[NO_AGENT]++;
-            return 0L;
-        }
         HealthDeletedRows deleted;
         try {
-            deleted = store.deleteConversationReturningDays(conversationId);
+            deleted = agents.isEmpty() ? store.deleteConversationIfDaysKnown(conversationId) : store.deleteConversationReturningDays(conversationId);
         } catch (RuntimeException e) {
             counts[FAILED_DELETES]++;
-            return 0L;
+            return -1L;
+        }
+        if (deleted == null && agents.isEmpty()) {
+            counts[NO_AGENT]++;
+            return -1L;
         }
         if (dirtyDays != null && dirtyDays.isResolvable()) {
             dirtyDays.get().markDeletedRows(conversationId, agents, deleted);
