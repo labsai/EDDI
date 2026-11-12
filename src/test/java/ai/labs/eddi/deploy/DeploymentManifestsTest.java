@@ -3341,6 +3341,26 @@ class DeploymentManifestsTest {
         }
 
         /**
+         * {@code nats.buildProfileImage} stopped being read in chart 2.7.0 (the release
+         * that made the messaging type a runtime choice). NOTES.txt warns with that
+         * version, but values.yaml told operators "&lt; 2.5" — so an operator on 2.5 or
+         * 2.6 read that their flag was already ignored when it was not. The two copies
+         * are asserted against each other.
+         */
+        @Test
+        @DisplayName("values.yaml and NOTES.txt agree on when nats.buildProfileImage stopped being read")
+        void buildProfileImageRemovalVersionAgrees() throws IOException {
+            Matcher notes = Pattern.compile("nats\\.buildProfileImage is deprecated and ignored: since chart (\\d+\\.\\d+\\.\\d+)")
+                    .matcher(read(HELM_TEMPLATES.resolve("NOTES.txt")));
+            assertTrue(notes.find(), "NOTES.txt must keep its nats.buildProfileImage deprecation warning");
+
+            Matcher values = Pattern.compile("`nats\\.buildProfileImage` from chart < (\\S+?)\\s").matcher(read(HELM.resolve("values.yaml")));
+            assertTrue(values.find(), "values.yaml must keep its nats.buildProfileImage note");
+
+            assertEquals(notes.group(1), values.group(1), "values.yaml and NOTES.txt name different chart versions for the removal");
+        }
+
+        /**
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */

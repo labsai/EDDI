@@ -98,39 +98,48 @@ export function AdjustBudgetDialog({ snapshot, onClose }: { snapshot: TeamBudget
   );
 }
 
-/** Admin: move part of this month's cap from one team to another (idempotent per opening). */
-export function TransferBudgetDialog({
-  open,
-  teams,
-  initialFromId,
-  onClose,
-}: {
-  open: boolean;
-  teams: TeamBudgetSnapshot[];
-  initialFromId?: string;
-  onClose: () => void;
-}) {
+/** Admin: move part of this month's cap from one team to another (idempotent per transfer, across reopenings). */
+export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; teams: TeamBudgetSnapshot[]; onClose: () => void }) {
   const { t } = useTranslation();
   const mutation = useTransferTeamBudget();
-  const [from, setFrom] = useState(initialFromId ?? "");
+  const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // One key per opening: a retry after a timeout cannot move the money twice.
+  // One key per transfer: a retry after a timeout cannot move the money twice.
   const [key, setKey] = useState(() => newIdempotencyKey());
+  // The last attempt failed with a 5xx or a network error, so it may have been applied.
+  const [outcomeUnknown, setOutcomeUnknown] = useState(false);
   const source = useMemo(() => teams.find((s) => s.groupId === from), [teams, from]);
   const amountValue = parseUsd(amount);
   const valid =
     from !== "" && to !== "" && from !== to && amountValue !== null && amountValue <= (source?.remainingUsd ?? 0) && reason.trim() !== "";
 
-  function close() {
-    setFrom(initialFromId ?? "");
+  function reset() {
+    setFrom("");
     setTo("");
     setAmount("");
     setReason("");
     setError(null);
     setKey(newIdempotencyKey());
+    setOutcomeUnknown(false);
+  }
+
+  /** A field edit makes the shown error stale; outcomeUnknown and the key stay, so a retry is still idempotent. */
+  function edited(set: (value: string) => void) {
+    return (value: string) => {
+      set(value);
+      setError(null);
+    };
+  }
+
+  function close() {
+    // After an attempt that may have been applied, keep it — values, key and
+    // error — so reopening and retrying sends the same key, which the server
+    // deduplicates. A fresh key here made the same transfer a new one. An
+    // attempt still running is as open as a 5xx: its reply settles it later.
+    if (!outcomeUnknown && !mutation.isPending) reset();
     onClose();
   }
 
@@ -141,7 +150,8 @@ export function TransferBudgetDialog({
       {
         onSuccess: () => {
           toast.success(t("teamBudget.transferred", "Budget transferred"));
-          close();
+          reset();
+          onClose();
         },
         onError: (e) => {
           setError(getErrorMessage(e));
@@ -149,7 +159,9 @@ export function TransferBudgetDialog({
           // asks to start again), so the next attempt is a new transfer with a new key.
           // A 5xx or a network error may have debited: keep the key so a retry stays
           // idempotent; the server refuses that key for an edited request.
-          if (isApiError(e) && e.status >= 400 && e.status < 500) setKey(newIdempotencyKey());
+          const refused = isApiError(e) && e.status >= 400 && e.status < 500;
+          if (refused) setKey(newIdempotencyKey());
+          setOutcomeUnknown(!refused);
         },
       },
     );
@@ -182,19 +194,19 @@ export function TransferBudgetDialog({
         </p>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.from", "From")}</span>
-          <select className={FIELD} value={from} onChange={(e) => setFrom(e.target.value)} data-testid="team-budget-from">
+          <select className={FIELD} value={from} onChange={(e) => edited(setFrom)(e.target.value)} data-testid="team-budget-from">
             {options(to)}
           </select>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.to", "To")}</span>
-          <select className={FIELD} value={to} onChange={(e) => setTo(e.target.value)} data-testid="team-budget-to">
+          <select className={FIELD} value={to} onChange={(e) => edited(setTo)(e.target.value)} data-testid="team-budget-to">
             {options(from)}
           </select>
         </label>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">{t("teamBudget.amount", "Amount (USD)")}</span>
-          <input className={FIELD} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="team-budget-amount" />
+          <input className={FIELD} inputMode="decimal" value={amount} onChange={(e) => edited(setAmount)(e.target.value)} data-testid="team-budget-amount" />
           {source && (
             <span className="mt-1 block text-xs text-muted-foreground">
               {t("teamBudget.remaining", "Remaining")}: {formatUsd(source.remainingUsd ?? 0)}
@@ -207,7 +219,7 @@ export function TransferBudgetDialog({
             className={FIELD}
             maxLength={TEAM_BUDGET_MAX_REASON_LENGTH}
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={(e) => edited(setReason)(e.target.value)}
             data-testid="team-budget-transfer-reason"
           />
           <span className="mt-1 block text-xs text-muted-foreground">{t("teamBudget.reasonHelp", "Required. Recorded in the audit ledger.")}</span>

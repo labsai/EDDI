@@ -460,7 +460,7 @@ postgres:
 #
 # Cluster mode (eddi.messagingType=nats): conversation leases and fencing
 # tokens, cache-invalidation events, shared security/tool state and durable dead
-# letters. See docs/clustering.md. `nats.buildProfileImage` from chart < 2.5 is
+# letters. See docs/clustering.md. `nats.buildProfileImage` from chart < 2.7.0 is
 # no longer read: the published image selects cluster mode at runtime.
 
 nats:
