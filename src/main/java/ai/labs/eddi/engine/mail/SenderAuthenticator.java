@@ -102,6 +102,14 @@ public class SenderAuthenticator {
     static final Duration DEFAULT_MAX_SIGNATURE_AGE = Duration.ofDays(7);
 
     /**
+     * How far ahead of the delivery instant a signed {@code Date} may be when it
+     * stands in for {@code t=}: a sender's clock, so more than the 5 minutes a
+     * signer's {@code t=} gets, but bounded — otherwise a far-future Date would
+     * make the signature never too old.
+     */
+    static final Duration MAX_FUTURE_DATE = Duration.ofHours(1);
+
+    /**
      * The headers that decide how the body is read. An unsigned instance of any of
      * them lets the holder of a signed mail make EDDI read the signed body
      * differently — a prepended {@code Content-Type} with a boundary of their own
@@ -331,6 +339,12 @@ public class SenderAuthenticator {
                     : covers(pass, verification, "date") ? signedDate(verification) : null;
             if (signedAt == null) {
                 return "the signature's age cannot be judged: it has no t= and does not sign the Date";
+            }
+            // A future t= already fails in the verifier. A signed Date far ahead would
+            // keep the age check below passing for as long as the signer chose — so it
+            // is bounded too, more loosely, since a Date is a sender's clock.
+            if (pass.signedAt() == null && signedAt.isAfter(evaluatedAt.plus(MAX_FUTURE_DATE))) {
+                return "the signed Date is in the future, so the signature's age cannot be judged";
             }
             if (signedAt.plus(maxSignatureAge).isBefore(evaluatedAt)) {
                 return "the signature is older than eddi.email.dkim.max-signature-age (a replayed mail?)";

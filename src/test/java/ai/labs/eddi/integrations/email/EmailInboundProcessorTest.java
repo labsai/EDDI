@@ -363,6 +363,32 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("a signed mail without a usable Message-ID is deduplicated on its signature: an added header or Message-ID does not make a new mail")
+        void replayWithoutMessageId() throws Exception {
+            // The signature "covers" message-id only in the sense that there is none:
+            // both counts are zero. The ledger key is a hash of the raw bytes.
+            verdict = passCovering("d5", "from", "subject", "date", "message-id");
+            EmailTestMail original = EmailTestMail.mail().messageId("not an id");
+            EmailTestMail withHeader = EmailTestMail.mail().messageId("not an id").header("X-Added: replay");
+            EmailTestMail withId = EmailTestMail.mail().messageId("<added@attacker.example>");
+
+            processor.process(context(Map.of()), original.polled(1), Instant.now());
+            processor.process(context(Map.of()), withHeader.polled(2), Instant.now());
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertTrue(ledger.findByRecipient("alice@supplier.com").stream()
+                    .anyMatch(r -> "duplicate:replayed_signature".equals(r.lastError())), "the copy is refused as a replay");
+
+            // The first delivery recorded its signature even though its id was not a signed
+            // one.
+            assertTrue(ledger.findByMessage(INTEGRATION, Direction.IN, EmailInboundProcessor.signatureKey("d5")).isPresent());
+            // Adding a Message-ID the signature does not list leaves it uncovered.
+            verdict = passCovering("d5", "from", "subject", "date");
+            processor.process(context(Map.of()), withId.polled(3), Instant.now());
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
         @DisplayName("the same mail processed again after a deferral finds its own signature marker and runs")
         void ownMarkerAfterDeferral() throws Exception {
             verdict = passCovering("d2", "from", "subject", "date");

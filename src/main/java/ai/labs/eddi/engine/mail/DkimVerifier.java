@@ -501,7 +501,22 @@ public class DkimVerifier {
         }
         String t = tags.value("t");
         return new DkimResult(domain, selector, algorithmText, Outcome.PASS, "verified", signedHeaders, t == null ? null : timestamp(t),
-                HexFormat.of().formatHex(sha256().digest((domain + ";" + stripFws(tags.value("b"))).getBytes(StandardCharsets.ISO_8859_1))));
+                signatureDigest(domain, signature));
+    }
+
+    /**
+     * The replay key of a verified signature: its (lower-case, validated) domain
+     * and its <em>decoded</em> signature bytes. Never the {@code b=} text: the
+     * {@code b=} value is blanked from the signed header input, so its spelling —
+     * padding, folding, whitespace — can be changed without breaking the signature,
+     * and every spelling must give the same key.
+     */
+    static String signatureDigest(String domain, byte[] signature) {
+        MessageDigest digest = sha256();
+        digest.update(domain.getBytes(StandardCharsets.US_ASCII));
+        digest.update((byte) 0);
+        digest.update(signature);
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private record Sig(String domain, String selector, String algorithm) {

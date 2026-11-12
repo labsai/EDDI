@@ -91,6 +91,35 @@ class EncodedWordsTest {
     }
 
     @Test
+    @DisplayName("an address header with tens of thousands of encoded words in unknown charsets parses within a time budget")
+    void parseListBoundsLibraryDecoding() {
+        // InternetAddress.getPersonal() decodes the whole display name with the mail
+        // library's decoder, a charset lookup per word, before EDDI's own cap.
+        StringBuilder header = new StringBuilder("\"");
+        for (int i = 0; i < 30_000; i++) {
+            header.append("=?x-unknown-").append(i).append("?Q?a?= ");
+        }
+        header.append("\" <alice@example.com>, \"=?UTF-8?Q?J=C3=BCrgen?=\" <j@example.com>");
+
+        AddressNormalizer.Parsed parsed = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> AddressNormalizer.parseList(header.toString()));
+
+        assertEquals(2, parsed.addresses().size());
+        assertTrue(parsed.addresses().get(0).displayName().length() <= 256);
+        assertEquals("alice@example.com", parsed.addresses().get(0).address());
+        assertEquals("j@example.com", parsed.addresses().get(1).address());
+    }
+
+    @Test
+    @DisplayName("past the per-header budget, encoded words are broken so no decoder treats them as one")
+    void encodedWordBudget() {
+        String few = "=?UTF-8?Q?a?= =?UTF-8?Q?b?=";
+        assertEquals(few, AddressNormalizer.boundEncodedWords(few));
+        String many = "=?UTF-8?Q?a?= ".repeat(AddressNormalizer.MAX_ENCODED_WORDS_PER_HEADER + 5);
+        String bounded = AddressNormalizer.boundEncodedWords(many);
+        assertEquals(AddressNormalizer.MAX_ENCODED_WORDS_PER_HEADER, bounded.split("=\\?", -1).length - 1);
+    }
+
+    @Test
     @DisplayName("a display name is capped before its encoded words are decoded")
     void displayNameCappedBeforeDecoding() {
         String name = "=?x-unknown?Q?a?= ".repeat(50_000);

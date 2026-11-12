@@ -551,7 +551,8 @@ public class MimeMessageParser {
 
         private void visitLeaf(MimePart part, ContentType type, String baseType, Collected into) throws MailParseException {
             String disposition = disposition(part);
-            String filename = filename(part);
+            String rawFilename = rawFilename(part);
+            String filename = cleanFilename(rawFilename);
             boolean isBodyType = "text/plain".equals(baseType) || "text/html".equals(baseType);
             if (isBodyType && !"attachment".equals(disposition) && filename == null) {
                 byte[] bytes = readBounded(part, limits.maxRawBytes());
@@ -582,7 +583,10 @@ public class MimeMessageParser {
                     || "message/global".equals(baseType) || "message/global-headers".equals(baseType))) {
                 readOriginalMessageId(part);
             }
-            attachment(part, baseType, disposition, filename, into);
+            // A name too long to be read in full could hide its extension past the cap:
+            // it is treated as an executable, never stored.
+            boolean overlongName = rawFilename != null && rawFilename.length() > MAX_RAW_FILENAME_LENGTH;
+            attachment(part, baseType, disposition, filename, overlongName, into);
         }
 
         /**
@@ -601,7 +605,7 @@ public class MimeMessageParser {
             return left == 0 ? "" : truncate(html, left);
         }
 
-        private void attachment(MimePart part, String baseType, String disposition, String filename, Collected into)
+        private void attachment(MimePart part, String baseType, String disposition, String filename, boolean overlongName, Collected into)
                 throws MailParseException {
             if (++attachmentCount > limits.maxAttachments()) {
                 throw new MailParseException(MailParseException.Reason.TOO_MANY_ATTACHMENTS,
@@ -612,12 +616,13 @@ public class MimeMessageParser {
             boolean inline = "inline".equals(disposition);
             boolean archive = AttachmentClassifier.isArchive(filename, baseType);
             if (bytes == null) {
-                boolean executable = AttachmentClassifier.isExecutable(filename, baseType, null);
+                boolean executable = overlongName || AttachmentClassifier.isExecutable(filename, baseType, null);
                 into.attachments.add(new MailAttachment(filename, baseType, -1, contentId, inline, executable, archive,
                         MailAttachment.SkipReason.TOO_LARGE, null));
                 return;
             }
-            boolean executable = AttachmentClassifier.isExecutable(filename, baseType, Arrays.copyOf(bytes, Math.min(bytes.length, 8)));
+            boolean executable = overlongName
+                    || AttachmentClassifier.isExecutable(filename, baseType, Arrays.copyOf(bytes, Math.min(bytes.length, 8)));
             if (executable) {
                 into.attachments.add(new MailAttachment(filename, baseType, bytes.length, contentId, inline, true, archive,
                         MailAttachment.SkipReason.EXECUTABLE, null));
@@ -678,14 +683,13 @@ public class MimeMessageParser {
             }
         }
 
-        private static String filename(MimePart part) {
-            String name;
+        /** The file name as the part declares it (not decoded here), or null. */
+        private static String rawFilename(MimePart part) {
             try {
-                name = part.getFileName();
+                return part.getFileName();
             } catch (MessagingException | RuntimeException e) {
                 return null;
             }
-            return cleanFilename(name);
         }
 
         private static String contentId(MimePart part) {
@@ -954,17 +958,23 @@ public class MimeMessageParser {
         return out.toString();
     }
 
+    /** Characters of an extension kept when a long file name is cut. */
+    private static final int MAX_KEPT_EXTENSION = 32;
+
     /**
      * A file name with no path, no controls, decoded, capped; null when nothing is
-     * left.
+     * left. What survives the caps is the <em>end</em> of the name — the last path
+     * segment and its extension, which the executable check reads — never the
+     * start. (A name over {@link #MAX_RAW_FILENAME_LENGTH} is also withheld as
+     * executable by the walk, whatever is left of it.)
      */
     static String cleanFilename(String name) {
         if (name == null) {
             return null;
         }
-        // Capped before decoding: the encoded-word decoder's work is bounded by its
-        // input, and nothing past this length could survive the cap below anyway.
-        String bounded = name.length() > MAX_RAW_FILENAME_LENGTH ? name.substring(0, MAX_RAW_FILENAME_LENGTH) : name;
+        // Capped before decoding, so the encoded-word decoder's work is bounded by its
+        // input; the tail is kept, since the basename and extension are at the end.
+        String bounded = name.length() > MAX_RAW_FILENAME_LENGTH ? name.substring(name.length() - MAX_RAW_FILENAME_LENGTH) : name;
         String decoded = stripControls(EncodedWords.decode(bounded)).strip();
         int slash = Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf('\\'));
         String base = slash >= 0 ? decoded.substring(slash + 1) : decoded;
@@ -972,7 +982,18 @@ public class MimeMessageParser {
         if (base.isEmpty() || base.equals(".") || base.equals("..")) {
             return null;
         }
-        return base.length() > MAX_FILENAME_LENGTH ? truncate(base, MAX_FILENAME_LENGTH) : base;
+        if (base.length() <= MAX_FILENAME_LENGTH) {
+            return base;
+        }
+        // The extension as Windows sees it: trailing dots and spaces are dropped when a
+        // file is saved, so "x.exe." keeps ".exe." whole.
+        int end = base.length();
+        while (end > 0 && (base.charAt(end - 1) == '.' || base.charAt(end - 1) == ' ')) {
+            end--;
+        }
+        int dot = base.lastIndexOf('.', end - 1);
+        String extension = dot > 0 && base.length() - dot <= MAX_KEPT_EXTENSION ? base.substring(dot) : "";
+        return truncate(base, MAX_FILENAME_LENGTH - extension.length()) + extension;
     }
 
     private static String truncate(String text, int length) {

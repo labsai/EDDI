@@ -644,6 +644,52 @@ class SenderAuthenticatorTest {
             assertEquals(first.signedHeaders().signatureDigest(), second.signedHeaders().signatureDigest());
         }
 
+        /**
+         * The signed text with the b= value respelled: padding removed and the value
+         * refolded — b= is blanked from the signed header input, so the signature still
+         * verifies.
+         */
+        private String respelledSignature(String signed) {
+            int start = signed.indexOf("; b=") + 4;
+            int end = start;
+            while (!(signed.startsWith("\r\n", end) && end + 2 < signed.length() && signed.charAt(end + 2) != '\t'
+                    && signed.charAt(end + 2) != ' ')) {
+                end++;
+            }
+            String value = signed.substring(start, end).replace("\r\n", "").replace("\t", "").replace(" ", "");
+            String unpadded = value.replaceAll("=+$", "");
+            assertNotEquals(value, unpadded, "the test signature carries padding");
+            return signed.substring(0, start) + " " + unpadded.substring(0, 10) + "\r\n " + unpadded.substring(10) + signed.substring(end);
+        }
+
+        @Test
+        @DisplayName("a respelled b= (padding stripped, refolded) still verifies and keeps the same replay key")
+        void signatureDigestIgnoresSpelling() {
+            byte[] signed = sign(standardMessage(), new Options().headers("from", "to", "subject", "date"));
+            byte[] respelled = bytes(respelledSignature(text(signed)).replace("<q3-1@example.com>", "<fresh-id@example.com>"));
+
+            MailAuthentication first = authenticate(keys(), signed);
+            MailAuthentication second = authenticate(keys(), respelled);
+
+            assertEquals(Verdict.ALIGNED_PASS, second.verdict(), second.reason());
+            assertEquals(first.signedHeaders().signatureDigest(), second.signedHeaders().signatureDigest());
+        }
+
+        @Test
+        @DisplayName("a signed Date far in the future (no t=) is not an aligned pass; a little ahead is")
+        void futureSignedDate() {
+            byte[] future = sign(message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: x",
+                    "Date: Fri, 25 Oct 2030 10:00:00 +0000", "Message-ID: <f@example.com>", "", "hi"), new Options());
+            MailAuthentication auth = authenticate(keys(), future);
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertTrue(auth.reason().contains("future"), auth.reason());
+
+            // DkimVerifierTest.NOW is 2026-10-25T12:00:00Z.
+            byte[] slightlyAhead = sign(message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: x",
+                    "Date: Sun, 25 Oct 2026 12:30:00 +0000", "Message-ID: <g@example.com>", "", "hi"), new Options());
+            assertEquals(Verdict.ALIGNED_PASS, authenticate(keys(), slightlyAhead).verdict());
+        }
+
         @Test
         @DisplayName("an old signature is not an aligned pass, judged on t= or else the signed Date")
         void oldSignature() {

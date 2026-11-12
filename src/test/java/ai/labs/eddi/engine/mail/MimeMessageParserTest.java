@@ -737,6 +737,36 @@ class MimeMessageParserTest {
             assertFalse(parser().parse(raw, MailLimits.defaults(), true).anomalies().contains(MailAnomaly.HTML_TRUNCATED));
         }
 
+        private InboundMail withAttachmentNamed(String filename) throws MailParseException {
+            return parser().parse(message("From: a@example.com\nMessage-ID: <fn@example.com>\nContent-Type: multipart/mixed; boundary=b\n\n"
+                    + "--b\nContent-Type: text/plain\n\nhello\n--b\nContent-Type: text/plain\nContent-Disposition: attachment; filename=\""
+                    + filename + "\"\n\nalert('x')\n--b--\n"), MailLimits.defaults(), true);
+        }
+
+        @Test
+        @DisplayName("an over-long file name whose path hides an executable basename is withheld, never stored")
+        void overlongPathFilenameWithheld() throws Exception {
+            MailAttachment attachment = withAttachmentNamed("a".repeat(2040) + "/payload.js").attachments().get(0);
+
+            assertTrue(attachment.executable());
+            assertEquals(MailAttachment.SkipReason.EXECUTABLE, attachment.skipReason());
+            assertFalse(attachment.hasContent());
+            assertEquals("payload.js", MimeMessageParser.cleanFilename("a".repeat(2040) + "/payload.js"), "the tail survives the cap");
+        }
+
+        @Test
+        @DisplayName("a long basename keeps its extension when it is cut, so the executable check still sees it")
+        void longBasenameKeepsExtension() throws Exception {
+            String cleaned = MimeMessageParser.cleanFilename("a".repeat(400) + ".js");
+            assertEquals(255, cleaned.length());
+            assertTrue(cleaned.endsWith(".js"), cleaned);
+            assertTrue(MimeMessageParser.cleanFilename("b".repeat(400) + ".exe. ").endsWith(".exe."));
+
+            MailAttachment attachment = withAttachmentNamed("a".repeat(400) + ".js").attachments().get(0);
+            assertTrue(attachment.executable());
+            assertFalse(attachment.hasContent());
+        }
+
         @Test
         @DisplayName("a file name is capped before its encoded words are decoded")
         void filenameCappedBeforeDecoding() {

@@ -343,10 +343,13 @@ public class EmailInboundProcessor {
         if (!authenticated && settings.requireAuthentication()) {
             return refuse(ctx, row, "unauthenticated:" + verdictId(authentication), EmailMetrics.UNAUTHENTICATED, now);
         }
-        if (authenticated && !authentication.signedHeaders().covers("message-id")) {
-            // The row is keyed on a Message-ID the signature does not cover, so a copy
-            // of this signed mail under a new id would get a row of its own and run
-            // again as its author. The signature itself is the key then.
+        if (authenticated && (parsed.syntheticMessageId() || !authentication.signedHeaders().covers("message-id"))) {
+            // The row is keyed on something a holder of this signed mail can change: an
+            // unsigned Message-ID, or — when the mail has no usable Message-ID — a hash
+            // of the raw bytes (an added unsigned header changes it, and so does adding
+            // a Message-ID, whose absence the signature need not cover). A copy would
+            // get a row of its own and run again as its author, so the signature
+            // itself is the key too.
             Disposition replayed = claimSignature(ctx, row, authentication.signedHeaders().signatureDigest(), sender, now);
             if (replayed != null) {
                 return replayed;
