@@ -1068,54 +1068,35 @@ public class GdprComplianceService {
     }
 
     /**
-     * Who the current configuration of a group says its members are: the agent ids
-     * (AGENT and GROUP members, facilitator, moderator) and the HUMAN member ids.
-     * Both empty when there is no group store, no such group any more, or it cannot
-     * be read.
+     * The ids the current configuration of group {@code groupId} lists as
+     * {@code HUMAN} members, which the export masks in that group's transcripts.
+     * The configuration may only add masks: it describes the group as it is now,
+     * not as it was during the discussion, so its AGENT entries are not read at all
+     * — an agent is recognised only from what the stored discussion recorded
+     * ({@link ThirdPartyIdentifiers}). Empty when there is no group store, no such
+     * group any more, or it cannot be read; the export never fails for it.
      */
-    record GroupRoster(Set<String> agents, Set<String> humans) {
-        static final GroupRoster UNKNOWN = new GroupRoster(Set.of(), Set.of());
-    }
-
-    /**
-     * The roster of group {@code groupId} for masking its discussions' transcripts;
-     * {@link GroupRoster#UNKNOWN} when it cannot be read. The export then masks
-     * every id it cannot positively place as the subject's or an agent's
-     * ({@link ThirdPartyIdentifiers}) — it never fails for it.
-     */
-    GroupRoster groupRoster(String groupId) {
+    Set<String> configuredHumanMembers(String groupId) {
         if (groupId == null || agentGroupStore == null || !agentGroupStore.isResolvable()) {
-            return GroupRoster.UNKNOWN;
+            return Set.of();
         }
         try {
             IAgentGroupStore store = agentGroupStore.get();
             IResourceStore.IResourceId current = store.getCurrentResourceId(groupId);
             AgentGroupConfiguration config = current == null ? null : store.read(groupId, current.getVersion());
-            if (config == null) {
-                return GroupRoster.UNKNOWN;
+            if (config == null || config.getMembers() == null) {
+                return Set.of();
             }
-            Set<String> agents = new HashSet<>();
             Set<String> humans = new HashSet<>();
-            if (config.getMembers() != null) {
-                for (GroupMember member : config.getMembers()) {
-                    if (member == null || member.agentId() == null) {
-                        continue;
-                    }
-                    (member.memberType() == MemberType.HUMAN ? humans : agents).add(member.agentId());
+            for (GroupMember member : config.getMembers()) {
+                if (member != null && member.agentId() != null && member.memberType() == MemberType.HUMAN) {
+                    humans.add(member.agentId());
                 }
             }
-            if (config.getFacilitator() != null && config.getFacilitator().agentId() != null) {
-                agents.add(config.getFacilitator().agentId());
-            }
-            if (config.getModeratorAgentId() != null) {
-                agents.add(config.getModeratorAgentId());
-            }
-            agents.removeAll(humans);
-            return new GroupRoster(agents, humans);
+            return humans;
         } catch (Exception e) {
-            LOGGER.debugf("[GDPR] Group configuration %s not readable for the export; masking every unplaced id: %s",
-                    LogSanitizer.sanitize(groupId), e.getMessage());
-            return GroupRoster.UNKNOWN;
+            LOGGER.debugf("[GDPR] Group configuration %s not readable for the export: %s", LogSanitizer.sanitize(groupId), e.getMessage());
+            return Set.of();
         }
     }
 
@@ -1350,15 +1331,15 @@ public class GdprComplianceService {
         Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
         // One configuration read per group, however many of its discussions the user
         // started.
-        Map<String, GroupRoster> rosters = new HashMap<>();
+        Map<String, Set<String>> configuredHumans = new HashMap<>();
         try {
             GroupConversationsPage page = groupConversationsOf(userId, GROUP_CONVERSATION_EXPORT_LIMIT);
             groupConversationsTruncated = page.truncated();
             for (GroupConversation gc : page.owned()) {
-                GroupRoster roster = rosters.computeIfAbsent(gc.getGroupId(), this::groupRoster);
+                Set<String> humans = configuredHumans.computeIfAbsent(gc.getGroupId(), this::configuredHumanMembers);
                 groupConversationEntries.add(new UserDataExport.GroupConversationExportEntry(gc.getId(), gc.getGroupId(),
                         gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(),
-                        ThirdPartyIdentifiers.transcriptFor(gc, userId, roster.agents(), roster.humans()),
+                        ThirdPartyIdentifiers.transcriptFor(gc, userId, humans),
                         gc.getCreated(), gc.getLastModified()));
                 blobOwnerIds.add(gc.getId());
                 if (gc.getMemberConversationIds() != null) {

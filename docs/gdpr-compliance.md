@@ -286,11 +286,13 @@ approver (`decidedBy`) of a decision in the subject's conversation, the owner
 audit sample, and the other human members of a group discussion the subject started
 (speaker and target id and display name in `transcript`). The subject's own id and
 `system:*` principals are kept. In a transcript the rule fails closed: an id stays
-only if it is positively known to be an agent — the group's current configuration
-lists it as an agent or group member, facilitator or moderator, or the stored
-discussion started a member conversation for it, recruited it or created it — and
-every other id is masked. When the group configuration is gone or unreadable, an agent
-that never got a member conversation therefore also reads `[other person]`. What another person *wrote* in a discussion
+only if the stored discussion itself recorded it as an agent at the time — it started
+a member conversation for it, recruited or created it, or added it as a dynamic
+member of a non-human type — and every other id is masked. The group's *current*
+configuration can only add masks (its `HUMAN` members are always masked); it is never
+taken as proof that an id is an agent, because an id that was a human member during
+the discussion may be listed as an agent today. So an agent that never got a member
+conversation (one that was only ever skipped, say) reads `[other person]` too. What another person *wrote* in a discussion
 the subject started stays in the transcript; review it before handing the bundle over.
 (Earlier releases exported those identifiers as stored.)
 

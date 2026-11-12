@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
@@ -54,10 +56,10 @@ public final class ThirdPartyIdentifiers {
     /**
      * The transcript of {@code discussion} with nobody but the subject and the
      * group's agents left recognisable, without a group configuration — see
-     * {@link #transcriptFor(GroupConversation, String, Set, Set)}.
+     * {@link #transcriptFor(GroupConversation, String, Set)}.
      */
     public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId) {
-        return transcriptFor(discussion, subjectId, Set.of(), Set.of());
+        return transcriptFor(discussion, subjectId, Set.of());
     }
 
     /**
@@ -71,22 +73,24 @@ public final class ThirdPartyIdentifiers {
      * <p>
      * A transcript entry does not record whether its speaker was human — a human
      * member's turn can carry any entry type, and a human id need not look like an
-     * address — so a person cannot be ruled out from the transcript alone. What
-     * makes an id a known agent: the group configuration lists it as an
-     * {@code AGENT} or {@code GROUP} member, facilitator or moderator
-     * ({@code configuredAgents}), or the stored discussion records it as one — a
-     * member conversation was started for it (only agents get one), or it was
-     * recruited or created during the discussion. An id the configuration lists as
-     * {@code HUMAN} ({@code configuredHumans}), or the member a pending human turn
-     * waits on, is masked even if one of those also names it.
+     * address — so a person cannot be ruled out from the transcript alone. An id is
+     * a known agent only on evidence the stored discussion itself recorded at the
+     * time: a member conversation was started for it (only agents get one), it was
+     * recruited or created during the discussion, or it is a dynamically added
+     * member persisted with a non-{@code HUMAN} type. The group's <em>current</em>
+     * configuration is never evidence that an id is an agent — it may have changed
+     * since, and an id that was a HUMAN member then may be listed as an AGENT now —
+     * so it can only add masks: an id it lists as {@code HUMAN}
+     * ({@code configuredHumans}) is masked even where the discussion's own record
+     * would keep it, and so is the member a pending human turn waits on, and a
+     * dynamic member persisted as {@code HUMAN}.
      * <p>
-     * Without a readable configuration, an agent that never got a member
-     * conversation (one that was only ever skipped, say) is masked as well: the
-     * bundle then shows {@value #OTHER_PERSON} for it, which costs the data subject
-     * an agent's name, never another person's identity.
+     * An agent that never got a member conversation (one that was only ever
+     * skipped, say) is therefore masked as well: the bundle shows
+     * {@value #OTHER_PERSON} for it, which costs the data subject an agent's name,
+     * never another person's identity.
      */
-    public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredAgents,
-                                                      Set<String> configuredHumans) {
+    public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredHumans) {
         List<TranscriptEntry> stored = discussion.getTranscript();
         if (stored == null || stored.isEmpty()) {
             return stored;
@@ -97,8 +101,16 @@ public final class ThirdPartyIdentifiers {
             transcript = new ArrayList<>(stored);
         }
         Set<String> agents = new HashSet<>();
-        if (configuredAgents != null) {
-            agents.addAll(configuredAgents);
+        Set<String> humans = new HashSet<>();
+        if (configuredHumans != null) {
+            humans.addAll(configuredHumans);
+        }
+        if (discussion.getDynamicMembers() != null) {
+            for (GroupMember member : discussion.getDynamicMembers()) {
+                if (member != null && member.agentId() != null) {
+                    (member.memberType() == MemberType.HUMAN ? humans : agents).add(member.agentId());
+                }
+            }
         }
         if (discussion.getMemberConversationIds() != null) {
             agents.addAll(discussion.getMemberConversationIds().keySet());
@@ -109,9 +121,7 @@ public final class ThirdPartyIdentifiers {
         if (discussion.getCreatedAgentIds() != null) {
             agents.addAll(discussion.getCreatedAgentIds());
         }
-        if (configuredHumans != null) {
-            agents.removeAll(configuredHumans);
-        }
+        agents.removeAll(humans);
         if (discussion.getPendingHumanInput() != null) {
             agents.remove(discussion.getPendingHumanInput().memberId());
         }

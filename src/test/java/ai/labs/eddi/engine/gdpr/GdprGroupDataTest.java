@@ -252,19 +252,10 @@ class GdprGroupDataTest {
         assertEquals(USER_ID, transcript.get(2).speakerAgentId());
     }
 
-    @Test
     @SuppressWarnings("unchecked")
-    void export_masksAHumanMemberTheGroupConfigurationDeclares_evenOneWhoOnlySkipped() throws Exception {
-        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
-        var gc = discussion("gc-1");
-        // Never spoke, not pending, no address for an id: only the configuration knows.
-        gc.getTranscript().add(new TranscriptEntry("gregor", "Gregor", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH, "timeout",
-                null));
-        gc.getTranscript().add(new TranscriptEntry("agent-1", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
-                null));
-        groupConversations(gc);
+    private void currentGroupConfiguration(GroupMember... members) throws Exception {
         var config = new AgentGroupConfiguration();
-        config.setMembers(List.of(new GroupMember("agent-1", "Analyst", 1, null), new GroupMember("gregor", "Gregor", 2, null, MemberType.HUMAN)));
+        config.setMembers(List.of(members));
         IAgentGroupStore groupStore = mock(IAgentGroupStore.class);
         IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
         when(current.getVersion()).thenReturn(3);
@@ -274,11 +265,51 @@ class GdprGroupDataTest {
         when(groupStores.isResolvable()).thenReturn(true);
         when(groupStores.get()).thenReturn(groupStore);
         service.agentGroupStore = groupStores;
+    }
+
+    @Test
+    void export_masksAHumanMemberTheGroupConfigurationDeclares_evenOneWhoOnlySkipped() throws Exception {
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        // agent-0 got a member conversation: recorded as an agent by the discussion
+        var gc = discussion("gc-1", "member-1");
+        // Never spoke, not pending, no address for an id: only the configuration knows.
+        gc.getTranscript().add(new TranscriptEntry("gregor", "Gregor", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH, "timeout",
+                null));
+        gc.getTranscript().add(new TranscriptEntry("agent-0", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
+                null));
+        groupConversations(gc);
+        currentGroupConfiguration(new GroupMember("agent-0", "Analyst", 1, null), new GroupMember("gregor", "Gregor", 2, null, MemberType.HUMAN));
 
         var transcript = service.exportUserData(USER_ID).groupConversations().getFirst().transcript();
 
         assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).speakerAgentId());
-        assertEquals("agent-1", transcript.get(1).speakerAgentId());
+        assertEquals("agent-0", transcript.get(1).speakerAgentId(), "a recorded agent stays readable");
+    }
+
+    /**
+     * The configuration describes the group now, not during the discussion: an id
+     * it lists as an AGENT today, which was a HUMAN member then (no member
+     * conversation, nothing else recording it as an agent), stays masked.
+     */
+    @Test
+    void export_aConfigurationThatNowCallsAFormerHumanAnAgentDoesNotUnmaskThem() throws Exception {
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        var gc = discussion("gc-1", "member-1");
+        gc.getTranscript().add(new TranscriptEntry("gregor", "Gregor", "his opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
+                "agent-0"));
+        gc.getTranscript().add(new TranscriptEntry("agent-0", "Analyst", "a reply", 0, "p", TranscriptEntryType.CRITIQUE, Instant.EPOCH, null,
+                "gregor"));
+        groupConversations(gc);
+        currentGroupConfiguration(new GroupMember("agent-0", "Analyst", 1, null), new GroupMember("gregor", "Gregor", 2, null, MemberType.AGENT));
+
+        var transcript = service.exportUserData(USER_ID).groupConversations().getFirst().transcript();
+
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).speakerAgentId());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(0).speakerDisplayName());
+        assertEquals("his opinion", transcript.get(0).content());
+        assertEquals("agent-0", transcript.get(1).speakerAgentId(), "a recorded agent stays readable");
+        assertEquals("Analyst", transcript.get(1).speakerDisplayName());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(1).targetAgentId());
     }
 
     @Test

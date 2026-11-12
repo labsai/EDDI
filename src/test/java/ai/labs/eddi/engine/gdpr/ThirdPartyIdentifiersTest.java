@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -102,22 +104,25 @@ class ThirdPartyIdentifiersTest {
     }
 
     @Test
-    @DisplayName("an id the configuration does not place is masked; a configured HUMAN is masked even with a member conversation")
-    void configurationPlacesAgentsAndHumans() {
+    @DisplayName("only the discussion's own record makes an agent; a configured or persisted HUMAN is masked regardless")
+    void onlyTheStoredRecordPlacesAgents() {
         GroupConversation discussion = new GroupConversation();
         List<TranscriptEntry> transcript = new ArrayList<>();
-        transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.OPINION, null));
-        transcript.add(entry("moderator-1", "Moderator", TranscriptEntryType.SYNTHESIS, null));
+        transcript.add(entry("agent-2", "Recruit", TranscriptEntryType.OPINION, null));
+        transcript.add(entry("dyn-human", "Dee", TranscriptEntryType.OPINION, null));
         transcript.add(entry("stranger", "Stranger", TranscriptEntryType.OPINION, null));
         transcript.add(entry("hank", "Hank", TranscriptEntryType.OPINION, null));
         discussion.setTranscript(transcript);
+        discussion.addDynamicMember(new GroupMember("agent-2", "Recruit", 3, null, MemberType.AGENT));
+        discussion.addDynamicMember(new GroupMember("dyn-human", "Dee", 4, null, MemberType.HUMAN));
+        discussion.getMemberConversationIds().put("dyn-human", "conv-d");
         discussion.getMemberConversationIds().put("hank", "conv-h");
 
-        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner", Set.of("agent-1", "moderator-1"), Set.of("hank"));
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner", Set.of("hank"));
 
-        assertEquals("agent-1", masked.get(0).speakerAgentId());
-        assertEquals("moderator-1", masked.get(1).speakerAgentId());
+        assertEquals("agent-2", masked.get(0).speakerAgentId(), "a dynamic member persisted as AGENT is an agent");
+        assertEquals(OTHER_PERSON, masked.get(1).speakerAgentId(), "a dynamic member persisted as HUMAN is masked");
         assertEquals(OTHER_PERSON, masked.get(2).speakerAgentId());
-        assertEquals(OTHER_PERSON, masked.get(3).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(3).speakerAgentId(), "a configured HUMAN is masked even with a member conversation");
     }
 }
