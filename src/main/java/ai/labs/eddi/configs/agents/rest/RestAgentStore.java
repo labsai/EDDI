@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -76,6 +77,13 @@ public class RestAgentStore implements IRestAgentStore {
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
+
+    /**
+     * Refuses an agent-originated write that changes {@code hitlConfig.oversight}.
+     * Field-injected so the constructor keeps its shape; null in hand-built tests.
+     */
+    @Inject
+    AgentCallOversightGuard oversightGuard;
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -170,6 +178,11 @@ public class RestAgentStore implements IRestAgentStore {
         // / does not exist", which a caller with no rights to this agent must not be
         // able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
+        // An agent's own call (marked X-EDDI-Agent-Call) may not change any agent's
+        // oversight policy — sampled audit and earned autonomy are a human's to set.
+        if (oversightGuard != null) {
+            oversightGuard.requireNoOversightChange(id, agentConfiguration, () -> agentStore.read(id, version));
+        }
         requireWorkflowsExist(agentConfiguration);
         // dynamicOrigin is engine-written provenance that teardown_agent and group
         // cleanup rely on before they delete an agent. Keep what is stored, never
