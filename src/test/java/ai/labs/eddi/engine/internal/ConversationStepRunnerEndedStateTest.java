@@ -123,4 +123,17 @@ class ConversationStepRunnerEndedStateTest {
         runner.tearDownSubAgentsIfEnded("other", other);
         verify(service, never()).tearDownStandaloneSubAgents("other", other);
     }
+
+    @Test
+    @DisplayName("a turn settling while the end is under way, before ENDED is stored, still tears down its sub-agents")
+    void endUnderWayBeforeEndedIsStored() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        // The end has signalled the cancel but not stored ENDED yet.
+        when(service.isEnding(ID)).thenReturn(true);
+        when(store.getConversationState(ID)).thenReturn(ConversationState.EXECUTION_INTERRUPTED);
+
+        runner.tearDownSubAgentsIfEnded(ID, memory);
+
+        verify(service).tearDownStandaloneSubAgents(ID, memory);
+    }
 }

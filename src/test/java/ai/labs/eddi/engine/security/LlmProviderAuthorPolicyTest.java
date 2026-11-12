@@ -317,4 +317,57 @@ class LlmProviderAuthorPolicyTest {
             assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(adminBedrock, editorReplacement, "existing (restorable)"));
         }
     }
+
+    @Nested
+    @DisplayName("review round 2: facts bound to their element, duplicate ids")
+    class ElementIdentity {
+
+        private String bedrockTask(String id, String modelId, String stepParameters) {
+            return "{\"id\":\"" + id + "\",\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"" + modelId + "\"},"
+                    + "\"modelCascade\":{\"steps\":[{\"parameters\":{" + stepParameters + "}}]}}";
+        }
+
+        private String tasks(String... tasks) {
+            return "{\"tasks\":[" + String.join(",", tasks) + "]}";
+        }
+
+        @Test
+        @DisplayName("a restricted setting approved on one task does not carry over to another task's step")
+        void factsAreBoundToTheirTaskAndStep() {
+            // Task b runs Bedrock m2 with the administrator's approval. Task a runs m1.
+            String stored = tasks(bedrockTask("a", "m1", ""), bedrockTask("b", "m2", ""));
+            // An untyped step under task a re-pointed to m2: m2 is approved — for task b.
+            String candidate = tasks(bedrockTask("a", "m1", "\"modelId\":\"m2\""), bedrockTask("b", "m2", ""));
+
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(candidate, stored, "langchain"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(stored, stored, "langchain"));
+        }
+
+        @Test
+        @DisplayName("a restricted task's approval does not move to a task with another id")
+        void taskIdentityForProviders() {
+            String stored = tasks(task0("a", "bedrock", "m1"), task0("b", "openai", "gpt"));
+            String candidate = tasks(task0("a", "openai", "gpt"), task0("b", "bedrock", "m1"));
+
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(candidate, stored, "langchain"));
+        }
+
+        private String task0(String id, String type, String model) {
+            return "{\"id\":\"" + id + "\",\"type\":\"" + type + "\",\"parameters\":{\"modelId\":\"" + model + "\"}}";
+        }
+
+        @Test
+        @DisplayName("duplicate task ids carry nothing over, in the stored document or the new one")
+        void duplicateIdsCarryNothingOver() {
+            String duplicate = tasks(task0("a", "bedrock", "m1"), task0("a", "openai", "gpt"));
+            String unique = tasks(task0("a", "bedrock", "m1"));
+
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(duplicate, unique, "langchain"));
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(unique, duplicate, "langchain"));
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(duplicate, duplicate, "langchain"));
+            // Without a privileged setting, duplicate ids are not the policy's concern.
+            String plain = tasks(task0("a", "openai", "gpt"), task0("a", "openai", "gpt"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(plain, null, "langchain"));
+        }
+    }
 }

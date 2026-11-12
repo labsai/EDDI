@@ -40,13 +40,17 @@ import org.mockito.MockitoAnnotations;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -224,6 +228,21 @@ class ConversationServiceEndedConversationTest {
 
             verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
             verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.READY);
+        }
+
+        @Test
+        @DisplayName("the conversation is marked as ending from before the cancel until after ENDED is stored")
+        void endingMarkCoversTheWindowBeforeEndedIsStored() {
+            AtomicBoolean markedWhileStoring = new AtomicBoolean();
+            doAnswer(invocation -> {
+                markedWhileStoring.set(conversationService.isEnding(CONVERSATION_ID));
+                return null;
+            }).when(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
+
+            conversationService.endConversation(CONVERSATION_ID, "user:alice");
+
+            assertTrue(markedWhileStoring.get(), "a turn settling before ENDED is stored must see the mark");
+            assertFalse(conversationService.isEnding(CONVERSATION_ID), "the mark is cleared once the end is done");
         }
     }
 }

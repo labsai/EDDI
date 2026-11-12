@@ -18,6 +18,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -168,6 +169,11 @@ public class LlmProviderAuthorPolicy {
             return;
         }
         Facts allowed = stored == null ? new Facts() : facts(stored);
+        if (wanted.ambiguous || allowed.ambiguous) {
+            // An element id that occurs twice no longer names one element: nothing is
+            // carried over by it, so a privileged setting needs an administrator.
+            allowed = new Facts();
+        }
         List<String> refused = new ArrayList<>();
         for (String fact : wanted.privileged) {
             if (!allowed.privileged.contains(fact)) {
@@ -181,9 +187,14 @@ public class LlmProviderAuthorPolicy {
         }
     }
 
-    /** What a document asks for that needs an administrator, path-independent. */
+    /**
+     * What a document asks for that needs an administrator, each bound to the
+     * element (task, step) that sets it.
+     */
     private static final class Facts {
         private final Set<String> privileged = new TreeSet<>();
+        /** Whether some array carries the same element id twice. */
+        private boolean ambiguous;
 
         boolean isEmpty() {
             return privileged.isEmpty();
@@ -211,6 +222,13 @@ public class LlmProviderAuthorPolicy {
             return;
         }
         if (node.isArray()) {
+            Set<String> ids = new HashSet<>();
+            for (JsonNode element : node) {
+                JsonNode id = element != null && element.isObject() ? element.get("id") : null;
+                if (id != null && id.isTextual() && !id.asText().isBlank() && !ids.add(id.asText().trim())) {
+                    facts.ambiguous = true;
+                }
+            }
             int index = 0;
             for (JsonNode element : node) {
                 // An element keeps its identity in the path — its "id" where it has one
@@ -254,7 +272,10 @@ public class LlmProviderAuthorPolicy {
         JsonNode taskType = task.get("type");
         String taskProvider = taskType != null && taskType.isTextual() ? taskType.asText().trim().toLowerCase(Locale.ROOT) : null;
         Map<String, String> taskSettings = settingsOf(task);
+        int index = 0;
         for (JsonNode step : steps) {
+            // The same path the walk gives the step itself, so its fact is bound to it.
+            String stepPath = path + "/modelCascade/steps[" + elementKey(step, index++) + "]";
             if (step == null || !step.isObject()) {
                 continue;
             }
@@ -270,9 +291,12 @@ public class LlmProviderAuthorPolicy {
             if (parameters != null && parameters.isObject()) {
                 scalars(parameters, effective);
             }
-            facts.privileged.add("provider|" + provider + "|" + pointing(effective));
+            facts.privileged.add("provider|" + provider + "|" + pointing(effective) + AT + stepPath);
         }
     }
+
+    /** Separates a fact's value from the path of the element that sets it. */
+    private static final String AT = " @ ";
 
     private static Map<String, String> pointing(Map<String, String> settings) {
         Map<String, String> pointing = new TreeMap<>();
@@ -303,7 +327,7 @@ public class LlmProviderAuthorPolicy {
             // carries model parameters (an LLM task, a cascade step, a judge).
             boolean modelSpec = !"type".equals(field) || node.has("parameters");
             if (modelSpec && value != null && value.isTextual() && isIndirect(value.asText())) {
-                facts.privileged.add("indirect|" + field + "|" + value.asText().trim());
+                facts.privileged.add("indirect|" + field + "|" + value.asText().trim() + AT + path);
             }
         }
 
@@ -325,7 +349,7 @@ public class LlmProviderAuthorPolicy {
                 }
                 boolean inside = jlamaBase.isPresent() && JlamaModelDirectory.confine(value, jlamaBase.get()).isPresent();
                 if (!inside) {
-                    facts.privileged.add("jlama-path|" + key + "|" + value.trim());
+                    facts.privileged.add("jlama-path|" + key + "|" + value.trim() + AT + path);
                 }
             }
         }
@@ -337,7 +361,7 @@ public class LlmProviderAuthorPolicy {
                     pointing.put(key, value);
                 }
             });
-            facts.privileged.add("provider|" + provider + "|" + pointing);
+            facts.privileged.add("provider|" + provider + "|" + pointing + AT + path);
         }
     }
 

@@ -1032,6 +1032,30 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Override
     public void endConversation(String conversationId, String endedBy, String endReason) {
+        // Marked before the in-flight turn is signalled, cleared once the end's own
+        // cleanup is done: a cancelled turn finishing in between, while the store
+        // does not say ENDED yet, still tears down the sub-agents it created from its
+        // live memory (ConversationStepRunner.tearDownSubAgentsIfEnded).
+        endingConversations.add(conversationId);
+        try {
+            endConversationMarked(conversationId, endedBy, endReason);
+        } finally {
+            endingConversations.remove(conversationId);
+        }
+    }
+
+    /**
+     * The conversations this node is ending right now — see
+     * {@link #endConversation(String, String, String)}.
+     */
+    private final Set<String> endingConversations = ConcurrentHashMap.newKeySet();
+
+    /** Whether this node is ending {@code conversationId} at this moment. */
+    boolean isEnding(String conversationId) {
+        return conversationId != null && endingConversations.contains(conversationId);
+    }
+
+    private void endConversationMarked(String conversationId, String endedBy, String endReason) {
         long startTime = System.nanoTime();
         // Signal any in-flight resume on this pod (mirrors cancelConversation): a
         // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
